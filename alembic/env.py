@@ -6,9 +6,9 @@ the placeholder in alembic.ini.
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from memoryhub.config import DatabaseSettings
 
 # Alembic Config object (provides access to alembic.ini values)
@@ -22,9 +22,10 @@ if config.config_file_name is not None:
 db_settings = DatabaseSettings()
 config.set_main_option("sqlalchemy.url", db_settings.sync_url)
 
-# Import your models' MetaData for autogenerate support.
-# When models are defined, set this to Base.metadata.
-target_metadata = None
+# Import models' MetaData for autogenerate support.
+from memoryhub.models import Base  # noqa: E402
+
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
