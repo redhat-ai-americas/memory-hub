@@ -20,9 +20,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "pytest-asyncio",
+    "pytest-asyncio>=0.24",
     "pytest-cov",
     "ruff",
+    "aiosqlite",
+    "greenlet",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,0 +1,372 @@
+"""Unit tests for the core memory service layer.
+
+Uses async in-memory SQLite. The pgvector Vector column is replaced with a
+plain JSON-like column via a listener so that the schema can be created
+without the pgvector extension.
+"""
+
+import json
+import uuid
+
+import pytest
+from sqlalchemy import Text, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.types import TypeDecorator
+
+from memoryhub.models.base import Base
+from memoryhub.models.memory import MemoryNode
+from memoryhub.models.schemas import (
+    MemoryNodeCreate,
+    MemoryNodeRead,
+    MemoryNodeStub,
+    MemoryNodeUpdate,
+    MemoryScope,
+)
+from memoryhub.services.embeddings import MockEmbeddingService
+from memoryhub.services.exceptions import MemoryNotCurrentError, MemoryNotFoundError
+from memoryhub.services.memory import (
+    create_memory,
+    get_memory_history,
+    read_memory,
+    report_contradiction,
+    search_memories,
+    update_memory,
+)
+
+
+class _JsonEncodedVector(TypeDecorator):
+    """Store embedding vectors as JSON text in SQLite for testing."""
+
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            return json.dumps(value)
+        return None
+
+    def process_result_value(self, value, dialect):
+        if value is not None:
+            return json.loads(value)
+        return None
+
+
+@pytest.fixture
+async def async_session():
+    """Create an in-memory SQLite database with the schema for testing.
+
+    Patches the pgvector Vector column to a JSON-encoded TEXT column
+    so that SQLite can store and retrieve embeddings.
+    """
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+
+    embedding_col = MemoryNode.__table__.c.embedding
+    original_type = embedding_col.type
+    embedding_col.type = _JsonEncodedVector()
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("PRAGMA journal_mode=WAL"))
+            await conn.run_sync(Base.metadata.create_all)
+
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with session_factory() as session:
+            yield session
+    finally:
+        embedding_col.type = original_type
+        await engine.dispose()
+
+
+@pytest.fixture
+def embedding_service():
+    return MockEmbeddingService()
+
+
+def _make_create_data(**overrides) -> MemoryNodeCreate:
+    """Build a MemoryNodeCreate with sensible defaults."""
+    defaults = {
+        "content": "prefers Podman over Docker",
+        "scope": MemoryScope.USER,
+        "weight": 0.9,
+        "owner_id": "user-123",
+    }
+    defaults.update(overrides)
+    return MemoryNodeCreate(**defaults)
+
+
+# -- create_memory --
+
+
+async def test_create_memory(async_session, embedding_service):
+    data = _make_create_data()
+    result = await create_memory(data, async_session, embedding_service)
+
+    assert isinstance(result, MemoryNodeRead)
+    assert result.content == "prefers Podman over Docker"
+    assert result.scope == MemoryScope.USER
+    assert result.weight == 0.9
+    assert result.owner_id == "user-123"
+    assert result.is_current is True
+    assert result.version == 1
+    assert result.previous_version_id is None
+    assert "prefers Podman over Docker" in result.stub
+
+
+async def test_create_memory_with_parent(async_session, embedding_service):
+    parent_data = _make_create_data(content="I use Red Hat UBI images")
+    parent = await create_memory(parent_data, async_session, embedding_service)
+
+    child_data = _make_create_data(
+        content="Because UBI images are FIPS-compliant",
+        parent_id=parent.id,
+        branch_type="rationale",
+    )
+    child = await create_memory(child_data, async_session, embedding_service)
+
+    assert child.parent_id == parent.id
+    assert child.branch_type == "rationale"
+
+
+async def test_create_memory_with_metadata(async_session, embedding_service):
+    data = _make_create_data(metadata={"source": "user-stated", "confidence": 0.95})
+    result = await create_memory(data, async_session, embedding_service)
+
+    assert result.metadata is not None
+    assert result.metadata["source"] == "user-stated"
+
+
+# -- read_memory --
+
+
+async def test_read_memory(async_session, embedding_service):
+    data = _make_create_data()
+    created = await create_memory(data, async_session, embedding_service)
+
+    result = await read_memory(created.id, async_session)
+
+    assert result.id == created.id
+    assert result.content == created.content
+    assert result.has_children is False
+    assert result.has_rationale is False
+
+
+async def test_read_memory_with_children(async_session, embedding_service):
+    parent = await create_memory(_make_create_data(content="Parent node"), async_session, embedding_service)
+    await create_memory(
+        _make_create_data(content="Child 1", parent_id=parent.id, branch_type="description"),
+        async_session,
+        embedding_service,
+    )
+    await create_memory(
+        _make_create_data(content="Rationale child", parent_id=parent.id, branch_type="rationale"),
+        async_session,
+        embedding_service,
+    )
+
+    result = await read_memory(parent.id, async_session, depth=1)
+
+    assert result.has_children is True
+    assert result.has_rationale is True
+
+
+async def test_read_memory_not_found(async_session):
+    fake_id = uuid.uuid4()
+    with pytest.raises(MemoryNotFoundError) as exc_info:
+        await read_memory(fake_id, async_session)
+    assert exc_info.value.memory_id == fake_id
+
+
+# -- update_memory --
+
+
+async def test_update_memory(async_session, embedding_service):
+    original = await create_memory(_make_create_data(), async_session, embedding_service)
+
+    update_data = MemoryNodeUpdate(content="prefers Podman over Docker for all container work")
+    updated = await update_memory(original.id, update_data, async_session, embedding_service)
+
+    assert updated.version == 2
+    assert updated.is_current is True
+    assert updated.previous_version_id == original.id
+    assert "all container work" in updated.content
+
+    # Original should no longer be current
+    old = await read_memory(original.id, async_session)
+    assert old.is_current is False
+
+
+async def test_update_memory_preserves_unchanged_fields(async_session, embedding_service):
+    original = await create_memory(
+        _make_create_data(weight=0.85, metadata={"source": "observed"}),
+        async_session,
+        embedding_service,
+    )
+
+    update_data = MemoryNodeUpdate(content="updated content only")
+    updated = await update_memory(original.id, update_data, async_session, embedding_service)
+
+    assert updated.weight == 0.85
+    assert updated.metadata["source"] == "observed"
+    assert updated.scope == original.scope
+    assert updated.owner_id == original.owner_id
+
+
+async def test_update_memory_not_found(async_session, embedding_service):
+    fake_id = uuid.uuid4()
+    with pytest.raises(MemoryNotFoundError):
+        await update_memory(fake_id, MemoryNodeUpdate(content="nope"), async_session, embedding_service)
+
+
+async def test_update_non_current_memory_raises(async_session, embedding_service):
+    original = await create_memory(_make_create_data(), async_session, embedding_service)
+    await update_memory(original.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service)
+
+    # Trying to update the old (non-current) version should fail
+    with pytest.raises(MemoryNotCurrentError) as exc_info:
+        await update_memory(original.id, MemoryNodeUpdate(content="v3"), async_session, embedding_service)
+    assert exc_info.value.memory_id == original.id
+
+
+# -- get_memory_history --
+
+
+async def test_get_memory_history(async_session, embedding_service):
+    v1 = await create_memory(_make_create_data(content="version 1"), async_session, embedding_service)
+    v2 = await update_memory(v1.id, MemoryNodeUpdate(content="version 2"), async_session, embedding_service)
+    v3 = await update_memory(v2.id, MemoryNodeUpdate(content="version 3"), async_session, embedding_service)
+
+    # Get history starting from the latest version
+    history = await get_memory_history(v3.id, async_session)
+
+    assert len(history) == 3
+    # Newest first
+    assert history[0].version == 3
+    assert history[1].version == 2
+    assert history[2].version == 1
+    assert history[0].is_current is True
+    assert history[1].is_current is False
+    assert history[2].is_current is False
+
+
+async def test_get_memory_history_single_version(async_session, embedding_service):
+    node = await create_memory(_make_create_data(), async_session, embedding_service)
+    history = await get_memory_history(node.id, async_session)
+
+    assert len(history) == 1
+    assert history[0].version == 1
+    assert history[0].is_current is True
+
+
+async def test_get_memory_history_not_found(async_session):
+    with pytest.raises(MemoryNotFoundError):
+        await get_memory_history(uuid.uuid4(), async_session)
+
+
+# -- report_contradiction --
+
+
+async def test_report_contradiction(async_session, embedding_service):
+    node = await create_memory(_make_create_data(), async_session, embedding_service)
+
+    count = await report_contradiction(
+        node.id,
+        observed_behavior="user actually used Docker in last session",
+        confidence=0.8,
+        session=async_session,
+    )
+    assert count == 1
+
+    count = await report_contradiction(
+        node.id,
+        observed_behavior="user ran docker-compose up",
+        confidence=0.6,
+        session=async_session,
+    )
+    assert count == 2
+
+    # Verify stored in metadata
+    refreshed = await read_memory(node.id, async_session)
+    assert len(refreshed.metadata["contradictions"]) == 2
+    assert refreshed.metadata["contradictions"][0]["confidence"] == 0.8
+
+
+async def test_report_contradiction_not_found(async_session):
+    with pytest.raises(MemoryNotFoundError):
+        await report_contradiction(uuid.uuid4(), "doesn't matter", 0.5, async_session)
+
+
+async def test_report_contradiction_preserves_existing_metadata(async_session, embedding_service):
+    node = await create_memory(
+        _make_create_data(metadata={"source": "user-stated"}),
+        async_session,
+        embedding_service,
+    )
+
+    await report_contradiction(node.id, "contradicting behavior", 0.7, session=async_session)
+
+    refreshed = await read_memory(node.id, async_session)
+    assert refreshed.metadata["source"] == "user-stated"
+    assert len(refreshed.metadata["contradictions"]) == 1
+
+
+# -- search_memories --
+
+
+async def test_search_memories_returns_results(async_session, embedding_service):
+    """Search returns nodes filtered by owner and scope."""
+    await create_memory(
+        _make_create_data(content="prefers Podman over Docker", weight=0.9),
+        async_session,
+        embedding_service,
+    )
+    await create_memory(
+        _make_create_data(content="uses FastAPI for web services", weight=0.5),
+        async_session,
+        embedding_service,
+    )
+
+    results = await search_memories(
+        "container runtime preference",
+        async_session,
+        embedding_service,
+        owner_id="user-123",
+    )
+
+    assert len(results) == 2
+    # High weight -> MemoryNodeRead, low weight -> MemoryNodeStub
+    types = {type(r) for r in results}
+    assert MemoryNodeRead in types
+    assert MemoryNodeStub in types
+
+
+async def test_search_memories_filters_scope(async_session, embedding_service):
+    await create_memory(
+        _make_create_data(content="user preference", scope=MemoryScope.USER),
+        async_session,
+        embedding_service,
+    )
+    await create_memory(
+        _make_create_data(content="project standard", scope=MemoryScope.PROJECT),
+        async_session,
+        embedding_service,
+    )
+
+    results = await search_memories(
+        "preference",
+        async_session,
+        embedding_service,
+        scope="user",
+    )
+
+    assert len(results) == 1
+    assert results[0].scope == MemoryScope.USER
+
+
+async def test_search_memories_current_only(async_session, embedding_service):
+    v1 = await create_memory(_make_create_data(content="old"), async_session, embedding_service)
+    await update_memory(v1.id, MemoryNodeUpdate(content="new"), async_session, embedding_service)
+
+    results = await search_memories("old", async_session, embedding_service, current_only=True)
+
+    # Only the current version should be returned
+    assert all((r.is_current if isinstance(r, MemoryNodeRead) else True) for r in results)
