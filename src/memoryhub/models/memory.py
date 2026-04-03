@@ -61,8 +61,8 @@ class MemoryNode(TimestampMixin, Base):
         nullable=True,
     )
 
-    # Embedding (1536 dims for OpenAI-compatible models, computed async)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
+    # Embedding (384 dims for sentence-transformers/all-MiniLM-L6-v2)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
 
     # Extensible metadata
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)

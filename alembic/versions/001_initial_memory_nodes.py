@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column("is_current", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("previous_version_id", sa.UUID(), nullable=True),
-        sa.Column("embedding", Vector(1536), nullable=True),
+        sa.Column("embedding", Vector(384), nullable=True),
         sa.Column("metadata", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
