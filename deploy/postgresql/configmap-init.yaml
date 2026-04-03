@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memoryhub-pg-init
+  labels:
+    app.kubernetes.io/name: memoryhub-pg
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: database
+data:
+  01-extensions.sql: |
+    -- Enable required extensions for MemoryHub
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+    -- Verify extensions loaded
+    DO $$
+    DECLARE
+      vec_version text;
+    BEGIN
+      SELECT extversion INTO vec_version FROM pg_extension WHERE extname = 'vector';
+      RAISE NOTICE 'pgvector version: %', vec_version;
+      RAISE NOTICE 'uuid-ossp loaded: %', EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp');
+    END $$;

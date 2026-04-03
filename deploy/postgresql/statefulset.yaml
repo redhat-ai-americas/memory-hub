@@ -1,0 +1,88 @@
+# NOTE: The official postgres image runs as uid 999. OpenShift assigns random
+# UIDs by default via the restricted SCC. This StatefulSet requires the
+# "anyuid" SCC granted to the default service account in this namespace.
+# See README.md for the prerequisite oc adm command.
+#
+# We set PGDATA to a subdirectory of the mount point because the postgres
+# image requires PGDATA to be a non-mount-root directory.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: memoryhub-pg
+  labels:
+    app.kubernetes.io/name: memoryhub-pg
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: database
+spec:
+  serviceName: memoryhub-pg
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoryhub-pg
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memoryhub-pg
+        app.kubernetes.io/part-of: memoryhub
+        app.kubernetes.io/component: database
+    spec:
+      securityContext:
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: postgresql
+          image: pgvector/pgvector:0.8.2-pg16
+          ports:
+            - containerPort: 5432
+              name: postgresql
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: memoryhub-pg-credentials
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: "1"
+          volumeMounts:
+            - name: pg-data
+              mountPath: /var/lib/postgresql/data
+            - name: pg-init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - memoryhub
+                - -d
+                - memoryhub
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - memoryhub
+                - -d
+                - memoryhub
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: pg-data
+          persistentVolumeClaim:
+            claimName: memoryhub-pg-data
+        - name: pg-init
+          configMap:
+            name: memoryhub-pg-init

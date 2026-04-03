@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memoryhub-pg-data
+  labels:
+    app.kubernetes.io/name: memoryhub-pg
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: database
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
