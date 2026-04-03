@@ -5,6 +5,7 @@ original dynamic loader (UnifiedMCPServer) is not used — it was
 designed for FastMCP 2 and doesn't register tools correctly in v3.
 """
 
+import os
 from fastmcp import FastMCP
 
 from src.tools.write_memory import write_memory
@@ -34,7 +35,18 @@ for tool_fn in [register_session, write_memory, read_memory, update_memory,
 
 
 def main():
-    mcp.run()
+    # Detect transport from environment or use default
+    transport = os.getenv("MCP_TRANSPORT", "stdio")
+    
+    if transport == "http":
+        # HTTP mode for OpenShift deployment
+        host = os.getenv("MCP_HTTP_HOST", "0.0.0.0")
+        port = int(os.getenv("MCP_HTTP_PORT", "8080"))
+        path = os.getenv("MCP_HTTP_PATH", "/mcp/")
+        mcp.run(transport="http", host=host, port=port, path=path)
+    else:
+        # STDIO mode for local development
+        mcp.run()
 
 
 if __name__ == "__main__":
