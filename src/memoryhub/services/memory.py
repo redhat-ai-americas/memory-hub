@@ -197,6 +197,7 @@ async def update_memory(
     old_children = children_result.scalars().all()
 
     for child in old_children:
+        # Deep copy branch to new parent
         copied_child = MemoryNode(
             id=uuid.uuid4(),
             content=child.content,
@@ -208,15 +209,19 @@ async def update_memory(
             branch_type=child.branch_type,
             metadata_=child.metadata_,
             embedding=list(child.embedding) if child.embedding is not None else None,
-            is_current=child.is_current,
+            is_current=True,
             version=child.version,
-            previous_version_id=child.previous_version_id,
+            previous_version_id=None,
             storage_type=child.storage_type,
             content_ref=child.content_ref,
             created_at=child.created_at,
             updated_at=now,
         )
         session.add(copied_child)
+
+        # Retire old branch — deep copy is the canonical version now
+        child.is_current = False
+        child.expires_at = now + timedelta(days=app_settings.version_retention_days)
 
     await session.commit()
     await session.refresh(new_node)
