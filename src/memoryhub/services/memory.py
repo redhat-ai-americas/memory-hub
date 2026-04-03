@@ -5,12 +5,13 @@ and receive an explicit AsyncSession (no hidden global state).
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import Integer, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from memoryhub.config import AppSettings
 from memoryhub.models.memory import MemoryNode
 from memoryhub.models.schemas import (
     MemoryNodeCreate,
@@ -91,7 +92,22 @@ async def read_memory(
         raise MemoryNotFoundError(memory_id)
 
     has_children, has_rationale = await _compute_branch_flags(node, session, depth)
-    return _node_to_read(node, has_children=has_children, has_rationale=has_rationale)
+    read = _node_to_read(node, has_children=has_children, has_rationale=has_rationale)
+
+    # Populate branches when depth > 0 and children were eagerly loaded
+    if depth > 0 and node.children:
+        read.branches = [
+            MemoryNodeStub(
+                id=child.id,
+                stub=child.stub,
+                scope=child.scope,
+                weight=child.weight,
+                branch_type=child.branch_type,
+            )
+            for child in node.children
+        ]
+
+    return read
 
 
 async def update_memory(
@@ -168,12 +184,46 @@ async def update_memory(
         updated_at=now,
     )
 
+    # Set TTL on the old version
+    app_settings = AppSettings()
     old_node.is_current = False
+    old_node.expires_at = now + timedelta(days=app_settings.version_retention_days)
+
     session.add(new_node)
+
+    # Deep-copy one level of child branches from old node to new node
+    children_stmt = select(MemoryNode).where(MemoryNode.parent_id == old_node.id)
+    children_result = await session.execute(children_stmt)
+    old_children = children_result.scalars().all()
+
+    for child in old_children:
+        copied_child = MemoryNode(
+            id=uuid.uuid4(),
+            content=child.content,
+            stub=child.stub,
+            scope=child.scope,
+            weight=child.weight,
+            owner_id=child.owner_id,
+            parent_id=new_node.id,
+            branch_type=child.branch_type,
+            metadata_=child.metadata_,
+            embedding=list(child.embedding) if child.embedding is not None else None,
+            is_current=child.is_current,
+            version=child.version,
+            previous_version_id=child.previous_version_id,
+            storage_type=child.storage_type,
+            content_ref=child.content_ref,
+            created_at=child.created_at,
+            updated_at=now,
+        )
+        session.add(copied_child)
+
     await session.commit()
     await session.refresh(new_node)
 
-    return _node_to_read(new_node, has_children=False, has_rationale=False)
+    has_children = len(old_children) > 0
+    has_rationale = any(c.branch_type == "rationale" for c in old_children)
+    return _node_to_read(new_node, has_children=has_children, has_rationale=has_rationale)
 
 
 async def search_memories(
@@ -185,47 +235,84 @@ async def search_memories(
     weight_threshold: float = 0.8,
     max_results: int = 20,
     current_only: bool = True,
-) -> list[MemoryNodeRead | MemoryNodeStub]:
+) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity.
 
-    Returns high-weight results as MemoryNodeRead and low-weight results
-    as MemoryNodeStub. Falls back to metadata-only filtering when pgvector
+    Returns a list of (result, relevance_score) tuples. High-weight results
+    are MemoryNodeRead, low-weight results are MemoryNodeStub. The relevance
+    score is 1.0 - cosine_distance (range 0-1 for normalized vectors).
+
+    Falls back to weight-based ordering with synthetic scores when pgvector
     is not available (e.g., SQLite in tests).
     """
     query_embedding = await embedding_service.embed(query)
 
-    # Build base query with filters
-    stmt = select(MemoryNode)
+    # Build base filters
+    filters = []
     if current_only:
-        stmt = stmt.where(MemoryNode.is_current.is_(True))
+        filters.append(MemoryNode.is_current.is_(True))
     if scope is not None:
-        stmt = stmt.where(MemoryNode.scope == scope)
+        filters.append(MemoryNode.scope == scope)
     if owner_id is not None:
-        stmt = stmt.where(MemoryNode.owner_id == owner_id)
+        filters.append(MemoryNode.owner_id == owner_id)
 
+    use_pgvector = True
     try:
         # pgvector cosine distance: smaller = more similar
-        distance = MemoryNode.embedding.cosine_distance(query_embedding)
-        stmt = stmt.order_by(distance).limit(max_results)
+        distance_expr = MemoryNode.embedding.cosine_distance(query_embedding)
+        stmt = (
+            select(MemoryNode, distance_expr.label("distance"))
+            .where(*filters)
+            .order_by(distance_expr)
+            .limit(max_results)
+        )
     except Exception:
         # Fallback for non-pgvector backends (e.g., SQLite in tests)
-        stmt = stmt.order_by(MemoryNode.weight.desc()).limit(max_results)
+        use_pgvector = False
+        stmt = select(MemoryNode).where(*filters).order_by(MemoryNode.weight.desc()).limit(max_results)
 
     result = await session.execute(stmt)
-    nodes = result.scalars().all()
 
-    results: list[MemoryNodeRead | MemoryNodeStub] = []
-    for node in nodes:
+    if use_pgvector:
+        rows = result.all()  # list of (MemoryNode, distance)
+        nodes_with_distance = [(row[0], float(row[1])) for row in rows]
+    else:
+        nodes = result.scalars().all()
+        total = len(nodes) if nodes else 1
+        # Synthetic scores: rank-based descending from 1.0
+        nodes_with_distance = [(node, i / total) for i, node in enumerate(nodes)]
+
+    if not nodes_with_distance:
+        return []
+
+    # Bulk-query branch flags for all result nodes
+    node_ids = [n.id for n, _ in nodes_with_distance]
+    branch_flags = await _bulk_branch_flags(node_ids, session)
+
+    results: list[tuple[MemoryNodeRead | MemoryNodeStub, float]] = []
+    for node, distance in nodes_with_distance:
+        relevance_score = 1.0 - distance
+        has_children, has_rationale = branch_flags.get(node.id, (False, False))
         if node.weight >= weight_threshold:
-            results.append(_node_to_read(node, has_children=False, has_rationale=False))
+            results.append(
+                (
+                    _node_to_read(node, has_children=has_children, has_rationale=has_rationale),
+                    relevance_score,
+                )
+            )
         else:
             results.append(
-                MemoryNodeStub(
-                    id=node.id,
-                    stub=node.stub,
-                    scope=node.scope,
-                    weight=node.weight,
-                    branch_type=node.branch_type,
+                (
+                    MemoryNodeStub(
+                        id=node.id,
+                        stub=node.stub,
+                        scope=node.scope,
+                        weight=node.weight,
+                        branch_type=node.branch_type,
+                        has_children=has_children,
+                        has_rationale=has_rationale,
+                    ),
+                    relevance_score,
                 )
             )
     return results
@@ -234,10 +321,16 @@ async def search_memories(
 async def get_memory_history(
     memory_id: uuid.UUID,
     session: AsyncSession,
-) -> list[MemoryVersionInfo]:
-    """Walk the previous_version_id chain to build a full version history.
+    max_versions: int = 20,
+    offset: int = 0,
+) -> dict:
+    """Walk the previous_version_id chain to build a paginated version history.
 
-    Returns versions ordered newest-first.
+    Returns a dict with:
+      - versions: list[MemoryVersionInfo] (newest-first, paginated)
+      - total_versions: int (total count in the chain)
+      - has_more: bool (whether more versions exist beyond this page)
+      - offset: int (the offset used)
     """
     stmt = select(MemoryNode).where(MemoryNode.id == memory_id)
     result = await session.execute(stmt)
@@ -246,19 +339,21 @@ async def get_memory_history(
     if node is None:
         raise MemoryNotFoundError(memory_id)
 
-    history: list[MemoryVersionInfo] = []
+    all_versions: list[MemoryVersionInfo] = []
     visited: set[uuid.UUID] = set()
     current = node
 
     while current is not None and current.id not in visited:
         visited.add(current.id)
-        history.append(
+        all_versions.append(
             MemoryVersionInfo(
                 id=current.id,
                 version=current.version,
                 is_current=current.is_current,
                 created_at=current.created_at,
                 stub=current.stub,
+                content=current.content,
+                expires_at=current.expires_at,
             )
         )
         if current.previous_version_id is not None:
@@ -269,8 +364,18 @@ async def get_memory_history(
             current = None
 
     # Newest first (highest version number first)
-    history.sort(key=lambda v: v.version, reverse=True)
-    return history
+    all_versions.sort(key=lambda v: v.version, reverse=True)
+
+    total_versions = len(all_versions)
+    page = all_versions[offset : offset + max_versions]
+    has_more = (offset + max_versions) < total_versions
+
+    return {
+        "versions": page,
+        "total_versions": total_versions,
+        "has_more": has_more,
+        "offset": offset,
+    }
 
 
 async def report_contradiction(
@@ -308,6 +413,33 @@ async def report_contradiction(
 
 
 # -- Internal helpers --
+
+
+async def _bulk_branch_flags(
+    parent_ids: list[uuid.UUID],
+    session: AsyncSession,
+) -> dict[uuid.UUID, tuple[bool, bool]]:
+    """Compute has_children and has_rationale for multiple parent IDs in one query.
+
+    Returns a dict mapping parent_id -> (has_children, has_rationale).
+    Parents with no children are absent from the dict.
+    """
+    if not parent_ids:
+        return {}
+
+    stmt = (
+        select(
+            MemoryNode.parent_id,
+            func.count(MemoryNode.id).label("child_count"),
+            func.sum(func.cast(MemoryNode.branch_type == "rationale", Integer)).label("rationale_count"),
+        )
+        .where(MemoryNode.parent_id.in_(parent_ids))
+        .group_by(MemoryNode.parent_id)
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+
+    return {row.parent_id: (row.child_count > 0, (row.rationale_count or 0) > 0) for row in rows}
 
 
 async def _compute_branch_flags(
@@ -355,6 +487,7 @@ def _node_to_read(
         metadata_=node.metadata_,
         created_at=node.created_at,
         updated_at=node.updated_at,
+        expires_at=node.expires_at,
         has_children=has_children,
         has_rationale=has_rationale,
     )

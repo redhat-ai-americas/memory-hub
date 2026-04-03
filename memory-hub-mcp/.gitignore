@@ -48,6 +48,7 @@ uv.lock.*
 # OpenShift/Build
 .oc-build/*
 .openshift/*
+.build-context/
 # kube creds or local kube config copies
 kubeconfig*
 *.kubeconfig

@@ -119,7 +119,7 @@ async def search_memory(
             }
 
         formatted = []
-        for item in results:
+        for item, relevance_score in results:
             entry = item.model_dump(mode="json")
             if isinstance(item, MemoryNodeRead):
                 entry["result_type"] = "full"
@@ -127,9 +127,7 @@ async def search_memory(
                 entry["result_type"] = "stub"
             else:
                 entry["result_type"] = "unknown"
-            # Relevance score not yet available from the service layer;
-            # placeholder until pgvector distance is surfaced.
-            entry["relevance_score"] = None
+            entry["relevance_score"] = round(relevance_score, 4)
             formatted.append(entry)
 
         return {

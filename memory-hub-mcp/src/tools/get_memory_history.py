@@ -32,15 +32,31 @@ async def get_memory_history(
             ),
         ),
     ],
+    max_versions: Annotated[
+        int,
+        Field(
+            description="Maximum number of versions to return per page (1-100).",
+            ge=1,
+            le=100,
+        ),
+    ] = 20,
+    offset: Annotated[
+        int,
+        Field(
+            description="Number of versions to skip from newest. Use for pagination.",
+            ge=0,
+        ),
+    ] = 0,
     ctx: Context = None,
 ) -> dict:
-    """Get the full version history of a memory.
+    """Get the version history of a memory with pagination.
 
     Shows how the memory evolved over time: what changed, when, and what the
     previous content was. Supports forensics ("what did the agent believe on
     March 15th?") and helps agents understand context drift.
 
     Returns versions ordered newest-first with full content for each version.
+    Use offset/max_versions for pagination on long-lived memories.
     """
     if ctx:
         await ctx.info(f"Fetching version history for memory {memory_id}")
@@ -55,36 +71,53 @@ async def get_memory_history(
 
     session, gen = await get_db_session()
     try:
-        history = await _get_memory_history(parsed_id, session)
+        history_result = await _get_memory_history(
+            parsed_id, session, max_versions=max_versions, offset=offset
+        )
+
+        page = history_result["versions"]
+        total_versions = history_result["total_versions"]
+        has_more = history_result["has_more"]
 
         versions = [
             {
                 "version": v.version,
-                "content": v.stub,  # MemoryVersionInfo carries stub
+                "content": v.content,
                 "stub": v.stub,
                 "is_current": v.is_current,
                 "created_at": v.created_at.isoformat(),
                 "id": str(v.id),
             }
-            for v in history
+            for v in page
         ]
 
-        if len(versions) == 1:
+        if total_versions == 1:
             message = (
                 "This memory has no version history "
                 f"(version {versions[0]['version']}, never updated)."
             )
-        else:
-            current = next((v for v in versions if v["is_current"]), versions[0])
+        elif not versions:
             message = (
-                f"{len(versions)} versions found. "
-                f"Current is version {current['version']}."
+                f"{total_versions} versions exist but offset {offset} "
+                "is beyond the available range."
             )
+        else:
+            current = next((v for v in versions if v["is_current"]), None)
+            message = f"{total_versions} versions total."
+            if current:
+                message += f" Current is version {current['version']}."
+            if has_more:
+                message += (
+                    f" Showing {len(versions)} versions at offset {offset}; "
+                    "use offset to see more."
+                )
 
         return {
             "memory_id": memory_id,
             "versions": versions,
-            "total_versions": len(versions),
+            "total_versions": total_versions,
+            "has_more": has_more,
+            "offset": offset,
             "message": message,
         }
 

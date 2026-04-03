@@ -86,8 +86,10 @@ class MemoryNodeRead(BaseModel):
     metadata: dict[str, Any] | None = Field(default=None, validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
+    expires_at: datetime | None = None
     has_children: bool = False  # populated by service layer, not from ORM
     has_rationale: bool = False  # populated by service layer, not from ORM
+    branches: list["MemoryNodeStub"] | None = None  # populated when depth > 0
 
 
 class MemoryNodeStub(BaseModel):
@@ -114,3 +116,5 @@ class MemoryVersionInfo(BaseModel):
     is_current: bool
     created_at: datetime
     stub: str
+    content: str = ""
+    expires_at: datetime | None = None

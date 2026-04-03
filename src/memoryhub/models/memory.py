@@ -5,10 +5,11 @@ with parent_id for tree relationships and previous_version_id for version chains
 """
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ForeignKey, Index, String, Text, text
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -60,6 +61,9 @@ class MemoryNode(TimestampMixin, Base):
         ForeignKey("memory_nodes.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+    # TTL for superseded versions (current versions never expire)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
     # Embedding (384 dims for sentence-transformers/all-MiniLM-L6-v2)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)

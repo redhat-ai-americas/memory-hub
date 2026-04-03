@@ -92,10 +92,13 @@ async def write_memory(
 
     # Validate branch_type requirement
     if parent_id is not None and branch_type is None:
-        return (
-            "branch_type is required when parent_id is set. "
-            "Common types: rationale, provenance, description, evidence."
-        )
+        return {
+            "error": True,
+            "message": (
+                "branch_type is required when parent_id is set. "
+                "Common types: rationale, provenance, description, evidence."
+            ),
+        }
 
     # Parse parent_id to UUID if provided
     parsed_parent_id: uuid.UUID | None = None
@@ -103,7 +106,7 @@ async def write_memory(
         try:
             parsed_parent_id = uuid.UUID(parent_id)
         except ValueError:
-            return f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID."
+            return {"error": True, "message": f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID."}
 
     # Build the create schema with validation
     try:
@@ -119,7 +122,7 @@ async def write_memory(
     except ValidationError as exc:
         errors = exc.errors()
         messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
-        return "Parameter validation failed:\n" + "\n".join(messages)
+        return {"error": True, "message": "Parameter validation failed:\n" + "\n".join(messages)}
 
     session = None
     gen = None
@@ -132,14 +135,17 @@ async def write_memory(
         return result.model_dump(mode="json")
 
     except MemoryNotFoundError:
-        return (
-            f"Parent memory {parent_id} not found. Check the parent_id — "
-            "it may have been deleted or you may not have access to it."
-        )
+        return {
+            "error": True,
+            "message": (
+                f"Parent memory {parent_id} not found. Check the parent_id — "
+                "it may have been deleted or you may not have access to it."
+            ),
+        }
     except MemoryAccessDeniedError as exc:
-        return f"Access denied: {exc.reason}"
+        return {"error": True, "message": f"Access denied: {exc.reason}"}
     except Exception as exc:
-        return f"Failed to create memory: {exc}"
+        return {"error": True, "message": f"Failed to create memory: {exc}"}
     finally:
         if gen is not None:
             await release_db_session(gen)

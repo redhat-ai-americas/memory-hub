@@ -190,9 +190,10 @@ async def test_update_memory(async_session, embedding_service):
     assert updated.previous_version_id == original.id
     assert "all container work" in updated.content
 
-    # Original should no longer be current
+    # Original should no longer be current and should have expires_at set
     old = await read_memory(original.id, async_session)
     assert old.is_current is False
+    assert old.expires_at is not None
 
 
 async def test_update_memory_preserves_unchanged_fields(async_session, embedding_service):
@@ -227,6 +228,68 @@ async def test_update_non_current_memory_raises(async_session, embedding_service
     assert exc_info.value.memory_id == original.id
 
 
+async def test_update_memory_deep_copies_branches(async_session, embedding_service):
+    """When a memory is updated, its child branches are deep-copied to the new version."""
+    parent = await create_memory(_make_create_data(content="I use Red Hat UBI"), async_session, embedding_service)
+
+    # Add a rationale branch and a description branch to the original
+    rationale_data = _make_create_data(
+        content="Because UBI images are FIPS-compliant",
+        parent_id=parent.id,
+        branch_type="rationale",
+    )
+    rationale = await create_memory(rationale_data, async_session, embedding_service)
+
+    desc_data = _make_create_data(
+        content="Red Hat Universal Base Image",
+        parent_id=parent.id,
+        branch_type="description",
+    )
+    await create_memory(desc_data, async_session, embedding_service)
+
+    # Update the parent memory
+    updated = await update_memory(
+        parent.id, MemoryNodeUpdate(content="I use Red Hat UBI 9"), async_session, embedding_service
+    )
+
+    # The new version should report having children
+    assert updated.has_children is True
+    assert updated.has_rationale is True
+
+    # Read the new version with depth=1 to see its branches
+    new_with_branches = await read_memory(updated.id, async_session, depth=1)
+    assert new_with_branches.branches is not None
+    assert len(new_with_branches.branches) == 2
+
+    # The copied branches should have different IDs than the originals
+    copied_ids = {b.id for b in new_with_branches.branches}
+    assert rationale.id not in copied_ids
+
+    # But the content should match
+    copied_rationale = [b for b in new_with_branches.branches if b.branch_type == "rationale"]
+    assert len(copied_rationale) == 1
+
+
+async def test_update_memory_sets_expires_at(async_session, embedding_service):
+    """Old version gets an expires_at timestamp when superseded."""
+    from datetime import timedelta
+
+    original = await create_memory(_make_create_data(), async_session, embedding_service)
+    assert original.expires_at is None  # current version has no TTL
+
+    updated = await update_memory(original.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service)
+    assert updated.expires_at is None  # new current version has no TTL
+
+    old = await read_memory(original.id, async_session)
+    assert old.expires_at is not None
+    # The expires_at should be roughly 90 days from now (default retention)
+    assert old.expires_at > old.updated_at
+    # Check it's approximately 90 days out (within 1 day tolerance)
+    expected_delta = timedelta(days=90)
+    actual_delta = old.expires_at - old.created_at
+    assert abs(actual_delta - expected_delta) < timedelta(days=1)
+
+
 # -- get_memory_history --
 
 
@@ -236,8 +299,12 @@ async def test_get_memory_history(async_session, embedding_service):
     v3 = await update_memory(v2.id, MemoryNodeUpdate(content="version 3"), async_session, embedding_service)
 
     # Get history starting from the latest version
-    history = await get_memory_history(v3.id, async_session)
+    result = await get_memory_history(v3.id, async_session)
+    history = result["versions"]
 
+    assert result["total_versions"] == 3
+    assert result["has_more"] is False
+    assert result["offset"] == 0
     assert len(history) == 3
     # Newest first
     assert history[0].version == 3
@@ -246,15 +313,49 @@ async def test_get_memory_history(async_session, embedding_service):
     assert history[0].is_current is True
     assert history[1].is_current is False
     assert history[2].is_current is False
+    # Content field should be populated
+    assert history[0].content == "version 3"
+    assert history[2].content == "version 1"
 
 
 async def test_get_memory_history_single_version(async_session, embedding_service):
     node = await create_memory(_make_create_data(), async_session, embedding_service)
-    history = await get_memory_history(node.id, async_session)
+    result = await get_memory_history(node.id, async_session)
+    history = result["versions"]
 
     assert len(history) == 1
     assert history[0].version == 1
     assert history[0].is_current is True
+    assert history[0].content == "prefers Podman over Docker"
+
+
+async def test_get_memory_history_pagination(async_session, embedding_service):
+    """Pagination returns the correct window and has_more flag."""
+    v1 = await create_memory(_make_create_data(content="v1"), async_session, embedding_service)
+    v2 = await update_memory(v1.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service)
+    v3 = await update_memory(v2.id, MemoryNodeUpdate(content="v3"), async_session, embedding_service)
+    v4 = await update_memory(v3.id, MemoryNodeUpdate(content="v4"), async_session, embedding_service)
+    v5 = await update_memory(v4.id, MemoryNodeUpdate(content="v5"), async_session, embedding_service)
+
+    # Page 1: first 2 versions (newest first: v5, v4)
+    result = await get_memory_history(v5.id, async_session, max_versions=2, offset=0)
+    assert len(result["versions"]) == 2
+    assert result["versions"][0].version == 5
+    assert result["versions"][1].version == 4
+    assert result["total_versions"] == 5
+    assert result["has_more"] is True
+
+    # Page 2: next 2 (v3, v2)
+    result = await get_memory_history(v5.id, async_session, max_versions=2, offset=2)
+    assert len(result["versions"]) == 2
+    assert result["versions"][0].version == 3
+    assert result["has_more"] is True
+
+    # Page 3: last 1 (v1)
+    result = await get_memory_history(v5.id, async_session, max_versions=2, offset=4)
+    assert len(result["versions"]) == 1
+    assert result["versions"][0].version == 1
+    assert result["has_more"] is False
 
 
 async def test_get_memory_history_not_found(async_session):
@@ -313,7 +414,7 @@ async def test_report_contradiction_preserves_existing_metadata(async_session, e
 
 
 async def test_search_memories_returns_results(async_session, embedding_service):
-    """Search returns nodes filtered by owner and scope."""
+    """Search returns (node, relevance_score) tuples filtered by owner and scope."""
     await create_memory(
         _make_create_data(content="prefers Podman over Docker", weight=0.9),
         async_session,
@@ -333,8 +434,12 @@ async def test_search_memories_returns_results(async_session, embedding_service)
     )
 
     assert len(results) == 2
+    # Each result is a (node, score) tuple
+    for item, score in results:
+        assert isinstance(score, float)
+        assert isinstance(item, (MemoryNodeRead, MemoryNodeStub))
     # High weight -> MemoryNodeRead, low weight -> MemoryNodeStub
-    types = {type(r) for r in results}
+    types = {type(item) for item, _ in results}
     assert MemoryNodeRead in types
     assert MemoryNodeStub in types
 
@@ -359,7 +464,9 @@ async def test_search_memories_filters_scope(async_session, embedding_service):
     )
 
     assert len(results) == 1
-    assert results[0].scope == MemoryScope.USER
+    item, score = results[0]
+    assert item.scope == MemoryScope.USER
+    assert isinstance(score, float)
 
 
 async def test_search_memories_current_only(async_session, embedding_service):
@@ -369,4 +476,4 @@ async def test_search_memories_current_only(async_session, embedding_service):
     results = await search_memories("old", async_session, embedding_service, current_only=True)
 
     # Only the current version should be returned
-    assert all((r.is_current if isinstance(r, MemoryNodeRead) else True) for r in results)
+    assert all((r.is_current if isinstance(r, MemoryNodeRead) else True) for r, _ in results)

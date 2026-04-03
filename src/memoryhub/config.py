@@ -50,3 +50,4 @@ class AppSettings(BaseSettings):
     model_config = {"env_prefix": "MEMORYHUB_"}
 
     log_level: str = "INFO"
+    version_retention_days: int = 90

@@ -1,7 +1,14 @@
-fastmcp>=2.11.3
+fastmcp>=3.0.0
 pyyaml>=6.0.2
 python-dotenv>=1.1.1
 watchdog>=6.0.0
-pytest>=8.4.1
-pytest-asyncio>=0.24.0
 pyjwt>=2.10.1
+# memoryhub core library dependencies
+sqlalchemy>=2.0
+asyncpg
+pgvector
+pydantic>=2.0
+pydantic-settings
+minio
+psycopg2-binary
+httpx

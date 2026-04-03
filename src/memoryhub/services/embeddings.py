@@ -2,7 +2,10 @@
 
 import hashlib
 import math
+import os
 from abc import ABC, abstractmethod
+
+import httpx
 
 EMBEDDING_DIM = 384
 
@@ -54,3 +57,29 @@ class MockEmbeddingService(EmbeddingService):
         if magnitude > 0:
             vector = [x / magnitude for x in vector]
         return vector
+
+
+class HttpEmbeddingService(EmbeddingService):
+    """Embedding service that calls a remote HTTP endpoint.
+
+    Compatible with the all-MiniLM-L6-v2 model served via standard
+    embedding API: POST {"inputs": "text"} → [[float, ...]]
+    """
+
+    def __init__(self, url: str | None = None):
+        self.url = url or os.environ.get(
+            "MEMORYHUB_EMBEDDING_URL",
+            "http://localhost:8080/embed",
+        )
+        self._client = httpx.AsyncClient(timeout=30.0)
+
+    async def embed(self, text: str) -> list[float]:
+        response = await self._client.post(self.url, json={"inputs": text})
+        response.raise_for_status()
+        data = response.json()
+        # API returns [[float, ...]] — unwrap the outer array
+        return data[0] if isinstance(data[0], list) else data
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        # Call one at a time — the API takes a single string
+        return [await self.embed(t) for t in texts]

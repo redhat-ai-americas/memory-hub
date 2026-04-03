@@ -59,7 +59,7 @@ async def read_memory(
     try:
         parsed_id = uuid.UUID(memory_id)
     except ValueError:
-        return f"Invalid memory_id format: '{memory_id}'. Must be a valid UUID."
+        return {"error": True, "message": f"Invalid memory_id format: '{memory_id}'. Must be a valid UUID."}
 
     session = None
     gen = None
@@ -77,12 +77,15 @@ async def read_memory(
         return result
 
     except MemoryNotFoundError:
-        return (
-            f"Memory {memory_id} not found. It may have been deleted, "
-            "or you may not have access to this memory's scope."
-        )
+        return {
+            "error": True,
+            "message": (
+                f"Memory {memory_id} not found. It may have been deleted, "
+                "or you may not have access to this memory's scope."
+            ),
+        }
     except Exception as exc:
-        return f"Failed to read memory: {exc}"
+        return {"error": True, "message": f"Failed to read memory: {exc}"}
     finally:
         if gen is not None:
             await release_db_session(gen)
