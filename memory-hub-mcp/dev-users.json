@@ -1,0 +1,16 @@
+{
+  "users": [
+    {
+      "user_id": "wjackson",
+      "name": "William Jackson",
+      "api_key": "mh-dev-wjackson-2026",
+      "scopes": ["user", "project", "role", "organizational", "enterprise"]
+    },
+    {
+      "user_id": "dev-test",
+      "name": "Test User",
+      "api_key": "mh-dev-test-2026",
+      "scopes": ["user", "project"]
+    }
+  ]
+}

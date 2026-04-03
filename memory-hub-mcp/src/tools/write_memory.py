@@ -7,7 +7,13 @@ from fastmcp import Context
 from pydantic import Field, ValidationError
 
 from src.core.app import mcp
-from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+from src.tools._deps import (
+    get_authenticated_owner,
+    get_db_session,
+    get_embedding_service,
+    release_db_session,
+)
+from src.tools.auth import has_scope, require_auth
 
 from memoryhub.models.schemas import MemoryNodeCreate
 from memoryhub.services.exceptions import MemoryAccessDeniedError, MemoryNotFoundError
@@ -36,14 +42,15 @@ async def write_memory(
         ),
     ],
     owner_id: Annotated[
-        str,
+        str | None,
         Field(
             description=(
                 "The user, project, or org this memory belongs to. "
-                "For user-scope, this is the user ID."
+                "For user-scope, this is the user ID. "
+                "Omit to use your authenticated user_id (requires register_session)."
             ),
         ),
-    ],
+    ] = None,
     weight: Annotated[
         float,
         Field(
@@ -90,6 +97,39 @@ async def write_memory(
     if ctx:
         await ctx.info("Creating memory node")
 
+    # Resolve owner_id from authenticated session if not supplied explicitly.
+    if owner_id is None:
+        try:
+            current_user = require_auth()
+        except RuntimeError as exc:
+            return {"error": True, "message": str(exc)}
+        owner_id = current_user["user_id"]
+    else:
+        # Explicit owner_id: validate the caller has access to that scope.
+        current_user = None
+        authenticated_owner = get_authenticated_owner()
+        if authenticated_owner is not None:
+            current_user = require_auth()
+            # For user scope, the owner must be the authenticated user.
+            if scope == "user" and owner_id != authenticated_owner:
+                return {
+                    "error": True,
+                    "message": (
+                        f"Cannot write user-scope memory for owner '{owner_id}': "
+                        f"you are authenticated as '{authenticated_owner}'. "
+                        "Use your own user_id or omit owner_id to use your identity."
+                    ),
+                }
+            # For higher scopes, verify the user has that scope.
+            if not has_scope(current_user, scope):
+                return {
+                    "error": True,
+                    "message": (
+                        f"Your account does not have access to the '{scope}' scope. "
+                        f"Allowed scopes: {', '.join(current_user.get('scopes', []))}."
+                    ),
+                }
+
     # Validate branch_type requirement
     if parent_id is not None and branch_type is None:
         return {
@@ -106,7 +146,10 @@ async def write_memory(
         try:
             parsed_parent_id = uuid.UUID(parent_id)
         except ValueError:
-            return {"error": True, "message": f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID."}
+            return {
+                "error": True,
+                "message": f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID.",
+            }
 
     # Build the create schema with validation
     try:
@@ -122,7 +165,10 @@ async def write_memory(
     except ValidationError as exc:
         errors = exc.errors()
         messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
-        return {"error": True, "message": "Parameter validation failed:\n" + "\n".join(messages)}
+        return {
+            "error": True,
+            "message": "Parameter validation failed:\n" + "\n".join(messages),
+        }
 
     session = None
     gen = None

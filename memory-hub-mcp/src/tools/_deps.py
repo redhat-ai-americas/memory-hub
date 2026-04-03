@@ -3,7 +3,12 @@
 import os
 
 from memoryhub.services.database import get_session
-from memoryhub.services.embeddings import EmbeddingService, HttpEmbeddingService, MockEmbeddingService
+from memoryhub.services.embeddings import (
+    EmbeddingService,
+    HttpEmbeddingService,
+    MockEmbeddingService,
+)
+from src.tools.auth import require_auth
 
 _embedding_service: EmbeddingService | None = None
 
@@ -31,3 +36,16 @@ async def release_db_session(gen):
         await gen.__anext__()
     except StopAsyncIteration:
         pass
+
+
+def get_authenticated_owner() -> str | None:
+    """Return the authenticated user's user_id, or None if no session is registered.
+
+    Tools that want to fall back silently use this. Tools that must enforce auth
+    should call src.tools.auth.require_auth() directly.
+    """
+    try:
+        user = require_auth()
+        return user["user_id"]
+    except RuntimeError:
+        return None

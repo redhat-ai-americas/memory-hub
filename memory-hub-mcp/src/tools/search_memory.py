@@ -14,7 +14,12 @@ from pydantic import Field
 from memoryhub.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
 from memoryhub.services.memory import search_memories
 from src.core.app import mcp
-from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+from src.tools._deps import (
+    get_authenticated_owner,
+    get_db_session,
+    get_embedding_service,
+    release_db_session,
+)
 
 VALID_SCOPES = {s.value for s in MemoryScope}
 
@@ -49,7 +54,11 @@ async def search_memory(
     owner_id: Annotated[
         str | None,
         Field(
-            description="Filter to a specific owner's memories (user ID or project identifier)."
+            description=(
+                "Filter to a specific owner's memories (user ID or project identifier). "
+                "Omit to default to your authenticated user_id (requires register_session). "
+                "Pass an empty string to search across all owners without filtering."
+            )
         ),
     ] = None,
     max_results: Annotated[
@@ -84,6 +93,13 @@ async def search_memory(
         raise ToolError(
             "Query cannot be empty. Provide a natural language search query."
         )
+
+    # Resolve owner_id: default to authenticated user when not explicitly set.
+    # An empty string signals "no filter" (search all accessible owners).
+    if owner_id is None:
+        owner_id = get_authenticated_owner()
+    elif owner_id == "":
+        owner_id = None
 
     if scope is not None and scope not in VALID_SCOPES:
         raise ToolError(

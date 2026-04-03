@@ -59,7 +59,10 @@ async def read_memory(
     try:
         parsed_id = uuid.UUID(memory_id)
     except ValueError:
-        return {"error": True, "message": f"Invalid memory_id format: '{memory_id}'. Must be a valid UUID."}
+        return {
+            "error": True,
+            "message": f"Invalid memory_id format: '{memory_id}'. Must be a valid UUID.",
+        }
 
     session = None
     gen = None

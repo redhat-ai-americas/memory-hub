@@ -82,6 +82,12 @@ spec:
               value: /mcp/
             - name: MCP_LOG_LEVEL
               value: INFO
+            - name: MEMORYHUB_USERS_FILE
+              value: /config/users.json
+          volumeMounts:
+            - name: users-config
+              mountPath: /config
+              readOnly: true
           resources:
             requests:
               memory: 256Mi
@@ -99,6 +105,10 @@ spec:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
+      volumes:
+        - name: users-config
+          configMap:
+            name: memoryhub-users
 ---
 apiVersion: v1
 kind: Service
