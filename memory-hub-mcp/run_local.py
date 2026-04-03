@@ -11,42 +11,14 @@ os.environ.setdefault("MEMORYHUB_DB_NAME", "memoryhub")
 os.environ.setdefault("MEMORYHUB_DB_USER", "memoryhub")
 os.environ.setdefault("MEMORYHUB_DB_PASSWORD", "memoryhub-dev-password")
 
-# Auth: point to the local dev users file (sibling of this script).
+# Auth: point to the local dev users file
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_dev_users = os.path.join(_script_dir, "dev-users.json")
-os.environ.setdefault("MEMORYHUB_USERS_FILE", _dev_users)
+os.environ.setdefault("MEMORYHUB_USERS_FILE", os.path.join(_script_dir, "dev-users.json"))
 
 # Ensure memoryhub core library is importable
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.chdir(_script_dir)
+sys.path.insert(0, os.path.dirname(_script_dir))
 
-from fastmcp import FastMCP
+from src.main import main
 
-mcp = FastMCP(
-    "MemoryHub",
-    instructions=(
-        "MemoryHub provides centralized, governed memory for AI agents. "
-        "Memories form a tree with branches (rationale, provenance, etc.). "
-        "IMPORTANT: Call register_session(api_key=...) at the start of every "
-        "conversation to authenticate. Then use write_memory to create, "
-        "search_memory to find, read_memory to expand details, update_memory "
-        "to revise, get_memory_history for forensics, and report_contradiction "
-        "for staleness detection."
-    ),
-)
-
-# Import tools and register with this mcp instance
-from src.tools.write_memory import write_memory
-from src.tools.read_memory import read_memory
-from src.tools.update_memory import update_memory
-from src.tools.search_memory import search_memory
-from src.tools.get_memory_history import get_memory_history
-from src.tools.report_contradiction import report_contradiction
-from src.tools.register_session import register_session
-
-for tool_fn in [register_session, write_memory, read_memory, update_memory,
-                search_memory, get_memory_history, report_contradiction]:
-    mcp.add_tool(tool_fn)
-
-if __name__ == "__main__":
-    mcp.run()
+main()
