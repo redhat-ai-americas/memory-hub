@@ -14,6 +14,7 @@ If `MEMORYHUB_API_KEY` is not set, skip MemoryHub integration silently — the u
 
 ### During Work
 
+- **Search memory again when the topic shifts.** The initial search covers the conversation's starting topic, but if work moves to a different area (e.g., from implementation to deployment, or from one subsystem to another), search memory for the new topic. Memories are retrieved on demand, not loaded once — use that.
 - When you learn something important about the user's preferences, project context, or decisions, call `write_memory` to persist it
 - When the user tells you something that should be remembered across conversations, write it to memory
 - Add rationale branches (via `parent_id` + `branch_type: "rationale"`) when the "why" behind a preference matters
