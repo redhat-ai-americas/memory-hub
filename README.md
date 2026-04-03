@@ -12,22 +12,25 @@ Contact William Jackson (wjackson) to get a MemoryHub API key. Each user gets th
 
 ### 2. Add the MCP server
 
-Run this from your terminal:
-
 ```bash
 claude mcp add --transport http \
-  --header "Content-Type: application/json" \
+  -e MEMORYHUB_API_KEY=<your-key> \
+  -s project \
   memoryhub \
   https://memory-hub-mcp-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/
 ```
 
+Replace `<your-key>` with the API key you received. The `-s project` flag scopes this to the MemoryHub project so it doesn't affect other work.
+
 ### 3. Start using it
 
 The project includes rules (`.claude/rules/memoryhub-integration.md`) that instruct Claude Code to:
-- Call `register_session` with your API key at the start of every conversation
+- Read `MEMORYHUB_API_KEY` and call `register_session` at the start of every conversation
 - Search memory for relevant context before starting work
 - Write important preferences, decisions, and project context to memory
 - Use version history and contradiction reporting
+
+If you work on this project in Claude Code, the agent will automatically use MemoryHub for persistent memory across conversations.
 
 ## Architecture
 

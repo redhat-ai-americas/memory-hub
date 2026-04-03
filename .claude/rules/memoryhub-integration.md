@@ -6,9 +6,11 @@ This project has a MemoryHub MCP server that provides persistent, centralized me
 
 At the START of every conversation, before doing any other work:
 
-1. Call `register_session` with the user's API key to authenticate
+1. Read the `MEMORYHUB_API_KEY` environment variable and call `register_session(api_key=<value>)` to authenticate
 2. Call `search_memory` with a query relevant to the current task to load context
 3. Use the returned memories to inform your work
+
+If `MEMORYHUB_API_KEY` is not set, skip MemoryHub integration silently — the user hasn't configured it yet.
 
 ### During Work
 
@@ -28,4 +30,4 @@ At the START of every conversation, before doing any other work:
 
 ### API Key
 
-The API key is provided as the environment variable `MEMORYHUB_API_KEY` in the MCP server configuration. Pass it to `register_session` at the start of each conversation.
+The API key is set via the `MEMORYHUB_API_KEY` environment variable, configured when you add the MCP server with `claude mcp add -e MEMORYHUB_API_KEY=<your-key> ...`. Read it and pass it to `register_session`.
