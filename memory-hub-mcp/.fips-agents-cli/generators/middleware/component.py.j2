@@ -1,0 +1,106 @@
+"""{{ description }}"""
+
+from typing import Any, Callable
+{% if async %}
+from fastmcp import Context
+{% endif %}
+from fastmcp.exceptions import ToolError
+from src.core.app import mcp
+from src.core.logging import get_logger
+
+log = get_logger("middleware.{{ component_name }}")
+
+
+@mcp.middleware()
+{% if async %}async {% endif %}def {{ component_name }}(
+    ctx: Context,
+    next_handler: Callable,
+    *args: Any,
+    **kwargs: Any
+) -> Any:
+    """{{ description }}
+
+    This middleware {% if hook_type %}{{ hook_type }} tool execution{% else %}wraps tool execution{% endif %}.
+
+    Args:
+        ctx: FastMCP context with request information
+        next_handler: Next handler in the middleware chain
+        *args: Positional arguments passed to the tool
+        **kwargs: Keyword arguments passed to the tool
+
+    Returns:
+        Result from the tool execution
+
+    Raises:
+        ToolError: If middleware validation or processing fails
+    """
+    # TODO: Implement middleware logic
+    # Remove this placeholder and add your implementation
+
+{% if hook_type == "before_tool" %}    # EXAMPLE: Pre-execution logic
+    tool_name = getattr(ctx.request, "tool_name", "unknown") if hasattr(ctx, "request") else "unknown"
+    log.info(f"Before tool: {tool_name}")
+
+    # Add pre-execution checks here
+    # Example: Validate request format
+    # Example: Check rate limits
+    # Example: Load required context
+
+{% elif hook_type == "after_tool" %}    # Execute the tool first
+    result = {% if async %}await {% endif %}next_handler(*args, **kwargs)
+
+    # EXAMPLE: Post-execution logic
+    tool_name = getattr(ctx.request, "tool_name", "unknown") if hasattr(ctx, "request") else "unknown"
+    log.info(f"After tool: {tool_name}")
+
+    # Add post-execution processing here
+    # Example: Log result metadata
+    # Example: Update metrics
+    # Example: Transform result
+
+    return result
+
+{% elif hook_type == "on_error" %}    try:
+        # Execute the tool
+        result = {% if async %}await {% endif %}next_handler(*args, **kwargs)
+        return result
+    except Exception as e:
+        # EXAMPLE: Error handling logic
+        tool_name = getattr(ctx.request, "tool_name", "unknown") if hasattr(ctx, "request") else "unknown"
+        log.error(f"Error in tool {tool_name}: {e}")
+
+        # Add error handling here
+        # Example: Transform error
+        # Example: Log to external service
+        # Example: Add context to error
+
+        # Re-raise or transform the error
+        raise
+
+{% else %}    # EXAMPLE: General middleware pattern
+    log.debug(f"Middleware {{ component_name }} executing")
+
+    # Pre-execution logic here
+    # Example: Validate context
+    # Example: Check authentication
+    # Example: Set up resources
+
+    try:
+        # Execute the tool
+        result = {% if async %}await {% endif %}next_handler(*args, **kwargs)
+
+        # Post-execution logic here
+        # Example: Clean up resources
+        # Example: Log success
+
+        return result
+    except Exception as e:
+        # Error handling logic here
+        # Example: Log error details
+        # Example: Clean up resources
+        log.error(f"Middleware caught error: {e}")
+        raise
+{% endif %}
+
+    {% if hook_type != "after_tool" %}# Execute the tool
+    return {% if async %}await {% endif %}next_handler(*args, **kwargs){% endif %}

@@ -1,0 +1,55 @@
+"""Tests for {{ component_name }} tool."""
+
+import pytest
+{% if async %}
+from unittest.mock import AsyncMock
+{% endif %}
+{% if with_context and not async %}
+from unittest.mock import MagicMock
+{% endif %}
+from src.tools.{{ module_path }} import {{ component_name }}
+
+# Access the underlying function for testing (FastMCP decorator pattern)
+{{ component_name }}_fn = {{ component_name }}.fn
+
+
+{% if async %}@pytest.mark.asyncio
+async def test_{{ component_name }}_basic():
+{% else %}def test_{{ component_name }}_basic():
+{% endif %}    """Test basic {{ component_name }} functionality."""
+{% if with_context %}    ctx = {% if async %}AsyncMock(){% else %}MagicMock(){% endif %}
+{% endif %}    # TODO: Add test parameters
+    result = {% if async %}await {% endif %}{{ component_name }}_fn(
+        # Add parameters here
+{% if with_context %}        ctx=ctx,
+{% endif %}    )
+
+    # TODO: Add assertions
+    assert result is not None
+{% if with_context %}{% if async %}    ctx.info.assert_called_once(){% endif %}
+{% endif %}
+
+
+{% if async %}@pytest.mark.asyncio
+async def test_{{ component_name }}_error_handling():
+{% else %}def test_{{ component_name }}_error_handling():
+{% endif %}    """Test {{ component_name }} error handling."""
+{% if with_context %}    ctx = {% if async %}AsyncMock(){% else %}MagicMock(){% endif %}
+{% endif %}    # TODO: Test error conditions
+    # Example:
+    # with pytest.raises(ToolError, match="expected error"):
+    #     {% if async %}await {% endif %}{{ component_name }}_fn(invalid_param{% if with_context %}, ctx=ctx{% endif %})
+    pass
+
+
+{% if params|length > 0 %}{% if async %}@pytest.mark.asyncio
+async def test_{{ component_name }}_validation():
+{% else %}def test_{{ component_name }}_validation():
+{% endif %}    """Test {{ component_name }} parameter validation."""
+{% if with_context %}    ctx = {% if async %}AsyncMock(){% else %}MagicMock(){% endif %}
+{% endif %}    # TODO: Test validation
+    # from pydantic import ValidationError
+    # with pytest.raises(ValidationError):
+    #     {% if async %}await {% endif %}{{ component_name }}_fn(invalid_value{% if with_context %}, ctx=ctx{% endif %})
+    pass
+{% endif %}

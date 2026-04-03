@@ -1,0 +1,15 @@
+{
+  "generator": {
+    "tool": "fips-agents-cli",
+    "version": "0.2.0"
+  },
+  "template": {
+    "url": "https://github.com/rdwj/mcp-server-template",
+    "commit": "dd675aaeb328",
+    "full_commit": "dd675aaeb328f37d17d63868716265a1757ac241"
+  },
+  "project": {
+    "name": "memory-hub-mcp",
+    "created_at": "2026-04-03T17:49:20.427704+00:00"
+  }
+}

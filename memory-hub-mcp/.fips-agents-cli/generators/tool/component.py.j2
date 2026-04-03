@@ -1,0 +1,67 @@
+"""{{ description }}"""
+
+from typing import Annotated
+{% if params|length > 0 %}
+from pydantic import Field
+{% endif %}
+{% if async and with_context %}
+from fastmcp import Context
+{% endif %}
+{% if with_context and not async %}
+from fastmcp import Context
+{% endif %}
+{% if with_auth %}
+from src.core.auth import requires_scopes
+{% endif %}
+from fastmcp.exceptions import ToolError
+from src.core.app import mcp
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": {{ read_only|default(True) }},
+        "idempotentHint": {{ idempotent|default(True) }},
+        "openWorldHint": {{ open_world|default(False) }},
+    }
+)
+{% if with_auth %}@requires_scopes({{ required_scopes|default('["read:data"]')|tojson }})
+{% endif %}{% if async %}async {% endif %}def {{ component_name }}(
+{% if params|length > 0 %}{% for param in params %}    {{ param.name }}: Annotated[{{ param.type }}, Field(description="{{ param.description }}"{% if param.min_length %}, min_length={{ param.min_length }}{% endif %}{% if param.max_length %}, max_length={{ param.max_length }}{% endif %})],
+{% endfor %}{% endif %}{% if with_context %}    ctx: Context = None,
+{% endif %}) -> {{ return_type|default('str') }}:
+    """{{ description }}
+
+    Args:
+{% if params|length > 0 %}{% for param in params %}        {{ param.name }}: {{ param.description }}
+{% endfor %}{% endif %}{% if with_context %}        ctx: FastMCP context for logging and capabilities
+{% endif %}
+    Returns:
+        {{ return_description|default('Result of the operation') }}
+
+    Raises:
+        ToolError: If validation fails or operation cannot be completed
+    """
+{% if with_context and async %}    {% if async %}await {% endif %}ctx.info(f"Executing {{ component_name }}")
+{% endif %}
+    # TODO: Implement business logic
+    # Remove this placeholder and add your implementation
+
+    # EXAMPLE: Input validation
+    # if not param.strip():
+    #     raise ToolError("Parameter cannot be empty")
+
+{% if async %}    # EXAMPLE: Async HTTP request
+    # async with httpx.AsyncClient() as client:
+    #     response = await client.get(url)
+    #     if response.status_code != 200:
+    #         raise ToolError(f"Request failed: {response.status_code}")
+    #     return response.json()
+{% else %}    # EXAMPLE: Sync operation
+    # try:
+    #     result = process_data(param)
+    #     return result
+    # except Exception as e:
+    #     raise ToolError(f"Processing failed: {e}")
+{% endif %}
+
+    return "TODO: Replace with actual implementation"

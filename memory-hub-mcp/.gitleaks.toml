@@ -1,0 +1,23 @@
+# Gitleaks configuration for mcp-server-template
+# Manages false positives from documentation examples
+
+[allowlist]
+  description = "Allowlist for documentation examples and placeholders"
+
+  # Ignore documentation files with curl examples
+  paths = [
+    '''README\.md$''',
+    '''docs\/.*\.md$''',
+  ]
+
+  # Ignore common placeholder patterns in examples
+  regexes = [
+    # Example/placeholder tokens
+    '''dev-alice''',
+    '''admin-token''',
+    '''readonly-token''',
+    '''YOUR_TOKEN''',
+    '''YOUR_.*_HERE''',
+    # Truncated JWT examples (ending with ...)
+    '''eyJ[a-zA-Z0-9]+\.\.\.''',
+  ]

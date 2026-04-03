@@ -1,0 +1,98 @@
+"""Tests for {{ component_name }} middleware."""
+
+import pytest
+from unittest.mock import {% if async %}AsyncMock, {% endif %}MagicMock
+from src.middleware.{{ module_path }} import {{ component_name }}
+
+# Access the underlying function for testing (FastMCP decorator pattern)
+{{ component_name }}_fn = {{ component_name }}.fn
+
+
+{% if async %}@pytest.mark.asyncio
+async def test_{{ component_name }}_success():
+{% else %}def test_{{ component_name }}_success():
+{% endif %}    """Test middleware handles successful execution."""
+    # Create mock context
+    ctx = MagicMock()
+    ctx.request.tool_name = "test_tool"
+
+    # Create mock next handler that returns a result
+    next_handler = {% if async %}AsyncMock(return_value="success_result"){% else %}MagicMock(return_value="success_result"){% endif %}
+
+    # Execute middleware
+    result = {% if async %}await {% endif %}{{ component_name }}_fn(ctx, next_handler, "arg1", kwarg1="value1")
+
+    # Verify result is returned
+    assert result == "success_result"
+
+    # Verify next_handler was called
+    next_handler.assert_called_once_with("arg1", kwarg1="value1")
+
+
+{% if async %}@pytest.mark.asyncio
+async def test_{{ component_name }}_error():
+{% else %}def test_{{ component_name }}_error():
+{% endif %}    """Test middleware handles errors."""
+    # Create mock context
+    ctx = MagicMock()
+    ctx.request.tool_name = "failing_tool"
+
+    # Create mock next handler that raises an error
+    next_handler = {% if async %}AsyncMock(side_effect=ValueError("Test error")){% else %}MagicMock(side_effect=ValueError("Test error")){% endif %}
+
+    # Execute middleware and expect error to be raised
+    with pytest.raises(ValueError, match="Test error"):
+{% if async %}        await {{ component_name }}_fn(ctx, next_handler)
+{% else %}        {{ component_name }}_fn(ctx, next_handler)
+{% endif %}
+
+    # Verify next_handler was called
+    next_handler.assert_called_once()
+
+
+{% if async %}@pytest.mark.asyncio
+async def test_{{ component_name }}_no_request_context():
+{% else %}def test_{{ component_name }}_no_request_context():
+{% endif %}    """Test middleware handles missing request context."""
+    # Create minimal mock context without request attribute
+    ctx = MagicMock()
+    del ctx.request
+
+    # Create mock next handler
+    next_handler = {% if async %}AsyncMock(return_value="result"){% else %}MagicMock(return_value="result"){% endif %}
+
+    # Execute middleware - should not raise error
+    result = {% if async %}await {% endif %}{{ component_name }}_fn(ctx, next_handler)
+
+    # Verify result is returned
+    assert result == "result"
+    next_handler.assert_called_once()
+
+
+{% if async %}@pytest.mark.asyncio
+async def test_{{ component_name }}_with_arguments():
+{% else %}def test_{{ component_name }}_with_arguments():
+{% endif %}    """Test middleware passes arguments correctly."""
+    ctx = MagicMock()
+    ctx.request.tool_name = "test_tool"
+
+    # Create mock next handler
+    next_handler = {% if async %}AsyncMock(return_value="result"){% else %}MagicMock(return_value="result"){% endif %}
+
+    # Execute with various arguments
+    result = {% if async %}await {% endif %}{{ component_name }}_fn(
+        ctx,
+        next_handler,
+        "pos_arg1",
+        "pos_arg2",
+        kwarg1="value1",
+        kwarg2="value2"
+    )
+
+    # Verify arguments were passed through
+    next_handler.assert_called_once_with(
+        "pos_arg1",
+        "pos_arg2",
+        kwarg1="value1",
+        kwarg2="value2"
+    )

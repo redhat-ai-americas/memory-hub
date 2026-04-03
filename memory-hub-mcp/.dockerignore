@@ -1,0 +1,103 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.so
+.build/
+.eggs/
+*.egg-info/
+*.egg
+.venv/
+.uv/
+.env
+.env.*
+.envrc
+
+# Documentation
+fastmcp-server-docs/
+docs/
+*.md
+!README.md
+
+# Editors/OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+.history/
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.cache/
+.coverage
+htmlcov/
+tests/
+
+# Logs
+*.log
+
+# Node (if present)
+node_modules/
+
+# Local artifacts
+uv.lock
+uv.lock.*
+*.lock
+
+# OpenShift/Build
+.oc-build/
+.openshift/
+kubeconfig*
+*.kubeconfig
+
+# Secrets
+secrets*/
+secret*/
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+*.keystore
+*.der
+*.pkcs12
+
+# Prompt previews/outputs
+*.preview.txt
+
+# Container
+*.tar
+
+# Temporary files
+/tmp/
+
+# Claude Code and CLI tools
+.claude/
+.fips-agents-cli/
+
+# Architecture/Planning docs (keep README.md only)
+ARCHITECTURE.md
+IMPLEMENTATION_SUMMARY.md
+AGENTS.md
+CLAUDE.md
+GENERATOR_PLAN.md
+PROMPT_TEMPLATE_UPDATE_PLAN.md
+PROMPT_ENHANCEMENT_PLAN.md
+TESTING.md
+
+# Scripts not needed in container
+remove_examples.sh
+deploy.sh
+Makefile
+
+# OpenShift YAML (applied separately, not needed in image)
+openshift.yaml

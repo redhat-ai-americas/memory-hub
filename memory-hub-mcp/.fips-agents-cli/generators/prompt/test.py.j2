@@ -1,0 +1,59 @@
+"""Tests for {{ component_name }} prompt."""
+
+import pytest
+from src.prompts.{{ module_path }} import {{ component_name }}
+
+# Access the underlying function for testing (FastMCP decorator pattern)
+{{ component_name }}_fn = {{ component_name }}.fn
+
+
+def test_{{ component_name }}_basic():
+    """Test basic {{ component_name }} prompt generation."""
+    # TODO: Add test parameters
+    result = {{ component_name }}_fn(
+        # Add parameters here
+    )
+
+    # TODO: Add assertions
+    assert isinstance(result, str)
+    assert len(result) > 0
+{% if params|length > 0 %}    # Verify parameters are included
+{% for param in params %}{% if not param.optional %}    # assert "{{ param.name }}" in result.lower()
+{% endif %}{% endfor %}{% endif %}
+
+
+{% if params|length > 0 %}{% if params|selectattr('optional')|list|length > 0 %}def test_{{ component_name }}_with_optional_params():
+    """Test {{ component_name }} with optional parameters."""
+    result = {{ component_name }}_fn(
+        # Add required parameters
+{% for param in params %}{% if param.optional %}        {{ param.name }}={{ param.example|default('None') }},
+{% endif %}{% endfor %}    )
+
+    assert isinstance(result, str)
+    # TODO: Verify optional parameters are included
+    pass
+
+
+def test_{{ component_name }}_without_optional_params():
+    """Test {{ component_name }} without optional parameters."""
+    result = {{ component_name }}_fn(
+        # Add only required parameters
+    )
+
+    assert isinstance(result, str)
+    # TODO: Verify prompt works without optional parameters
+    pass
+{% endif %}{% endif %}
+
+
+{% if with_schema %}def test_{{ component_name }}_includes_schema():
+    """Test {{ component_name }} includes JSON schema."""
+    result = {{ component_name }}_fn(
+        # Add parameters
+    )
+
+    # Verify JSON schema is present
+    assert "JSON" in result or "json" in result
+    assert "{" in result
+    assert "}" in result
+{% endif %}
