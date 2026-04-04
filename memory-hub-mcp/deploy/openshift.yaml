@@ -61,10 +61,14 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: memory-hub-mcp
+      annotations:
+        # Force rollout when the ImageStream gets a new image
+        alpha.image.policy.openshift.io/resolve-names: '*'
     spec:
       containers:
         - name: mcp-server
           image: image-registry.openshift-image-registry.svc:5000/memory-hub-mcp/memory-hub-mcp:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               protocol: TCP
