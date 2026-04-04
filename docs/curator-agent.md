@@ -1,12 +1,12 @@
 # Curation Pipeline
 
-Curation in MemoryHub is not a separate service. It's a pipeline embedded in the MCP tools themselves, evaluated at write time. The pipeline runs rules in cost order (cheapest first) and escalates only when needed. For tasks requiring judgment, it uses MCP sampling to ask the calling agent's LLM -- or a configured fallback LLM. For genuinely ambiguous cases, elicitation can ask the human.
+Curation in MemoryHub is not a separate service. It's a pipeline embedded in the MCP tools themselves, evaluated at write time. The pipeline is entirely deterministic -- regex and embedding checks, no LLM calls. The key insight: instead of sampling an LLM to judge ambiguous cases, `write_memory` returns a similarity count as part of its response. The calling agent -- which already has an LLM -- decides what to do. This avoids the MCP sampling HITL approval problem entirely and keeps write latency low.
 
 The single-agent consistency argument from the original design still applies for above-user-level writes (promotion). But the day-to-day curation work -- dedup, secrets scanning, quality gating -- is distributed across the agents themselves, within their RBAC scope. Every agent that uses MemoryHub contributes to curation as a side effect of normal operation.
 
-## Three-Layer Curation Pipeline
+## Write-Time Curation Pipeline
 
-The pipeline runs inside `write_memory` (and potentially other write tools) before the memory is persisted. Each tier is more expensive than the last, and earlier tiers gate whether later tiers run at all.
+The pipeline runs inside `write_memory` before the memory is persisted. Every tier is deterministic and fast.
 
 ### Tier 0: Schema validation
 
@@ -30,41 +30,77 @@ pgvector cosine similarity query against existing memories in the same (owner_id
 | Similarity | Action |
 |---|---|
 | > 0.95 | Reject with pointer to existing memory (near-duplicate) |
-| 0.80 - 0.95 | Escalate to Tier 3 (possible duplicate, needs judgment) |
-| < 0.80 | Pass -- write normally (distinct memory) |
+| 0.80 - 0.95 | Flag in metadata, allow write |
+| < 0.80 | Allow write (distinct memory) |
 
 Thresholds are configurable via curation rules. Users with intentionally similar memories (e.g., dataset-specific notes) can raise the dedup threshold.
 
-### Tier 3: Sampling
+Note the key difference from earlier designs: the 0.80-0.95 range does NOT escalate to an LLM. The memory is written with a curation flag, and the similar_count is returned to the agent.
 
-Uses `ctx.sample()` from FastMCP to ask the calling agent's LLM for a judgment call. Seconds.
+### No inline sampling
 
-The sampling request provides context: "Memory X (similarity 0.88) already exists. Is this new memory genuinely different, an update, or a duplicate?" It uses structured output (`result_type=CurationDecision`) to force the LLM into returning one of: `allow`, `reject`, `merge`, `flag`.
+Earlier designs included Tier 3 (LLM sampling via `ctx.sample()`) and Tier 4 (human elicitation) in the write pipeline. These were removed because:
 
-Constraints on the sampling call:
-- Only read-only tools are exposed (e.g., `search_memory`, `read_memory`). Never write tools.
-- `max_tokens=300` to keep responses short and costs low.
-- Single round only. No multi-turn curation conversations.
+1. **MCP spec requires HITL for sampling.** The spec says clients SHOULD always have a human in the loop with the ability to deny sampling requests. For invisible plumbing like write-time dedup checks, popping an approval dialog on every ambiguous write is terrible UX.
 
-If the client doesn't support sampling, the server falls back to a configured LLM (see [Sampling Handler Configuration](#sampling-handler-configuration)).
+2. **The calling agent already has an LLM.** By returning similarity information in the `write_memory` response, we let the agent's existing reasoning handle the judgment call as part of its normal flow. No extra infrastructure, no HITL friction, no recursive loop risk.
 
-### Tier 4: Elicitation
+3. **Deterministic pipelines are predictable.** Regex and embedding checks produce the same result every time. LLM judgment varies by model, temperature, and context. For a write path, predictability matters.
 
-Uses FastMCP elicitation to present the human with a choice: "Here are two similar memories. Keep both, merge, or update?" Blocks until answered.
+Sampling remains available for explicit agent-initiated tools like `review_my_memories`, where the HITL approval is expected because the user asked for it. See [Sampling for Explicit Review](#sampling-for-explicit-review).
 
-Only triggered when Tier 3 returns "uncertain" or a rule mandates human approval. Deferred for later implementation -- the interface is designed here but not built until Phase 4.
+## Similarity Feedback on Write
 
-## Circuit Breaker
+The core curation mechanism: `write_memory` returns similarity information alongside the created memory, so the calling agent can make informed decisions.
 
-If `write_memory` calls `ctx.sample()`, and the sampling LLM calls `write_memory` again, that loops infinitely. This must never happen. Four layers of protection:
+### Response shape
 
-1. **Tool restriction**: The sampling call only exposes read-only tools. The LLM physically cannot trigger a write, so recursive loops are impossible at the API level.
+When a memory is written successfully, the response includes:
 
-2. **Structured output**: `result_type=CurationDecision` forces the LLM to return a decision enum, not free-form text that might be misinterpreted as an action.
+```json
+{
+    "memory": { ... },          // the created MemoryNodeRead
+    "curation": {
+        "similar_count": 3,     // number of existing memories above the flag threshold
+        "nearest_id": "uuid",   // ID of the most similar memory (if any)
+        "nearest_score": 0.87,  // cosine similarity of the nearest match
+        "flags": ["possible_duplicate"],  // any curation flags applied
+        "blocked": false        // whether the write was blocked (secrets, exact dup)
+    }
+}
+```
 
-3. **`skip_curation` parameter**: Write tools accept an internal `skip_curation` flag. When curation sampling decides to merge or update, the downstream writes pass `skip_curation=True` to bypass the pipeline. Defense in depth -- this layer only matters if tool restriction somehow fails.
+When a write is blocked (secrets scan, exact duplicate), the response includes:
 
-4. **Single round**: One sampling call per write operation, enforced in code. If one round doesn't resolve the question, escalate to Tier 4 (elicitation) or flag for background review. No retry loops.
+```json
+{
+    "memory": null,
+    "curation": {
+        "blocked": true,
+        "reason": "secrets_scan",
+        "detail": "Content matches API key pattern (AKIA...)",
+        "similar_count": 0
+    }
+}
+```
+
+### How agents use this
+
+The tool description for `write_memory` includes guidance like:
+
+> If `curation.similar_count` is greater than 0, consider reviewing existing similar memories before creating more. Use `search_memory` to find them, or call `get_similar_memories` with the memory ID to see what's similar. If the existing memory says the same thing, consider calling `update_memory` on it instead of creating a duplicate.
+
+This nudges the agent toward good memory hygiene without blocking writes. The agent's LLM makes the judgment call -- "is this actually a duplicate or a legitimately different memory?" -- using its full conversation context, which is richer than anything we could provide in a sampling prompt.
+
+### `get_similar_memories` tool
+
+A new read-only tool that returns paged similar memories for a given memory ID:
+
+```
+get_similar_memories(memory_id, threshold=0.80, max_results=10, offset=0)
+```
+
+Returns a list of similar memories with their similarity scores. This is how the agent drills into `similar_count > 0` without getting context-bombed -- it controls the page size. The tool uses the stored embedding from the source memory, so no re-embedding is needed.
 
 ## Curation Rules Engine
 
@@ -78,15 +114,13 @@ CREATE TABLE curator_rules (
     name            TEXT NOT NULL,       -- unique within (layer, owner_id)
     description     TEXT,
     trigger         TEXT NOT NULL,       -- on_write, on_read, periodic, on_contradiction_count
-    tier            TEXT NOT NULL,       -- regex, embedding, llm, human
+    tier            TEXT NOT NULL,       -- regex, embedding
     config          JSONB NOT NULL,      -- tier-specific configuration
     -- config keys by tier:
     --   regex:     pattern (regex string)
     --   embedding: threshold (float), similarity_range ([low, high])
-    --   llm:       prompt_template (string), similarity_range ([low, high])
-    --   human:     message (string)
     action          TEXT NOT NULL,       -- block, quarantine, flag, reject_with_pointer,
-                                         -- ask_agent, ask_human, merge, decay_weight
+                                         -- merge, decay_weight
     scope_filter    TEXT,                -- which memory scopes this applies to (null = all)
     layer           TEXT NOT NULL,       -- system, organizational, user
     owner_id        TEXT,                -- null for system/org, set for user-level rules
@@ -100,6 +134,8 @@ CREATE TABLE curator_rules (
 );
 ```
 
+Note: the `tier` enum no longer includes `llm` or `human`. Inline curation is deterministic only. LLM-powered curation happens through explicit agent tools, not through the rules engine.
+
 ### Three Rule Layers
 
 Rules are scoped to three layers, evaluated bottom-up (most specific wins, with exceptions):
@@ -112,6 +148,8 @@ Rules are scoped to three layers, evaluated bottom-up (most specific wins, with 
 
 The `override` flag is the key mechanism. System-layer rules for secrets scanning are marked `override=true`, which means no user or org rule can weaken them. But the dedup threshold? Users can adjust that -- the system default is a recommendation, not a mandate.
 
+User-layer rules evolve with the user's working style. An agent that notices frequent false-positive duplicate warnings can call `set_curation_rule` to adjust the user's threshold. Over time, each user's curation rules become tuned to their memory patterns.
+
 ### Rule Evaluation Logic
 
 For a given (trigger, scope, owner_id):
@@ -121,11 +159,9 @@ For a given (trigger, scope, owner_id):
 3. Load system rules
 4. Merge: user rules override org rules override system rules, matched by name. Exception: if a higher-layer rule has `override=true`, it cannot be overridden by a lower layer.
 5. Filter to matching trigger and scope_filter
-6. Evaluate in tier order (regex, embedding, llm, human)
+6. Evaluate in tier order (regex, embedding)
 7. Within a tier, evaluate by priority (lower number = higher priority)
-8. Stop at the first rule that produces a definitive action (block, reject, allow). Continue for rules that produce advisory actions (flag, decay_weight).
-
-Note on tier advancement: the `ask_agent` action is how a Tier 2 rule escalates to Tier 3 sampling. When the rule engine encounters `ask_agent`, it invokes `ctx.sample()` with the rule's `prompt_template` and the candidate memory context. The sampling result maps back to a concrete action (allow, reject, merge, flag) via the `CurationDecision` structured output. Similarly, `ask_human` triggers Tier 4 elicitation. These actions are the bridges between tiers -- they don't short-circuit the pipeline, they advance it.
+8. Stop at the first rule that produces a definitive action (block, reject). Continue for rules that produce advisory actions (flag, decay_weight).
 
 ### Default Rule Set
 
@@ -136,7 +172,7 @@ System-layer rules that ship with MemoryHub:
 | `secrets_scan` | regex | on_write | quarantine | yes | AWS keys, GitHub tokens, generic API keys, private key headers, bearer tokens |
 | `pii_scan` | regex | on_write | flag | yes | SSNs, email addresses, phone numbers |
 | `exact_duplicate` | embedding | on_write | reject_with_pointer | no | Cosine similarity > 0.95 within same (owner_id, scope) |
-| `near_duplicate` | embedding | on_write | ask_agent | no | Similarity 0.80 - 0.95, escalates to Tier 3 sampling |
+| `near_duplicate` | embedding | on_write | flag | no | Similarity 0.80 - 0.95, flags in metadata and returns similar_count |
 | `staleness_trigger` | regex | on_contradiction_count | flag | no | When contradiction count reaches threshold (default 5), flag for review |
 
 Note that `secrets_scan` and `pii_scan` are marked `override=true`. Users cannot disable secrets scanning. They can add their own regex rules that whitelist specific patterns (e.g., "AKIA in an example block is fine"), but the base scan always runs.
@@ -145,42 +181,49 @@ Note that `secrets_scan` and `pii_scan` are marked `override=true`. Users cannot
 
 Every agent that uses MemoryHub contributes to curation from its RBAC-limited perspective. Agents are sensors for above-scope issues and self-curators within their own scope.
 
+### How agents curate naturally
+
+The similarity feedback on `write_memory` is the primary curation signal. When an agent writes a memory and gets `similar_count: 3` back, its LLM can reason about what to do:
+
+- Read the similar memories via `get_similar_memories`
+- Decide: "these are genuinely different" (do nothing) or "I should update the existing one instead" (call `update_memory`)
+- Or: "these should be merged" (call `suggest_merge`)
+
+This works because the calling agent has full conversation context -- it knows *why* it's writing this memory and can judge similarity better than any isolated curation check could.
+
 ### Existing tools that contribute
 
 - `report_contradiction` -- accumulates staleness signals when an agent observes behavior contradicting a stored memory. These contradiction counts feed into the `staleness_trigger` rule.
 
 ### New tools
 
-**`suggest_merge(memory_a_id, memory_b_id, reasoning)`** -- Queues a merge suggestion for evaluation. The agent noticed two memories that should be one. Constrained to the agent's RBAC scope -- an agent can only suggest merges for memories it can read.
+**`get_similar_memories(memory_id, threshold=0.80, max_results=10, offset=0)`** -- Returns paged similar memories for a given memory ID with similarity scores. Read-only. This is how agents drill into similarity counts without context bloat.
+
+**`suggest_merge(memory_a_id, memory_b_id, reasoning)`** -- Queues a merge suggestion for evaluation. The agent noticed two memories that should be one. Constrained to the agent's RBAC scope -- an agent can only suggest merges for memories it can read. Creates a `conflicts_with` or `supersedes` relationship between the memories and flags both for review.
+
+**`set_curation_rule(name, config)`** -- Lets agents (within user scope) create or update user-layer curation rules. Example: the agent notices the user keeps getting false-positive duplicate warnings and adjusts the threshold. This tool can only create rules at the `user` layer for the authenticated owner_id. Cannot override system rules marked with `override=true`.
+
+### Sampling for Explicit Review
 
 **`review_my_memories(scope=None, max_results=20)`** -- Triggers a sampling-powered self-audit. The tool fetches the agent's memories, uses `ctx.sample()` to have the LLM review them, and returns suggestions: merge candidates, stale memories, conflicts. The agent can then act on the suggestions by calling `suggest_merge`, `update_memory`, or `report_contradiction`.
 
-**`set_curation_rule(name, config)`** -- Lets agents (within user scope) create or update user-layer curation rules. Example: the agent notices the user keeps getting false-positive duplicate warnings and adjusts the threshold. This tool can only create rules at the `user` layer for the authenticated owner_id.
+Unlike write-time curation, sampling here is appropriate because:
+- The user explicitly initiated it (or their agent did as a deliberate action)
+- The HITL approval dialog makes sense -- "MemoryHub wants to review your memories" is a reasonable prompt when you asked for a review
+- It's not on the hot path -- it runs when the agent has idle time, not blocking a write
 
-## Sampling Handler Configuration
-
-The MCP server configures a fallback sampling handler for clients that don't support sampling natively:
+The sampling handler for `review_my_memories` uses the Llama 4 Scout fallback for clients that don't support sampling:
 
 ```python
-from fastmcp import FastMCP
-from fastmcp.client.sampling.handlers.openai import OpenAISamplingHandler
-
-mcp = FastMCP(
-    "MemoryHub",
-    sampling_handler=OpenAISamplingHandler(
-        api_key=os.getenv("LLAMA_4_SCOUT_API_KEY"),
-        base_url=os.getenv("LLAMA_4_SCOUT_BASE_URL"),
-        default_model=os.getenv("LLAMA_4_SCOUT_MODEL_ID"),
-    ),
-    sampling_handler_behavior="fallback",
+sampling_handler=OpenAISamplingHandler(
+    api_key=os.getenv("LLAMA_4_SCOUT_API_KEY"),
+    base_url=os.getenv("LLAMA_4_SCOUT_BASE_URL"),
+    default_model=os.getenv("LLAMA_4_SCOUT_MODEL_ID"),
 )
+sampling_handler_behavior="fallback"
 ```
 
-With `"fallback"` behavior:
-- If the client supports sampling (e.g., Claude Code) -- the client's LLM handles it. Already paid for, zero marginal cost.
-- If a simpler client connects -- Llama 4 Scout handles it via the OpenAI-compatible API on vLLM/LiteLLM.
-
-The cheapest LLM path is always taken. In practice, most MemoryHub users are Claude Code users, so Tier 3 sampling rarely costs anything extra.
+With `"fallback"` behavior: Claude Code clients use their own LLM (zero marginal cost); simpler clients use Llama.
 
 ## Background Curator (Future)
 
@@ -195,61 +238,66 @@ This is deferred to a later phase. It requires multi-user data (we have one user
 
 The graph relationships built in [memory-tree.md](memory-tree.md) (`derived_from`, `supersedes`, `conflicts_with`) are the substrate for promotion provenance tracking. When a user memory gets promoted to organizational scope, the provenance chain links back to the source memories, enabling reversal if the promotion turns out to be wrong.
 
+The background curator uses `sampling_handler_behavior="always"` with the Llama 4 Scout handler, since it's server-side infrastructure with no client HITL involved.
+
 ## Design Questions (Resolved)
 
 These were open in the original design. Here's where we landed:
+
+**Should curation use LLM sampling at write time?** No. The MCP spec requires HITL for sampling, which is unacceptable friction on write operations. Instead, `write_memory` returns similarity counts and the calling agent's existing LLM handles the judgment. Sampling is reserved for explicit review tools.
 
 **Threshold for promotion?** Deferred -- needs multi-user data. When implemented, configurable via curation rule with trigger `periodic`.
 
 **Promotion reversals?** Mark promoted memory as not-current, restore original user memories from provenance chain (graph relationships). The `supersedes` and `derived_from` edges make this a graph traversal, not a guessing game.
 
-**Should curator use an LLM?** Yes, via sampling. Cheapest path: calling agent's LLM. Fallback: cluster Llama 4 Scout. Only used when heuristics are ambiguous (Tier 3). The cost structure is: Tier 1 and 2 are essentially free; Tier 3 costs one LLM call per ambiguous write; Tier 4 costs human attention.
+**Schema for human review queue?** Database-backed queue (flagged memories in metadata) for async review. Elicitation available for `review_my_memories` if needed. External ticketing integration deferred.
 
-**Schema for human review queue?** Elicitation for real-time decisions. Database-backed queue (flagged memories in metadata) for async review. External ticketing integration deferred.
-
-**Bottleneck prevention?** Inline curation runs per-write with efficient early exits. Regex catches most issues in microseconds. Embedding similarity is a single pgvector query. Sampling only fires for the 0.80-0.95 similarity band, which is a small fraction of writes. Background sweeps use incremental scanning (only memories since last run).
+**Bottleneck prevention?** Inline curation is fully deterministic: regex in microseconds, one pgvector query in milliseconds. No LLM calls on the write path means write latency is bounded and predictable.
 
 **Leader election?** Deferred to operator phase. Not needed for inline curation. Only matters when the background curator is introduced.
+
+**Recursive loop risk?** Eliminated by design. The write pipeline has no sampling, so there's nothing to recurse. The `review_my_memories` tool uses sampling but doesn't write -- it returns suggestions for the agent to act on.
 
 ## Design Questions (Open)
 
 - How should `set_curation_rule` validate that user rules don't create security gaps? Users need guardrails on what they can adjust. Thresholds are safe to change; disabling secrets scanning is not. The `override` flag on system rules prevents weakening, but we need clear error messages when a user tries to override a protected rule.
 
-- What's the right UX when Tier 3 sampling returns "merge"? Does the tool auto-merge (update existing memory + create `supersedes` relationship), or present the merge plan and ask for confirmation? Auto-merge is faster; confirmation is safer. Likely answer: auto-merge within user scope, confirmation for org scope.
-
 - Should `review_my_memories` be proactive (runs automatically after N writes) or only on-demand? On-demand is simpler to start. Proactive could be a curation rule with trigger `periodic` and a write-count threshold.
 
-- How do we handle the case where the sampling handler is unreachable? Fail open (allow the write, flag for later review) or fail closed (reject the write)? Fail open is better for user experience; fail closed is better for data quality. Likely answer: fail open with a flag, since Tier 2 already caught the high-confidence duplicates.
+- How do we define "similarity" in the tool description guidance? The 0.80 threshold is based on all-MiniLM-L6-v2 embeddings, which cluster differently than larger models. The threshold should be calibrated against real memory data. Starting conservative (0.80) and adjusting based on false-positive rates is the right approach.
+
+- Should `get_similar_memories` also return memories that have been flagged as similar to the given memory (reverse lookup via curation metadata), or only do a fresh embedding search? Fresh search is simpler; reverse lookup is faster for previously-flagged pairs.
 
 ## Implementation Phases
 
 ### Phase 2a: Inline Pipeline + Rules Engine
 
-- Curation rules table and evaluation engine
+- Curation rules table (migration, ORM model, Pydantic schemas)
+- Rule evaluation engine with layer merging
 - Tier 1 regex scanning in `write_memory`
-- Tier 2 embedding similarity checking in `write_memory`
+- Tier 2 embedding similarity in `write_memory` with similar_count response
 - Default system rules: `secrets_scan`, `pii_scan`, `exact_duplicate`, `near_duplicate`, `staleness_trigger`
-- Agent contribution tools (`suggest_merge`, `set_curation_rule`)
-- Tests for rule evaluation, regex patterns, embedding thresholds
+- `get_similar_memories` MCP tool
+- `suggest_merge` MCP tool
+- `set_curation_rule` MCP tool
+- Update `write_memory` response format with curation feedback
+- Tests for rule evaluation, regex patterns, embedding thresholds, response format
 
-### Phase 2b: Sampling Integration
+### Phase 2b: Explicit Review Tools
 
-- Wire up Llama 4 Scout as fallback sampling handler
-- Tier 3 sampling for ambiguous dedup cases
-- Circuit breaker implementation (tool restriction, structured output, skip_curation, single round)
-- `CurationDecision` structured output type
-- `review_my_memories` tool
-- Tests including sampling mock tests (mocking the sampling call, not the business logic)
+- Wire up Llama 4 Scout as fallback sampling handler in MCP server config
+- `review_my_memories` tool with sampling
+- Tests with mocked sampling
 
 ### Phase 3: Background Curator
 
-- Long-lived curator agent process
+- Long-lived curator agent process with `sampling_handler_behavior="always"`
 - Promotion analysis across users
 - Cross-user dedup and conflict detection
 - Staleness processing for accumulated contradiction signals
 
 ### Phase 4: Human-in-the-Loop
 
-- Elicitation integration for Tier 4
+- Elicitation integration for `review_my_memories`
 - Review queue UI/API
 - Notification system for flagged memories
