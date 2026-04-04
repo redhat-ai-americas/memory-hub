@@ -17,6 +17,9 @@ from src.tools.report_contradiction import report_contradiction
 from src.tools.register_session import register_session
 from src.tools.create_relationship import create_relationship
 from src.tools.get_relationships import get_relationships
+from src.tools.get_similar_memories import get_similar_memories
+from src.tools.suggest_merge import suggest_merge
+from src.tools.set_curation_rule import set_curation_rule
 
 mcp = FastMCP(
     "MemoryHub",
@@ -27,13 +30,17 @@ mcp = FastMCP(
         "conversation to authenticate. Then use write_memory to create, "
         "search_memory to find, read_memory to expand details, update_memory "
         "to revise, get_memory_history for forensics, and report_contradiction "
-        "for staleness detection."
+        "for staleness detection. "
+        "Curation tools: get_similar_memories to inspect near-duplicates flagged "
+        "during write, suggest_merge to link overlapping memories for review, and "
+        "set_curation_rule to tune your personal duplicate-detection thresholds."
     ),
 )
 
 for tool_fn in [register_session, write_memory, read_memory, update_memory,
                 search_memory, get_memory_history, report_contradiction,
-                create_relationship, get_relationships]:
+                create_relationship, get_relationships,
+                get_similar_memories, suggest_merge, set_curation_rule]:
     mcp.add_tool(tool_fn)
 
 

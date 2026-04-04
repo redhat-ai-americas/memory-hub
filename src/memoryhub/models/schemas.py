@@ -162,3 +162,106 @@ class MemoryVersionInfo(BaseModel):
     stub: str
     content: str = ""
     expires_at: datetime | None = None
+
+
+# -- Curation schemas --
+
+
+class RuleTrigger(StrEnum):
+    """When the curation engine evaluates a rule."""
+
+    ON_WRITE = "on_write"
+    ON_READ = "on_read"
+    PERIODIC = "periodic"
+    ON_CONTRADICTION_COUNT = "on_contradiction_count"
+
+
+class RuleTier(StrEnum):
+    """Evaluation strategy for a rule."""
+
+    REGEX = "regex"
+    EMBEDDING = "embedding"
+
+
+class RuleAction(StrEnum):
+    """What the engine does when a rule matches."""
+
+    BLOCK = "block"
+    QUARANTINE = "quarantine"
+    FLAG = "flag"
+    REJECT_WITH_POINTER = "reject_with_pointer"
+    MERGE = "merge"
+    DECAY_WEIGHT = "decay_weight"
+
+
+class RuleLayer(StrEnum):
+    """Ownership layer; determines who can define rules and precedence."""
+
+    SYSTEM = "system"
+    ORGANIZATIONAL = "organizational"
+    USER = "user"
+
+
+class CuratorRuleCreate(BaseModel):
+    """Input schema for creating a new curation rule."""
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = None
+    trigger: RuleTrigger
+    tier: RuleTier
+    config: dict[str, Any] = Field(default_factory=dict)
+    action: RuleAction
+    scope_filter: str | None = Field(
+        default=None,
+        description="MemoryScope value to restrict this rule; null means all scopes.",
+    )
+    layer: RuleLayer
+    owner_id: str | None = Field(
+        default=None,
+        description="Required for user-layer rules; null for system/organizational.",
+    )
+    override: bool = Field(
+        default=False,
+        description="When true, this rule can override rules from a higher layer.",
+    )
+    enabled: bool = True
+    priority: int = Field(ge=0, description="Lower number = higher priority (evaluated first).")
+
+
+class CuratorRuleRead(BaseModel):
+    """Output schema for reading a curation rule."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    trigger: RuleTrigger
+    tier: RuleTier
+    config: dict[str, Any] = Field(default_factory=dict)
+    action: RuleAction
+    scope_filter: str | None = None
+    layer: RuleLayer
+    owner_id: str | None = None
+    override: bool
+    enabled: bool
+    priority: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class CurationResult(BaseModel):
+    """Curation outcome returned alongside the memory from write_memory.
+
+    When blocked=True the memory was not persisted. The reason and detail fields
+    explain why. nearest_id/nearest_score are populated for embedding-tier rules
+    that found a near-duplicate.
+    """
+
+    blocked: bool = False
+    reason: str | None = None
+    detail: str | None = None
+    similar_count: int = 0
+    nearest_id: uuid.UUID | None = None
+    nearest_score: float | None = None
+    flags: list[str] = Field(default_factory=list)

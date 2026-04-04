@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.types import TypeDecorator
 
 from memoryhub.models.base import Base
+from memoryhub.models.curation import CuratorRule
 from memoryhub.models.memory import MemoryNode, MemoryRelationship
 from memoryhub.models.schemas import (
     MemoryNodeCreate,
@@ -65,11 +66,15 @@ async def async_session():
     original_type = embedding_col.type
     embedding_col.type = _JsonEncodedVector()
 
-    # Patch PostgreSQL-specific server_default on MemoryRelationship.metadata_ so
-    # SQLite can create the table ('{}'::jsonb is a PostgreSQL-only cast).
+    # Patch PostgreSQL-specific server_defaults ('{}'::jsonb casts) so
+    # SQLite can create the tables.
     rel_metadata_col = MemoryRelationship.__table__.c.metadata_
     original_rel_metadata_default = rel_metadata_col.server_default
     rel_metadata_col.server_default = None
+
+    rule_config_col = CuratorRule.__table__.c.config
+    original_rule_config_default = rule_config_col.server_default
+    rule_config_col.server_default = None
 
     try:
         async with engine.begin() as conn:
@@ -82,6 +87,7 @@ async def async_session():
     finally:
         embedding_col.type = original_type
         rel_metadata_col.server_default = original_rel_metadata_default
+        rule_config_col.server_default = original_rule_config_default
         await engine.dispose()
 
 
@@ -105,7 +111,8 @@ def _make_create_data(**overrides) -> MemoryNodeCreate:
 async def _create_node(session, embedding_service, **overrides):
     """Create a memory node and return it."""
     data = _make_create_data(**overrides)
-    return await create_memory(data, session, embedding_service)
+    node, _ = await create_memory(data, session, embedding_service)
+    return node
 
 
 def _make_relationship_data(**overrides) -> RelationshipCreate:

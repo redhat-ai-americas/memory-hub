@@ -92,7 +92,15 @@ async def write_memory(
     For user-scope memories, the write happens immediately. For higher scopes
     (organizational, enterprise), the write is queued for curator review.
 
-    Returns the created memory node with its generated ID, stub text, and timestamp.
+    Returns the created memory node with its generated ID, stub text, and timestamp,
+    along with curation metadata. If curation.similar_count is greater than 0, there
+    are existing memories that are similar to the one you just created. Consider
+    reviewing them with get_similar_memories to check for duplicates. If an existing
+    memory covers the same information, consider using update_memory instead of
+    creating duplicates.
+
+    If the write is blocked by a curation rule (e.g., exact duplicate detected),
+    error=True is returned with a message explaining the reason.
     """
     if ctx:
         await ctx.info("Creating memory node")
@@ -176,9 +184,32 @@ async def write_memory(
         session, gen = await get_db_session()
         embedding_service = get_embedding_service()
 
-        result = await create_memory(node_create, session, embedding_service)
+        memory, curation_result = await create_memory(node_create, session, embedding_service)
 
-        return result.model_dump(mode="json")
+        if curation_result["blocked"]:
+            return {
+                "error": True,
+                "message": f"Write blocked by curation rule: {curation_result['reason']}",
+                "detail": curation_result["detail"],
+                "curation": {
+                    "blocked": True,
+                    "reason": curation_result["reason"],
+                    "similar_count": curation_result.get("similar_count", 0),
+                    "nearest_id": str(curation_result["nearest_id"]) if curation_result.get("nearest_id") else None,
+                    "nearest_score": curation_result.get("nearest_score"),
+                },
+            }
+
+        return {
+            "memory": memory.model_dump(mode="json"),
+            "curation": {
+                "blocked": False,
+                "similar_count": curation_result["similar_count"],
+                "nearest_id": str(curation_result["nearest_id"]) if curation_result["nearest_id"] else None,
+                "nearest_score": curation_result["nearest_score"],
+                "flags": curation_result["flags"],
+            },
+        }
 
     except MemoryNotFoundError:
         return {

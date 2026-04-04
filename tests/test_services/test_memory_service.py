@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.types import TypeDecorator
 
 from memoryhub.models.base import Base
+from memoryhub.models.curation import CuratorRule
 from memoryhub.models.memory import MemoryNode, MemoryRelationship
 from memoryhub.models.schemas import (
     MemoryNodeCreate,
@@ -64,11 +65,15 @@ async def async_session():
     original_type = embedding_col.type
     embedding_col.type = _JsonEncodedVector()
 
-    # Patch PostgreSQL-specific server_default on MemoryRelationship.metadata_ so
-    # SQLite can create the table ('{}'::jsonb is a PostgreSQL-only cast).
+    # Patch PostgreSQL-specific server_defaults ('{}'::jsonb casts) so
+    # SQLite can create the tables.
     rel_metadata_col = MemoryRelationship.__table__.c.metadata_
     original_rel_metadata_default = rel_metadata_col.server_default
     rel_metadata_col.server_default = None
+
+    rule_config_col = CuratorRule.__table__.c.config
+    original_rule_config_default = rule_config_col.server_default
+    rule_config_col.server_default = None
 
     try:
         async with engine.begin() as conn:
@@ -81,6 +86,7 @@ async def async_session():
     finally:
         embedding_col.type = original_type
         rel_metadata_col.server_default = original_rel_metadata_default
+        rule_config_col.server_default = original_rule_config_default
         await engine.dispose()
 
 
@@ -106,8 +112,9 @@ def _make_create_data(**overrides) -> MemoryNodeCreate:
 
 async def test_create_memory(async_session, embedding_service):
     data = _make_create_data()
-    result = await create_memory(data, async_session, embedding_service)
+    result, curation = await create_memory(data, async_session, embedding_service)
 
+    assert curation["blocked"] is False
     assert isinstance(result, MemoryNodeRead)
     assert result.content == "prefers Podman over Docker"
     assert result.scope == MemoryScope.USER
@@ -121,23 +128,25 @@ async def test_create_memory(async_session, embedding_service):
 
 async def test_create_memory_with_parent(async_session, embedding_service):
     parent_data = _make_create_data(content="I use Red Hat UBI images")
-    parent = await create_memory(parent_data, async_session, embedding_service)
+    parent, _ = await create_memory(parent_data, async_session, embedding_service)
 
     child_data = _make_create_data(
         content="Because UBI images are FIPS-compliant",
         parent_id=parent.id,
         branch_type="rationale",
     )
-    child = await create_memory(child_data, async_session, embedding_service)
+    child, curation = await create_memory(child_data, async_session, embedding_service)
 
+    assert curation["blocked"] is False
     assert child.parent_id == parent.id
     assert child.branch_type == "rationale"
 
 
 async def test_create_memory_with_metadata(async_session, embedding_service):
     data = _make_create_data(metadata={"source": "user-stated", "confidence": 0.95})
-    result = await create_memory(data, async_session, embedding_service)
+    result, curation = await create_memory(data, async_session, embedding_service)
 
+    assert curation["blocked"] is False
     assert result.metadata is not None
     assert result.metadata["source"] == "user-stated"
 
@@ -147,7 +156,7 @@ async def test_create_memory_with_metadata(async_session, embedding_service):
 
 async def test_read_memory(async_session, embedding_service):
     data = _make_create_data()
-    created = await create_memory(data, async_session, embedding_service)
+    created, _ = await create_memory(data, async_session, embedding_service)
 
     result = await read_memory(created.id, async_session)
 
@@ -158,7 +167,7 @@ async def test_read_memory(async_session, embedding_service):
 
 
 async def test_read_memory_with_children(async_session, embedding_service):
-    parent = await create_memory(_make_create_data(content="Parent node"), async_session, embedding_service)
+    parent, _ = await create_memory(_make_create_data(content="Parent node"), async_session, embedding_service)
     await create_memory(
         _make_create_data(content="Child 1", parent_id=parent.id, branch_type="description"),
         async_session,
@@ -187,7 +196,7 @@ async def test_read_memory_not_found(async_session):
 
 
 async def test_update_memory(async_session, embedding_service):
-    original = await create_memory(_make_create_data(), async_session, embedding_service)
+    original, _ = await create_memory(_make_create_data(), async_session, embedding_service)
 
     update_data = MemoryNodeUpdate(content="prefers Podman over Docker for all container work")
     updated = await update_memory(original.id, update_data, async_session, embedding_service)
@@ -204,7 +213,7 @@ async def test_update_memory(async_session, embedding_service):
 
 
 async def test_update_memory_preserves_unchanged_fields(async_session, embedding_service):
-    original = await create_memory(
+    original, _ = await create_memory(
         _make_create_data(weight=0.85, metadata={"source": "observed"}),
         async_session,
         embedding_service,
@@ -226,7 +235,7 @@ async def test_update_memory_not_found(async_session, embedding_service):
 
 
 async def test_update_non_current_memory_raises(async_session, embedding_service):
-    original = await create_memory(_make_create_data(), async_session, embedding_service)
+    original, _ = await create_memory(_make_create_data(), async_session, embedding_service)
     await update_memory(original.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service)
 
     # Trying to update the old (non-current) version should fail
@@ -237,7 +246,7 @@ async def test_update_non_current_memory_raises(async_session, embedding_service
 
 async def test_update_memory_deep_copies_branches(async_session, embedding_service):
     """When a memory is updated, its child branches are deep-copied to the new version."""
-    parent = await create_memory(_make_create_data(content="I use Red Hat UBI"), async_session, embedding_service)
+    parent, _ = await create_memory(_make_create_data(content="I use Red Hat UBI"), async_session, embedding_service)
 
     # Add a rationale branch and a description branch to the original
     rationale_data = _make_create_data(
@@ -245,7 +254,7 @@ async def test_update_memory_deep_copies_branches(async_session, embedding_servi
         parent_id=parent.id,
         branch_type="rationale",
     )
-    rationale = await create_memory(rationale_data, async_session, embedding_service)
+    rationale, _ = await create_memory(rationale_data, async_session, embedding_service)
 
     desc_data = _make_create_data(
         content="Red Hat Universal Base Image",
@@ -281,7 +290,7 @@ async def test_update_memory_sets_expires_at(async_session, embedding_service):
     """Old version gets an expires_at timestamp when superseded."""
     from datetime import timedelta
 
-    original = await create_memory(_make_create_data(), async_session, embedding_service)
+    original, _ = await create_memory(_make_create_data(), async_session, embedding_service)
     assert original.expires_at is None  # current version has no TTL
 
     updated = await update_memory(original.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service)
@@ -301,7 +310,7 @@ async def test_update_memory_sets_expires_at(async_session, embedding_service):
 
 
 async def test_get_memory_history(async_session, embedding_service):
-    v1 = await create_memory(_make_create_data(content="version 1"), async_session, embedding_service)
+    v1, _ = await create_memory(_make_create_data(content="version 1"), async_session, embedding_service)
     v2 = await update_memory(v1.id, MemoryNodeUpdate(content="version 2"), async_session, embedding_service)
     v3 = await update_memory(v2.id, MemoryNodeUpdate(content="version 3"), async_session, embedding_service)
 
@@ -326,7 +335,7 @@ async def test_get_memory_history(async_session, embedding_service):
 
 
 async def test_get_memory_history_single_version(async_session, embedding_service):
-    node = await create_memory(_make_create_data(), async_session, embedding_service)
+    node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
     result = await get_memory_history(node.id, async_session)
     history = result["versions"]
 
@@ -338,7 +347,7 @@ async def test_get_memory_history_single_version(async_session, embedding_servic
 
 async def test_get_memory_history_pagination(async_session, embedding_service):
     """Pagination returns the correct window and has_more flag."""
-    v1 = await create_memory(_make_create_data(content="v1"), async_session, embedding_service)
+    v1, _ = await create_memory(_make_create_data(content="v1"), async_session, embedding_service)
     v2 = await update_memory(v1.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service)
     v3 = await update_memory(v2.id, MemoryNodeUpdate(content="v3"), async_session, embedding_service)
     v4 = await update_memory(v3.id, MemoryNodeUpdate(content="v4"), async_session, embedding_service)
@@ -374,7 +383,7 @@ async def test_get_memory_history_not_found(async_session):
 
 
 async def test_report_contradiction(async_session, embedding_service):
-    node = await create_memory(_make_create_data(), async_session, embedding_service)
+    node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
 
     count = await report_contradiction(
         node.id,
@@ -404,7 +413,7 @@ async def test_report_contradiction_not_found(async_session):
 
 
 async def test_report_contradiction_preserves_existing_metadata(async_session, embedding_service):
-    node = await create_memory(
+    node, _ = await create_memory(
         _make_create_data(metadata={"source": "user-stated"}),
         async_session,
         embedding_service,
@@ -422,12 +431,12 @@ async def test_report_contradiction_preserves_existing_metadata(async_session, e
 
 async def test_search_memories_returns_results(async_session, embedding_service):
     """Search returns (node, relevance_score) tuples filtered by owner and scope."""
-    await create_memory(
+    await create_memory(  # result intentionally discarded
         _make_create_data(content="prefers Podman over Docker", weight=0.9),
         async_session,
         embedding_service,
     )
-    await create_memory(
+    await create_memory(  # result intentionally discarded
         _make_create_data(content="uses FastAPI for web services", weight=0.5),
         async_session,
         embedding_service,
@@ -452,12 +461,12 @@ async def test_search_memories_returns_results(async_session, embedding_service)
 
 
 async def test_search_memories_filters_scope(async_session, embedding_service):
-    await create_memory(
+    await create_memory(  # result intentionally discarded
         _make_create_data(content="user preference", scope=MemoryScope.USER),
         async_session,
         embedding_service,
     )
-    await create_memory(
+    await create_memory(  # result intentionally discarded
         _make_create_data(content="project standard", scope=MemoryScope.PROJECT),
         async_session,
         embedding_service,
@@ -477,7 +486,7 @@ async def test_search_memories_filters_scope(async_session, embedding_service):
 
 
 async def test_search_memories_current_only(async_session, embedding_service):
-    v1 = await create_memory(_make_create_data(content="old"), async_session, embedding_service)
+    v1, _ = await create_memory(_make_create_data(content="old"), async_session, embedding_service)
     await update_memory(v1.id, MemoryNodeUpdate(content="new"), async_session, embedding_service)
 
     results = await search_memories("old", async_session, embedding_service, current_only=True)

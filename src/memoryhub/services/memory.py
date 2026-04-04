@@ -21,6 +21,7 @@ from memoryhub.models.schemas import (
     MemoryVersionInfo,
 )
 from memoryhub.models.utils import generate_stub
+from memoryhub.services.curation.pipeline import run_curation_pipeline
 from memoryhub.services.embeddings import EmbeddingService
 from memoryhub.services.exceptions import MemoryNotCurrentError, MemoryNotFoundError
 
@@ -29,11 +30,20 @@ async def create_memory(
     data: MemoryNodeCreate,
     session: AsyncSession,
     embedding_service: EmbeddingService,
-) -> MemoryNodeRead:
+    skip_curation: bool = False,
+) -> tuple[MemoryNodeRead | None, dict]:
     """Create a new memory node.
 
-    Generates the stub and embedding, persists the node, and returns it
-    as a MemoryNodeRead.
+    Generates the stub and embedding, runs the curation pipeline, and (if
+    allowed) persists the node. Returns a ``(memory, curation_result)`` tuple:
+
+    - If curation blocks the write: ``memory`` is ``None`` and
+      ``curation_result["blocked"]`` is ``True``.
+    - If the write is allowed: ``memory`` is the created ``MemoryNodeRead`` and
+      ``curation_result["blocked"]`` is ``False``.
+
+    Set ``skip_curation=True`` to bypass the pipeline entirely (used for
+    downstream writes from merge operations).
     """
     embedding = await embedding_service.embed(data.content)
     stub = generate_stub(
@@ -43,6 +53,27 @@ async def create_memory(
         branch_count=0,
         has_rationale=False,
     )
+
+    if not skip_curation:
+        curation_result = await run_curation_pipeline(
+            content=data.content,
+            embedding=embedding,
+            owner_id=data.owner_id,
+            scope=data.scope,
+            session=session,
+        )
+        if curation_result["blocked"]:
+            return None, curation_result
+    else:
+        curation_result = {
+            "blocked": False,
+            "reason": None,
+            "detail": None,
+            "similar_count": 0,
+            "nearest_id": None,
+            "nearest_score": None,
+            "flags": [],
+        }
 
     now = datetime.now(UTC)
     node = MemoryNode(
@@ -67,7 +98,8 @@ async def create_memory(
     await session.commit()
     await session.refresh(node)
 
-    return node_to_read(node, has_children=False, has_rationale=False)
+    memory = node_to_read(node, has_children=False, has_rationale=False)
+    return memory, curation_result
 
 
 async def read_memory(
