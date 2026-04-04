@@ -6,7 +6,7 @@ MemoryHub is composed of eight subsystems. This document is the map -- each subs
 |-----------|-------------|-----|--------|
 | memory-tree | Core data model: tree-structured memories with nodes, branches, weights, and scopes | [memory-tree.md](memory-tree.md) | Design |
 | storage-layer | PostgreSQL + pgvector for vectors and graph, MinIO for documents | [storage-layer.md](storage-layer.md) | Design |
-| curator-agent | Scheduled agent for memory promotion, pruning, conflict resolution, secrets scanning | [curator-agent.md](curator-agent.md) | TBD |
+| curator-agent | Inline curation pipeline (regex, embedding dedup, LLM sampling) plus future background agent for promotion and cross-user analysis | [curator-agent.md](curator-agent.md) | Design |
 | governance | Access control, immutable audit trail, FIPS compliance, policy enforcement | [governance.md](governance.md) | Design |
 | mcp-server | MCP interface for agent interactions (read, write, search memories) | [mcp-server.md](mcp-server.md) | Skeleton |
 | operator | Kubernetes Operator with CRDs for lifecycle management | [operator.md](operator.md) | Skeleton |
