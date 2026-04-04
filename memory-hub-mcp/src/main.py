@@ -15,6 +15,8 @@ from src.tools.search_memory import search_memory
 from src.tools.get_memory_history import get_memory_history
 from src.tools.report_contradiction import report_contradiction
 from src.tools.register_session import register_session
+from src.tools.create_relationship import create_relationship
+from src.tools.get_relationships import get_relationships
 
 mcp = FastMCP(
     "MemoryHub",
@@ -30,7 +32,8 @@ mcp = FastMCP(
 )
 
 for tool_fn in [register_session, write_memory, read_memory, update_memory,
-                search_memory, get_memory_history, report_contradiction]:
+                search_memory, get_memory_history, report_contradiction,
+                create_relationship, get_relationships]:
     mcp.add_tool(tool_fn)
 
 

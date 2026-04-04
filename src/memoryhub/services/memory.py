@@ -67,7 +67,7 @@ async def create_memory(
     await session.commit()
     await session.refresh(node)
 
-    return _node_to_read(node, has_children=False, has_rationale=False)
+    return node_to_read(node, has_children=False, has_rationale=False)
 
 
 async def read_memory(
@@ -92,7 +92,7 @@ async def read_memory(
         raise MemoryNotFoundError(memory_id)
 
     has_children, has_rationale = await _compute_branch_flags(node, session, depth)
-    read = _node_to_read(node, has_children=has_children, has_rationale=has_rationale)
+    read = node_to_read(node, has_children=has_children, has_rationale=has_rationale)
 
     # Populate branches when depth > 0 and children were eagerly loaded
     if depth > 0 and node.children:
@@ -228,7 +228,7 @@ async def update_memory(
 
     has_children = len(old_children) > 0
     has_rationale = any(c.branch_type == "rationale" for c in old_children)
-    return _node_to_read(new_node, has_children=has_children, has_rationale=has_rationale)
+    return node_to_read(new_node, has_children=has_children, has_rationale=has_rationale)
 
 
 async def search_memories(
@@ -301,7 +301,7 @@ async def search_memories(
         if node.weight >= weight_threshold:
             results.append(
                 (
-                    _node_to_read(node, has_children=has_children, has_rationale=has_rationale),
+                    node_to_read(node, has_children=has_children, has_rationale=has_rationale),
                     relevance_score,
                 )
             )
@@ -469,7 +469,7 @@ async def _compute_branch_flags(
     return has_children, has_rationale
 
 
-def _node_to_read(
+def node_to_read(
     node: MemoryNode,
     has_children: bool,
     has_rationale: bool,

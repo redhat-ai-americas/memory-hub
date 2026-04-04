@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.types import TypeDecorator
 
 from memoryhub.models.base import Base
-from memoryhub.models.memory import MemoryNode
+from memoryhub.models.memory import MemoryNode, MemoryRelationship
 from memoryhub.models.schemas import (
     MemoryNodeCreate,
     MemoryNodeRead,
@@ -64,6 +64,12 @@ async def async_session():
     original_type = embedding_col.type
     embedding_col.type = _JsonEncodedVector()
 
+    # Patch PostgreSQL-specific server_default on MemoryRelationship.metadata_ so
+    # SQLite can create the table ('{}'::jsonb is a PostgreSQL-only cast).
+    rel_metadata_col = MemoryRelationship.__table__.c.metadata_
+    original_rel_metadata_default = rel_metadata_col.server_default
+    rel_metadata_col.server_default = None
+
     try:
         async with engine.begin() as conn:
             await conn.execute(text("PRAGMA journal_mode=WAL"))
@@ -74,6 +80,7 @@ async def async_session():
             yield session
     finally:
         embedding_col.type = original_type
+        rel_metadata_col.server_default = original_rel_metadata_default
         await engine.dispose()
 
 

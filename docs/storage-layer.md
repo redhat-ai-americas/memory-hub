@@ -18,23 +18,40 @@ The FIPS story is clean: pgvector computes vector distances using mathematical o
 
 Memory nodes form a tree, and the tree structure needs to be queryable. We need to answer questions like "give me all branches of this node," "find the rationale for this memory," and "trace the provenance of this organizational memory back to source user memories."
 
-Two approaches are on the table, and we haven't committed to one yet:
+**Decision: adjacency lists + explicit relationships table for v1.**
 
-**Adjacency list tables** are the simplest option. Each node row has a `parent_id` foreign key. Tree traversal uses recursive CTEs (`WITH RECURSIVE`). This works well for bounded-depth trees (which memory trees are -- rarely deeper than 3-4 levels) and doesn't require any extensions.
+Our trees are shallow (3-4 levels), so recursive CTEs (`WITH RECURSIVE`) handle traversal efficiently without additional complexity. This approach requires no new PostgreSQL extensions -- it works with the OOTB operator as-is, which matters because extension support there is less documented than with Crunchy Data's operator. Apache AGE was the alternative (openCypher query support, more expressive graph traversal), but it's an incubator-stage dependency that needs validation we don't need yet. The evolution path to AGE or an in-memory graph remains open.
 
-**Apache AGE** adds openCypher query support to PostgreSQL, making graph queries more expressive. Instead of recursive CTEs, you'd write `MATCH (m:Memory)-[:HAS_RATIONALE]->(r:Rationale) RETURN r`. AGE is an Apache incubator project that runs as a PostgreSQL extension. It inherits PostgreSQL's security properties (including FIPS compliance via OS-level OpenSSL).
+#### `memory_relationships` table
 
-The tradeoff: adjacency lists are simpler and require no extension, but graph queries get verbose for anything beyond parent-child lookups. AGE is more expressive but adds a dependency on an incubator-stage extension that needs validation with the OOTB operator.
+Beyond the parent/child tree structure (handled by `parent_id` on the node row), we need first-class cross-node relationships: provenance chains, semantic conflicts, supersession across scopes. These live in a dedicated relationships table rather than encoding them as special node types.
 
-**Validation needed**: confirm that the OOTB PostgreSQL operator supports installing either pgvector or AGE as extensions. Crunchy Data's operator explicitly bundles pgvector; the OOTB operator's extension story is less documented.
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | UUID | PK |
+| `source_id` | UUID FK → memory_nodes | The "from" node |
+| `target_id` | UUID FK → memory_nodes | The "to" node |
+| `relationship_type` | String | Type of edge |
+| `metadata_` | JSON | Relationship-specific context |
+| `created_at` | DateTime (tz-aware) | When created |
+| `created_by` | String | Who created it |
+
+Initial relationship types:
+
+- `derived_from` -- provenance; this memory was produced from that one
+- `supersedes` -- cross-scope replacement; an org memory supersedes a user memory on the same topic
+- `conflicts_with` -- semantic conflict; two memories contradict each other
+- `related_to` -- general association when no stronger type applies
+
+Indexes on `(source_id, relationship_type)` and `(target_id, relationship_type)` support the common access patterns: "give me all outbound edges of type X from this node" and "give me everything that points at this node."
 
 ### Evolution path: in-memory graph
 
-For graph traversals at scale, there's an interesting option we want to keep available: an in-process graph library (like petgraph in Rust or NetworkX in Python) that loads the graph structure from PostgreSQL at startup and runs traversals in memory.
+For graph traversals at scale, there's an option we want to keep available: an in-process graph library (like NetworkX in Python or petgraph in Rust) that loads the graph structure from PostgreSQL at startup and runs traversals in memory.
 
-The pattern would be: load the adjacency data from PostgreSQL into an in-memory graph structure, run traversals there (which avoids database round-trips), and write mutations back to PostgreSQL for durability. This could be significantly faster for complex multi-hop traversals, and petgraph is a mature Rust library with no cryptographic dependencies.
+The pattern would be: load the adjacency data from PostgreSQL into an in-memory graph structure, run traversals there (which avoids database round-trips), and write mutations back to PostgreSQL for durability. This could be significantly faster for complex multi-hop traversals.
 
-This isn't needed for v1 -- adjacency lists or AGE should handle our initial graph complexity. But the architecture shouldn't preclude it. If we keep the graph query interface clean, swapping the traversal engine behind it is a contained change.
+This isn't needed for v1 -- recursive CTEs against shallow trees should handle our initial graph complexity. If recursive CTEs become a bottleneck as graph depth or query complexity grows, this is the natural next step. Keeping the graph query interface clean means swapping the traversal engine behind it is a contained change.
 
 ## MinIO: Document Storage
 
@@ -85,7 +102,6 @@ Both systems' backup data should be encrypted. PostgreSQL backups inherit OS-lev
 ## Design Questions
 
 - What's the right content size threshold for PostgreSQL vs. MinIO storage?
-- Should we use AGE or stick with adjacency lists for v1? This depends partly on OOTB operator extension support.
 - How do we handle embedding model upgrades? If we switch embedding models, all existing vectors need re-computation. Do we store the model identifier alongside the embedding?
 - What's the retention policy for audit logs? Infinite retention is expensive; time-bounded retention loses forensic capability. Tiered storage (hot/warm/cold) for audit data?
 - Connection pooling: does the OOTB operator include PgBouncer, or do we deploy it separately?

@@ -26,3 +26,11 @@ class MemoryAccessDeniedError(Exception):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(f"Access denied: {reason}")
+
+
+class RelationshipNotFoundError(Exception):
+    """Raised when a graph relationship cannot be found."""
+
+    def __init__(self, relationship_id: uuid.UUID) -> None:
+        self.relationship_id = relationship_id
+        super().__init__(f"Relationship {relationship_id} not found")
