@@ -1,4 +1,4 @@
-.PHONY: help install test deploy-all deploy-db deploy-mcp migrate clean-mcp
+.PHONY: help install test test-integration deploy-all deploy-db deploy-mcp migrate clean-mcp
 
 # Default target
 help:
@@ -7,7 +7,8 @@ help:
 	@echo ""
 	@echo "Local Development:"
 	@echo "  make install     - Install core library and dev dependencies"
-	@echo "  make test        - Run all tests (core + MCP server)"
+	@echo "  make test             - Run all tests (core + MCP server)"
+	@echo "  make test-integration - Run integration tests against real PostgreSQL"
 	@echo ""
 	@echo "OpenShift Deployment:"
 	@echo "  make deploy-all  - Full stack deploy (PostgreSQL + migrations + MCP server)"
@@ -26,8 +27,12 @@ install:
 
 # Run all tests
 test:
-	.venv/bin/pytest tests/ -q
+	.venv/bin/pytest tests/ -q -m "not integration"
 	cd memory-hub-mcp && ../.venv/bin/pytest tests/ -q
+
+# Run integration tests against real PostgreSQL + pgvector
+test-integration:
+	scripts/run-integration-tests.sh
 
 # Full stack deployment
 deploy-all:
