@@ -1,0 +1,126 @@
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: auth-server
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: auth-server:latest
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  triggers: []
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: auth-server
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: auth-rsa-keys
+type: Opaque
+stringData:
+  # PLACEHOLDER: Replace with actual RSA keys before first deployment.
+  # Generate with: openssl genrsa 2048 > private.pem && openssl rsa -in private.pem -pubout > public.pem
+  AUTH_RSA_PRIVATE_KEY_PEM: ""
+  AUTH_RSA_PUBLIC_KEY_PEM: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-server
+  template:
+    metadata:
+      labels:
+        app: auth-server
+      annotations:
+        alpha.image.policy.openshift.io/resolve-names: '*'
+    spec:
+      containers:
+      - name: auth-server
+        image: auth-server:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8081
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        envFrom:
+        - secretRef:
+            name: memoryhub-pg-credentials
+        - secretRef:
+            name: auth-rsa-keys
+        env:
+        - name: AUTH_HOST
+          value: "0.0.0.0"
+        - name: AUTH_PORT
+          value: "8081"
+        - name: AUTH_DB_HOST
+          value: "memoryhub-pg.memoryhub-db.svc.cluster.local"
+        - name: AUTH_DB_PORT
+          value: "5432"
+        - name: AUTH_DB_NAME
+          value: "memoryhub"
+        - name: AUTH_DB_USER
+          value: "memoryhub"
+        - name: AUTH_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: memoryhub-pg-credentials
+              key: POSTGRES_PASSWORD
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-server
+spec:
+  selector:
+    app: auth-server
+  ports:
+  - port: 8081
+    targetPort: 8081
+    protocol: TCP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: auth-server
+spec:
+  to:
+    kind: Service
+    name: auth-server
+  port:
+    targetPort: 8081
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
