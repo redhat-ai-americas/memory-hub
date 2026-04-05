@@ -48,21 +48,13 @@ The OdhApplication tile links to this Route.
 
 ### Authentication
 
-Authorino handles all API key validation at the infrastructure layer.
-The Authorino operator is already deployed with RHOAI. An `AuthConfig`
-CR defines the policy for the MCP server Route — validating API keys
-stored as labeled Kubernetes Secrets and injecting identity headers
-(`X-Auth-Owner-Name`, `X-Auth-Owner-Type`) into forwarded requests.
+Authentication is handled by a separate OAuth 2.1 authorization service that issues short-lived JWTs. Agents exchange API keys for tokens via the `client_credentials` grant; the MCP server validates JWTs using FastMCP's `JWTVerifier`. See [governance.md](../governance.md) for the full architecture.
 
-The landing page UI itself is accessed by platform admins via the
-RHOAI dashboard, so it sits behind OpenShift OAuth (same as the
-dashboard). For the demo, we can use an `oauth-proxy` sidecar on the
-UI deployment, or simply rely on the cluster's network policy if all
-users are already authenticated to the console.
+Authorino or Istio Service Mesh can optionally validate JWTs at the infrastructure layer as defense-in-depth, rejecting invalid tokens before they reach the application. This is recommended for production but not required — the MCP server validates tokens independently.
 
-For API key management (creating/revoking keys), the UI talks to the
-Kubernetes API to manage Authorino Secrets — no custom auth backend
-needed.
+The landing page UI itself is accessed by platform admins via the RHOAI dashboard, so it sits behind OpenShift OAuth (same as the dashboard). For the demo, we can use an `oauth-proxy` sidecar on the UI deployment, or simply rely on the cluster's network policy if all users are already authenticated to the console.
+
+For API key management (creating/revoking keys), the UI talks to the auth service's client registry. Keys are stored as Kubernetes Secrets with MemoryHub labels for Authorino compatibility if deployed.
 
 ### API Layer
 
@@ -246,7 +238,7 @@ To use Option B, we would either:
 |---|---|---|
 | Time to demo-ready | Days | Weeks |
 | Dashboard coupling | None | Tight |
-| MCP auth | Authorino (both options) | Authorino (both options) |
+| MCP auth | OAuth 2.1 JWT (both options) | OAuth 2.1 JWT (both options) |
 | Admin auth | oauth-proxy sidecar | Inherited from dashboard |
 | Release independence | Full | Tied to dashboard |
 | "Native" feel | Very close (same PatternFly) | Identical |

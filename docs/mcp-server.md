@@ -8,7 +8,7 @@ The MCP server is the sole external interface to MemoryHub. Every agent interact
 
 The MCP server uses streamable-http transport (SSE is deprecated). It's built with FastMCP 3 (not v2), deployed as a single-replica Deployment on OpenShift behind a Route with TLS edge termination. The pod is stateless -- all state lives in PostgreSQL.
 
-Authentication uses API key auth via a ConfigMap-mounted `users.json`. Each key maps to a user identity with scoped access. Full OpenShift OAuth/OIDC integration is a future concern (see [governance.md](governance.md)).
+Authentication uses OAuth 2.1 with short-lived JWTs. A separate auth service issues tokens; the MCP server validates them via FastMCP's `JWTVerifier`. API keys are exchanged for JWTs via the `client_credentials` grant. See [governance.md](governance.md) for the full auth architecture.
 
 Deployment is automated via `deploy/deploy.sh` which stages a build context, triggers an OpenShift BuildConfig (binary strategy), and waits for rollout. The Deployment spec includes `imagePullPolicy: Always` to prevent stale image caching.
 
@@ -18,7 +18,7 @@ Deployment is automated via `deploy/deploy.sh` which stages a build context, tri
 
 | Tool | Purpose | Read/Write |
 |------|---------|------------|
-| `register_session` | API key authentication, establishes user identity | Setup |
+| `register_session` | Compatibility shim for clients that can't send HTTP auth headers; primary auth is via JWT bearer tokens | Setup |
 | `write_memory` | Create memory nodes and branches, with inline curation feedback | Write |
 | `read_memory` | Retrieve memory by ID with optional branch depth expansion | Read |
 | `update_memory` | Create new version of a memory, preserving history | Write |
@@ -51,9 +51,15 @@ Three-layer rules (system > organizational > user) with override protection. Sys
 
 ## Authentication
 
-Current: API key auth via `register_session`. Keys are stored in a ConfigMap-mounted JSON file. Each key maps to a user_id, name, and list of accessible scopes.
+The MCP server is a **resource server** in OAuth 2.1 terms — it validates JWTs but does not issue them. A separate OAuth 2.1 authorization service handles token issuance via three grant types: `client_credentials` (agents/SDKs), `authorization_code` + PKCE (browser-based humans), and token exchange / RFC 8693 (platform-integrated agents on RHOAI/K8s).
 
-Future: OpenShift OAuth/OIDC with per-agent identity. See #7 (governance design) and #13 (RBAC).
+FastMCP's `JWTVerifier` validates tokens at the transport layer before any tool code executes. Tools access the authenticated identity via `get_access_token()`, which provides `sub` (user ID), `identity_type` (user/service), `tenant_id` (multi-tenant isolation), and `scopes` (operational permissions like `memory:read`, `memory:write:user`).
+
+The `register_session` tool is retained as a compatibility shim for MCP clients that cannot send HTTP Authorization headers (due to client bugs or limitations). It accepts an API key, performs the token exchange internally, and stores the identity for the session. It is not the primary auth path.
+
+**Phase 2 (current):** API key auth via `register_session` with ConfigMap-mounted users.json. See the "Current state" section in [governance.md](governance.md) for details on enforcement gaps being addressed.
+
+See #7 for the full governance and auth design.
 
 ## Error Handling
 
@@ -68,7 +74,7 @@ MCP tools return clear, actionable errors as `{"error": true, "message": "..."}`
 - **Should `get_context` exist?** No. Agents compose `search_memory` + `read_memory` themselves. This gives agents control over their context budget and avoids a monolithic tool.
 - **Should `get_branches` be a separate tool?** No. `read_memory(depth=1)` returns branches inline. One tool, fewer round-trips.
 - **How does write_memory handle concurrent writes?** Blocking for user-scope (direct write). Above-user-scope queued for curator review (not yet implemented).
-- **How do agents without OpenShift identity connect?** API keys via `register_session`. Works for Claude Code and other external clients.
+- **How do agents without OpenShift identity connect?** API keys exchanged for JWTs via the `client_credentials` OAuth grant. The `memoryhub` Python SDK handles this transparently. `register_session` remains as a fallback for MCP clients with header limitations.
 - **Max results granularity for search?** `max_results` parameter (default 10, max 50) plus weight-based stub/full split. Agents control page size.
 - **Should curation use LLM sampling?** No. MCP spec requires HITL approval for sampling, which is unacceptable friction on write operations. Instead, `write_memory` returns similarity counts and the calling agent's existing LLM handles judgment calls.
 

@@ -225,10 +225,7 @@ data:
   api_key: <base64-encoded key>
 ```
 
-Authorino validates incoming requests against these Secrets before
-they reach the MCP server. On successful auth, Authorino injects
-identity headers (e.g., `X-Auth-Owner-Name`, `X-Auth-Owner-Type`)
-that the MCP server can trust without re-validating.
+When Authorino is deployed as defense-in-depth, it validates incoming requests against these Secrets before they reach the MCP server, injecting identity headers (`X-Auth-Owner-Name`, `X-Auth-Owner-Type`). However, the primary auth mechanism is the OAuth 2.1 authorization service — agents exchange API keys for short-lived JWTs via the `client_credentials` grant, and the MCP server validates JWTs independently via FastMCP's `JWTVerifier`. See [governance.md](../governance.md) for the full auth architecture.
 
 #### AuthConfig
 
@@ -281,22 +278,20 @@ spec:
 
 #### MCP server changes
 
-Minimal. The MCP server's `register_session` no longer validates the
-API key itself — Authorino already did that. Instead, `register_session`
-reads the identity from the headers Authorino injected:
+The MCP server validates JWTs using FastMCP's `JWTVerifier` at the transport layer. Tools access the authenticated identity via `get_access_token()`:
 
 ```python
-# Before: server validates key
-api_key = request.headers["Authorization"]
-user = validate_key(api_key)  # custom code
+from fastmcp.server.dependencies import get_access_token
 
-# After: Authorino validated, server trusts headers
-owner_name = request.headers["X-Auth-Owner-Name"]
-owner_type = request.headers["X-Auth-Owner-Type"]
+@mcp.tool
+async def search_memory(query: str, ...) -> dict:
+    token = get_access_token()
+    user_id = token.claims["sub"]
+    tenant_id = token.claims["tenant_id"]
+    # All queries filtered by tenant_id + scope authorization
 ```
 
-This removes auth logic from the MCP server entirely and pushes it
-to the infrastructure layer where it belongs.
+The `register_session` tool is retained as a compatibility shim for MCP clients that cannot send HTTP Authorization headers. It is not the primary auth path.
 
 #### Future direction: one agent, one key
 
