@@ -1,0 +1,97 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'sdk/v*.*.*'
+      - 'mcp/v*.*.*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  sdk-tests:
+    name: SDK Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for SDK changes
+        if: github.event_name == 'pull_request'
+        id: sdk-changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            sdk:
+              - 'sdk/**'
+
+      - name: Set up Python ${{ matrix.python-version }}
+        if: github.event_name != 'pull_request' || steps.sdk-changes.outputs.sdk == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        if: github.event_name != 'pull_request' || steps.sdk-changes.outputs.sdk == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          cd sdk && pip install -e .[dev]
+
+      - name: Lint with ruff
+        if: github.event_name != 'pull_request' || steps.sdk-changes.outputs.sdk == 'true'
+        run: cd sdk && ruff check src
+
+      - name: Run tests with pytest
+        if: github.event_name != 'pull_request' || steps.sdk-changes.outputs.sdk == 'true'
+        run: cd sdk && pytest
+
+  mcp-tests:
+    name: MCP Server Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for MCP changes
+        if: github.event_name == 'pull_request'
+        id: mcp-changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            mcp:
+              - 'memory-hub-mcp/**'
+
+      - name: Set up Python 3.11
+        if: github.event_name != 'pull_request' || steps.mcp-changes.outputs.mcp == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        if: github.event_name != 'pull_request' || steps.mcp-changes.outputs.mcp == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          cd memory-hub-mcp && pip install -r requirements.txt && pip install pytest
+
+      - name: Run tests with pytest
+        if: github.event_name != 'pull_request' || steps.mcp-changes.outputs.mcp == 'true'
+        run: cd memory-hub-mcp && pytest tests/ -v
+
+  status:
+    name: Tests Status
+    runs-on: ubuntu-latest
+    needs: [sdk-tests, mcp-tests]
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.sdk-tests.result }}" == "failure" ] || [ "${{ needs.mcp-tests.result }}" == "failure" ]; then
+            echo "One or more test jobs failed"
+            exit 1
+          fi
+          echo "All tests passed successfully"

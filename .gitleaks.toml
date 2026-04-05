@@ -1,0 +1,14 @@
+[allowlist]
+  description = "MemoryHub project allowlist for false positives"
+
+  paths = [
+    '''docs\/.*\.md$''',
+    '''retrospectives\/.*\.md$''',
+    '''\.claude\/commands\/.*\.md$''',
+    '''\.claude\/rules\/.*\.md$''',
+  ]
+
+  regexes = [
+    '''mh-dev-.*-\d{4}''',
+    '''mh-svc-.*-\d{4}''',
+  ]

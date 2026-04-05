@@ -1,0 +1,133 @@
+name: Release and Publish
+
+on:
+  push:
+    tags:
+      - 'sdk/v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      component: ${{ steps.version.outputs.component }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for tests to pass
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.ref }}
+          check-regexp: 'SDK Tests'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+
+      - name: Extract component and version from tag
+        id: version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          COMPONENT=${TAG%%/*}
+          VERSION=${TAG#*/v}
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "component=$COMPONENT" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Read version from source
+        id: read_version
+        run: |
+          COMPONENT="${{ steps.version.outputs.component }}"
+          if [ "$COMPONENT" = "sdk" ]; then
+            VERSION_SRC=$(grep -E '^__version__' sdk/src/memoryhub/__init__.py | cut -d'"' -f2)
+          else
+            echo "Error: Unknown component '$COMPONENT'"
+            exit 1
+          fi
+          echo "version_src=$VERSION_SRC" >> $GITHUB_OUTPUT
+
+      - name: Verify version match
+        run: |
+          if [ "${{ steps.version.outputs.version }}" != "${{ steps.read_version.outputs.version_src }}" ]; then
+            echo "Error: Tag version (${{ steps.version.outputs.version }}) does not match source (${{ steps.read_version.outputs.version_src }})"
+            exit 1
+          fi
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          COMPONENT="${{ steps.version.outputs.component }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          CHANGELOG_FILE="$COMPONENT/CHANGELOG.md"
+          if [ -f "$CHANGELOG_FILE" ]; then
+            CHANGELOG=$(awk "/## .*$VERSION/,/## [0-9]/ { if (/## [0-9]/ && !/## .*$VERSION/) exit; if (!/## .*$VERSION/) print }" "$CHANGELOG_FILE" | sed '/^$/d')
+          fi
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="Release $COMPONENT version $VERSION"
+          fi
+          echo "$CHANGELOG" > /tmp/changelog.txt
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CHANGELOG=$(cat /tmp/changelog.txt)
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.component }} ${{ steps.version.outputs.version }}" \
+            --notes "$CHANGELOG" \
+            --verify-tag
+
+  build:
+    name: Build distribution
+    needs: [create-release]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build package
+        run: cd ${{ needs.create-release.outputs.component }} && python -m build
+
+      - name: Store distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: ${{ needs.create-release.outputs.component }}/dist/
+
+  publish-to-pypi:
+    name: Publish to PyPI
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/memoryhub
+
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download distribution packages
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

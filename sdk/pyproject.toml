@@ -26,6 +26,14 @@ classifiers = [
 ]
 keywords = ["ai", "agents", "memory", "mcp", "openshift", "kubernetes"]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
 [project.urls]
 Homepage = "https://github.com/rdwj/memory-hub"
 Repository = "https://github.com/rdwj/memory-hub"
@@ -33,3 +41,15 @@ Issues = "https://github.com/rdwj/memory-hub/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memoryhub"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
