@@ -11,6 +11,13 @@ htmlcov/
 .coverage
 .env
 *.env
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+secrets.yaml
+secrets.yml
 .DS_Store
 
 # Added by ggshield
