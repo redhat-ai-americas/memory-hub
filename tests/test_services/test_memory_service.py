@@ -16,12 +16,13 @@ from memoryhub.models.schemas import (
     MemoryNodeUpdate,
     MemoryScope,
 )
-from memoryhub.services.exceptions import MemoryNotCurrentError, MemoryNotFoundError
+from memoryhub.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
 from memoryhub.services.memory import (
     create_memory,
     get_memory_history,
     read_memory,
     report_contradiction,
+    resolve_contradiction,
     search_memories,
     update_memory,
 )
@@ -396,6 +397,56 @@ async def test_report_contradiction_resolved_not_counted(async_session, embeddin
         session=async_session,
     )
     assert count == 1
+
+
+# -- resolve_contradiction --
+
+
+async def test_resolve_contradiction(async_session, embedding_service):
+    node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
+
+    await report_contradiction(
+        node.id, "user ran docker build", 0.8, "test-agent", async_session,
+    )
+
+    from sqlalchemy import select
+    from memoryhub.models.contradiction import ContradictionReport
+
+    result = await async_session.execute(
+        select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
+    )
+    report = result.scalars().first()
+    assert report.resolved is False
+
+    resolved = await resolve_contradiction(report.id, async_session)
+    assert resolved.resolved is True
+    assert resolved.resolved_at is not None
+
+
+async def test_resolve_contradiction_not_found(async_session):
+    with pytest.raises(ContradictionNotFoundError):
+        await resolve_contradiction(uuid.uuid4(), async_session)
+
+
+async def test_resolve_contradiction_already_resolved(async_session, embedding_service):
+    node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
+
+    await report_contradiction(
+        node.id, "user ran docker build", 0.8, "test-agent", async_session,
+    )
+
+    from sqlalchemy import select
+    from memoryhub.models.contradiction import ContradictionReport
+
+    result = await async_session.execute(
+        select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
+    )
+    report = result.scalars().first()
+
+    await resolve_contradiction(report.id, async_session)
+
+    with pytest.raises(ValueError, match="already resolved"):
+        await resolve_contradiction(report.id, async_session)
 
 
 # -- search_memories --

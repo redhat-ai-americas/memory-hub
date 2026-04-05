@@ -28,6 +28,14 @@ class MemoryAccessDeniedError(Exception):
         super().__init__(f"Access denied: {reason}")
 
 
+class ContradictionNotFoundError(Exception):
+    """Raised when a contradiction report cannot be found."""
+
+    def __init__(self, contradiction_id: uuid.UUID) -> None:
+        self.contradiction_id = contradiction_id
+        super().__init__(f"Contradiction report {contradiction_id} not found")
+
+
 class RelationshipNotFoundError(Exception):
     """Raised when a graph relationship cannot be found."""
 

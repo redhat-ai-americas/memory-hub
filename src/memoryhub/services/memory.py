@@ -24,7 +24,7 @@ from memoryhub.models.schemas import (
 from memoryhub.models.utils import generate_stub
 from memoryhub.services.curation.pipeline import run_curation_pipeline
 from memoryhub.services.embeddings import EmbeddingService
-from memoryhub.services.exceptions import MemoryNotCurrentError, MemoryNotFoundError
+from memoryhub.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
 
 
 async def create_memory(
@@ -458,6 +458,32 @@ async def report_contradiction(
 
     await session.commit()
     return count
+
+
+async def resolve_contradiction(
+    contradiction_id: uuid.UUID,
+    session: AsyncSession,
+) -> ContradictionReport:
+    """Mark a contradiction report as resolved.
+
+    Returns the updated ContradictionReport. Raises ContradictionNotFoundError
+    if the ID doesn't exist, or ValueError if already resolved.
+    """
+    stmt = select(ContradictionReport).where(ContradictionReport.id == contradiction_id)
+    result = await session.execute(stmt)
+    report = result.scalar_one_or_none()
+
+    if report is None:
+        raise ContradictionNotFoundError(contradiction_id)
+
+    if report.resolved:
+        raise ValueError(f"Contradiction {contradiction_id} is already resolved")
+
+    report.resolved = True
+    report.resolved_at = datetime.now(UTC)
+
+    await session.commit()
+    return report
 
 
 # -- Internal helpers --
