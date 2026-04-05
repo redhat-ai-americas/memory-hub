@@ -1,1 +1,0 @@
-"""Country profile resources."""

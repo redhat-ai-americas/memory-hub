@@ -15,3 +15,4 @@ htmlcov/
 
 # Added by ggshield
 .cache_ggshield
+.mcp.json
