@@ -1,0 +1,18 @@
+[
+  {
+    "client_id": "your-username",
+    "client_secret": "your-api-key-here",
+    "client_name": "Your Name",
+    "identity_type": "user",
+    "tenant_id": "default",
+    "default_scopes": ["memory:read", "memory:write:user"]
+  },
+  {
+    "client_id": "my-service-agent",
+    "client_secret": "service-api-key-here",
+    "client_name": "My Service Agent",
+    "identity_type": "service",
+    "tenant_id": "default",
+    "default_scopes": ["memory:read", "memory:write:organizational"]
+  }
+]

@@ -19,6 +19,7 @@ credentials.json
 secrets.yaml
 secrets.yml
 .DS_Store
+seed-clients.json
 
 # Added by ggshield
 .cache_ggshield
