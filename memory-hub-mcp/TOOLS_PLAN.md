@@ -137,24 +137,152 @@ The tools are designed around the tree-based memory model: memories are nodes wi
   report_contradiction(memory_id="abc-123", observed_behavior="User ran 'docker build' and created a docker-compose.yml in the last 3 projects", confidence=0.8)
   ```
 
+---
+
+## Phase 2 Tools: Graph Relationships & Curation
+
+Phase 2 adds 5 tools covering two capabilities: graph relationships between memories (provenance, supersession, conflict) and curation self-service (similarity inspection, merge suggestions, rule tuning).
+
+### Design Principles for Phase 2
+
+**Token-efficient similarity feedback.** write_memory already returns `similar_count` — a count, not a payload. The agent decides whether to investigate. `get_similar_memories` provides paged drill-down so agents control their context budget. This follows Anthropic's guidance to implement pagination and sensible defaults rather than returning massive datasets.
+
+**Graph tools expose the relationship model, not raw queries.** Rather than a generic "run graph query" tool, we expose specific workflows: create a typed edge, query edges for a node, trace provenance. The relationship_type enum (`derived_from`, `supersedes`, `conflicts_with`, `related_to`) constrains the agent to valid edge types — reducing hallucination risk per Anthropic's guidance on semantic names over freeform strings.
+
+**Curation tools let agents self-manage.** Rather than relying on a background curator for everything, agents can tune their own dedup thresholds via `set_curation_rule` and suggest merges via `suggest_merge`. This follows the "context-aware tools" principle — tools that consolidate what would otherwise require multiple steps.
+
+### create_relationship
+
+- **Purpose**: Create a directed edge between two memory nodes. Use this to link memories that are semantically connected — marking that an organizational memory was `derived_from` several user memories, that one memory `supersedes` another, that two memories `conflicts_with` each other, or that they are `related_to` one another. Relationships are immutable — create or delete them, never update.
+- **Parameters**:
+  - `source_id` (string/UUID, required): UUID of the source memory node — the "from" end of the directed edge.
+  - `target_id` (string/UUID, required): UUID of the target memory node — the "to" end. Must differ from source_id.
+  - `relationship_type` (string, required): One of: `derived_from` (provenance — source was derived from target), `supersedes` (source replaces target), `conflicts_with` (semantic conflict between source and target), `related_to` (general association).
+  - `metadata` (object, optional): Key-value context about the relationship — reasoning, confidence, curator notes.
+- **Returns**: The created relationship with its UUID, timestamps, `created_by` identity, and stub text from both the source and target nodes for context.
+- **Error Cases**:
+  - "Memory node [id] not found. Verify both source_id and target_id refer to existing, current memory nodes." — One or both nodes missing.
+  - "Relationship ([source] --[type]--> [target]) already exists." — Duplicate edge. The agent should use the existing relationship.
+  - "source_id and target_id must be different — self-referential edges are not allowed."
+  - "Invalid relationship_type '[value]'. Must be one of: derived_from, supersedes, conflicts_with, related_to."
+- **Example Usage**: Marking provenance for a promoted memory:
+  ```
+  create_relationship(source_id="<org-memory-id>", target_id="<user-memory-id>", relationship_type="derived_from", metadata={"promoted_by": "curator"})
+  ```
+
+### get_relationships
+
+- **Purpose**: Get all graph relationships for a memory node. Use this to understand how memories are connected — trace provenance chains, find conflicts, discover related memories. Supports directional filtering and optional provenance chain tracing.
+- **Parameters**:
+  - `node_id` (string/UUID, required): UUID of the memory node to query.
+  - `relationship_type` (string, optional): Filter by type. One of: `derived_from`, `supersedes`, `conflicts_with`, `related_to`. Omit for all types.
+  - `direction` (string, optional, default "both"): Which edges to return: `outgoing` (this node is the source), `incoming` (this node is the target), or `both`.
+  - `include_provenance` (boolean, optional, default false): If true, additionally traces `derived_from` edges backward from this node to build a provenance chain showing where this memory originated. Useful for organizational memories that were promoted from user memories.
+- **Returns**: A dict with `relationships` (list of edges with source/target stubs), `count`, and optionally `provenance_chain` (list of `{hop, node, relationship}` entries tracing back to the origin).
+- **Error Cases**:
+  - "Memory node [id] not found. Verify the node_id refers to an existing memory node."
+  - "Invalid direction '[value]'. Must be one of: outgoing, incoming, both."
+  - "Invalid relationship_type '[value]'. Must be one of: derived_from, supersedes, conflicts_with, related_to."
+- **Example Usage**: Tracing the origin of an organizational memory:
+  ```
+  get_relationships(node_id="<org-memory>", include_provenance=true)
+  ```
+
+### get_similar_memories
+
+- **Purpose**: Get memories similar to a given memory, with similarity scores. Use this to investigate when `write_memory` reports `similar_count > 0`. Returns paged results to avoid context bloat — start with a small page and increase if needed. Each result includes the memory stub and a cosine similarity score.
+- **Parameters**:
+  - `memory_id` (string/UUID, required): UUID of the memory to find similar memories for. Uses the stored embedding from this memory.
+  - `threshold` (float, optional, default 0.80): Minimum cosine similarity (0.0-1.0). Lower values return more results but include less-relevant matches.
+  - `max_results` (integer, optional, default 10): Maximum results per page (1-50).
+  - `offset` (integer, optional, default 0): Pagination offset. Use with `has_more` from the response.
+- **Returns**: `{"results": [{id, stub, score}], "total": int, "has_more": bool}`. Results are ordered by similarity (highest first). The `total` is the full count of memories above the threshold, not just the page.
+- **Error Cases**:
+  - "Memory [id] not found." — Invalid or inaccessible memory ID.
+  - "Memory [id] has no embedding — similarity search unavailable." — Memory was stored without an embedding (shouldn't happen in normal operation).
+- **Example Usage**: After `write_memory` returns `similar_count: 3`:
+  ```
+  get_similar_memories(memory_id="<new-memory-id>", max_results=3)
+  ```
+  If the results look redundant, call `update_memory` on the existing one or `suggest_merge` to link them.
+
+### suggest_merge
+
+- **Purpose**: Suggest that two memories should be merged into one. Records the suggestion as a `conflicts_with` relationship between the two memories with merge reasoning in the metadata. This is how agents flag redundancy for review — the merge suggestion can be found later via `get_relationships`. RBAC-scoped: you can only suggest merges for memories you can read.
+- **Parameters**:
+  - `memory_a_id` (string/UUID, required): UUID of the first memory.
+  - `memory_b_id` (string/UUID, required): UUID of the second memory. Must differ from memory_a_id.
+  - `reasoning` (string, required): Why these memories should be merged. Be specific — "Both describe Podman preference but with different wording" is better than "duplicates".
+- **Returns**: The created `conflicts_with` relationship with merge metadata (`merge_suggested: true`, `reasoning`, `suggested_by`), plus a confirmation message.
+- **Error Cases**:
+  - "Memory node [id] not found." — One or both memories don't exist.
+  - "memory_a_id and memory_b_id must be different."
+  - "reasoning cannot be empty."
+  - "A merge suggestion already exists between these memories." — Duplicate suggestion.
+- **Example Usage**: After finding two similar container preference memories:
+  ```
+  suggest_merge(memory_a_id="<older-memory>", memory_b_id="<newer-memory>", reasoning="Both describe Podman preference. The newer version includes Containerfile guidance that should be consolidated.")
+  ```
+
+### set_curation_rule
+
+- **Purpose**: Create or update a user-layer curation rule. Use this to tune curation preferences — for example, raising the duplicate detection threshold if you're getting false positives. Rules created here only affect your own memories. Cannot override system rules marked as protected (like secrets scanning). Upserts by name: if a rule with the given name exists for your user, it's updated; otherwise created.
+- **Parameters**:
+  - `name` (string, required): Rule name. This is the unique identifier within your user rules.
+  - `tier` (string, optional, default "embedding"): Rule tier: `regex` (pattern matching) or `embedding` (similarity threshold).
+  - `action` (string, optional, default "flag"): Action on match: `flag`, `block`, `quarantine`, `reject_with_pointer`, `decay_weight`.
+  - `config` (object, optional): Tier-specific configuration. For embedding: `{"threshold": 0.98}` to raise the dedup threshold. For regex: `{"pattern": "regex-string"}` for custom pattern matching.
+  - `scope_filter` (string, optional): Limit this rule to a specific scope (user, project, etc.). Null applies to all scopes.
+  - `enabled` (boolean, optional, default true): Whether this rule is active.
+  - `priority` (integer, optional, default 10): Evaluation priority within the tier (lower = higher priority).
+- **Returns**: The created or updated rule with its UUID and all fields. Includes `"created": true` or `"updated": true` to indicate which action was taken.
+- **Error Cases**:
+  - "Cannot override system rule '[name]' — it is protected by the platform administrator." — Agent tried to create a user rule with the same name as a protected system rule.
+  - "Invalid tier '[value]'. Must be one of: regex, embedding."
+  - "Invalid action '[value]'. Must be one of: flag, block, quarantine, reject_with_pointer, decay_weight."
+- **Example Usage**: Raising the dedup threshold because dataset memories are intentionally similar:
+  ```
+  set_curation_rule(name="my_dedup_threshold", tier="embedding", action="reject_with_pointer", config={"threshold": 0.98})
+  ```
+
 ## Implementation Order
 
-1. **write_memory** — Foundation. Can't test anything else without the ability to create memories. Also validates the governance pipeline.
-2. **read_memory** — Immediate follow-up. Write + read is the minimal useful pair. Tests depth expansion and branch traversal.
-3. **search_memory** — The most important tool for agent UX. Requires pgvector embeddings, so depends on an embedding service/function being available.
-4. **update_memory** — Versioning is a core differentiator. Tests the isCurrent model and version chain.
-5. **get_memory_history** — Builds on the version chain from update_memory. Straightforward once versioning works.
-6. **report_contradiction** — Can be implemented last since it feeds the curator agent (which is a Phase 2 concern). But the MCP interface should exist so agents can start reporting.
+### Phase 1 (complete)
+
+1. **register_session** — Authentication and session setup.
+2. **write_memory** — Foundation. Now includes curation pipeline integration (secrets scanning, embedding dedup, similar_count feedback).
+3. **read_memory** — Depth expansion and branch traversal.
+4. **search_memory** — Semantic search via pgvector.
+5. **update_memory** — Versioning with deep copy of branches.
+6. **get_memory_history** — Version chain traversal.
+7. **report_contradiction** — Staleness signal accumulation.
+
+### Phase 2 (current)
+
+8. **create_relationship** — Depends on graph service layer (done in #4). Foundation for provenance and merge suggestions.
+9. **get_relationships** — Depends on create_relationship. Read-only query tool.
+10. **get_similar_memories** — Depends on curation similarity service (done in #6 Phase 2a). Read-only drill-down.
+11. **suggest_merge** — Depends on create_relationship (uses it under the hood to create a `conflicts_with` edge).
+12. **set_curation_rule** — Depends on curation rules service (done in #6 Phase 2a). Most independent of the Phase 2 tools.
 
 ## Dependencies
 
-- **PostgreSQL + pgvector**: Deployed in memoryhub-db namespace (done — issue #3).
-- **memoryhub core library**: SQLAlchemy models, Pydantic schemas, and a service layer for CRUD operations. The models exist; the service layer (database session management, query functions) needs to be built as part of tool implementation.
-- **Embedding function**: search_memory needs to embed query strings into vectors. Options: call an external embedding API (OpenAI, vLLM-served model), or use a local model. For Phase 1, we can use a mock embedding or a lightweight local model. The embedding strategy is a deferred decision — the MCP tool just needs a function it can call.
-- **Governance engine**: Access control and audit logging. For Phase 1, we can implement a simplified version (check scope permissions, log to PostgreSQL) without the full governance system from Phase 3.
+### Phase 1 (resolved)
 
-## Open Questions
+- **PostgreSQL + pgvector**: Deployed in memoryhub-db namespace.
+- **memoryhub core library**: SQLAlchemy models, Pydantic schemas, service layer.
+- **Embedding service**: all-MiniLM-L6-v2 deployed on OpenShift AI (384-dim embeddings).
+- **API key auth**: ConfigMap-based user authentication.
 
-- **Embedding strategy**: What embedding model/service do we use? This affects search_memory quality significantly. For demo, a mock or small local model may suffice. For production, needs a vLLM-compatible model on OpenShift AI.
-- **Contradiction threshold**: How many contradictions trigger a revision prompt? Configurable per deployment? Default of 5 seems reasonable.
-- **Concurrent write handling**: Does write_memory block until the write completes, or return immediately with a "pending" status? For user-scope (direct write), blocking is fine. For above-user-scope (curator queue), async with status makes more sense.
+### Phase 2 (resolved)
+
+- **Graph service** (`memoryhub.services.graph`): 6 async functions for creating/querying relationships and traversals. Built in #4.
+- **Curation service** (`memoryhub.services.curation`): Pipeline, scanner, similarity, and rules modules. Built in #6 Phase 2a.
+- **`memory_relationships` table**: Migration 003, deployed.
+- **`curator_rules` table**: Migration 004, deployed. Default system rules seeded.
+
+## Open Questions (Phase 1 — Resolved)
+
+- **Embedding strategy**: all-MiniLM-L6-v2 on OpenShift AI via HTTP API. MockEmbeddingService for tests.
+- **Contradiction threshold**: Default of 5, configurable via curator rules.
+- **Concurrent write handling**: Blocking for user-scope, queued for above-user-scope.

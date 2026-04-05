@@ -7,7 +7,7 @@ from fastmcp import Context
 from pydantic import Field, ValidationError
 
 from src.core.app import mcp
-from src.tools._deps import get_authenticated_owner, get_db_session, release_db_session
+from src.tools._deps import get_db_session, release_db_session
 from src.tools.auth import require_auth
 
 from memoryhub.models.schemas import RelationshipCreate, RelationshipType
@@ -54,6 +54,9 @@ async def create_relationship(
     marking that an organizational memory was derived_from several user memories,
     or that one memory supersedes another.
 
+    Relationships are immutable (create or delete, never update). Edge direction:
+    for derived_from, source is the derived node, target is the origin.
+
     Returns the created relationship with its ID, timestamps, and node stubs.
     """
     if ctx:
@@ -64,7 +67,6 @@ async def create_relationship(
     except RuntimeError as exc:
         return {"error": True, "message": str(exc)}
 
-    # Validate relationship_type against the controlled vocabulary
     if relationship_type not in _VALID_TYPES:
         return {
             "error": True,
@@ -74,7 +76,6 @@ async def create_relationship(
             ),
         }
 
-    # Parse UUIDs
     try:
         parsed_source_id = uuid.UUID(source_id)
     except ValueError:
@@ -113,7 +114,6 @@ async def create_relationship(
             "message": "Parameter validation failed:\n" + "\n".join(messages),
         }
 
-    session = None
     gen = None
     try:
         session, gen = await get_db_session()
@@ -125,11 +125,10 @@ async def create_relationship(
             "error": True,
             "message": (
                 f"Memory node {exc.memory_id} not found. "
-                "Verify both source_id and target_id refer to existing memory nodes."
+                "Verify both source_id and target_id refer to existing, current memory nodes."
             ),
         }
     except ValueError as exc:
-        # Duplicate edge from the service layer
         return {"error": True, "message": str(exc)}
     except Exception as exc:
         return {"error": True, "message": f"Failed to create relationship: {exc}"}

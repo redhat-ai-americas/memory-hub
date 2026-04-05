@@ -11,7 +11,14 @@ from src.tools._deps import get_db_session, release_db_session
 from src.tools.auth import require_auth
 
 from memoryhub.models.curation import CuratorRule
-from memoryhub.models.schemas import CuratorRuleCreate, CuratorRuleRead, RuleAction, RuleLayer, RuleTier, RuleTrigger
+from memoryhub.models.schemas import (
+    CuratorRuleCreate,
+    CuratorRuleRead,
+    RuleAction,
+    RuleLayer,
+    RuleTier,
+    RuleTrigger,
+)
 from memoryhub.services.curation.rules import create_rule
 
 _VALID_TIERS = [t.value for t in RuleTier]
@@ -48,8 +55,8 @@ async def set_curation_rule(
         Field(
             description=(
                 "Tier-specific config. "
-                "For embedding: {\"threshold\": float}. "
-                "For regex: {\"pattern\": string}."
+                'For embedding: {"threshold": float}. '
+                'For regex: {"pattern": string}.'
             )
         ),
     ] = None,
@@ -86,17 +93,13 @@ async def set_curation_rule(
     if tier not in _VALID_TIERS:
         return {
             "error": True,
-            "message": (
-                f"Invalid tier {tier!r}. Must be one of: {', '.join(_VALID_TIERS)}."
-            ),
+            "message": f"Invalid tier {tier!r}. Must be one of: {', '.join(_VALID_TIERS)}.",
         }
 
     if action not in _VALID_ACTIONS:
         return {
             "error": True,
-            "message": (
-                f"Invalid action {action!r}. Must be one of: {', '.join(_VALID_ACTIONS)}."
-            ),
+            "message": f"Invalid action {action!r}. Must be one of: {', '.join(_VALID_ACTIONS)}.",
         }
 
     if not name.strip():
@@ -105,13 +108,11 @@ async def set_curation_rule(
     owner_id = current_user["user_id"]
     resolved_config = config or {}
 
-    session = None
     gen = None
     try:
         session, gen = await get_db_session()
 
-        # Check whether a system or organizational rule with this name has override=True.
-        # If so, user rules cannot shadow it.
+        # Check for protected system/org rule with this name
         protected_stmt = select(CuratorRule).where(
             and_(
                 CuratorRule.name == name,
@@ -125,13 +126,12 @@ async def set_curation_rule(
             return {
                 "error": True,
                 "message": (
-                    f"Cannot create rule {name!r}: a {protected_rule.layer}-layer rule "
-                    f"with this name is marked protected (override=True) and cannot be "
-                    f"shadowed by user rules."
+                    f"Cannot override system rule {name!r} — it is protected "
+                    "by the platform administrator."
                 ),
             }
 
-        # Check for an existing user rule with this name to decide create vs update.
+        # Check for existing user rule with this name (upsert)
         existing_stmt = select(CuratorRule).where(
             and_(
                 CuratorRule.name == name,
@@ -143,7 +143,6 @@ async def set_curation_rule(
         existing = existing_result.scalar_one_or_none()
 
         if existing is not None:
-            # Update in place
             existing.tier = tier
             existing.action = action
             existing.config = resolved_config
@@ -159,7 +158,7 @@ async def set_curation_rule(
                 "rule": rule_read.model_dump(mode="json"),
             }
 
-        # Create new user rule — always on_write, user layer, no override
+        # Create new user rule
         rule_data = CuratorRuleCreate(
             name=name,
             trigger=RuleTrigger.ON_WRITE,

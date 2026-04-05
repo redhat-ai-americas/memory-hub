@@ -6,6 +6,7 @@ designed for FastMCP 2 and doesn't register tools correctly in v3.
 """
 
 import os
+
 from fastmcp import FastMCP
 
 from src.tools.write_memory import write_memory
@@ -15,6 +16,7 @@ from src.tools.search_memory import search_memory
 from src.tools.get_memory_history import get_memory_history
 from src.tools.report_contradiction import report_contradiction
 from src.tools.register_session import register_session
+
 from src.tools.create_relationship import create_relationship
 from src.tools.get_relationships import get_relationships
 from src.tools.get_similar_memories import get_similar_memories

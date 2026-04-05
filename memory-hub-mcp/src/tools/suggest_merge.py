@@ -4,13 +4,13 @@ import uuid
 from typing import Annotated, Any
 
 from fastmcp import Context
-from pydantic import Field, ValidationError
+from pydantic import Field
 
 from src.core.app import mcp
 from src.tools._deps import get_db_session, release_db_session
 from src.tools.auth import require_auth
 
-from memoryhub.models.schemas import RelationshipCreate, RelationshipType
+from memoryhub.models.schemas import RelationshipCreate
 from memoryhub.services.exceptions import MemoryNotFoundError
 from memoryhub.services.graph import create_relationship as create_relationship_service
 
@@ -33,7 +33,7 @@ async def suggest_merge(
     ],
     reasoning: Annotated[
         str,
-        Field(description="Why these memories should be merged."),
+        Field(description="Why these memories should be merged. Be specific."),
     ],
     ctx: Context = None,
 ) -> dict[str, Any]:
@@ -47,7 +47,7 @@ async def suggest_merge(
     You must have read access to both memories (RBAC-scoped).
     """
     if ctx:
-        await ctx.info(f"Suggesting merge between {memory_a_id!r} and {memory_b_id!r}")
+        await ctx.info(f"Suggesting merge: {memory_a_id} + {memory_b_id}")
 
     try:
         current_user = require_auth()
@@ -73,45 +73,36 @@ async def suggest_merge(
     if parsed_a == parsed_b:
         return {
             "error": True,
-            "message": "memory_a_id and memory_b_id must be different — cannot suggest merging a memory with itself.",
+            "message": "memory_a_id and memory_b_id must be different.",
         }
 
-    if not reasoning.strip():
+    if not reasoning or not reasoning.strip():
         return {
             "error": True,
-            "message": "reasoning cannot be empty. Explain why these memories should be merged.",
+            "message": "reasoning cannot be empty.",
         }
 
-    try:
-        rel_create = RelationshipCreate(
-            source_id=parsed_a,
-            target_id=parsed_b,
-            relationship_type=RelationshipType.conflicts_with,
-            created_by=current_user["user_id"],
-            metadata={
-                "merge_suggested": True,
-                "reasoning": reasoning,
-                "suggested_by": current_user["user_id"],
-            },
-        )
-    except ValidationError as exc:
-        errors = exc.errors()
-        messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
-        return {
-            "error": True,
-            "message": "Parameter validation failed:\n" + "\n".join(messages),
-        }
+    rel_create = RelationshipCreate(
+        source_id=parsed_a,
+        target_id=parsed_b,
+        relationship_type="conflicts_with",
+        created_by=current_user["user_id"],
+        metadata={
+            "merge_suggested": True,
+            "reasoning": reasoning.strip(),
+            "suggested_by": current_user["user_id"],
+        },
+    )
 
-    session = None
     gen = None
     try:
         session, gen = await get_db_session()
         result = await create_relationship_service(rel_create, session)
+
         return {
-            "merge_suggested": True,
             "relationship": result.model_dump(mode="json"),
             "message": (
-                "Merge suggestion recorded as a 'conflicts_with' relationship. "
+                f"Merge suggestion recorded between {memory_a_id} and {memory_b_id}. "
                 "Use get_relationships to find pending merge suggestions."
             ),
         }
@@ -119,22 +110,12 @@ async def suggest_merge(
     except MemoryNotFoundError as exc:
         return {
             "error": True,
-            "message": (
-                f"Memory {exc.memory_id} not found. "
-                "Verify both memory_a_id and memory_b_id refer to existing memory nodes."
-            ),
+            "message": f"Memory node {exc.memory_id} not found.",
         }
     except ValueError as exc:
-        # Duplicate edge — a merge suggestion already exists
-        return {
-            "error": True,
-            "message": (
-                f"A 'conflicts_with' relationship already exists between these memories. "
-                f"Detail: {exc}"
-            ),
-        }
+        return {"error": True, "message": str(exc)}
     except Exception as exc:
-        return {"error": True, "message": f"Failed to create merge suggestion: {exc}"}
+        return {"error": True, "message": f"Failed to suggest merge: {exc}"}
     finally:
         if gen is not None:
             await release_db_session(gen)

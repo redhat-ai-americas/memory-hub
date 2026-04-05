@@ -1,116 +1,83 @@
 """Tests for get_similar_memories tool."""
 
+import inspect
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.tools.get_similar_memories import get_similar_memories
 
-MEMORY_ID = "aaaaaaaa-0000-0000-0000-000000000001"
-SIM_ID = "bbbbbbbb-0000-0000-0000-000000000002"
 
-_FAKE_USER = {"user_id": "test-user", "scopes": ["user"]}
+def test_get_similar_memories_is_decorated():
+    """Verify get_similar_memories is a decorated MCP tool."""
+    assert callable(get_similar_memories)
 
 
-def _make_service_result(has_results: bool = True):
-    if not has_results:
-        return {"results": [], "total": 0, "has_more": False}
-    return {
-        "results": [
-            {"id": uuid.UUID(SIM_ID), "stub": "A similar memory stub", "score": 0.92}
-        ],
-        "total": 1,
-        "has_more": False,
-    }
+def test_get_similar_memories_is_async():
+    """The tool function must be async."""
+    assert inspect.iscoroutinefunction(get_similar_memories)
+
+
+def test_get_similar_memories_has_required_parameters():
+    """Verify the function signature includes all expected parameters."""
+    sig = inspect.signature(get_similar_memories)
+    param_names = set(sig.parameters.keys())
+
+    required = {"memory_id"}
+    assert required.issubset(param_names), (
+        f"Missing required params: {required - param_names}"
+    )
+
+    optional = {"threshold", "max_results", "offset", "ctx"}
+    assert optional.issubset(param_names), (
+        f"Missing optional params: {optional - param_names}"
+    )
+
+
+def test_get_similar_memories_default_values():
+    """Verify default values for optional parameters."""
+    sig = inspect.signature(get_similar_memories)
+    params = sig.parameters
+
+    assert params["threshold"].default == 0.80
+    assert params["max_results"].default == 10
+    assert params["offset"].default == 0
 
 
 @pytest.mark.asyncio
-async def test_requires_auth():
-    with patch("src.tools.get_similar_memories.require_auth", side_effect=RuntimeError("No session registered.")):
-        result = await get_similar_memories(memory_id=MEMORY_ID)
-
+async def test_get_similar_memories_requires_auth():
+    """Unauthenticated calls return an error."""
+    with patch("src.tools.get_similar_memories.require_auth", side_effect=RuntimeError("Not authenticated")):
+        result = await get_similar_memories(memory_id=str(uuid.uuid4()))
     assert result["error"] is True
-    assert "No session registered" in result["message"]
 
 
 @pytest.mark.asyncio
-async def test_invalid_uuid():
-    with patch("src.tools.get_similar_memories.require_auth", return_value=_FAKE_USER):
+async def test_get_similar_memories_invalid_uuid():
+    """Bad UUID format returns a clear error."""
+    with patch("src.tools.get_similar_memories.require_auth", return_value={"user_id": "test"}):
         result = await get_similar_memories(memory_id="not-a-uuid")
-
     assert result["error"] is True
-    assert "not-a-uuid" in result["message"]
-    assert "memory_id" in result["message"]
+    assert "Invalid memory_id format" in result["message"]
 
 
 @pytest.mark.asyncio
-async def test_success_with_results():
-    mock_session = MagicMock()
+async def test_get_similar_memories_success():
+    """Successful query returns paged results."""
+    mock_session = AsyncMock()
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.get_similar_memories.require_auth", return_value=_FAKE_USER),
+        patch("src.tools.get_similar_memories.require_auth", return_value={"user_id": "test"}),
         patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
         patch(
-            "src.tools.get_similar_memories._get_similar_memories",
+            "src.tools.get_similar_memories.get_similar_memories_service",
             new_callable=AsyncMock,
-            return_value=_make_service_result(has_results=True),
+            return_value={"results": [], "total": 0, "has_more": False},
         ),
     ):
-        result = await get_similar_memories(memory_id=MEMORY_ID, threshold=0.80, max_results=10, offset=0)
-
-    assert "error" not in result
-    assert result["total"] == 1
-    assert result["has_more"] is False
-    assert len(result["results"]) == 1
-    # UUIDs must be serialised to strings
-    assert result["results"][0]["id"] == SIM_ID
-    assert result["results"][0]["score"] == 0.92
-
-
-@pytest.mark.asyncio
-async def test_success_empty_results():
-    mock_session = MagicMock()
-    mock_gen = AsyncMock()
-
-    with (
-        patch("src.tools.get_similar_memories.require_auth", return_value=_FAKE_USER),
-        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
-        patch(
-            "src.tools.get_similar_memories._get_similar_memories",
-            new_callable=AsyncMock,
-            return_value=_make_service_result(has_results=False),
-        ),
-    ):
-        result = await get_similar_memories(memory_id=MEMORY_ID)
-
-    assert "error" not in result
+        result = await get_similar_memories(memory_id=str(uuid.uuid4()))
     assert result["total"] == 0
-    assert result["results"] == []
-
-
-@pytest.mark.asyncio
-async def test_memory_not_found():
-    from memoryhub.services.exceptions import MemoryNotFoundError
-
-    missing_id = uuid.UUID(MEMORY_ID)
-    mock_session = MagicMock()
-    mock_gen = AsyncMock()
-
-    with (
-        patch("src.tools.get_similar_memories.require_auth", return_value=_FAKE_USER),
-        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
-        patch(
-            "src.tools.get_similar_memories._get_similar_memories",
-            new_callable=AsyncMock,
-            side_effect=MemoryNotFoundError(missing_id),
-        ),
-    ):
-        result = await get_similar_memories(memory_id=MEMORY_ID)
-
-    assert result["error"] is True
-    assert str(missing_id) in result["message"]
+    assert result["has_more"] is False

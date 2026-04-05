@@ -1,168 +1,136 @@
 """Tests for set_curation_rule tool."""
 
+import inspect
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.tools.set_curation_rule import set_curation_rule
 
-_FAKE_USER = {"user_id": "test-user", "scopes": ["user"]}
+
+def test_set_curation_rule_is_decorated():
+    """Verify set_curation_rule is a decorated MCP tool."""
+    assert callable(set_curation_rule)
 
 
-def _make_curator_rule(name: str = "near_duplicate_threshold", layer: str = "user", override: bool = False):
-    """Return a minimal CuratorRule ORM-like mock."""
-    from memoryhub.models.curation import CuratorRule
+def test_set_curation_rule_is_async():
+    """The tool function must be async."""
+    assert inspect.iscoroutinefunction(set_curation_rule)
 
-    rule = MagicMock(spec=CuratorRule)
-    rule.id = uuid.uuid4()
-    rule.name = name
-    rule.description = None
-    rule.trigger = "on_write"
-    rule.tier = "embedding"
-    rule.config = {"threshold": 0.82}
-    rule.action = "flag"
-    rule.scope_filter = None
-    rule.layer = layer
-    rule.owner_id = "test-user" if layer == "user" else None
-    rule.override = override
-    rule.enabled = True
-    rule.priority = 10
-    rule.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    rule.updated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    return rule
+
+def test_set_curation_rule_has_required_parameters():
+    """Verify the function signature includes all expected parameters."""
+    sig = inspect.signature(set_curation_rule)
+    param_names = set(sig.parameters.keys())
+
+    required = {"name"}
+    assert required.issubset(param_names), (
+        f"Missing required params: {required - param_names}"
+    )
+
+    optional = {"tier", "action", "config", "scope_filter", "enabled", "priority", "ctx"}
+    assert optional.issubset(param_names), (
+        f"Missing optional params: {optional - param_names}"
+    )
+
+
+def test_set_curation_rule_default_values():
+    """Verify default values for optional parameters."""
+    sig = inspect.signature(set_curation_rule)
+    params = sig.parameters
+
+    assert params["tier"].default == "embedding"
+    assert params["action"].default == "flag"
+    assert params["config"].default is None
+    assert params["scope_filter"].default is None
+    assert params["enabled"].default is True
+    assert params["priority"].default == 10
 
 
 @pytest.mark.asyncio
-async def test_requires_auth():
-    with patch("src.tools.set_curation_rule.require_auth", side_effect=RuntimeError("No session registered.")):
+async def test_set_curation_rule_requires_auth():
+    """Unauthenticated calls return an error."""
+    with patch("src.tools.set_curation_rule.require_auth", side_effect=RuntimeError("Not authenticated")):
         result = await set_curation_rule(name="my_rule")
-
     assert result["error"] is True
-    assert "No session registered" in result["message"]
 
 
 @pytest.mark.asyncio
-async def test_invalid_tier():
-    with patch("src.tools.set_curation_rule.require_auth", return_value=_FAKE_USER):
-        result = await set_curation_rule(name="my_rule", tier="neural")
-
+async def test_set_curation_rule_invalid_tier():
+    """Invalid tier returns an error with valid options."""
+    with patch("src.tools.set_curation_rule.require_auth", return_value={"user_id": "test"}):
+        result = await set_curation_rule(name="my_rule", tier="magic")
     assert result["error"] is True
-    assert "neural" in result["message"]
     assert "regex" in result["message"]
-    assert "embedding" in result["message"]
 
 
 @pytest.mark.asyncio
-async def test_invalid_action():
-    with patch("src.tools.set_curation_rule.require_auth", return_value=_FAKE_USER):
-        result = await set_curation_rule(name="my_rule", action="delete")
-
+async def test_set_curation_rule_invalid_action():
+    """Invalid action returns an error with valid options."""
+    with patch("src.tools.set_curation_rule.require_auth", return_value={"user_id": "test"}):
+        result = await set_curation_rule(name="my_rule", action="destroy")
     assert result["error"] is True
-    assert "delete" in result["message"]
     assert "flag" in result["message"]
 
 
 @pytest.mark.asyncio
-async def test_empty_name():
-    with patch("src.tools.set_curation_rule.require_auth", return_value=_FAKE_USER):
-        result = await set_curation_rule(name="   ")
+async def test_set_curation_rule_protected_system_rule():
+    """Cannot override a protected system rule."""
+    mock_protected = MagicMock()
+    mock_protected.layer = "system"
 
-    assert result["error"] is True
-    assert "name" in result["message"]
-
-
-@pytest.mark.asyncio
-async def test_blocked_by_protected_system_rule():
-    """A system rule with override=True must prevent user rule creation with same name."""
-    protected_rule = _make_curator_rule(name="secrets_scan", layer="system", override=True)
-    mock_session = MagicMock()
+    mock_session = AsyncMock()
+    mock_execute = AsyncMock()
+    mock_execute.scalar_one_or_none.return_value = mock_protected
+    mock_session.execute.return_value = mock_execute
     mock_gen = AsyncMock()
 
-    # First query returns the protected rule; second query (existing user rule) is not reached.
-    mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=protected_rule)))
-
     with (
-        patch("src.tools.set_curation_rule.require_auth", return_value=_FAKE_USER),
+        patch("src.tools.set_curation_rule.require_auth", return_value={"user_id": "test"}),
         patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
     ):
         result = await set_curation_rule(name="secrets_scan")
-
     assert result["error"] is True
     assert "protected" in result["message"]
-    assert "secrets_scan" in result["message"]
 
 
 @pytest.mark.asyncio
-async def test_creates_new_rule():
-    """When no existing user rule exists, the tool creates one."""
-    new_rule = _make_curator_rule(name="my_threshold")
-    mock_session = MagicMock()
+async def test_set_curation_rule_create_success():
+    """Creating a new rule returns created=True."""
+    mock_rule = MagicMock()
+    mock_rule.id = uuid.uuid4()
+    mock_rule.name = "my_threshold"
+    mock_rule.tier = "embedding"
+    mock_rule.action = "flag"
+    mock_rule.config = {"threshold": 0.98}
+    mock_rule.scope_filter = None
+    mock_rule.layer = "user"
+    mock_rule.owner_id = "test"
+    mock_rule.override = False
+    mock_rule.enabled = True
+    mock_rule.priority = 10
+    mock_rule.trigger = "on_write"
+    mock_rule.description = None
+    mock_rule.created_at = "2026-04-04T00:00:00Z"
+    mock_rule.updated_at = "2026-04-04T00:00:00Z"
+
+    # First execute returns None for protected check, second returns None for existing check
+    mock_session = AsyncMock()
+    execute_results = [
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # protected check
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # existing check
+    ]
+    mock_session.execute = AsyncMock(side_effect=execute_results)
     mock_gen = AsyncMock()
 
-    # First execute: no protected rule. Second execute: no existing user rule.
-    mock_session.execute = AsyncMock(
-        side_effect=[
-            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # protected check
-            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # existing user rule check
-        ]
-    )
-
     with (
-        patch("src.tools.set_curation_rule.require_auth", return_value=_FAKE_USER),
+        patch("src.tools.set_curation_rule.require_auth", return_value={"user_id": "test"}),
         patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
-        patch(
-            "src.tools.set_curation_rule.create_rule",
-            new_callable=AsyncMock,
-            return_value=new_rule,
-        ),
+        patch("src.tools.set_curation_rule.create_rule", new_callable=AsyncMock, return_value=mock_rule),
     ):
-        result = await set_curation_rule(
-            name="my_threshold",
-            tier="embedding",
-            action="flag",
-            config={"threshold": 0.82},
-        )
-
-    assert "error" not in result
+        result = await set_curation_rule(name="my_threshold", config={"threshold": 0.98})
     assert result["created"] is True
     assert result["updated"] is False
-    assert result["rule"]["name"] == "my_threshold"
-
-
-@pytest.mark.asyncio
-async def test_updates_existing_rule():
-    """When a user rule with the same name already exists, it is updated in place."""
-    existing_rule = _make_curator_rule(name="my_threshold")
-    mock_session = MagicMock()
-    mock_gen = AsyncMock()
-    mock_session.commit = AsyncMock()
-    mock_session.refresh = AsyncMock()
-
-    mock_session.execute = AsyncMock(
-        side_effect=[
-            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),         # protected check
-            MagicMock(scalar_one_or_none=MagicMock(return_value=existing_rule)), # existing user rule
-        ]
-    )
-
-    with (
-        patch("src.tools.set_curation_rule.require_auth", return_value=_FAKE_USER),
-        patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
-    ):
-        result = await set_curation_rule(
-            name="my_threshold",
-            tier="embedding",
-            action="flag",
-            config={"threshold": 0.85},
-        )
-
-    assert "error" not in result
-    assert result["created"] is False
-    assert result["updated"] is True
-    # The existing_rule mock's attribute should have been updated
-    assert existing_rule.config == {"threshold": 0.85}

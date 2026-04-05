@@ -12,3 +12,6 @@ htmlcov/
 .env
 *.env
 .DS_Store
+
+# Added by ggshield
+.cache_ggshield

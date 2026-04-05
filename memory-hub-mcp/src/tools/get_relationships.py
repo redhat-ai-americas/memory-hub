@@ -12,7 +12,10 @@ from src.tools.auth import require_auth
 
 from memoryhub.models.schemas import RelationshipType
 from memoryhub.services.exceptions import MemoryNotFoundError
-from memoryhub.services.graph import get_relationships as get_relationships_service, trace_provenance
+from memoryhub.services.graph import (
+    get_relationships as get_relationships_service,
+    trace_provenance,
+)
 
 _VALID_TYPES = [t.value for t in RelationshipType]
 _VALID_DIRECTIONS = ("outgoing", "incoming", "both")
@@ -78,7 +81,6 @@ async def get_relationships(
     except RuntimeError as exc:
         return {"error": True, "message": str(exc)}
 
-    # Validate node_id
     try:
         parsed_node_id = uuid.UUID(node_id)
     except ValueError:
@@ -87,7 +89,6 @@ async def get_relationships(
             "message": f"Invalid node_id format: {node_id!r}. Must be a valid UUID.",
         }
 
-    # Validate direction
     if direction not in _VALID_DIRECTIONS:
         return {
             "error": True,
@@ -97,7 +98,6 @@ async def get_relationships(
             ),
         }
 
-    # Validate relationship_type if supplied
     if relationship_type is not None and relationship_type not in _VALID_TYPES:
         return {
             "error": True,
@@ -107,7 +107,6 @@ async def get_relationships(
             ),
         }
 
-    session = None
     gen = None
     try:
         session, gen = await get_db_session()
