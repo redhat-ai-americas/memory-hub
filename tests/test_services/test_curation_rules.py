@@ -5,17 +5,8 @@ pgvector-specific similarity checks fall back to returning zero results on SQLit
 so pipeline tests with embeddings only verify the fallback path is clean.
 """
 
-import json
-import uuid
-
 import pytest
-from sqlalchemy import Text, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.types import TypeDecorator
 
-from memoryhub.models.base import Base
-from memoryhub.models.curation import CuratorRule
-from memoryhub.models.memory import MemoryNode, MemoryRelationship
 from memoryhub.models.schemas import (
     CuratorRuleCreate,
     RuleAction,
@@ -26,59 +17,6 @@ from memoryhub.models.schemas import (
 import memoryhub.services.curation.pipeline as curation_pipeline
 from memoryhub.services.curation.pipeline import run_curation_pipeline
 from memoryhub.services.curation.rules import create_rule, load_rules, seed_default_rules
-
-
-class _JsonEncodedVector(TypeDecorator):
-    """Store embedding vectors as JSON text in SQLite for testing."""
-
-    impl = Text
-    cache_ok = True
-
-    def process_bind_param(self, value, dialect):
-        if value is not None:
-            return json.dumps(value)
-        return None
-
-    def process_result_value(self, value, dialect):
-        if value is not None:
-            return json.loads(value)
-        return None
-
-
-@pytest.fixture
-async def async_session():
-    """Create an in-memory SQLite database with the full schema for testing.
-
-    Patches the pgvector Vector column and PostgreSQL-specific server_defaults
-    so that SQLite can create the tables without the pgvector extension.
-    """
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-
-    embedding_col = MemoryNode.__table__.c.embedding
-    original_type = embedding_col.type
-    embedding_col.type = _JsonEncodedVector()
-
-    rel_metadata_col = MemoryRelationship.__table__.c.metadata_
-    original_rel_metadata_default = rel_metadata_col.server_default
-    rel_metadata_col.server_default = None
-
-    rule_config_col = CuratorRule.__table__.c.config
-    original_rule_config_default = rule_config_col.server_default
-    rule_config_col.server_default = None
-
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(text("PRAGMA journal_mode=WAL"))
-            await conn.run_sync(Base.metadata.create_all)
-
-        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        async with session_factory() as session:
-            yield session
-    finally:
-        embedding_col.type = original_type
-        rel_metadata_col.server_default = original_rel_metadata_default
-        rule_config_col.server_default = original_rule_config_default
-        await engine.dispose()
 
 
 # -- Helper --
