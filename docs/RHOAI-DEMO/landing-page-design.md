@@ -236,7 +236,7 @@ An Authorino `AuthConfig` CR defines the auth policy for the MCP
 server Route:
 
 ```yaml
-apiVersion: authorino.kuadrant.io/v1beta3
+apiVersion: authorino.kuadrant.io/v1beta2
 kind: AuthConfig
 metadata:
   name: memoryhub-api
@@ -258,10 +258,10 @@ spec:
       headers:
         x-auth-owner-name:
           plain:
-            value: auth.identity.metadata.annotations.memoryhub\.redhat\.com/owner-name
+            selector: auth.identity.metadata.annotations.memoryhub\.redhat\.com/owner-name
         x-auth-owner-type:
           plain:
-            value: auth.identity.metadata.annotations.memoryhub\.redhat\.com/owner-type
+            selector: auth.identity.metadata.annotations.memoryhub\.redhat\.com/owner-type
 ```
 
 #### UI panel
