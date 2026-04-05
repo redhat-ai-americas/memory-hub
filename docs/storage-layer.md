@@ -53,6 +53,54 @@ The pattern would be: load the adjacency data from PostgreSQL into an in-memory 
 
 This isn't needed for v1 -- recursive CTEs against shallow trees should handle our initial graph complexity. If recursive CTEs become a bottleneck as graph depth or query complexity grows, this is the natural next step. Keeping the graph query interface clean means swapping the traversal engine behind it is a contained change.
 
+### Contradiction tracking
+
+Agents report contradictions when they observe behavior that conflicts with a stored memory. Previously these were stored as a JSON list in the memory node's `metadata_` column — convenient but unqueryable across memories and lost on node updates. The `contradiction_reports` table makes contradictions first-class.
+
+#### `contradiction_reports` table
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | UUID | PK, auto-generated |
+| `memory_id` | UUID FK → memory_nodes | The memory being contradicted. CASCADE on delete — if the memory is removed, its contradiction history goes with it. |
+| `observed_behavior` | Text | What was observed that conflicts. Agents are instructed to be specific ("user ran docker-compose up with 12 services") not vague ("used Docker"). |
+| `confidence` | Float (0.0–1.0) | Reporter's confidence that this is a real contradiction, not a temporary exception. |
+| `reporter` | String(255) | The `owner_id` of the agent/user that filed the report. Sourced from the authenticated session identity. |
+| `created_at` | DateTime (tz-aware) | Auto-timestamped at insert. |
+| `resolved` | Boolean, default false | Whether the contradiction has been addressed (memory updated, report dismissed, etc.). |
+| `resolved_at` | DateTime (tz-aware), nullable | When resolution occurred. Null until resolved. |
+
+#### Relationship to the curation engine
+
+The `report_contradiction` service function:
+1. Verifies the target memory exists (raises `MemoryNotFoundError` if not)
+2. Inserts a row into `contradiction_reports`
+3. Counts unresolved contradictions for that memory
+4. Returns the count to the MCP tool, which compares against a threshold (currently 5)
+
+When the threshold is reached, the MCP tool signals `revision_triggered: true` in its response. The consuming agent is expected to prompt the user for memory review — the system records the signal but doesn't auto-modify the memory.
+
+#### Query patterns
+
+The dashboard's Contradiction Log panel (Panel 5 in the RHOAI demo design) uses these access patterns:
+
+- **Unresolved contradictions for a memory:** `WHERE memory_id = ? AND resolved = false` — used by the curation threshold check and by the dashboard detail view.
+- **All unresolved contradictions, newest first:** `WHERE resolved = false ORDER BY created_at DESC` — the main dashboard panel listing.
+- **Resolution rate over time:** `GROUP BY date_trunc('day', created_at), resolved` — for the dashboard's trend view.
+
+#### Index strategy
+
+Two composite indexes cover the common queries:
+
+- `ix_contradiction_reports_memory_resolved` on `(memory_id, resolved)` — serves the per-memory threshold count and the detail view. The query planner can use this for either column alone or both.
+- `ix_contradiction_reports_resolved_created` on `(resolved, created_at)` — serves the main dashboard listing (unresolved, ordered by date). Also supports the resolution rate query.
+
+No partial index on `resolved = false` for now — the table is append-heavy and most rows will start unresolved, so a partial index wouldn't save much. If the resolved/unresolved ratio shifts heavily toward resolved over time, a partial index becomes worthwhile.
+
+#### Migration path
+
+The move from in-memory (`metadata_["contradictions"]`) to persistent (`contradiction_reports` table) was a clean cut — the service function was rewritten, not dual-pathed. Any contradictions stored in metadata JSON before migration 005 remain there as historical artifacts but are no longer read or written by the service. New contradictions go exclusively to the table.
+
 ## MinIO: Document Storage
 
 MinIO provides S3-compatible object storage for memories that are too large for a database row. Full procedure documents, markdown files with embedded examples, comprehensive project context -- these live in MinIO as objects, with a reference (S3 key) stored in the PostgreSQL node row.
