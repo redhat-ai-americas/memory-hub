@@ -328,7 +328,7 @@ async def search_memories(
 
     results: list[tuple[MemoryNodeRead | MemoryNodeStub, float]] = []
     for node, distance in nodes_with_distance:
-        relevance_score = 1.0 - distance
+        relevance_score = max(0.0, 1.0 - distance)
         has_children, has_rationale = branch_flags.get(node.id, (False, False))
         if node.weight >= weight_threshold:
             results.append(
