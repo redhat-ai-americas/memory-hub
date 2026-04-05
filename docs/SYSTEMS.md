@@ -4,16 +4,18 @@ MemoryHub is composed of eight subsystems. This document is the map -- each subs
 
 | Subsystem | Description | Doc | Status |
 |-----------|-------------|-----|--------|
-| memory-tree | Core data model: tree-structured memories with nodes, branches, weights, and scopes | [memory-tree.md](memory-tree.md) | Design |
-| storage-layer | PostgreSQL + pgvector for vectors and graph, MinIO for documents | [storage-layer.md](storage-layer.md) | Design |
-| curator-agent | Inline curation pipeline (regex, embedding dedup, LLM sampling) plus future background agent for promotion and cross-user analysis | [curator-agent.md](curator-agent.md) | Design |
+| memory-tree | Core data model: tree-structured memories with nodes, branches, weights, and scopes | [memory-tree.md](memory-tree.md) | Implemented |
+| storage-layer | PostgreSQL + pgvector for vectors and graph relationships, MinIO for documents (deferred) | [storage-layer.md](storage-layer.md) | Implemented |
+| curator-agent | Deterministic inline curation pipeline (regex scanning, embedding dedup) with three-layer rules engine. Future background agent for promotion and cross-user analysis | [curator-agent.md](curator-agent.md) | Implemented (Phase 2a) |
 | governance | Access control, immutable audit trail, FIPS compliance, policy enforcement | [governance.md](governance.md) | Design |
-| mcp-server | MCP interface for agent interactions (read, write, search memories) | [mcp-server.md](mcp-server.md) | Skeleton |
+| mcp-server | MCP interface with 12 tools: memory CRUD, semantic search, graph relationships, curation self-service | [mcp-server.md](mcp-server.md) | Implemented |
 | operator | Kubernetes Operator with CRDs for lifecycle management | [operator.md](operator.md) | Skeleton |
 | observability | Grafana dashboards and Prometheus metrics for memory operations | [observability.md](observability.md) | TBD |
 | org-ingestion | Pipeline for scanning external sources and ingesting organizational knowledge | [org-ingestion.md](org-ingestion.md) | TBD |
 
 ## Status definitions
+
+**Implemented** means the subsystem is deployed and functioning on OpenShift with tests. There may be follow-up work (performance tuning, additional features), but the core capability is live.
 
 **Design** means the core concepts are decided and documented, but implementation hasn't started. There may still be open design questions noted in the subsystem doc.
 
