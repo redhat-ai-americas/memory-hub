@@ -15,6 +15,7 @@ spec:
     type: Docker
     dockerStrategy:
       dockerfilePath: Containerfile
+  triggers: []
 ---
 apiVersion: image.openshift.io/v1
 kind: ImageStream
@@ -50,6 +51,8 @@ spec:
     metadata:
       labels:
         app: mcp-server
+      annotations:
+        alpha.image.policy.openshift.io/resolve-names: '*'
     spec:
       containers:
       - name: mcp-server
@@ -62,12 +65,12 @@ spec:
           tcpSocket:
             port: 8080
           initialDelaySeconds: 10
-          periodSeconds: 10
+          periodSeconds: 30
         readinessProbe:
           tcpSocket:
             port: 8080
           initialDelaySeconds: 5
-          periodSeconds: 5
+          periodSeconds: 10
         envFrom:
         - secretRef:
             name: memoryhub-db-credentials
@@ -80,6 +83,8 @@ spec:
           value: "8080"
         - name: MCP_HTTP_PATH
           value: "/mcp/"
+        - name: MCP_LOG_LEVEL
+          value: "INFO"
         - name: MEMORYHUB_USERS_FILE
           value: /config/users.json
         resources:
@@ -88,7 +93,7 @@ spec:
             cpu: "500m"
           requests:
             memory: "256Mi"
-            cpu: "100m"
+            cpu: "250m"
         volumeMounts:
         - name: users-config
           mountPath: /config
