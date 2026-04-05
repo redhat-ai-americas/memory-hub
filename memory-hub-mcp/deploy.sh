@@ -2,9 +2,9 @@
 # Simple deployment script for MCP server to OpenShift
 # Usage: ./deploy.sh [project-name]
 
-set -e
+set -euo pipefail
 
-PROJECT=${1:-mcp-demo}
+PROJECT="${1:-mcp-demo}"
 
 echo "========================================="
 echo "MCP Server Deployment to OpenShift"
@@ -20,16 +20,20 @@ fi
 
 # Create project if it doesn't exist
 echo "→ Setting up project..."
-if oc project $PROJECT &>/dev/null; then
+if oc get project "$PROJECT" &>/dev/null; then
     echo "  Using existing project: $PROJECT"
 else
     echo "  Creating new project: $PROJECT"
-    oc new-project $PROJECT
+    oc new-project "$PROJECT"
 fi
+
+# Apply users configmap (must exist before the Deployment references it)
+echo "→ Applying users configmap..."
+oc apply -f deploy/users-configmap.yaml -n "$PROJECT"
 
 # Apply OpenShift resources
 echo "→ Applying OpenShift resources..."
-sed "s|image: mcp-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/mcp-server:latest|g" openshift.yaml | oc apply -f - -n $PROJECT
+sed "s|image: mcp-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/mcp-server:latest|g" openshift.yaml | oc apply -f - -n "$PROJECT"
 
 # Start build
 echo "→ Building container image..."
@@ -56,16 +60,16 @@ if [ "$FIXED_COUNT" -gt "0" ]; then
 fi
 
 echo "  Starting binary build with filtered context..."
-oc start-build mcp-server --from-dir="$BUILD_DIR" --follow -n $PROJECT
+oc start-build mcp-server --from-dir="$BUILD_DIR" --follow -n "$PROJECT"
 
 # Wait for rollout
 echo "→ Deploying application..."
-oc rollout restart deployment/mcp-server -n $PROJECT 2>/dev/null || true
-oc rollout status deployment/mcp-server -n $PROJECT --timeout=300s
+oc rollout restart deployment/mcp-server -n "$PROJECT" 2>/dev/null || true
+oc rollout status deployment/mcp-server -n "$PROJECT" --timeout=300s
 
 # Get route (host and path)
-ROUTE_HOST=$(oc get route mcp-server -n $PROJECT -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-ROUTE_PATH=$(oc get route mcp-server -n $PROJECT -o jsonpath='{.spec.path}' 2>/dev/null || echo "/mcp/")
+ROUTE_HOST=$(oc get route mcp-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+ROUTE_PATH=$(oc get route mcp-server -n "$PROJECT" -o jsonpath='{.spec.path}' 2>/dev/null || echo "/mcp/")
 
 echo ""
 echo "========================================="

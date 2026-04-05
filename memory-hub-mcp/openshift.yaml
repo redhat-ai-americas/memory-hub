@@ -21,6 +21,22 @@ kind: ImageStream
 metadata:
   name: mcp-server
 ---
+# WARNING: Dev credentials only. For production, use OpenShift Secrets management
+# or HashiCorp Vault. The embedding URL is cluster-specific and must be updated
+# per deployment.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: memoryhub-db-credentials
+type: Opaque
+stringData:
+  MEMORYHUB_DB_HOST: memoryhub-pg.memoryhub-db.svc.cluster.local
+  MEMORYHUB_DB_PORT: "5432"
+  MEMORYHUB_DB_NAME: memoryhub
+  MEMORYHUB_DB_USER: memoryhub
+  MEMORYHUB_DB_PASSWORD: memoryhub-dev-password
+  MEMORYHUB_EMBEDDING_URL: https://all-minilm-l6-v2-embedding-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/embed
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,6 +54,7 @@ spec:
       containers:
       - name: mcp-server
         image: mcp-server:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
           protocol: TCP
@@ -51,6 +68,9 @@ spec:
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 5
+        envFrom:
+        - secretRef:
+            name: memoryhub-db-credentials
         env:
         - name: MCP_TRANSPORT
           value: "http"
@@ -60,6 +80,8 @@ spec:
           value: "8080"
         - name: MCP_HTTP_PATH
           value: "/mcp/"
+        - name: MEMORYHUB_USERS_FILE
+          value: /config/users.json
         resources:
           limits:
             memory: "512Mi"
@@ -67,6 +89,14 @@ spec:
           requests:
             memory: "256Mi"
             cpu: "100m"
+        volumeMounts:
+        - name: users-config
+          mountPath: /config
+          readOnly: true
+      volumes:
+      - name: users-config
+        configMap:
+          name: memoryhub-users
 ---
 apiVersion: v1
 kind: Service
