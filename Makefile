@@ -1,4 +1,4 @@
-.PHONY: help install test test-integration deploy-all deploy-db deploy-mcp migrate clean-mcp
+.PHONY: help install test test-integration deploy-all deploy-db deploy-mcp deploy-auth migrate clean-mcp clean-auth test-auth
 
 # Default target
 help:
@@ -14,8 +14,10 @@ help:
 	@echo "  make deploy-all  - Full stack deploy (PostgreSQL + migrations + MCP server)"
 	@echo "  make deploy-db   - Deploy PostgreSQL only"
 	@echo "  make deploy-mcp  - Deploy MCP server only (skip DB + migrations)"
+	@echo "  make deploy-auth - Deploy auth service to memoryhub-auth project"
 	@echo "  make migrate     - Run Alembic migrations only"
 	@echo "  make clean-mcp   - Remove MCP server from OpenShift"
+	@echo "  make clean-auth  - Remove auth service from OpenShift"
 	@echo ""
 
 # Install core library in development mode
@@ -29,6 +31,10 @@ install:
 test:
 	.venv/bin/pytest tests/ -q -m "not integration"
 	cd memory-hub-mcp && ../.venv/bin/pytest tests/ -q
+
+# Run auth service tests
+test-auth:
+	cd memoryhub-auth && make test
 
 # Run integration tests against real PostgreSQL + pgvector
 test-integration:
@@ -53,3 +59,11 @@ migrate:
 # Remove MCP server
 clean-mcp:
 	cd memory-hub-mcp && make clean PROJECT=memory-hub-mcp
+
+# Deploy auth service
+deploy-auth:
+	cd memoryhub-auth && make deploy PROJECT=memoryhub-auth
+
+# Remove auth service
+clean-auth:
+	cd memoryhub-auth && make clean PROJECT=memoryhub-auth

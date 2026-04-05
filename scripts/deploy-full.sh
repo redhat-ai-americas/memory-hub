@@ -8,11 +8,13 @@ SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 
 DB_NAMESPACE="memoryhub-db"
 MCP_PROJECT="memory-hub-mcp"
+AUTH_PROJECT="memoryhub-auth"
 DB_POD_LABEL="app.kubernetes.io/name=memoryhub-pg"
 
 SKIP_DB=false
 SKIP_MIGRATIONS=false
 SKIP_MCP=false
+SKIP_AUTH=false
 
 START_TIME=$(date +%s)
 
@@ -60,12 +62,14 @@ parse_args() {
             --skip-db)         SKIP_DB=true ;;
             --skip-migrations) SKIP_MIGRATIONS=true ;;
             --skip-mcp)        SKIP_MCP=true ;;
+            --skip-auth)       SKIP_AUTH=true ;;
             -h|--help)
-                echo "Usage: $SCRIPT_NAME [--skip-db] [--skip-migrations] [--skip-mcp]"
+                echo "Usage: $SCRIPT_NAME [--skip-db] [--skip-migrations] [--skip-mcp] [--skip-auth]"
                 echo ""
                 echo "  --skip-db          Skip PostgreSQL deployment"
                 echo "  --skip-migrations  Skip Alembic migrations"
                 echo "  --skip-mcp         Skip MCP server deployment"
+                echo "  --skip-auth        Skip Auth server deployment"
                 exit 0
                 ;;
             *)
@@ -104,6 +108,7 @@ preflight() {
     echo "    PostgreSQL:  $([ "$SKIP_DB" = true ] && echo "skip" || echo "deploy")"
     echo "    Migrations:  $([ "$SKIP_MIGRATIONS" = true ] && echo "skip" || echo "run")"
     echo "    MCP server:  $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
+    echo "    Auth server: $([ "$SKIP_AUTH" = true ] && echo "skip" || echo "deploy")"
 }
 
 # ---------------------------------------------------------------------------
@@ -218,13 +223,40 @@ verify() {
     else
         printf "    %-20s %s\n" "MCP server URL:" "(route not found — check: oc get route -n $MCP_PROJECT)"
     fi
+
+    local auth_route_host
+    auth_route_host=$(oc get route auth-server -n "$AUTH_PROJECT" \
+        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+
+    if [ -n "$auth_route_host" ]; then
+        printf "    %-20s %s\n" "Auth server URL:" "https://${auth_route_host}"
+    else
+        printf "    %-20s %s\n" "Auth server URL:" "(route not found — check: oc get route -n $AUTH_PROJECT)"
+    fi
 }
 
 # ---------------------------------------------------------------------------
-# Future sections (placeholder)
+# Section 3b: Auth Server
 # ---------------------------------------------------------------------------
-# --- 5. Dashboards (future) ---
-# --- 6. Observability (future) ---
+deploy_auth() {
+    banner "3b. Auth Server"
+
+    if [ "$SKIP_AUTH" = true ]; then
+        skipped "Auth server (--skip-auth)"
+        return 0
+    fi
+
+    info "Seeding OAuth clients..."
+    "$REPO_ROOT/.venv/bin/python" "$REPO_ROOT/scripts/seed-oauth-clients.py"
+
+    info "Building and deploying Auth server (project: $AUTH_PROJECT)..."
+    pushd "$REPO_ROOT/memoryhub-auth" > /dev/null
+    make deploy PROJECT="$AUTH_PROJECT"
+    popd > /dev/null
+
+    echo ""
+    echo -e "  ${GREEN}Auth server deployed${RESET}"
+}
 
 # ---------------------------------------------------------------------------
 # Main
@@ -240,6 +272,7 @@ main() {
     deploy_postgresql
     run_migrations
     deploy_mcp
+    deploy_auth
     verify
 
     local secs
