@@ -9,12 +9,17 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from memoryhub.services.curation.rules import load_rules
+from memoryhub.services.curation.rules import load_rules, seed_default_rules
 from memoryhub.services.curation.scanner import scan_content, scan_with_custom_patterns
 from memoryhub.services.curation.similarity import check_similarity
 
 # Actions that immediately halt the pipeline and block the write.
 _TERMINAL_ACTIONS = {"block", "quarantine", "reject_with_pointer"}
+
+# Set to True after the first successful seed so subsequent calls skip the DB check.
+# Concurrent first-writes may both call seed_default_rules — that's fine because
+# the function is idempotent (checks for existing system rules before inserting).
+_rules_seeded = False
 
 
 async def run_curation_pipeline(
@@ -41,6 +46,11 @@ async def run_curation_pipeline(
 
     When blocked=True, the caller must not persist the memory.
     """
+    global _rules_seeded
+    if not _rules_seeded:
+        await seed_default_rules(session)
+        _rules_seeded = True
+
     flags: list[str] = []
     rules = await load_rules(
         trigger="on_write",
