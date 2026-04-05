@@ -8,38 +8,119 @@ governance" at a glance.
 
 PatternFly `Page` with a left nav sidebar and a main content area.
 The sidebar provides navigation between the seven panels below. The default
-view is the Status Overview.
+view is the Memory Graph — the hero panel for the demo.
+
+## Personas
+
+Two primary audiences use this UI:
+
+**Platform Admin** — Focused on operational health, curation policy oversight,
+and a birds-eye view of the memory landscape across all agents and scopes.
+Uses panels 1 (Status Overview), 2 (Memory Graph), 4 (Curation Rules),
+5 (Contradiction Log), and 6 (Observability Links).
+
+**Developer / Team Lead** — Focused on onboarding their agents, managing
+API keys, and understanding what their agents have stored. Uses panels 3
+(Users and Agents), 7 (API Key Management), and the Memory Graph filtered
+to their agent's owner_id.
 
 ## Panels
 
-### 1. Status Overview (default view)
+### 1. Status Overview
 
 High-level health and metrics at a glance.
 
 | Element | Data source | Notes |
 |---|---|---|
-| MCP server health | Health check endpoint | Green/red indicator |
-| Total memories stored | `search_memory` total count | Headline number |
-| Active sessions | Session tracking | Headline number |
-| Memories by scope | Aggregate by scope (user/project/org/enterprise) | Donut chart |
-| Contradiction rate | `report_contradiction` aggregates | Trend sparkline |
-| Recent activity | Latest writes/updates | Time-ordered feed |
+| MCP server health | HTTP health check against the MCP server pod | Green/red indicator |
+| Total memories stored | `SELECT COUNT(*) FROM memory_nodes WHERE is_current = true` | Headline number |
+| Active sessions | Kubernetes API — count of MCP server pods in Running state | Headline number |
+| Memories by scope | `SELECT scope, COUNT(*) FROM memory_nodes WHERE is_current = true GROUP BY scope` | Donut chart |
+| Contradiction rate | Curation rule trigger metadata (limited until `contradiction_reports` table exists — see Panel 5) | Trend sparkline |
+| Recent activity | `SELECT * FROM memory_nodes ORDER BY updated_at DESC LIMIT N` | Time-ordered feed |
 
 PatternFly components: `Card`, `Grid`, `ChartDonut`, `DescriptionList`.
 
-### 2. Memory Browser
+### 2. Memory Graph (default view)
 
-Search and explore the memory tree.
+Interactive visualization of the memory landscape — the hero panel for
+the demo and for understanding what agents are building and how memories
+relate.
 
-- Search bar backed by `search_memory` (semantic search via pgvector)
-- Results show content stub, scope, weight, owner, relevance score
-- Clicking a result expands via `read_memory` with depth, showing the
-  branch structure (rationale, provenance, evidence, etc.)
-- Version history available via `get_memory_history`
-- Relationship links shown inline via `get_relationships`
+The graph is the default and primary view of this panel. It tells the story
+of MemoryHub at a glance: nodes are memories, edges are the relationships
+between them, and the structure reveals how agents reason and accumulate
+knowledge over time.
 
-PatternFly components: `SearchInput`, `DataList`, `TreeView`,
-`ExpandableSection`, `Label` (for scope/weight badges).
+#### Graph visualization
+
+An interactive node-link diagram built from two data sources joined at
+render time:
+
+- **Nodes** — `memory_nodes` where `is_current = true`. Each node represents
+  one active memory.
+- **Edges** — two types:
+  - Tree hierarchy: parent-child edges derived from `parent_id` adjacency list
+  - Explicit relationships: edges from `memory_relationships` table
+    (source_id → target_id with relationship_type)
+
+**Node visual encoding:**
+- Color by `scope` (matching the badge palette: enterprise = red,
+  organizational = blue, project = green, user = grey)
+- Size by `weight` (higher weight = larger node)
+- Icon or shape by `branch_type` (main vs. rationale vs. provenance vs. evidence)
+
+**Edge visual encoding:**
+- Solid line — parent-child tree hierarchy
+- Dashed line — `derived_from`
+- Dotted line — `related_to`
+- Red line — `conflicts_with`
+- Orange line — `supersedes`
+
+**Library candidates:** vis.js, cytoscape.js, or d3-force. These need
+evaluation for PatternFly integration compatibility — vis.js has the
+easiest setup; cytoscape.js is more flexible for custom layouts; d3-force
+offers the most control but requires more implementation work. Pick based
+on available time and PatternFly theming constraints.
+
+#### Filter sidebar
+
+A collapsible sidebar within the panel provides graph-level filtering:
+- Owner (agent or user name — from Authorino Secrets, same source as Panel 3)
+- Scope (enterprise / organizational / project / user)
+- Date range (created_at or updated_at)
+- Relationship type (filter which edge types are visible)
+- Branch type (show only rationale branches, etc.)
+
+Filters translate to SQL `WHERE` clauses against `memory_nodes` and
+`memory_relationships` before the graph data is returned.
+
+#### Node detail drawer
+
+Clicking a node opens a right-side drawer showing:
+- Full memory content
+- Metadata: scope, weight, branch_type, owner_id, created_at, updated_at
+- Version history: walk the `previous_version_id` chain to show prior versions
+- Relationships: list entries from `memory_relationships` where this node
+  is source or target
+
+#### Search
+
+A search input above the graph accepts a text query. The backend runs a
+pgvector similarity query (`SELECT ... ORDER BY embedding <=> query_embedding`)
+and returns matching node IDs. Matching nodes are highlighted/filtered in
+the graph rather than shown in a separate list. This keeps search integrated
+with the graph view rather than fragmenting the UI into two separate modes.
+
+Data queries:
+- Graph data: join `memory_nodes` with `memory_relationships`, filtered by
+  sidebar selections
+- Search: pgvector similarity query on `memory_nodes.embedding`
+- Tree traversal: recursive CTE on `parent_id` for subtree expansion
+- Version history: chain of `previous_version_id` lookups
+
+PatternFly components: `SearchInput`, `Drawer`, `Label` (scope/weight badges),
+`Toolbar` (filter sidebar trigger), `Spinner` (while graph loads).
 
 ### 3. Users and Agents
 
@@ -50,8 +131,9 @@ List the users and agents whose memories are being managed.
   as the API Key Management panel (Panel 7), giving us the owner
   roster without a custom MCP tool
 - Columns: name, owner type (agent/user badge), use case, memory
-  count (from `search_memory` filtered by owner), last active
-- Click through to filter the Memory Browser by that owner
+  count (`SELECT COUNT(*) FROM memory_nodes WHERE owner_id = ? AND is_current = true`),
+  last active
+- Click through to filter the Memory Graph by that owner
 - Agent vs. human distinction via `memoryhub.redhat.com/owner-type`
   label on the Secret
 
@@ -61,12 +143,14 @@ PatternFly components: `Table`, `Label`, `Badge`.
 
 View and manage duplicate detection and quality rules.
 
-- Table of rules from `set_curation_rule` data: name, tier
+- Table of rules from the `curator_rules` table: name, tier
   (regex/embedding), action (flag/block/quarantine/etc.), scope filter,
   priority, enabled status
-- Toggle enabled/disabled inline
-- Create new rule via modal form
-- Show hit count per rule (roadmap — requires tracking)
+- Query: `SELECT * FROM curator_rules ORDER BY priority DESC`
+- Toggle enabled/disabled inline (UI writes back to `curator_rules.enabled`)
+- Create new rule via modal form (INSERT into `curator_rules`)
+- Show hit count per rule (roadmap — requires a trigger count column or
+  separate tracking table)
 
 PatternFly components: `Table`, `Switch`, `Modal`, `Form`,
 `ToggleGroup` (for tier filter).
@@ -78,9 +162,17 @@ Reported contradictions between stored memories and observed behavior.
 - Table: memory ID (linked), observed behavior, confidence, timestamp,
   contradiction count, whether revision was triggered
 - Filter by resolution status
-- Click through to the memory in the Memory Browser
+- Click through to the memory in the Memory Graph
 
-PatternFly components: `Table`, `Label` (severity), `Toolbar` (filters).
+**Current limitation:** There is no `contradiction_reports` table yet —
+contradictions are tracked in-memory by the curation engine and are lost
+on restart. A separate issue has been filed to add persistent contradiction
+tracking. Until that table exists, this panel shows a placeholder state
+with a note explaining the gap, and may surface limited data from
+`curator_rules` trigger metadata where available.
+
+PatternFly components: `Table`, `Label` (severity), `Toolbar` (filters),
+`EmptyState` (placeholder until persistence is implemented).
 
 ### 6. Observability Links
 
@@ -221,10 +313,9 @@ The API key Secrets are also the authoritative source for the
 Users and Agents panel — listing Secrets with the
 `memoryhub.redhat.com/key` label gives us the roster of all
 registered owners. This means Panel 3 doesn't need a separate
-`list_agents` MCP tool; it queries the same Kubernetes Secrets
-that Authorino uses. Memory counts per owner would still come
-from the MCP server (via `search_memory` filtered by owner), but
-the owner list itself comes from the key registry.
+owner list endpoint; it queries the same Kubernetes Secrets
+that Authorino uses. Memory counts per owner come from a filtered
+COUNT query against `memory_nodes`.
 
 PatternFly components: `Table`, `Modal`, `Form`, `ClipboardCopy`
 (for the one-time key display), `Label` (status badges),
@@ -242,3 +333,7 @@ PatternFly components: `Table`, `Modal`, `Form`, `ClipboardCopy`
   `organizational` = blue, `project` = green, `user` = grey
 - Keep the design information-dense — this is a platform admin tool,
   not a consumer product
+- The UI backend queries PostgreSQL directly for all memory data. The
+  MCP server is the agent-facing interface and is not involved in UI
+  data access. Both the UI backend and MCP server read from the same
+  database, but they serve different audiences.

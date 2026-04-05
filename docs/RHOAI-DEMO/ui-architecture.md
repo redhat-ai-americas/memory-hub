@@ -18,16 +18,22 @@ The OdhApplication tile links to this Route.
 │  │ "Open application" ──────────────┼──► memoryhub-ui Route
 │  └───────────────────────────────┘  │      │
 └─────────────────────────────────────┘      ▼
-                                      ┌──────────────┐
-                                      │ MemoryHub UI │  (PatternFly React)
-                                      │ nginx/caddy  │
-                                      └──────┬───────┘
-                                             │ API calls
-                                             ▼
-                                      ┌──────────────┐
-                                      │ MemoryHub    │
-                                      │ MCP Server   │
-                                      └──────────────┘
+                                     ┌──────────────┐
+                                     │ MemoryHub UI │ (PatternFly React)
+                                     │ nginx/caddy  │
+                                     └──────┬───────┘
+                                            │ REST API
+                                            ▼
+                                     ┌──────────────┐
+                                     │ FastAPI      │
+                                     │ Backend      │──► k8s API (Authorino Secrets)
+                                     └──────┬───────┘
+                                            │ SQLAlchemy
+                                            ▼
+                                     ┌──────────────┐
+                                     │ PostgreSQL   │◄── MemoryHub MCP Server
+                                     │ + pgvector   │    (agent-facing, same DB)
+                                     └──────────────┘
 ```
 
 ### Stack
@@ -38,7 +44,7 @@ The OdhApplication tile links to this Route.
 | Component library | PatternFly 6 (matches odh-dashboard) |
 | Build tool | Vite |
 | Container | nginx on UBI 9 (static file serving) |
-| API communication | REST adapter over MCP tools (see below) |
+| API communication | FastAPI backend → PostgreSQL (shared DB with MCP server) |
 
 ### Authentication
 
@@ -60,24 +66,44 @@ needed.
 
 ### API Layer
 
-The MCP server speaks MCP protocol (streamable-http), not REST. The UI
-needs a thin adapter. Two approaches:
+The UI backend is a FastAPI service that queries PostgreSQL directly
+using SQLAlchemy async, sharing the same models from the `memoryhub-core`
+library that the MCP server uses. This is not an MCP client — the UI
+backend and the MCP server are peers that read from the same database.
+The MCP server is not in the data path for the UI.
 
-1. **BFF (Backend for Frontend)** — A lightweight FastAPI service that
-   translates REST calls into MCP tool invocations. Deployed alongside
-   the UI in the same namespace. Also proxies Kubernetes API calls for
-   API key management (listing/creating Authorino Secrets) so the
-   React app doesn't need a direct k8s API dependency.
+The FastAPI backend handles three concerns:
 
-2. **Direct MCP client in browser** — Use the MCP TypeScript SDK to
-   call the MCP server directly from the React app. Simpler deployment
-   (no BFF) but ties the frontend to MCP transport details. Key
-   management would still need a backend for k8s API access.
+1. **Memory data** — SQL queries against `memory_nodes`, `memory_relationships`,
+   and `curator_rules`. pgvector similarity queries for search. No MCP
+   protocol involved.
 
-Recommendation: **BFF approach** for the demo. It keeps the React app
-as a pure REST consumer, provides a single backend for both MCP tool
-calls and Kubernetes Secret management (API keys), and lets us add
-caching and aggregation as needed.
+2. **Kubernetes API** — Listing, creating, and deleting Authorino Secrets
+   for API key management. The React app doesn't hold direct k8s API
+   credentials; the backend proxies these calls.
+
+3. **MCP server health** — A simple HTTP health check against the MCP server
+   pod to report liveness on the Status Overview panel. This is a plain
+   HTTP GET, not an MCP protocol interaction.
+
+### Data Architecture
+
+The UI backend and MCP server are peers sharing the same PostgreSQL database.
+Neither proxies through the other.
+
+- The **MCP server** is the write path for agents: it receives tool calls
+  (write_memory, update_memory, etc.) and commits changes to PostgreSQL.
+- The **UI backend** is the read path for humans: it queries PostgreSQL
+  directly for dashboards, graph visualization, and admin views.
+- The only writes the UI backend makes are to Kubernetes (Authorino Secrets
+  for API key management) and to `curator_rules` (admin curation rule
+  management).
+- Both services use the same SQLAlchemy models from `memoryhub-core`,
+  so schema changes are reflected consistently.
+
+This shared-database pattern is standard for platform UIs — the OpenShift
+console reads from etcd, the same store the API server writes to, without
+proxying through the API server for every read.
 
 ### Pros
 
@@ -157,15 +183,15 @@ as a left-sidebar navigation item alongside Workbenches, Pipelines, etc.
 │                       │ API calls                   │
 │                       ▼                             │
 │               ┌──────────────┐                      │
-│               │ BFF endpoint │  (optional, could    │
-│               │ /api/memory  │   be a dashboard     │
-│               └──────┬───────┘   backend route)     │
+│               │ FastAPI BFF  │  (queries PostgreSQL  │
+│               │ /api/memory  │   directly, not MCP)  │
+│               └──────┬───────┘                       │
 │                      │                              │
 └──────────────────────┼──────────────────────────────┘
                        ▼
                 ┌──────────────┐
-                │ MemoryHub    │
-                │ MCP Server   │
+                │ PostgreSQL   │◄── MemoryHub MCP Server
+                │ + pgvector   │    (agent-facing, same DB)
                 └──────────────┘
 ```
 
