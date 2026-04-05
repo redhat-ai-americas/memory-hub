@@ -8,7 +8,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from src.core.app import mcp
-from src.tools._deps import get_db_session, release_db_session
+from src.tools._deps import get_authenticated_owner, get_db_session, release_db_session
 
 from memoryhub.services.exceptions import MemoryNotFoundError
 from memoryhub.services.memory import report_contradiction as _report_contradiction
@@ -82,12 +82,15 @@ async def report_contradiction(
             "Provide a valid UUID (e.g., '550e8400-e29b-41d4-a716-446655440000')."
         )
 
+    reporter = get_authenticated_owner() or "unknown"
+
     session, gen = await get_db_session()
     try:
         contradiction_count = await _report_contradiction(
             memory_id=parsed_id,
             observed_behavior=observed_behavior,
             confidence=confidence,
+            reporter=reporter,
             session=session,
         )
 

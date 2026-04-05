@@ -315,12 +315,16 @@ async def test_get_memory_history_not_found(async_session):
 
 
 async def test_report_contradiction(async_session, embedding_service):
+    from sqlalchemy import select
+    from memoryhub.models.contradiction import ContradictionReport
+
     node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
 
     count = await report_contradiction(
         node.id,
         observed_behavior="user actually used Docker in last session",
         confidence=0.8,
+        reporter="test-agent",
         session=async_session,
     )
     assert count == 1
@@ -329,19 +333,23 @@ async def test_report_contradiction(async_session, embedding_service):
         node.id,
         observed_behavior="user ran docker-compose up",
         confidence=0.6,
+        reporter="test-agent",
         session=async_session,
     )
     assert count == 2
 
-    # Verify stored in metadata
-    refreshed = await read_memory(node.id, async_session)
-    assert len(refreshed.metadata["contradictions"]) == 2
-    assert refreshed.metadata["contradictions"][0]["confidence"] == 0.8
+    # Verify stored in contradiction_reports table
+    result = await async_session.execute(
+        select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
+    )
+    reports = result.scalars().all()
+    assert len(reports) == 2
+    assert reports[0].confidence == 0.8
 
 
 async def test_report_contradiction_not_found(async_session):
     with pytest.raises(MemoryNotFoundError):
-        await report_contradiction(uuid.uuid4(), "doesn't matter", 0.5, async_session)
+        await report_contradiction(uuid.uuid4(), "doesn't matter", 0.5, "test-agent", async_session)
 
 
 async def test_report_contradiction_preserves_existing_metadata(async_session, embedding_service):
@@ -351,11 +359,43 @@ async def test_report_contradiction_preserves_existing_metadata(async_session, e
         embedding_service,
     )
 
-    await report_contradiction(node.id, "contradicting behavior", 0.7, session=async_session)
+    await report_contradiction(node.id, "contradicting behavior", 0.7, "test-agent", session=async_session)
 
     refreshed = await read_memory(node.id, async_session)
     assert refreshed.metadata["source"] == "user-stated"
-    assert len(refreshed.metadata["contradictions"]) == 1
+    assert "contradictions" not in refreshed.metadata
+
+
+async def test_report_contradiction_resolved_not_counted(async_session, embedding_service):
+    from sqlalchemy import select
+    from memoryhub.models.contradiction import ContradictionReport
+
+    node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
+
+    await report_contradiction(
+        node.id,
+        observed_behavior="user used Docker once",
+        confidence=0.7,
+        reporter="test-agent",
+        session=async_session,
+    )
+
+    # Mark the first report resolved
+    result = await async_session.execute(
+        select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
+    )
+    report = result.scalars().first()
+    report.resolved = True
+    await async_session.commit()
+
+    count = await report_contradiction(
+        node.id,
+        observed_behavior="user ran docker-compose up again",
+        confidence=0.6,
+        reporter="test-agent",
+        session=async_session,
+    )
+    assert count == 1
 
 
 # -- search_memories --

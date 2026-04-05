@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.types import TypeDecorator
 
 from memoryhub.models.base import Base
+from memoryhub.models.contradiction import ContradictionReport
 from memoryhub.models.curation import CuratorRule
 from memoryhub.models.memory import MemoryNode, MemoryRelationship
 from memoryhub.services.embeddings import MockEmbeddingService

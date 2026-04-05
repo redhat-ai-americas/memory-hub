@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from memoryhub.config import AppSettings
+from memoryhub.models.contradiction import ContradictionReport
 from memoryhub.models.memory import MemoryNode
 from memoryhub.models.schemas import (
     MemoryNodeCreate,
@@ -419,34 +420,44 @@ async def report_contradiction(
     memory_id: uuid.UUID,
     observed_behavior: str,
     confidence: float,
+    reporter: str,
     session: AsyncSession,
 ) -> int:
     """Record a contradiction against a memory node.
 
-    Stores contradictions in the node's metadata under a "contradictions" list.
-    Returns the total number of contradictions recorded so far.
+    Inserts a row into contradiction_reports and returns the count of
+    unresolved contradictions for this memory.
     """
-    stmt = select(MemoryNode).where(MemoryNode.id == memory_id)
+    # Verify the memory exists
+    stmt = select(MemoryNode.id).where(MemoryNode.id == memory_id)
     result = await session.execute(stmt)
-    node = result.scalar_one_or_none()
-
-    if node is None:
+    if result.scalar_one_or_none() is None:
         raise MemoryNotFoundError(memory_id)
 
-    metadata = dict(node.metadata_) if node.metadata_ else {}
-    contradictions = list(metadata.get("contradictions", []))
-    contradictions.append(
-        {
-            "observed_behavior": observed_behavior,
-            "confidence": confidence,
-            "reported_at": datetime.now(UTC).isoformat(),
-        }
+    # Insert the contradiction report
+    report = ContradictionReport(
+        memory_id=memory_id,
+        observed_behavior=observed_behavior,
+        confidence=confidence,
+        reporter=reporter,
     )
-    metadata["contradictions"] = contradictions
-    node.metadata_ = metadata
+    session.add(report)
+    await session.flush()
+
+    # Count unresolved contradictions for this memory
+    count_stmt = (
+        select(func.count())
+        .select_from(ContradictionReport)
+        .where(
+            ContradictionReport.memory_id == memory_id,
+            ContradictionReport.resolved == False,  # noqa: E712
+        )
+    )
+    count_result = await session.execute(count_stmt)
+    count = count_result.scalar_one()
 
     await session.commit()
-    return len(contradictions)
+    return count
 
 
 # -- Internal helpers --

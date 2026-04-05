@@ -1,6 +1,7 @@
 """Memory data models (Pydantic + SQLAlchemy)."""
 
 from memoryhub.models.base import Base, TimestampMixin
+from memoryhub.models.contradiction import ContradictionReport
 from memoryhub.models.curation import CuratorRule
 from memoryhub.models.memory import MemoryNode, MemoryRelationship
 from memoryhub.models.schemas import (
@@ -26,6 +27,7 @@ from memoryhub.models.utils import generate_stub
 
 __all__ = [
     "Base",
+    "ContradictionReport",
     "CurationResult",
     "CuratorRule",
     "CuratorRuleCreate",
