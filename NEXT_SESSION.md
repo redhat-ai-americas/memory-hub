@@ -16,28 +16,26 @@ Begin implementing the OAuth 2.1 auth service and the `memoryhub` Python SDK. Th
 - 175 tests (106 unit + 69 MCP), all passing
 - Authorino installed on cluster (v1beta2, defense-in-depth role)
 - RBAC design complete in `docs/governance.md` — enforcement architecture, scope model, audit trail schema, auth architecture
+- `memoryhub` Python SDK on PyPI (placeholder 0.0.1)
+- CI/CD: GH Actions test + release pipelines with trusted publishing
+- Apache 2.0 license
 
 ## What was completed last session
 
 - **#7** governance design — enforcement gaps documented, authorize_read/authorize_write designed, operational scope model (memory:read:user etc.), JWT token model with tenant_id, audit_log table schema with RLS
 - **#13** closed as duplicate of #7
 - **#22** Authorino verified — v1beta2 on cluster, landing-page-design.md fixed
-- Auth architecture pivoted: OAuth 2.1 AS as separate service, three grant types, FastMCP JWTVerifier on MCP server
+- Auth architecture pivoted: OAuth 2.1 AS as separate service, three grant types, FastMCP JWTVerifier on MCP server. Istio identified as preferred defense-in-depth over Authorino.
+- All design docs updated for new auth model (governance.md, mcp-server.md, ui-architecture.md, landing-page-design.md)
+- `memoryhub` registered on PyPI (0.0.1 placeholder): https://pypi.org/project/memoryhub/
+- CI/CD release pipeline: `scripts/release.sh`, GH Actions (test.yml + release.yml), trusted publishing, `/create-release` slash command. Verified end-to-end with sdk/v0.0.1 tag.
+- Apache 2.0 LICENSE file added
 - memoryhub-integration.md rules fixed (hardcoded API key)
 - Retro at `retrospectives/2026-04-05_rbac-governance-design/RETRO.md`
 
 ## Session plan
 
-### 1. Register `memoryhub` on PyPI
-
-The name is available. Create a minimal placeholder package to reserve it:
-- `memoryhub/` package with `__init__.py` and version
-- `pyproject.toml` with metadata
-- Publish to PyPI
-
-This is time-sensitive — someone else could register it.
-
-### 2. Decide: same repo or separate repo for auth service?
+### 1. Decide: same repo or separate repo for auth service?
 
 Arguments for same repo:
 - Shared models (user identity, scopes, tenant)
@@ -51,7 +49,7 @@ Arguments for separate repo:
 
 Discuss and decide before starting implementation.
 
-### 3. Design the auth service
+### 2. Design the auth service
 
 If same repo: `memoryhub-auth/` directory alongside `memory-hub-mcp/`
 If separate repo: new repo with FastAPI
@@ -65,7 +63,7 @@ Key components:
 - Trust configuration (YAML or CRD)
 - Token issuance (short-lived JWT + refresh token)
 
-### 4. Design the Python SDK
+### 3. Design the Python SDK
 
 The `memoryhub` package that agents import:
 - `MemoryHubClient` with api_key and platform_token auth modes
@@ -73,7 +71,7 @@ The `memoryhub` package that agents import:
 - search, read, write, update operations
 - Async-first (with sync wrapper)
 
-### 5. Wire FastMCP JWTVerifier into MCP server
+### 4. Wire FastMCP JWTVerifier into MCP server
 
 Update `memory-hub-mcp/src/core/app.py` to pass `auth=JWTVerifier(...)` to FastMCP constructor. This replaces the custom `register_session` / `require_auth()` pattern.
 
