@@ -1,9 +1,9 @@
-# Retrospective: Infrastructure Automation
+# Retrospective: Infrastructure Automation + Integration Tests
 
 **Date:** 2026-04-04
-**Effort:** Curation rule seeding, deployment automation, manifest consolidation
-**Issues:** #18 (closed), #14 (closed)
-**Commits:** 4e44cb2..27371ff (5 commits)
+**Effort:** Curation rule seeding, deployment automation, manifest consolidation, integration tests
+**Issues:** #18 (closed), #14 (closed), #15 (closed — de-scoped), #17 (closed)
+**Commits:** 4e44cb2..a3cdc4c (10 commits)
 
 ## What We Set Out To Do
 
@@ -21,8 +21,10 @@ Three items: automate curation rule seeding (#18), close #4 on GitHub (retro act
 
 - **Review sub-agents caught real bugs.** The `((WAITED++))` arithmetic bug under `set -e` would have broken every fresh deployment. The `$?` always-zero diagnostic message was also caught. The two-manifest divergence was found by a comparison sub-agent.
 - **Live verification caught the build context gap.** The memoryhub-core/ missing from the build context would not have been found by any local test. Deploying to the cluster found it immediately.
+- **Integration tests found a real service bug.** Cosine similarity scores could go negative because pgvector distance ranges [0, 2] and the service did `1.0 - distance` without clamping. This bug was invisible in SQLite tests — exactly the kind of thing #17 was meant to catch.
 - **Clean commit separation.** Prep commits (manifest hardening, deploy.sh fixes) separated from feature commits (#18, #14), making each individually reviewable and revertable.
 - **Lazy seeding design was simple and correct.** 8 lines of production code, idempotent, no event loop issues, self-healing on table wipe.
+- **Fixture consolidation reduced 198 lines of duplication** across 3 test files down to a single shared conftest.
 
 ## Gaps Identified
 
@@ -40,6 +42,9 @@ Three items: automate curation rule seeding (#18), close #4 on GitHub (retro act
 - [x] Consolidate two openshift.yaml files
 - [x] Include memoryhub-core/ in deploy.sh build context
 - [x] Live-verify deployment against cluster (12 tools loaded, server healthy)
+- [x] Integration tests against real PostgreSQL + pgvector (14 tests, all passing)
+- [x] Fix cosine similarity score clamping bug found by integration tests
+- [x] De-scope #15 (UBI pgvector image — not cost-effective for demo)
 - [ ] Consider having deploy.sh delegate to build-context.sh to avoid parallel context logic
 
 ## Patterns
