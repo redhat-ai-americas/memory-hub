@@ -62,15 +62,17 @@ def _test_content(label: str) -> str:
 
 @pytest.fixture
 async def wjackson_client():
-    """SDK client authenticated as wjackson (user identity).
-
-    Note: FastMCP JWTVerifier validates tokens but doesn't populate
-    get_access_token() for tools. We fall back to register_session
-    to establish identity in the server process.
-    """
+    """SDK client authenticated as wjackson (user identity)."""
     client = _make_client("wjackson", "mh-dev-wjackson-2026")
     async with client:
-        await client._call("register_session", {"api_key": "mh-dev-wjackson-2026"})
+        yield client
+
+
+@pytest.fixture
+async def curator_client():
+    """SDK client authenticated as curator-agent (service identity)."""
+    client = _make_client("curator-agent", "mh-svc-curator-2026")
+    async with client:
         yield client
 
 
@@ -126,38 +128,30 @@ async def test_update_own_memory(wjackson_client: MemoryHubClient):
     assert updated.version == 2
 
 
-async def test_cross_user_read_denied():
-    """A different user cannot read another user's user-scope memory.
+async def test_cross_user_read_denied(
+    wjackson_client: MemoryHubClient,
+    curator_client: MemoryHubClient,
+):
+    """A different identity cannot read another user's user-scope memory.
 
-    Uses a single connection with session switching: write as wjackson,
-    re-register as dev-test, try to read — denied because user-scope
-    requires owner_id == caller.
-
-    Note: Session is process-level, so both register_session calls
-    affect the same server process. This test relies on the last
-    register_session winning, which correctly changes the identity.
+    wjackson writes a user-scope memory, then curator-agent (separate JWT
+    identity) tries to read it. User-scope requires owner_id == caller,
+    so the read is denied even though curator has blanket memory:read.
     """
-    client = _make_client("wjackson", "mh-dev-wjackson-2026")
-    async with client:
-        # Step 1: Register as wjackson and write a memory
-        await client._call("register_session", {"api_key": "mh-dev-wjackson-2026"})
-        content = _test_content("cross-user-isolation")
-        write_result = await client.write(
-            content=content, scope="user", owner_id="wjackson",
-        )
-        wjackson_memory_id = write_result.memory.id
+    content = _test_content("cross-user-isolation")
+    write_result = await wjackson_client.write(
+        content=content, scope="user", owner_id="wjackson",
+    )
+    wjackson_memory_id = write_result.memory.id
 
-        # Step 2: Switch identity to dev-test
-        await client._call("register_session", {"api_key": "mh-dev-test-2026"})
+    # curator-agent tries to read wjackson's user-scope memory — denied
+    with pytest.raises(Exception) as exc_info:
+        await curator_client.read(wjackson_memory_id)
 
-        # Step 3: Try to read wjackson's memory as dev-test — should fail
-        with pytest.raises(Exception) as exc_info:
-            await client.read(wjackson_memory_id)
-
-        error_text = str(exc_info.value).lower()
-        assert any(term in error_text for term in (
-            "authorized", "denied", "not found", "error",
-        )), f"Expected authorization error, got: {exc_info.value}"
+    error_text = str(exc_info.value).lower()
+    assert any(term in error_text for term in (
+        "authorized", "denied", "not found", "error",
+    )), f"Expected authorization error, got: {exc_info.value}"
 
 
 async def test_search_scope_filtering(wjackson_client: MemoryHubClient):
