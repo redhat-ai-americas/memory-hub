@@ -245,6 +245,55 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
   set_curation_rule(name="my_dedup_threshold", tier="embedding", action="reject_with_pointer", config={"threshold": 0.98})
   ```
 
+---
+
+## Phase 3 Tools: Memory Lifecycle
+
+Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase 2c — admins viewing memories in the dashboard needed a way to remove ones that shouldn't be there (sensitive content that slipped past curation, stale test data, etc.). The deletion model is **soft-delete**: a `deleted_at` timestamp marks the memory and its entire version chain as gone, all queries filter it out, but the row stays in the database for audit/recovery. Hard delete is intentionally NOT exposed via MCP — it's reserved for a future admin agent (#45).
+
+### Design Principles for Phase 3
+
+**Destructive operations are annotated, not gated.** Following Anthropic's guidance: tools that make destructive changes should disclose this via tool annotations (`destructiveHint: True`) so the consuming agent's harness can warn the user, but the tool itself doesn't gate behind a confirmation parameter. Confirmation is the consuming agent's job; gating it in the tool would create friction for legitimate batch operations and wouldn't actually prevent a misbehaving agent from confirming its own destructive call.
+
+**Soft-delete is the right primitive for an MCP tool.** Hard delete (physical row removal) is irreversible and dangerous in an agentic context where a single bad tool call could destroy user data. Soft-delete is recoverable, audit-friendly, and consistent with how the rest of the memory tree handles state changes (versioning never destroys, only supersedes). If a privileged actor needs hard delete, that's an admin workflow with elevated authorization, not a routine MCP tool.
+
+**The whole version chain goes together.** Memories have version chains via `previous_version_id`. Deleting only the current version would leave orphaned older versions visible in forensic searches — confusing and useless. Deleting only an old version would leave a "current" pointer to a deleted node — broken. The clean semantics: delete the memory, and the entire chain (plus any child branches) goes with it. Return counts so the agent knows how much was affected.
+
+**Authorization is owner OR admin.** Routine deletions are owner-driven (an agent cleaning up its own user-scope memories). Admin override exists for incident response (the curator agent finds sensitive content, deletes it on behalf of the user). Both paths flow through `memory:write:<scope>` for the routine case and the `memory:admin` scope for the override.
+
+### delete_memory
+
+- **Purpose**: Soft-delete a memory and its entire version chain. The memory and all of its prior versions are marked as deleted via a `deleted_at` timestamp; child branches (rationale, provenance, etc.) attached to any version in the chain are also deleted. Deleted memories are excluded from `search_memory`, `read_memory`, and graph traversal queries. The data remains in the database for audit and potential recovery, but is not visible via any standard read path. Use this when a memory is wrong, sensitive content slipped past curation, or test data needs cleanup. **This is a destructive operation** — there is no MCP-exposed undelete.
+- **Parameters**:
+  - `memory_id` (string/UUID, required): The ID of any version of the memory to delete. The tool walks the version chain in both directions (older via `previous_version_id`, newer via forward search) so passing an old version ID still deletes the entire chain. This matches the behavior of `get_memory_history`, which also accepts any version ID.
+- **Returns**: A summary dict with the count of deleted nodes:
+  - `deleted_id` (string): The memory_id that was passed in (echoed back for confirmation).
+  - `versions_deleted` (integer): How many version-chain nodes were soft-deleted (will be ≥ 1).
+  - `branches_deleted` (integer): How many child branch nodes (rationale, provenance, etc.) were also deleted.
+  - `total_deleted` (integer): Sum of versions + branches. This is the total number of rows the tool affected.
+  The agent uses this to confirm the scope of the deletion: if the agent expected to delete a single memory but `total_deleted` is 8, it knows the memory had a deep history or many branches and can mention this to the user.
+- **Error Cases**:
+  - "Memory [id] not found. It may have already been deleted, or you may not have read access to its scope." — The memory doesn't exist OR the caller's claims don't include `memory:read` for the memory's scope. We don't distinguish these to avoid leaking the existence of memories the caller can't see.
+  - "Memory [id] has already been deleted. Use get_memory_history to see when it was deleted." — Returned when the memory exists but its `deleted_at` is already set. This is a 409-equivalent: idempotent retries are safe but the agent should know the second call did nothing.
+  - "Not authorized to delete this [scope]-scope memory. You need either ownership of the memory or the memory:admin scope." — Caller has read access but not write access to this memory's scope, and is not a memory:admin. Tells the agent exactly what would unblock the call.
+  - "Invalid memory_id format: '[value]'. Expected a UUID string." — The memory_id parameter wasn't a valid UUID. Standard format error.
+- **Tool Annotations**:
+  - `readOnlyHint: false` — Modifies state.
+  - `destructiveHint: true` — **This is the key annotation for delete_memory.** Tells the consuming agent's harness that this operation removes data and should be surfaced to the user (e.g., shown in a confirmation prompt or marked in transcripts).
+  - `idempotentHint: false` — A retry returns "already deleted" rather than the same result. Idempotent in effect (no double-deletion) but not in response.
+  - `openWorldHint: false` — Only affects the local database, no external side effects.
+- **Example Usage**: An agent cleaning up a stale preference:
+  ```
+  delete_memory(memory_id="0fcc6790-957d-4f2a-a398-99a028065005")
+  ```
+  Returns: `{"deleted_id": "0fcc6790-...", "versions_deleted": 3, "branches_deleted": 1, "total_deleted": 4}`. Agent reports to user: "Deleted the 'prefers Vim' preference along with 2 prior versions and its rationale branch (4 records total)."
+
+  An admin agent removing sensitive content via memory:admin scope:
+  ```
+  delete_memory(memory_id="abc-123-leaked-secret")
+  ```
+  Returns the same shape; the agent's authorization to delete came from `memory:admin` rather than ownership.
+
 ## Implementation Order
 
 ### Phase 1 (complete)
@@ -257,13 +306,17 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
 6. **get_memory_history** — Version chain traversal.
 7. **report_contradiction** — Staleness signal accumulation.
 
-### Phase 2 (current)
+### Phase 2 (complete)
 
 8. **create_relationship** — Depends on graph service layer (done in #4). Foundation for provenance and merge suggestions.
 9. **get_relationships** — Depends on create_relationship. Read-only query tool.
 10. **get_similar_memories** — Depends on curation similarity service (done in #6 Phase 2a). Read-only drill-down.
 11. **suggest_merge** — Depends on create_relationship (uses it under the hood to create a `conflicts_with` edge).
 12. **set_curation_rule** — Depends on curation rules service (done in #6 Phase 2a). Most independent of the Phase 2 tools.
+
+### Phase 3 (current)
+
+13. **delete_memory** — Depends on the `deleted_at` column (Alembic 007), the `delete_memory()` service-layer function in `memoryhub.services.memory`, and the `MemoryAlreadyDeletedError` exception. The tool itself is a thin authorization + service-layer wrapper. Refs #42.
 
 ## Dependencies
 
@@ -280,6 +333,13 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
 - **Curation service** (`memoryhub.services.curation`): Pipeline, scanner, similarity, and rules modules. Built in #6 Phase 2a.
 - **`memory_relationships` table**: Migration 003, deployed.
 - **`curator_rules` table**: Migration 004, deployed. Default system rules seeded.
+
+### Phase 3 (resolved)
+
+- **`deleted_at` column on `memory_nodes`**: Alembic migration 007, applied to dev DB.
+- **`delete_memory()` service function** (`memoryhub.services.memory`): Walks the version chain (both directions), collects child branches, and bulk soft-deletes via `UPDATE`. Returns a count summary.
+- **`MemoryAlreadyDeletedError` exception** (`memoryhub.services.exceptions`): Distinguishes "already deleted" from "not found" so the tool can return a 409-equivalent message.
+- **All read paths filter `deleted_at IS NULL`**: `read_memory`, `search_memories`, `_bulk_branch_flags`, `_compute_branch_flags`, and the BFF queries (graph, search, stats, users).
 
 ## Open Questions (Phase 1 — Resolved)
 
