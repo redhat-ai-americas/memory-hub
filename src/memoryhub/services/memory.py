@@ -532,8 +532,13 @@ async def report_contradiction(
     Inserts a row into contradiction_reports and returns the count of
     unresolved contradictions for this memory.
     """
-    # Verify the memory exists
-    stmt = select(MemoryNode.id).where(MemoryNode.id == memory_id)
+    # Verify the memory exists and is not deleted. Reporting a contradiction
+    # against a deleted memory is meaningless — there's no current version
+    # for the curator to revise.
+    stmt = select(MemoryNode.id).where(
+        MemoryNode.id == memory_id,
+        MemoryNode.deleted_at.is_(None),
+    )
     result = await session.execute(stmt)
     if result.scalar_one_or_none() is None:
         raise MemoryNotFoundError(memory_id)

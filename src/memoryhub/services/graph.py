@@ -110,9 +110,17 @@ async def get_relationships(
     if not rels:
         return []
 
-    # Bulk load the stubs for all referenced nodes
-    node_ids = {r.source_id for r in rels} | {r.target_id for r in rels}
-    stubs = await _load_stubs(node_ids, session)
+    # Drop edges where either endpoint references a deleted memory.
+    # The starting node was already verified live by _fetch_current_node above,
+    # so this filter only excludes edges to dangling deleted neighbors.
+    referenced_ids = {r.source_id for r in rels} | {r.target_id for r in rels}
+    alive_ids = await _alive_node_ids(referenced_ids, session)
+    rels = [r for r in rels if r.source_id in alive_ids and r.target_id in alive_ids]
+
+    if not rels:
+        return []
+
+    stubs = await _load_stubs(referenced_ids, session)
 
     return [
         _relationship_to_read(r, source_stub=stubs.get(r.source_id), target_stub=stubs.get(r.target_id))
@@ -151,6 +159,7 @@ async def get_subtree(
             and_(
                 MemoryNode.parent_id.in_(frontier),
                 MemoryNode.is_current.is_(True),
+                MemoryNode.deleted_at.is_(None),
             )
         )
         result = await session.execute(stmt)
@@ -335,9 +344,16 @@ def _relationship_to_read(
 
 
 async def _fetch_current_node(node_id: uuid.UUID, session: AsyncSession) -> MemoryNode:
-    """Load a memory node by ID, requiring it to be current. Raises MemoryNotFoundError."""
+    """Load a memory node by ID, requiring it to be current and not deleted.
+
+    Raises MemoryNotFoundError if missing, superseded, or soft-deleted.
+    """
     stmt = select(MemoryNode).where(
-        and_(MemoryNode.id == node_id, MemoryNode.is_current.is_(True))
+        and_(
+            MemoryNode.id == node_id,
+            MemoryNode.is_current.is_(True),
+            MemoryNode.deleted_at.is_(None),
+        )
     )
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
@@ -347,8 +363,16 @@ async def _fetch_current_node(node_id: uuid.UUID, session: AsyncSession) -> Memo
 
 
 async def _fetch_node_by_id(node_id: uuid.UUID, session: AsyncSession) -> MemoryNode | None:
-    """Load a memory node by ID regardless of is_current status."""
-    stmt = select(MemoryNode).where(MemoryNode.id == node_id)
+    """Load a memory node by ID regardless of is_current status, but excluding deleted.
+
+    Returns None for missing or soft-deleted nodes. Used by traversal helpers
+    (trace_provenance, find_related) where hitting a deleted memory should
+    gracefully terminate the walk rather than raise.
+    """
+    stmt = select(MemoryNode).where(
+        MemoryNode.id == node_id,
+        MemoryNode.deleted_at.is_(None),
+    )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -358,11 +382,12 @@ async def _fetch_both_nodes(
     target_id: uuid.UUID,
     session: AsyncSession,
 ) -> tuple[MemoryNode, MemoryNode]:
-    """Load source and target nodes together, raising MemoryNotFoundError for either missing."""
+    """Load source and target nodes together; both must be current and not deleted."""
     stmt = select(MemoryNode).where(
         and_(
             MemoryNode.id.in_([source_id, target_id]),
             MemoryNode.is_current.is_(True),
+            MemoryNode.deleted_at.is_(None),
         )
     )
     result = await session.execute(stmt)
@@ -380,9 +405,32 @@ async def _load_stubs(
     node_ids: set[uuid.UUID],
     session: AsyncSession,
 ) -> dict[uuid.UUID, str]:
-    """Return a mapping of node_id -> stub for the given IDs."""
+    """Return a mapping of node_id -> stub for the given IDs (excluding deleted)."""
     if not node_ids:
         return {}
-    stmt = select(MemoryNode.id, MemoryNode.stub).where(MemoryNode.id.in_(node_ids))
+    stmt = select(MemoryNode.id, MemoryNode.stub).where(
+        MemoryNode.id.in_(node_ids),
+        MemoryNode.deleted_at.is_(None),
+    )
     result = await session.execute(stmt)
     return {row.id: row.stub for row in result.all()}
+
+
+async def _alive_node_ids(
+    node_ids: set[uuid.UUID],
+    session: AsyncSession,
+) -> set[uuid.UUID]:
+    """Return the subset of node_ids that exist and are not deleted.
+
+    Used by graph queries to drop edges that reference deleted memories.
+    Edges to deleted memories are filtered out of relationship results so
+    callers don't see broken pointers.
+    """
+    if not node_ids:
+        return set()
+    stmt = select(MemoryNode.id).where(
+        MemoryNode.id.in_(node_ids),
+        MemoryNode.deleted_at.is_(None),
+    )
+    result = await session.execute(stmt)
+    return {row[0] for row in result.all()}

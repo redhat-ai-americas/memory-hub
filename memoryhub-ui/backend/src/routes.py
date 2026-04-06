@@ -663,6 +663,30 @@ async def delete_rule(rule_id: str, db: DbDep):
 # ---------------------------------------------------------------------------
 
 
+def _live_contradictions():
+    """Build a base SELECT for ContradictionReport joined to non-deleted memories.
+
+    Reports whose target memory has been soft-deleted are excluded from
+    every list/count/stats response. The MCP report_contradiction tool
+    already prevents new reports from being created against deleted
+    memories, but historical reports against memories that were later
+    deleted still exist in the table and need to be filtered out here.
+    """
+    return select(ContradictionReport).join(
+        MemoryNode, ContradictionReport.memory_id == MemoryNode.id
+    ).where(MemoryNode.deleted_at.is_(None))
+
+
+def _live_contradiction_count():
+    """Count of contradictions whose target memory still exists."""
+    return (
+        select(func.count())
+        .select_from(ContradictionReport)
+        .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
+        .where(MemoryNode.deleted_at.is_(None))
+    )
+
+
 def _contradiction_to_response(report: ContradictionReport) -> ContradictionResponse:
     return ContradictionResponse(
         id=str(report.id),
@@ -683,8 +707,11 @@ async def list_contradictions(
     min_confidence: float | None = Query(default=None),
     max_confidence: float | None = Query(default=None),
 ):
-    """List contradiction reports with optional filters."""
-    stmt = select(ContradictionReport).order_by(ContradictionReport.created_at.desc())
+    """List contradiction reports with optional filters.
+
+    Reports whose target memory has been soft-deleted are excluded.
+    """
+    stmt = _live_contradictions().order_by(ContradictionReport.created_at.desc())
     if resolved is not None:
         stmt = stmt.where(ContradictionReport.resolved == resolved)
     if min_confidence is not None:
@@ -698,37 +725,30 @@ async def list_contradictions(
 
 @router.get("/api/contradictions/stats", response_model=ContradictionStatsResponse)
 async def contradiction_stats(db: DbDep):
-    """Summary counts for the contradiction log dashboard."""
-    total_result = await db.execute(
-        select(func.count()).select_from(ContradictionReport)
-    )
+    """Summary counts for the contradiction log dashboard.
+
+    All counts exclude reports whose target memory has been soft-deleted.
+    """
+    total_result = await db.execute(_live_contradiction_count())
     total = total_result.scalar_one()
 
     unresolved_result = await db.execute(
-        select(func.count()).select_from(ContradictionReport).where(
-            ContradictionReport.resolved.is_(False)
-        )
+        _live_contradiction_count().where(ContradictionReport.resolved.is_(False))
     )
     unresolved = unresolved_result.scalar_one()
 
     high_result = await db.execute(
-        select(func.count()).select_from(ContradictionReport).where(
-            ContradictionReport.confidence > 0.8
-        )
+        _live_contradiction_count().where(ContradictionReport.confidence > 0.8)
     )
     high = high_result.scalar_one()
 
     medium_result = await db.execute(
-        select(func.count()).select_from(ContradictionReport).where(
-            ContradictionReport.confidence.between(0.5, 0.8)
-        )
+        _live_contradiction_count().where(ContradictionReport.confidence.between(0.5, 0.8))
     )
     medium = medium_result.scalar_one()
 
     low_result = await db.execute(
-        select(func.count()).select_from(ContradictionReport).where(
-            ContradictionReport.confidence < 0.5
-        )
+        _live_contradiction_count().where(ContradictionReport.confidence < 0.5)
     )
     low = low_result.scalar_one()
 

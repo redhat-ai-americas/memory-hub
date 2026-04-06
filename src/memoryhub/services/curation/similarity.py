@@ -42,6 +42,7 @@ async def check_similarity(
         MemoryNode.owner_id == owner_id,
         MemoryNode.scope == scope,
         MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
         MemoryNode.embedding.isnot(None),
     ]
     if exclude_id is not None:
@@ -92,7 +93,10 @@ async def get_similar_memories(
     Returns:
       {"results": [{"id": uuid, "stub": str, "score": float}], "total": int, "has_more": bool}
     """
-    source_stmt = select(MemoryNode).where(MemoryNode.id == memory_id)
+    source_stmt = select(MemoryNode).where(
+        MemoryNode.id == memory_id,
+        MemoryNode.deleted_at.is_(None),
+    )
     source_result = await session.execute(source_stmt)
     source = source_result.scalar_one_or_none()
 
@@ -111,6 +115,7 @@ async def get_similar_memories(
         MemoryNode.owner_id == source.owner_id,
         MemoryNode.scope == source.scope,
         MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
         MemoryNode.embedding.isnot(None),
         MemoryNode.id != memory_id,
         distance_expr <= max_distance,
