@@ -15,6 +15,7 @@ spec:
     type: Docker
     dockerStrategy:
       dockerfilePath: Containerfile
+      noCache: true
   triggers: []
 ---
 apiVersion: image.openshift.io/v1
