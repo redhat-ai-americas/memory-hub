@@ -1,166 +1,175 @@
-# Next Session: Dashboard Admin — Client Management, Users/Agents, oauth-proxy
+# Next Session: Curation Rules (Panel 4) and Contradiction Log (Panel 5)
 
 ## Goal
 
-Add admin functionality to the MemoryHub dashboard: self-service OAuth client management (Panel 7), a Users/Agents roster (Panel 3), and oauth-proxy to secure the UI Route. By end of session: platform admins can create/deactivate OAuth clients for agents, see who's using MemoryHub, and the dashboard is behind OpenShift auth.
+Add the remaining admin panels to the MemoryHub dashboard: Curation Rules management (Panel 4) and Contradiction Log (Panel 5). By end of session: admins can view/create/toggle curation rules and browse contradiction reports with resolution tracking.
 
 ## What's deployed and working
 
-- MCP server with RBAC enforcement on OpenShift (`mcp-server` in `memory-hub-mcp` namespace)
-- OAuth 2.1 auth service (`auth-server` in `memoryhub-auth` namespace) — POST /token, /.well-known/*, /healthz
+- MCP server with RBAC enforcement (`mcp-server` in `memory-hub-mcp` namespace)
+- OAuth 2.1 auth service with admin API (`auth-server` in `memoryhub-auth` namespace)
+  - POST /token, /.well-known/*, /healthz
+  - GET/POST/PATCH /admin/clients, POST /admin/clients/{id}/rotate-secret (X-Admin-Key protected)
 - PostgreSQL + pgvector in `memoryhub-db` namespace
 - SDK v0.1.0 on PyPI with JWT auth
-- **Dashboard with Memory Graph + Status Overview** (`memoryhub-ui` in `memory-hub-mcp` namespace)
-  - Interactive force-directed graph (cytoscape.js/fcose), scope coloring, edge click relationship view
-  - Status cards: total memories, donut chart, activity feed, MCP health
-  - OdhApplication tile registered in RHOAI
-- `noCache: true` on all BuildConfigs (no more stale layer issues)
+- **Dashboard with 4 panels** (`memoryhub-ui` in `memory-hub-mcp` namespace)
+  - Memory Graph (cytoscape.js/fcose, scope coloring, edge click, search, owner filter)
+  - Status Overview (counts, donut chart, activity feed, MCP health)
+  - Users & Agents (auth + DB merge, click-to-filter graph)
+  - Client Management (create/deactivate/rotate-secret with one-time secret modal)
+- oauth-proxy sidecar (port 8443, reencrypt TLS, OpenShift login required)
+- OdhApplication tile registered in RHOAI
+- `noCache: true` on all BuildConfigs
 
 ## Design references
 
-- `docs/RHOAI-DEMO/landing-page-design.md` — Panels 3 and 7 specs
-- `docs/RHOAI-DEMO/ui-architecture.md` — oauth-proxy sidecar, auth service admin API
-- `memoryhub-auth/src/models.py` — OAuthClient and RefreshToken SQLAlchemy models
+- `docs/RHOAI-DEMO/landing-page-design.md` — Panels 4 and 5 specs
+- `docs/RHOAI-DEMO/ui-architecture.md` — data architecture
+- `docs/curator-agent.md` — curation rule layers, actions, evaluation order
+- `src/memoryhub/models/curation.py` — CuratorRule SQLAlchemy model
+- `src/memoryhub/models/contradiction.py` — ContradictionReport SQLAlchemy model
+- `src/memoryhub/models/schemas.py` — CuratorRuleCreate, CuratorRuleRead Pydantic schemas
+
+## Database state
+
+Both tables exist and are migrated:
+- `curator_rules` — migration 004
+- `contradiction_reports` — migration 005
+
+## Existing MCP tools
+
+- `set_curation_rule` — creates/updates user-layer rules (tier, action, config, scope_filter, priority)
+- `report_contradiction` — records contradiction against a memory (observed_behavior, confidence)
 
 ## Session scope
 
-### 1. Auth service admin API (`memoryhub-auth/`)
+### 1. BFF endpoints for Curation Rules (Panel 4)
 
-The auth service currently only has token issuance. Add client management endpoints:
+Add to `memoryhub-ui/backend/src/routes.py`:
 
 ```
-GET    /admin/clients              → list all clients
-POST   /admin/clients              → create client (returns client_secret once)
-GET    /admin/clients/{client_id}  → get client detail
-PATCH  /admin/clients/{client_id}  → update (deactivate, change scopes)
-POST   /admin/clients/{client_id}/rotate-secret → generate new secret
+GET    /api/rules              → list all curation rules (from curator_rules table)
+POST   /api/rules              → create a new rule
+GET    /api/rules/{rule_id}    → get rule detail
+PATCH  /api/rules/{rule_id}    → update (toggle enabled, change priority, etc.)
+DELETE /api/rules/{rule_id}    → delete a rule
 ```
 
-**OAuthClient model** (already exists in `memoryhub-auth/src/models.py`):
-- client_id (String, unique), client_secret_hash (String), client_name (String)
-- identity_type (String: user/service), tenant_id (String), default_scopes (JSON)
-- active (Boolean), created_at, updated_at
+These query the DB directly (same pattern as /api/graph, /api/stats — the BFF shares the PostgreSQL database).
 
-These endpoints are admin-only. For this session, protect them with a shared admin secret header (`X-Admin-Key`). In production, they'd be behind the oauth-proxy.
+**CuratorRule model** (already in `src/memoryhub/models/curation.py`):
+- id (UUID PK), name (unique per layer/owner_id), description, trigger, tier (regex/embedding)
+- config (JSON), action (block/quarantine/flag/reject_with_pointer/merge/decay_weight)
+- scope_filter, layer (system/organizational/user), owner_id, override (bool)
+- enabled (bool), priority (int, lower = first), created_at, updated_at
 
-### 2. Panel 7: Client Management (frontend + BFF)
+### 2. BFF endpoints for Contradiction Log (Panel 5)
 
-Self-service OAuth client provisioning.
+```
+GET    /api/contradictions                     → list all contradiction reports (with filters)
+PATCH  /api/contradictions/{id}                → mark as resolved
+GET    /api/contradictions/stats               → summary counts (total, unresolved, by confidence range)
+```
 
-**Table columns:** client_id, client_name, identity_type (user/service badge), scopes, tenant_id, active status, created date
+**ContradictionReport model** (already in `src/memoryhub/models/contradiction.py`):
+- id (UUID PK), memory_id (FK → memory_nodes), observed_behavior (text)
+- confidence (float 0-1), reporter (str), created_at
+- resolved (bool), resolved_at (datetime | None)
+
+### 3. Panel 4: Curation Rules (frontend)
+
+**Table columns:** name, tier (regex/embedding badge), action (badge), scope filter, layer, priority, enabled (Switch toggle), created date
 
 **Actions:**
-- Create client via modal: client_id, client_name, identity_type dropdown, scopes checkboxes, tenant_id
-- Secret shown once in a confirmation modal after creation (with copy button)
-- Deactivate: toggle active status (soft delete, no hard delete)
-- Rotate secret: generates new secret, invalidates old, shows new secret once
+- Toggle enabled/disabled inline via Switch component (PATCH)
+- Create new rule via modal: name, description, tier radio, action dropdown, scope_filter, priority, config JSON editor
+- Delete rule (with confirmation)
 
-**BFF endpoints to add:**
-```
-GET    /api/clients              → proxy to auth service /admin/clients
-POST   /api/clients              → proxy to auth service
-PATCH  /api/clients/{client_id}  → proxy to auth service
-POST   /api/clients/{client_id}/rotate-secret → proxy to auth service
-```
+**Filters:**
+- ToggleGroup for tier (All / Regex / Embedding)
+- Toggle for enabled status (All / Enabled / Disabled)
 
-### 3. Panel 3: Users and Agents
+### 4. Panel 5: Contradiction Log (frontend)
 
-Read-only roster of all identities using MemoryHub.
+**Table columns:** memory ID (truncated, linked), observed behavior (truncated), confidence (color-coded label), reporter, created date, resolved status
 
-**Data sources:**
-- Primary: `oauth_clients` table via auth service admin API (authoritative identity list)
-- Enrichment: `SELECT owner_id, COUNT(*), MAX(updated_at) FROM memory_nodes WHERE is_current = true GROUP BY owner_id` for memory counts and last active time
+**Actions:**
+- Mark as resolved (button or toggle)
+- Click memory ID to navigate to Memory Graph with that node selected
 
-**Table columns:** name, type (user/service badge), use case (from client_name), memory count, last active
+**Filters:**
+- Resolution status (All / Unresolved / Resolved)
+- Confidence range (High >0.8 / Medium 0.5-0.8 / Low <0.5)
 
-**Interaction:** Click a row to filter the Memory Graph by that owner_id (navigate to graph panel with owner filter pre-set).
+**Empty state:** If no contradictions exist, show PatternFly EmptyState with explanation.
 
-### 4. oauth-proxy sidecar
+### 5. Wire into App.tsx
 
-Add OpenShift oauth-proxy to the memoryhub-ui Deployment so the dashboard requires OpenShift login.
-
-**Changes:**
-- Add `oauth-proxy` sidecar container to the Deployment
-- Create ServiceAccount with `serviceaccounts.openshift.io/oauth-redirectreference` annotation
-- Route terminates TLS at oauth-proxy (port 4180), which proxies to the app (port 8080)
-- Update Route to point to oauth-proxy port
-- Update Service to expose both ports
-
-The oauth-proxy authenticates users via OpenShift OAuth and passes the authenticated identity downstream. The dashboard itself doesn't need to validate tokens — it's behind the proxy.
+- Enable "Curation Rules" and "Contradictions" nav items
+- Extend ActivePanel type with `'rules' | 'contradictions'`
 
 ## Architecture
 
 ```
-RHOAI Dashboard
-  └─ OdhApplication tile → memoryhub-ui Route (TLS)
-                                │
-                    ┌───────────┴────────────┐
-                    │   oauth-proxy :4180     │ ← OpenShift OAuth login
-                    └───────────┬────────────┘
-                                │ (authenticated)
-                    ┌───────────┴────────────┐
-                    │   memoryhub-ui :8080    │
-                    │   React + FastAPI BFF   │
-                    └───────────┬────────────┘
-                          │           │
-              ┌───────────┘           └───────────┐
-              │ SQLAlchemy                        │ HTTP
-    ┌─────────┴──────────┐            ┌───────────┴────────────┐
-    │ PostgreSQL+pgvector │            │ auth-server :8081      │
-    └────────────────────┘            │ /admin/clients/*       │
-                                      └────────────────────────┘
+memoryhub-ui :8080
+  │
+  ├─ /api/rules/*            → Direct SQL to curator_rules table
+  ├─ /api/contradictions/*   → Direct SQL to contradiction_reports table
+  ├─ /api/graph, /api/stats  → Direct SQL to memory_nodes (existing)
+  └─ /api/clients, /api/users → Proxy to auth-server :8081 (existing)
 ```
+
+Both new endpoints read/write the shared PostgreSQL database directly — no proxy to other services needed.
 
 ## Implementation plan
 
-### Step 1: Auth service admin API
+### Step 1: Pydantic schemas for rules and contradictions
 
-Add `memoryhub-auth/src/routes/admin.py`:
-- CRUD endpoints for oauth_clients
-- Pydantic schemas for client creation (input) and client detail (output)
-- Client secret generation: `secrets.token_urlsafe(32)`, hash with bcrypt, return plaintext once
-- Admin auth: `X-Admin-Key` header checked against `ADMIN_KEY` env var
-- Tests for all endpoints
+Add to `memoryhub-ui/backend/src/schemas.py`:
+- CurationRuleResponse, CreateRuleRequest, UpdateRuleRequest
+- ContradictionResponse, ContradictionStatsResponse, UpdateContradictionRequest
 
-Redeploy auth service to `memoryhub-auth` namespace.
-
-### Step 2: BFF proxy endpoints
+### Step 2: BFF routes
 
 Add to `memoryhub-ui/backend/src/routes.py`:
-- `/api/clients` endpoints that proxy to the auth service admin API
-- BFF adds the `X-Admin-Key` header from its own env var (frontend never sees the admin key)
-- Auth service URL from `MEMORYHUB_AUTH_SERVICE_URL` env var
+- Curation rules CRUD (5 endpoints)
+- Contradiction log (3 endpoints)
+- Import CuratorRule and ContradictionReport from `memoryhub.models`
 
-### Step 3: Frontend panels
+### Step 3: Frontend types and API client
 
-- `ClientManagement.tsx` — Table with create modal, deactivate toggle, rotate secret action
-- `UsersAgents.tsx` — Read-only roster with memory counts, click-to-filter
-- Wire into App.tsx sidebar nav (replace placeholder items)
-- Add `SecretRevealModal.tsx` — one-time secret display with copy button
+- TypeScript interfaces for rules and contradictions
+- API client functions (fetchRules, createRule, updateRule, deleteRule, fetchContradictions, etc.)
 
-### Step 4: oauth-proxy sidecar
+### Step 4: React components
 
-- Update `memoryhub-ui/openshift.yaml` with sidecar container, ServiceAccount, updated Route
-- Create `memoryhub-ui/openshift/oauth-proxy-sa.yaml` for the ServiceAccount
-- Test that unauthenticated requests redirect to OpenShift login
+- `CurationRules.tsx` — Table with inline toggle, create modal, delete confirmation, tier filter
+- `ContradictionLog.tsx` — Table with resolution filter, confidence badges, empty state
+- Wire into `App.tsx`
 
-### Step 5: Redeploy everything
+### Step 5: Deploy and verify
 
-- Auth service with admin API
-- memoryhub-ui with new panels + oauth-proxy
-- Verify end-to-end: login → dashboard → create client → see in roster
+- Rebuild memoryhub-ui (same build context pattern: temp dir with memoryhub/ + backend/ + frontend/)
+- Verify panels render with data
+
+## Deployment notes
+
+- **Build context**: Must include `memoryhub/` from repo root (contains SQLAlchemy models). Use temp dir with physical copies (symlinks don't work with `oc start-build`).
+- **Image pinning**: After build, use `oc set image deployment/memoryhub-ui memoryhub-ui=<full-digest>` to force the new image (ImageStream caching issue).
+- **Secrets**: Don't put mutable Secrets in openshift.yaml manifests — `oc apply` clobbers them.
+- **oauth-proxy**: Port 8443 HTTPS, cookie-secret must be 16/24/32 bytes exactly.
 
 ## What we're NOT building this session
 
-- Panels 4-6 (Curation Rules, Contradiction Log, Observability Links)
-- Role-based access control on the admin API (all authenticated users are admins for now)
-- Client secret rotation notifications
-- Audit logging for client management operations
+- Panel 6 (Observability Links) — blocked on Grafana dashboards (#10)
+- Rule hit count tracking (requires trigger count column or separate table)
+- Bulk operations on contradictions
+- Curation rule evaluation engine changes
 
 ## What comes after
 
-- **Panels 4+5** — Curation Rules and Contradiction Log
-- **#10 Grafana dashboards** — observability metrics for Panel 6
-- **RBAC on admin API** — restrict client management to specific users/groups
+- **Panel 6** — Observability Links (depends on #10 Grafana dashboards)
 - **#25 CLI client** — typer/click wrapper around the SDK
 - **#36 Frontend component tests** — Vitest + React Testing Library
+- **RBAC on admin API** — restrict client management to specific users/groups
+- **Rule hit tracking** — counter per curation rule for operational visibility
