@@ -2,12 +2,12 @@
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
-  name: mcp-server
+  name: memory-hub-mcp
 spec:
   output:
     to:
       kind: ImageStreamTag
-      name: mcp-server:latest
+      name: memory-hub-mcp:latest
   source:
     type: Binary
     binary: {}
@@ -21,7 +21,7 @@ spec:
 apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
-  name: mcp-server
+  name: memory-hub-mcp
 ---
 # WARNING: Dev credentials only. For production, use OpenShift Secrets management
 # or HashiCorp Vault. The embedding URL is cluster-specific and must be updated
@@ -42,22 +42,22 @@ stringData:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mcp-server
+  name: memory-hub-mcp
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mcp-server
+      app.kubernetes.io/name: memory-hub-mcp
   template:
     metadata:
       labels:
-        app: mcp-server
+        app.kubernetes.io/name: memory-hub-mcp
       annotations:
         alpha.image.policy.openshift.io/resolve-names: '*'
     spec:
       containers:
       - name: mcp-server
-        image: mcp-server:latest
+        image: memory-hub-mcp:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -88,6 +88,16 @@ spec:
           value: "INFO"
         - name: MEMORYHUB_USERS_FILE
           value: /config/users.json
+        # JWT verification — issued by the memoryhub-auth service.
+        # If these vars are unset, the server runs in session-only auth mode
+        # (legacy register_session API key path). Production deployments must
+        # set all three so JWTs from the auth service are verified.
+        - name: AUTH_JWKS_URI
+          value: "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/.well-known/jwks.json"
+        - name: AUTH_ISSUER
+          value: "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com"
+        - name: AUTH_AUDIENCE
+          value: "memoryhub"
         resources:
           limits:
             memory: "512Mi"
@@ -107,10 +117,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: mcp-server
+  name: memory-hub-mcp
 spec:
   selector:
-    app: mcp-server
+    app.kubernetes.io/name: memory-hub-mcp
   ports:
   - port: 8080
     targetPort: 8080
@@ -119,12 +129,12 @@ spec:
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: mcp-server
+  name: memory-hub-mcp
 spec:
   path: /mcp/
   to:
     kind: Service
-    name: mcp-server
+    name: memory-hub-mcp
   port:
     targetPort: 8080
   tls:

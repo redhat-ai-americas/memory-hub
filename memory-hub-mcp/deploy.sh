@@ -33,7 +33,7 @@ oc apply -f deploy/users-configmap.yaml -n "$PROJECT"
 
 # Apply OpenShift resources
 echo "→ Applying OpenShift resources..."
-sed "s|image: mcp-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/mcp-server:latest|g" openshift.yaml | oc apply -f - -n "$PROJECT"
+sed "s|image: memory-hub-mcp:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/memory-hub-mcp:latest|g" openshift.yaml | oc apply -f - -n "$PROJECT"
 
 # Start build
 echo "→ Building container image..."
@@ -67,16 +67,16 @@ if [ "$FIXED_COUNT" -gt "0" ]; then
 fi
 
 echo "  Starting binary build with filtered context..."
-oc start-build mcp-server --from-dir="$BUILD_DIR" --follow -n "$PROJECT"
+oc start-build memory-hub-mcp --from-dir="$BUILD_DIR" --follow -n "$PROJECT"
 
 # Wait for rollout
 echo "→ Deploying application..."
-oc rollout restart deployment/mcp-server -n "$PROJECT" 2>/dev/null || true
-oc rollout status deployment/mcp-server -n "$PROJECT" --timeout=300s
+oc rollout restart deployment/memory-hub-mcp -n "$PROJECT" 2>/dev/null || true
+oc rollout status deployment/memory-hub-mcp -n "$PROJECT" --timeout=300s
 
 # Get route (host and path)
-ROUTE_HOST=$(oc get route mcp-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-ROUTE_PATH=$(oc get route mcp-server -n "$PROJECT" -o jsonpath='{.spec.path}' 2>/dev/null || echo "/mcp/")
+ROUTE_HOST=$(oc get route memory-hub-mcp -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+ROUTE_PATH=$(oc get route memory-hub-mcp -n "$PROJECT" -o jsonpath='{.spec.path}' 2>/dev/null || echo "/mcp/")
 
 echo ""
 echo "========================================="
