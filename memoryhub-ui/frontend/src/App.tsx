@@ -109,11 +109,7 @@ const App: React.FC = () => {
 
   return (
     <Page masthead={masthead} sidebar={sidebar} style={{ height: '100vh', overflow: 'hidden' }}>
-      {activePanel === 'graph' && (
-        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-          <MemoryGraph />
-        </div>
-      )}
+      {activePanel === 'graph' && <MemoryGraph />}
       {activePanel === 'status' && <StatusOverview />}
     </Page>
   );

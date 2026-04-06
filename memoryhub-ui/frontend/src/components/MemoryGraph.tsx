@@ -165,6 +165,7 @@ const MemoryGraph: React.FC = () => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [graphHeight, setGraphHeight] = useState(600);
+  const [needsLayout, setNeedsLayout] = useState(true);
   const cyRef = useRef<cytoscape.Core | null>(null);
   const graphContainerRef = useRef<HTMLDivElement>(null);
 
@@ -237,6 +238,7 @@ const MemoryGraph: React.FC = () => {
       }),
       edges: graphData.edges,
     };
+    setNeedsLayout(true);
     return buildElements(filtered);
   }, [graphData, enabledScopes, ownerFilter]);
 
@@ -265,11 +267,7 @@ const MemoryGraph: React.FC = () => {
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
+      height: 'calc(100vh - 76px)',
     }}>
       <Toolbar style={{ borderBottom: '1px solid var(--pf-v6-global--BorderColor--100)', flexShrink: 0 }}>
         <ToolbarContent>
@@ -390,7 +388,7 @@ const MemoryGraph: React.FC = () => {
                 elements={filteredElements}
                 style={containerStyle}
                 stylesheet={STYLESHEET}
-                layout={{
+                layout={needsLayout ? {
                   name: 'fcose',
                   animate: true,
                   animationDuration: 500,
@@ -403,9 +401,10 @@ const MemoryGraph: React.FC = () => {
                   gravity: 0.25,
                   gravityRange: 3.8,
                   numIter: 2500,
-                } as cytoscape.LayoutOptions}
+                } as cytoscape.LayoutOptions : { name: 'preset' } as cytoscape.LayoutOptions}
                 cy={(cy: cytoscape.Core) => {
                   cyRef.current = cy;
+                  if (needsLayout) setNeedsLayout(false);
                   cy.removeAllListeners();
                   cy.on('tap', 'node', (evt: cytoscape.EventObject) => {
                     const node = evt.target as cytoscape.NodeSingular;
