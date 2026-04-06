@@ -169,7 +169,11 @@ function buildStylesheet(): any[] {
 
 const STYLESHEET = buildStylesheet();
 
-const MemoryGraph: React.FC = () => {
+interface MemoryGraphProps {
+  initialOwnerFilter?: string;
+}
+
+const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
   const [graphData, setGraphData] = useState<GraphResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +185,13 @@ const MemoryGraph: React.FC = () => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<EdgeInfo | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Apply initial owner filter from navigation (e.g. Users & Agents panel)
+  useEffect(() => {
+    if (initialOwnerFilter !== undefined) {
+      setOwnerFilter(initialOwnerFilter);
+    }
+  }, [initialOwnerFilter]);
+
   const [graphHeight, setGraphHeight] = useState(600);
   const [needsLayout, setNeedsLayout] = useState(true);
   const cyRef = useRef<cytoscape.Core | null>(null);

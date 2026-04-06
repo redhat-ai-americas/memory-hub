@@ -78,3 +78,45 @@ export interface SearchMatch {
   id: string;
   score: number;
 }
+
+export interface ClientResponse {
+  client_id: string;
+  client_name: string;
+  identity_type: 'user' | 'service';
+  tenant_id: string;
+  default_scopes: string[];
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClientCreatedResponse extends ClientResponse {
+  client_secret: string;
+}
+
+export interface SecretRotatedResponse {
+  client_id: string;
+  client_secret: string;
+}
+
+export interface CreateClientPayload {
+  client_id: string;
+  client_name: string;
+  identity_type: 'user' | 'service';
+  tenant_id: string;
+  default_scopes: string[];
+}
+
+export interface UpdateClientPayload {
+  client_name?: string;
+  active?: boolean;
+  default_scopes?: string[];
+}
+
+export interface UserEntry {
+  name: string;
+  owner_id: string;
+  identity_type: string;
+  memory_count: number;
+  last_active: string | null;
+}

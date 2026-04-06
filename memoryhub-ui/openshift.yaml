@@ -42,6 +42,7 @@ spec:
       annotations:
         alpha.image.policy.openshift.io/resolve-names: '*'
     spec:
+      serviceAccountName: memoryhub-ui
       containers:
       - name: memoryhub-ui
         image: memoryhub-ui:latest
@@ -67,6 +68,13 @@ spec:
         env:
         - name: MEMORYHUB_MCP_SERVER_URL
           value: "http://mcp-server.memory-hub-mcp.svc:8080/mcp/"
+        - name: MEMORYHUB_AUTH_SERVICE_URL
+          value: "http://auth-server.memoryhub-auth.svc:8081"
+        - name: MEMORYHUB_ADMIN_KEY
+          valueFrom:
+            secretKeyRef:
+              name: auth-admin-key
+              key: AUTH_ADMIN_KEY
         resources:
           limits:
             memory: "512Mi"
@@ -74,17 +82,63 @@ spec:
           requests:
             memory: "256Mi"
             cpu: "250m"
+      - name: oauth-proxy
+        image: registry.redhat.io/openshift4/ose-oauth-proxy:v4.14
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 4180
+          name: proxy
+          protocol: TCP
+        args:
+        - --https-address=:4180
+        - --provider=openshift
+        - --openshift-service-account=memoryhub-ui
+        - --upstream=http://localhost:8080
+        - --tls-cert=/etc/tls/private/tls.crt
+        - --tls-key=/etc/tls/private/tls.key
+        - --cookie-secret-file=/etc/proxy/secrets/session-secret
+        - --pass-basic-auth=false
+        - --pass-access-token=true
+        - --skip-auth-regex=^/healthz$
+        volumeMounts:
+        - name: proxy-tls
+          mountPath: /etc/tls/private
+          readOnly: true
+        - name: proxy-secret
+          mountPath: /etc/proxy/secrets
+          readOnly: true
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+      volumes:
+      - name: proxy-tls
+        secret:
+          secretName: memoryhub-ui-tls
+      - name: proxy-secret
+        secret:
+          secretName: memoryhub-ui-proxy
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: memoryhub-ui
   namespace: memory-hub-mcp
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: memoryhub-ui-tls
 spec:
   selector:
     app: memoryhub-ui
   ports:
-  - port: 8080
+  - name: proxy
+    port: 4180
+    targetPort: 4180
+    protocol: TCP
+  - name: app
+    port: 8080
     targetPort: 8080
     protocol: TCP
 ---
@@ -98,7 +152,7 @@ spec:
     kind: Service
     name: memoryhub-ui
   port:
-    targetPort: 8080
+    targetPort: 4180
   tls:
-    termination: edge
+    termination: reencrypt
     insecureEdgeTerminationPolicy: Redirect

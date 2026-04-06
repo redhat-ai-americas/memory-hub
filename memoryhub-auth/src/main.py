@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from src.config import settings
 from src.errors import OAuthError
 from src.keys import load_keys
-from src.routes import health, token, well_known
+from src.routes import admin, health, token, well_known
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +45,7 @@ async def oauth_error_handler(request, exc: OAuthError):
 app.include_router(token.router)
 app.include_router(well_known.router)
 app.include_router(health.router)
+app.include_router(admin.router)
 
 
 def main():

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     db_password: str = ""
     embedding_url: str = ""
     mcp_server_url: str = "http://mcp-server:8080/mcp/"
+    auth_service_url: str = "http://auth-server.memoryhub-auth.svc:8081"
+    admin_key: str = ""
 
     @property
     def database_url(self) -> str:

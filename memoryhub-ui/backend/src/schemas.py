@@ -84,3 +84,37 @@ class VersionEntry(BaseModel):
 class SearchMatch(BaseModel):
     id: str
     score: float
+
+
+class CreateClientRequest(BaseModel):
+    client_id: str
+    client_name: str
+    identity_type: str = "user"
+    tenant_id: str
+    default_scopes: list[str] = ["memory:read"]
+
+
+class UpdateClientRequest(BaseModel):
+    client_name: str | None = None
+    active: bool | None = None
+    default_scopes: list[str] | None = None
+
+
+class ClientResponse(BaseModel):
+    client_id: str
+    client_name: str
+    identity_type: str
+    tenant_id: str
+    default_scopes: list[str]
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClientCreatedResponse(ClientResponse):
+    client_secret: str
+
+
+class SecretRotatedResponse(BaseModel):
+    client_id: str
+    client_secret: str

@@ -23,6 +23,9 @@ class AuthSettings(BaseSettings):
     access_token_ttl: int = 900  # 15 minutes in seconds
     refresh_token_ttl: int = 86400  # 24 hours in seconds
 
+    # Admin API
+    admin_key: str = ""
+
     # RSA key paths (for OpenShift, mounted from Secret)
     rsa_private_key_path: str = ""
     rsa_public_key_path: str = ""

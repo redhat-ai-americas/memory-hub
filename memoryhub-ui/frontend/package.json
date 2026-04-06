@@ -13,6 +13,7 @@
     "@patternfly/react-core": "^6.1.0",
     "@patternfly/react-icons": "^6.1.0",
     "@patternfly/react-styles": "^6.1.0",
+    "@patternfly/react-table": "^6.4.1",
     "cytoscape": "^3.30.4",
     "cytoscape-fcose": "^2.2.0",
     "react": "^18.3.1",

@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import Settings, get_settings
 from src.database import get_db
 from src.schemas import (
+    ClientCreatedResponse,
+    ClientResponse,
+    CreateClientRequest,
     GraphEdge,
     GraphNode,
     GraphResponse,
@@ -20,7 +23,9 @@ from src.schemas import (
     RecentActivity,
     ScopeCount,
     SearchMatch,
+    SecretRotatedResponse,
     StatsResponse,
+    UpdateClientRequest,
     VersionEntry,
 )
 
@@ -61,6 +66,26 @@ def _rel_to_edge(rel: MemoryRelationship) -> GraphEdge:
         target=str(rel.target_id),
         type=rel.relationship_type,
     )
+
+
+async def _admin_request(
+    settings: Settings,
+    method: str,
+    path: str,
+    json_body: dict | None = None,
+) -> httpx.Response:
+    """Make an authenticated request to the auth service admin API."""
+    url = f"{settings.auth_service_url}{path}"
+    headers = {"X-Admin-Key": settings.admin_key}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.request(method, url, headers=headers, json=json_body)
+    if response.status_code >= 400:
+        try:
+            detail = response.json().get("detail", response.text)
+        except Exception:
+            detail = response.text
+        raise HTTPException(status_code=response.status_code, detail=detail)
+    return response
 
 
 async def _get_embedding(text_query: str, embedding_url: str) -> list[float] | None:
@@ -333,4 +358,109 @@ async def get_memory_history(memory_id: str, db: DbDep):
             created_at=n.created_at,
         )
         for n in chain
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Client management (proxy to auth service admin API)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/clients", response_model=list[ClientResponse])
+async def list_clients(settings: SettingsDep):
+    resp = await _admin_request(settings, "GET", "/admin/clients")
+    return resp.json()
+
+
+@router.post("/api/clients", response_model=ClientCreatedResponse, status_code=201)
+async def create_client(body: CreateClientRequest, settings: SettingsDep):
+    resp = await _admin_request(settings, "POST", "/admin/clients", json_body=body.model_dump())
+    return resp.json()
+
+
+@router.patch("/api/clients/{client_id}", response_model=ClientResponse)
+async def update_client(client_id: str, body: UpdateClientRequest, settings: SettingsDep):
+    payload = body.model_dump(exclude_none=True)
+    resp = await _admin_request(settings, "PATCH", f"/admin/clients/{client_id}", json_body=payload)
+    return resp.json()
+
+
+@router.post("/api/clients/{client_id}/rotate-secret", response_model=SecretRotatedResponse)
+async def rotate_client_secret(client_id: str, settings: SettingsDep):
+    resp = await _admin_request(settings, "POST", f"/admin/clients/{client_id}/rotate-secret")
+    return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Users and agents roster
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/users", response_model=list[dict])
+async def list_users(db: DbDep, settings: SettingsDep):
+    """List all identities with memory counts and last active times.
+
+    Merges OAuth client data from auth service with memory stats from DB.
+    """
+    # Get memory stats per owner from DB
+    stats_query = (
+        select(
+            MemoryNode.owner_id,
+            func.count().label("memory_count"),
+            func.max(MemoryNode.updated_at).label("last_active"),
+        )
+        .where(MemoryNode.is_current.is_(True))
+        .group_by(MemoryNode.owner_id)
+    )
+    result = await db.execute(stats_query)
+    owner_stats = {
+        row[0]: {"memory_count": row[1], "last_active": row[2]}
+        for row in result.fetchall()
+    }
+
+    # Try to get client list from auth service
+    clients = []
+    try:
+        resp = await _admin_request(settings, "GET", "/admin/clients")
+        clients = resp.json()
+    except Exception:
+        logger.warning("Could not fetch clients from auth service, using DB owner_ids only")
+
+    if clients:
+        # Merge: auth clients enriched with memory stats
+        users = []
+        seen_owners: set[str] = set()
+        for c in clients:
+            cid = c["client_id"]
+            stats = owner_stats.get(cid, {"memory_count": 0, "last_active": None})
+            users.append({
+                "name": c["client_name"],
+                "owner_id": cid,
+                "identity_type": c["identity_type"],
+                "memory_count": stats["memory_count"],
+                "last_active": stats["last_active"],
+            })
+            seen_owners.add(cid)
+        # Add owners that exist in DB but not in auth service
+        for owner_id, stats in owner_stats.items():
+            if owner_id not in seen_owners:
+                users.append({
+                    "name": owner_id,
+                    "owner_id": owner_id,
+                    "identity_type": "unknown",
+                    "memory_count": stats["memory_count"],
+                    "last_active": stats["last_active"],
+                })
+        return users
+
+    # Fallback: just DB owner_ids
+    return [
+        {
+            "name": owner_id,
+            "owner_id": owner_id,
+            "identity_type": "unknown",
+            "memory_count": stats["memory_count"],
+            "last_active": stats["last_active"],
+        }
+        for owner_id, stats in owner_stats.items()
     ]

@@ -17,10 +17,12 @@ import {
 } from '@patternfly/react-core';
 import { BarsIcon } from '@patternfly/react-icons';
 
+import ClientManagement from './components/ClientManagement';
 import MemoryGraph from './components/MemoryGraph';
 import StatusOverview from './components/StatusOverview';
+import UsersAgents from './components/UsersAgents';
 
-type ActivePanel = 'graph' | 'status';
+type ActivePanel = 'graph' | 'status' | 'users' | 'clients';
 
 interface NavEntry {
   id: string;
@@ -32,16 +34,22 @@ interface NavEntry {
 const NAV_ITEMS: NavEntry[] = [
   { id: 'graph', label: 'Memory Graph', panel: 'graph' },
   { id: 'status', label: 'Status Overview', panel: 'status' },
-  { id: 'users', label: 'Users & Agents', disabled: true },
+  { id: 'users', label: 'Users & Agents', panel: 'users' },
   { id: 'curation', label: 'Curation Rules', disabled: true },
   { id: 'contradictions', label: 'Contradictions', disabled: true },
   { id: 'observability', label: 'Observability', disabled: true },
-  { id: 'clients', label: 'Client Management', disabled: true },
+  { id: 'clients', label: 'Client Management', panel: 'clients' },
 ];
 
 const App: React.FC = () => {
   const [activePanel, setActivePanel] = useState<ActivePanel>('graph');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [graphOwnerFilter, setGraphOwnerFilter] = useState<string | undefined>();
+
+  const handleNavigateToGraph = (ownerId: string) => {
+    setGraphOwnerFilter(ownerId);
+    setActivePanel('graph');
+  };
 
   const masthead = (
     <Masthead>
@@ -109,8 +117,10 @@ const App: React.FC = () => {
 
   return (
     <Page masthead={masthead} sidebar={sidebar} style={{ height: '100vh', overflow: 'hidden' }}>
-      {activePanel === 'graph' && <MemoryGraph />}
+      {activePanel === 'graph' && <MemoryGraph initialOwnerFilter={graphOwnerFilter} />}
       {activePanel === 'status' && <StatusOverview />}
+      {activePanel === 'users' && <UsersAgents onNavigateToGraph={handleNavigateToGraph} />}
+      {activePanel === 'clients' && <ClientManagement />}
     </Page>
   );
 };
