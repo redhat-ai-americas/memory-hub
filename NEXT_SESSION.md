@@ -1,140 +1,209 @@
-# Next Session: OAuth 2.1 Auth Service
+# Next Session: Python SDK (`memoryhub` on PyPI)
 
 ## Goal
 
-Build and deploy the OAuth 2.1 authorization service — the foundation for MemoryHub's auth architecture. Focus on `client_credentials` grant (the workhorse for agents/SDKs). By end of session: a deployed service that accepts API keys and returns short-lived JWTs, verified on the cluster.
+Ship a real `memoryhub` SDK (v0.1.0) that wraps MemoryHub's MCP tools as typed Python methods with transparent OAuth authentication. By end of session: a published package on PyPI that a developer can `pip install memoryhub` and use to search/read/write memories from any Python agent.
 
 ## What's deployed and working
 
-- MCP server with 12 tools on OpenShift (route: `https://mcp-server-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/`)
+- MCP server with 12 tools on OpenShift (`https://mcp-server-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/`)
+- **OAuth 2.1 auth service** on OpenShift (`https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com`)
+  - `client_credentials` + `refresh_token` grants
+  - RSA-2048 JWT signing, JWKS endpoint
+  - Seeded clients: wjackson (user), curator-agent (service)
 - PostgreSQL + pgvector in `memoryhub-db` namespace
 - Real embeddings via all-MiniLM-L6-v2
-- API key auth with users configmap (to be replaced by OAuth)
-- Deterministic curation pipeline (secrets scan, PII detection, embedding dedup)
-- Contradiction tracking with `contradiction_reports` table + `resolve_contradiction` service function
-- Lazy rule seeding, one-command deployment (`make deploy-all`)
-- 175 tests (106 unit + 69 MCP), all passing locally
-- Authorino installed on cluster (v1beta2, defense-in-depth role)
-- RBAC design complete in `docs/governance.md` — enforcement architecture, scope model, audit trail schema, auth architecture
-- `memoryhub` Python SDK on PyPI (placeholder 0.0.1)
+- MCP server has JWTVerifier loaded (validates tokens when present, doesn't reject unauthenticated yet)
 - CI/CD: GH Actions test + release pipelines with trusted publishing
-- Apache 2.0 license
+- `memoryhub` registered on PyPI (0.0.1 placeholder)
+- 175 core + MCP tests, 51 auth tests — all passing
 
 ## What was completed last session
 
-- **#7** governance design — enforcement gaps documented, authorize_read/authorize_write designed, operational scope model (memory:read:user etc.), JWT token model with tenant_id, audit_log table schema with RLS
-- **#13** closed as duplicate of #7
-- **#22** Authorino verified — v1beta2 on cluster, landing-page-design.md fixed
-- Auth architecture pivoted: OAuth 2.1 AS as separate service, three grant types, FastMCP JWTVerifier on MCP server. Istio identified as preferred defense-in-depth over Authorino.
-- All design docs updated for new auth model (governance.md, mcp-server.md, ui-architecture.md, landing-page-design.md)
-- `memoryhub` registered on PyPI (0.0.1 placeholder): https://pypi.org/project/memoryhub/
-- CI/CD release pipeline: `scripts/release.sh`, GH Actions (test.yml + release.yml), trusted publishing, `/create-release` slash command. Verified end-to-end with sdk/v0.0.1 tag.
-- Apache 2.0 LICENSE file added
-- Retro at `retrospectives/2026-04-05_rbac-governance-design/RETRO.md`
+- Auth service built and deployed (memoryhub-auth/)
+- Migration 006: oauth_clients + refresh_tokens tables
+- MCP server wired with JWTVerifier via AUTH_JWKS_URI env var
+- Key finding: FastMCP 3.2.0 JWTVerifier validates tokens when present but doesn't reject unauthenticated requests. Full enforcement needs RemoteAuthProvider or service-layer checks (planned for #7).
+- Retro at `retrospectives/2026-04-05_oauth-auth-service/RETRO.md`
 
 ## Session plan
 
-### 1. Decide: same repo or separate repo?
+### 1. Design the SDK API surface
 
-Arguments for same repo (`memoryhub-auth/` alongside `memory-hub-mcp/`):
-- Shared models (user identity, scopes, tenant)
-- Easier to keep in sync during rapid development
-- Single CI pipeline (already set up for monorepo)
+The SDK wraps MCP tools as typed Python methods. The developer never sees MCP protocol, JWT tokens, or transport details.
 
-Arguments for separate repo:
-- Independent deployment lifecycle
-- Auth service is a general capability, not MCP-specific
-- Cleaner separation of concerns
+**Target API (from governance.md):**
 
-Discuss and decide before writing code.
-
-### 2. Build the auth service — `client_credentials` grant only
-
-This is the minimum viable auth service. One grant type, one token endpoint.
-
-**Endpoints to implement:**
-- `POST /token` — accepts `grant_type=client_credentials`, `client_id`, `client_secret`, returns JWT + refresh token
-- `GET /.well-known/oauth-authorization-server` — server metadata (RFC 8414)
-- `GET /.well-known/jwks.json` — public key for JWT verification
-
-**Internals:**
-- Client registry backed by PostgreSQL (can share the existing DB or use a new table)
-- RSA key pair for JWT signing (generated on first start, or from a K8s Secret)
-- JWT claims: `sub`, `identity_type`, `tenant_id`, `scopes`, `exp`, `iss`, `aud`
-- Short TTL (5–15 min), refresh token for long sessions
-- FastAPI service on UBI9
-
-**What we're NOT building this session:**
-- `authorization_code` + PKCE grant (browser auth — needed for dashboard, not for agents)
-- Token exchange / RFC 8693 (platform integration — needed for RHOAI, not for MVP)
-- `/register` endpoint (dynamic client registration — can add later)
-- Istio integration (defense-in-depth — separate concern)
-
-### 3. Deploy to OpenShift and verify
-
-- Deploy auth service to its own namespace or alongside the MCP server
-- Verify: `curl -X POST /token` with a valid client_id/secret returns a JWT
-- Verify: JWT can be decoded and has the expected claims
-- Verify: JWKS endpoint returns the public key
-
-### 4. Smoke test: MCP server validates the JWT
-
-Wire `JWTVerifier` into the MCP server's FastMCP constructor, pointing at the auth service's JWKS endpoint. Verify that a tool call with a valid JWT succeeds and one without fails. This doesn't need to be the full enforcement rollout — just proof that the two services talk to each other.
-
-## Architecture reference (from governance.md)
-
-**JWT claims:**
-```json
-{
-  "sub": "wjackson",
-  "identity_type": "user",
-  "tenant_id": "org-acme-healthcare",
-  "scopes": ["memory:read", "memory:write:user"],
-  "iat": 1743879600,
-  "exp": 1743880500,
-  "iss": "https://memoryhub-auth.apps.example.com",
-  "aud": "memoryhub"
-}
-```
-
-**Operational scopes:** `memory:read`, `memory:write:user`, `memory:write:organizational`, `memory:admin`
-
-**FastMCP integration:**
 ```python
-from fastmcp import FastMCP
-from fastmcp.server.auth import JWTVerifier
+from memoryhub import MemoryHubClient
 
-auth = JWTVerifier(
-    jwks_uri="https://memoryhub-auth.apps.example.com/.well-known/jwks.json",
-    issuer="https://memoryhub-auth.apps.example.com",
-    audience="memoryhub",
+# API key auth (client_credentials grant under the hood)
+client = MemoryHubClient(
+    url="https://mcp-server-memory-hub-mcp.apps.example.com/mcp/",
+    auth_url="https://auth-server-memoryhub-auth.apps.example.com",
+    client_id="wjackson",
+    client_secret="mh-dev-wjackson-2026",
 )
-mcp = FastMCP("MemoryHub", auth=auth)
+
+# Or from environment variables
+client = MemoryHubClient.from_env()
+
+# Core operations — async
+results = await client.search("deployment patterns", max_results=5)
+memory = await client.read(memory_id="uuid-here")
+created = await client.write("User prefers Podman over Docker", scope="user", weight=0.9)
+updated = await client.update(memory_id="uuid-here", content="Updated content")
+
+# Lifecycle
+history = await client.get_history(memory_id="uuid-here")
+await client.report_contradiction(memory_id="uuid-here", observed_behavior="...", confidence=0.8)
+
+# Sync wrappers for non-async contexts
+results = client.search_sync("deployment patterns")
 ```
+
+**Decided:** Use FastMCP `Client` with `BearerAuth` over streamable-http. The server already speaks MCP — no reason to build a REST layer.
+
+**Remaining design decisions to discuss:**
+- Async-first with sync wrappers, or sync-first with async variants?
+- How to handle `register_session` — the SDK should call it automatically after connecting, or skip it if JWT auth is active (it becomes a compatibility shim per governance.md).
+- Environment variable naming: `MEMORYHUB_URL`, `MEMORYHUB_AUTH_URL`, `MEMORYHUB_CLIENT_ID`, `MEMORYHUB_CLIENT_SECRET`?
+
+### 2. Implement the SDK
+
+**Structure in `sdk/`:**
+
+```
+sdk/
+├── src/memoryhub/
+│   ├── __init__.py          # Exports MemoryHubClient, __version__
+│   ├── client.py            # MemoryHubClient class
+│   ├── auth.py              # Token management (fetch, cache, refresh, retry-on-401)
+│   ├── models.py            # Pydantic models for Memory, SearchResult, etc.
+│   └── exceptions.py        # MemoryHubError, AuthenticationError, NotFoundError
+├── tests/
+│   ├── conftest.py
+│   ├── test_client.py
+│   ├── test_auth.py
+│   └── test_models.py
+├── pyproject.toml           # Already exists (0.0.1 placeholder)
+└── README.md                # Already exists
+```
+
+**Auth layer (auth.py):**
+- Calls `POST /token` with `client_credentials` grant
+- Caches the access token in memory
+- Refreshes automatically when expired (checks `exp` claim, refreshes with ~30s buffer)
+- Uses refresh token for seamless rotation
+- Retry-on-401: if a tool call gets 401, refresh token and retry once
+
+**Transport layer:**
+- Uses FastMCP `Client` with `BearerAuth` for MCP protocol over streamable-http (decided)
+
+**Dependencies to add to pyproject.toml:**
+- `httpx` (HTTP client for token endpoint + optional REST transport)
+- `pyjwt` (decode token to check expiry without verification)
+- `pydantic>=2.0` (response models)
+- If using MCP transport: `fastmcp>=2.11.3`
+
+### 3. Write tests
+
+- Unit tests for auth token management (mock the token endpoint)
+- Unit tests for response model parsing
+- Integration test: connect to the real deployed MCP server, search memories, verify response structure
+- Test sync wrappers work correctly
+
+### 4. Publish v0.1.0 to PyPI
+
+- Bump version in pyproject.toml to 0.1.0
+- Update README.md with real usage examples
+- Use `/create-release` to tag and publish via GH Actions trusted publishing
+- Verify: `pip install memoryhub` in a clean venv, run a quick smoke test
+
+### 5. Smoke test: use the SDK from a script
+
+Write a small example script that demonstrates the SDK end-to-end:
+```python
+from memoryhub import MemoryHubClient
+
+client = MemoryHubClient.from_env()
+results = await client.search("deployment patterns")
+print(f"Found {len(results)} memories")
+```
+
+## What we're NOT building this session
+
+- Sync wrappers can be deferred if time is short (async-first is fine for v0.1.0)
+- `platform_token=True` (K8s SA token exchange) — needs token_exchange grant, not built yet
+- CLI client (#25) — separate concern, can wrap the SDK later
+- LlamaStack integration (#27) — depends on SDK being done first
+- RBAC enforcement (#7) — next session after this
+
+## MCP tool → SDK method mapping
+
+| MCP Tool | SDK Method | Priority |
+|----------|-----------|----------|
+| `search_memory` | `client.search()` | Must have |
+| `read_memory` | `client.read()` | Must have |
+| `write_memory` | `client.write()` | Must have |
+| `update_memory` | `client.update()` | Must have |
+| `register_session` | Called internally by client | Must have |
+| `get_memory_history` | `client.get_history()` | Should have |
+| `report_contradiction` | `client.report_contradiction()` | Should have |
+| `get_similar_memories` | `client.get_similar()` | Nice to have |
+| `get_relationships` | `client.get_relationships()` | Nice to have |
+| `create_relationship` | `client.create_relationship()` | Nice to have |
+| `suggest_merge` | `client.suggest_merge()` | Nice to have |
+| `set_curation_rule` | `client.set_curation_rule()` | Nice to have |
+
+## Architecture reference
+
+**FastMCP Python client with Bearer auth:**
+```python
+from fastmcp import Client
+from fastmcp.client.auth import BearerAuth
+
+client = Client(
+    "https://mcp-server.apps.example.com/mcp/",
+    auth=BearerAuth(access_token)
+)
+
+async with client:
+    result = await client.call_tool("search_memory", {"query": "test", "max_results": 5})
+```
+
+**OAuth token endpoint:**
+```
+POST https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=wjackson&client_secret=mh-dev-wjackson-2026
+```
+
+Returns: `{"access_token": "eyJ...", "token_type": "bearer", "expires_in": 900, "refresh_token": "...", "scope": "..."}`
 
 ## What comes after this session
 
-- **SDK (`memoryhub` on PyPI):** `MemoryHubClient` wrapping the token exchange + memory operations. Depends on having a real `/token` endpoint to code against.
-- **Full MCP enforcement:** Roll out `authorize_read`/`authorize_write` across all tools, backed by JWT scopes.
-- **Additional grant types:** `authorization_code` + PKCE for the dashboard, token exchange for RHOAI agents.
-- **#19** RHOAI dashboard UI (blocked on auth being real)
+- **#7 RBAC enforcement**: Wire RemoteAuthProvider or service-layer authorize_read/authorize_write. SDK already sends JWTs, so enforcement is transparent to SDK users.
+- **#25 CLI client**: Thin wrapper around the SDK with click/typer.
+- **#27 LlamaStack integration**: Use SDK as the memory provider.
+- **#19 RHOAI dashboard**: Unblocked by auth, independent of SDK.
 
 ## Open backlog (for context, not this session)
 
-- **#7** — Implementation of RBAC enforcement (design done, auth service is prerequisite)
-- **#19** — RHOAI dashboard UI (blocked on auth)
+- **#7** — RBAC enforcement (design done, auth service deployed, needs implementation)
+- **#19** — RHOAI dashboard UI
 - **#21** — Evaluate graph viz library
 - **#24** — Write getStartedMarkDown for OdhApplication CR
 - **#10** — Observability: Grafana dashboards + Prometheus metrics
 - **#11** — Org-ingestion pipeline design
 - **#5** — MinIO for S3 object storage
-- **#25, #26, #27** — CLI, SDK, LlamaStack integration
 
 ## Key conventions
 
-- MCP tools MUST be created via `/plan-tools` → `/create-tools` → `/exercise-tools`
-- Delete existing deployment before redeploying (`make clean-mcp` then `make deploy-mcp`)
-- Use `-n namespace` flags, never `oc project`
+- SDK lives in `sdk/` directory (already exists with placeholder)
+- Package name is `memoryhub` (already registered on PyPI)
+- Use hatchling for builds (already configured in pyproject.toml)
+- MCP tools MUST be created via `/plan-tools` → `/create-tools` → `/exercise-tools` (not applicable for SDK, but noted)
 - Run tests before committing
-- Deploy and verify on cluster as part of implementation, not as an afterthought
-- After architectural changes, check ALL design docs for stale references (lesson from this session's retro)
+- Deploy and verify on cluster as part of implementation
