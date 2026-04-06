@@ -136,7 +136,7 @@ def test_get_claims_session_fallback():
     """When no JWT via either path, fall back to session-based auth."""
     session_user = {
         "user_id": "wjackson",
-        "name": "William Jackson",
+        "name": "Wes Jackson",
         "scopes": ["user", "project", "role", "organizational", "enterprise"],
         "identity_type": "user",
     }

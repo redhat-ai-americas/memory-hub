@@ -2,7 +2,7 @@
   "users": [
     {
       "user_id": "wjackson",
-      "name": "William Jackson",
+      "name": "Wes Jackson",
       "api_key": "mh-dev-wjackson-2026",
       "scopes": ["user", "project", "role", "organizational", "enterprise"]
     },

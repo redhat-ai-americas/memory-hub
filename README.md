@@ -8,7 +8,7 @@ MemoryHub is deployed and available as an MCP server. To connect your Claude Cod
 
 ### 1. Get an API key
 
-Contact William Jackson (wjackson) to get a MemoryHub API key. Each user gets their own key that scopes memories to their identity.
+Contact Wes Jackson (wjackson) to get a MemoryHub API key. Each user gets their own key that scopes memories to their identity.
 
 ### 2. Add the MCP server
 

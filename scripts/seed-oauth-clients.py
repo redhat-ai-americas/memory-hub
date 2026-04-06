@@ -13,7 +13,7 @@ Example clients.json:
     {
       "client_id": "wjackson",
       "client_secret": "your-secret-here",
-      "client_name": "William Jackson",
+      "client_name": "Wes Jackson",
       "identity_type": "user",
       "tenant_id": "default",
       "default_scopes": ["memory:read", "memory:write:user"]
