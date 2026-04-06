@@ -53,6 +53,14 @@ export async function fetchMemoryHistory(id: string): Promise<VersionEntry[]> {
   return apiFetch<VersionEntry[]>(`/memory/${encodeURIComponent(id)}/history`);
 }
 
+export async function deleteMemory(id: string): Promise<void> {
+  const response = await fetch(`${BASE}/memory/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`API error ${response.status}: ${detail}`);
+  }
+}
+
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     method: 'POST',

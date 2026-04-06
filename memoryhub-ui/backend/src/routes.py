@@ -134,7 +134,7 @@ async def get_graph(
     owner_id: str | None = Query(default=None),
 ):
     """Return all current memory nodes and their edges for graph visualization."""
-    stmt = select(MemoryNode).where(MemoryNode.is_current.is_(True))
+    stmt = select(MemoryNode).where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None))
     if scope:
         stmt = stmt.where(MemoryNode.scope == scope)
     if owner_id:
@@ -193,7 +193,7 @@ async def search_graph(
             """
             SELECT id::text, 1 - (embedding <=> CAST(:query_vec AS vector)) AS score
             FROM memory_nodes
-            WHERE is_current = true
+            WHERE is_current = true AND deleted_at IS NULL
             ORDER BY embedding <=> CAST(:query_vec AS vector)
             LIMIT 20
             """
@@ -208,6 +208,7 @@ async def search_graph(
         select(MemoryNode)
         .where(
             MemoryNode.is_current.is_(True),
+            MemoryNode.deleted_at.is_(None),
             (MemoryNode.content.ilike(pattern) | MemoryNode.stub.ilike(pattern)),
         )
         .limit(20)
@@ -226,20 +227,20 @@ async def search_graph(
 async def get_stats(db: DbDep, settings: SettingsDep):
     """Return dashboard statistics."""
     # Total current memories
-    total_result = await db.execute(select(func.count()).select_from(MemoryNode).where(MemoryNode.is_current.is_(True)))
+    total_result = await db.execute(select(func.count()).select_from(MemoryNode).where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None)))
     total = total_result.scalar_one()
 
     # Count by scope
     scope_result = await db.execute(
         select(MemoryNode.scope, func.count().label("cnt"))
-        .where(MemoryNode.is_current.is_(True))
+        .where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None))
         .group_by(MemoryNode.scope)
     )
     scope_counts = [ScopeCount(scope=row[0], count=row[1]) for row in scope_result.fetchall()]
 
     # 10 most recently touched nodes
     recent_result = await db.execute(
-        select(MemoryNode).where(MemoryNode.is_current.is_(True)).order_by(MemoryNode.updated_at.desc()).limit(10)
+        select(MemoryNode).where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None)).order_by(MemoryNode.updated_at.desc()).limit(10)
     )
     recent_nodes = recent_result.scalars().all()
     recent_activity = [
@@ -284,14 +285,18 @@ async def get_memory(memory_id: str, db: DbDep):
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}")
 
-    result = await db.execute(select(MemoryNode).where(MemoryNode.id == parsed_id))
+    result = await db.execute(
+        select(MemoryNode).where(MemoryNode.id == parsed_id, MemoryNode.deleted_at.is_(None))
+    )
     node = result.scalar_one_or_none()
     if node is None:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
 
-    # Children count
+    # Children count (exclude deleted)
     count_result = await db.execute(
-        select(func.count()).select_from(MemoryNode).where(MemoryNode.parent_id == parsed_id)
+        select(func.count()).select_from(MemoryNode).where(
+            MemoryNode.parent_id == parsed_id, MemoryNode.deleted_at.is_(None)
+        )
     )
     children_count = count_result.scalar_one()
 
@@ -371,6 +376,68 @@ async def get_memory_history(memory_id: str, db: DbDep):
 
 
 # ---------------------------------------------------------------------------
+# Memory deletion
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/api/memory/{memory_id}", status_code=204)
+async def delete_memory(memory_id: str, db: DbDep):
+    """Soft-delete a memory and its entire version chain."""
+    from sqlalchemy import update as sa_update
+
+    try:
+        parsed_id = uuid.UUID(memory_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}")
+
+    result = await db.execute(select(MemoryNode).where(MemoryNode.id == parsed_id))
+    node = result.scalar_one_or_none()
+    if node is None:
+        raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
+    if node.deleted_at is not None:
+        raise HTTPException(status_code=409, detail=f"Memory {memory_id!r} is already deleted")
+
+    now = datetime.now(timezone.utc)
+
+    # Collect version chain (walk backwards with cycle guard)
+    version_ids: set = {parsed_id}
+    current = node
+    while current.previous_version_id and current.previous_version_id not in version_ids:
+        version_ids.add(current.previous_version_id)
+        prev_result = await db.execute(select(MemoryNode).where(MemoryNode.id == current.previous_version_id))
+        current = prev_result.scalar_one_or_none()
+        if current is None:
+            break
+
+    # Walk forward through newer versions
+    changed = True
+    while changed:
+        changed = False
+        fwd_result = await db.execute(
+            select(MemoryNode).where(
+                MemoryNode.previous_version_id.in_(list(version_ids)),
+                ~MemoryNode.id.in_(list(version_ids)),
+            )
+        )
+        for fwd_node in fwd_result.scalars().all():
+            version_ids.add(fwd_node.id)
+            changed = True
+
+    # Child branches
+    child_result = await db.execute(select(MemoryNode).where(MemoryNode.parent_id.in_(list(version_ids))))
+    child_ids = {child.id for child in child_result.scalars().all()}
+    all_ids = version_ids | child_ids
+
+    # Bulk soft-delete
+    await db.execute(
+        sa_update(MemoryNode)
+        .where(MemoryNode.id.in_(list(all_ids)))
+        .values(deleted_at=now, is_current=False)
+    )
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
 # Client management (proxy to auth service admin API)
 # ---------------------------------------------------------------------------
 
@@ -418,7 +485,7 @@ async def list_users(db: DbDep, settings: SettingsDep):
             func.count().label("memory_count"),
             func.max(MemoryNode.updated_at).label("last_active"),
         )
-        .where(MemoryNode.is_current.is_(True))
+        .where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None))
         .group_by(MemoryNode.owner_id)
     )
     result = await db.execute(stats_query)

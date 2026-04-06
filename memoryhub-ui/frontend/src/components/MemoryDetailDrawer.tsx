@@ -25,10 +25,14 @@ import {
   Card,
   CardBody,
   CardTitle,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
 } from '@patternfly/react-core';
-import { ArrowRightIcon } from '@patternfly/react-icons';
+import { ArrowRightIcon, TrashIcon } from '@patternfly/react-icons';
 import type { MemoryDetail, VersionEntry } from '@/types';
-import { fetchMemoryDetail, fetchMemoryHistory } from '@/api/client';
+import { fetchMemoryDetail, fetchMemoryHistory, deleteMemory } from '@/api/client';
 import ScopeBadge from './ScopeBadge';
 import { formatRelativeTime, formatDate } from '@/utils/time';
 
@@ -60,11 +64,12 @@ interface MemoryDetailDrawerProps {
   edgeInfo: EdgeInfo | null;
   onClose: () => void;
   onSelectNode: (nodeId: string) => void;
+  onDelete?: () => void;
   children?: React.ReactNode;
 }
 
 const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
-  isOpen, nodeId, edgeInfo, onClose, onSelectNode, children,
+  isOpen, nodeId, edgeInfo, onClose, onSelectNode, onDelete, children,
 }) => {
   const [detail, setDetail] = useState<MemoryDetail | null>(null);
   const [history, setHistory] = useState<VersionEntry[]>([]);
@@ -77,6 +82,10 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
   const [targetDetail, setTargetDetail] = useState<MemoryDetail | null>(null);
   const [edgeLoading, setEdgeLoading] = useState(false);
   const [edgeError, setEdgeError] = useState<string | null>(null);
+
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Load node detail
   useEffect(() => {
@@ -123,6 +132,23 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
       })
       .finally(() => setEdgeLoading(false));
   }, [edgeInfo, isOpen]);
+
+  const handleDelete = async () => {
+    if (!nodeId) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteMemory(nodeId);
+      setDeleteModalOpen(false);
+      setDetail(null);
+      onClose();
+      onDelete?.();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete memory');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const renderEdgePanel = () => {
     if (!edgeInfo) return null;
@@ -480,6 +506,16 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
           </StackItem>
         </Stack>
         <DrawerActions>
+          {detail && !edgeInfo && (
+            <Button
+              variant="danger"
+              size="sm"
+              icon={<TrashIcon />}
+              onClick={() => setDeleteModalOpen(true)}
+            >
+              Delete
+            </Button>
+          )}
           <DrawerCloseButton onClick={onClose} />
         </DrawerActions>
       </DrawerHead>
@@ -490,12 +526,61 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
     </DrawerPanelContent>
   );
 
+  const deleteModal = (
+    <Modal
+      variant="small"
+      isOpen={deleteModalOpen}
+      onClose={() => setDeleteModalOpen(false)}
+      aria-label="Confirm delete"
+    >
+      <ModalHeader title="Delete memory?" />
+      <ModalBody>
+        <Stack hasGutter>
+          <StackItem>
+            This will soft-delete this memory and all versions in its chain.
+            Deleted memories are excluded from search and graph views.
+          </StackItem>
+          {detail && (
+            <StackItem>
+              <Content component="small" style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                {detail.stub}
+              </Content>
+            </StackItem>
+          )}
+          {deleteError && (
+            <StackItem>
+              <Alert variant="danger" title="Delete failed" isInline>
+                {deleteError}
+              </Alert>
+            </StackItem>
+          )}
+        </Stack>
+      </ModalBody>
+      <ModalFooter>
+        <Button
+          variant="danger"
+          onClick={handleDelete}
+          isLoading={deleting}
+          isDisabled={deleting}
+        >
+          Delete
+        </Button>
+        <Button variant="link" onClick={() => setDeleteModalOpen(false)} isDisabled={deleting}>
+          Cancel
+        </Button>
+      </ModalFooter>
+    </Modal>
+  );
+
   return (
-    <Drawer isExpanded={isOpen} position="right" style={{ height: '100%' }}>
-      <DrawerContent panelContent={panelContent} style={{ height: '100%' }}>
-        {children}
-      </DrawerContent>
-    </Drawer>
+    <>
+      {deleteModal}
+      <Drawer isExpanded={isOpen} position="right" style={{ height: '100%' }}>
+        <DrawerContent panelContent={panelContent} style={{ height: '100%' }}>
+          {children}
+        </DrawerContent>
+      </Drawer>
+    </>
   );
 };
 

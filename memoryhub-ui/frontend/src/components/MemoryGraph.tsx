@@ -445,6 +445,11 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
               setSelectedEdge(null);
               setSelectedNodeId(id);
             }}
+            onDelete={() => {
+              setDrawerOpen(false);
+              setSelectedNodeId(null);
+              loadGraph();
+            }}
           >
             {graphData.nodes.length === 0 ? (
               <Flex
