@@ -59,6 +59,17 @@ class WriteResult(BaseModel):
     curation: CurationInfo
 
 
+class DeleteResult(BaseModel):
+    """Result of a delete_memory operation."""
+
+    model_config = ConfigDict(extra="allow")
+
+    deleted_id: str
+    versions_deleted: int = 0
+    branches_deleted: int = 0
+    total_deleted: int = 0
+
+
 class SearchResult(BaseModel):
     """Result of a search_memory operation."""
 

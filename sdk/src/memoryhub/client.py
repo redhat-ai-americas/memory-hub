@@ -19,6 +19,7 @@ from memoryhub.exceptions import (
 from memoryhub.models import (
     ContradictionResult,
     CurationRuleResult,
+    DeleteResult,
     HistoryResult,
     Memory,
     RelationshipInfo,
@@ -238,6 +239,13 @@ class MemoryHubClient:
         })
         return Memory.model_validate(data)
 
+    async def delete(self, memory_id: str) -> DeleteResult:
+        """Soft-delete a memory and its entire version chain."""
+        data = await self._call("delete_memory", {
+            "memory_id": memory_id,
+        })
+        return DeleteResult.model_validate(data)
+
     # ── Lifecycle ───────────────────────────────────────────────────
 
     async def get_history(
@@ -404,4 +412,11 @@ class MemoryHubClient:
         async def _do():
             async with self:
                 return await self.update(memory_id, **kwargs)
+        return self._run_sync(_do())
+
+    def delete_sync(self, memory_id: str) -> DeleteResult:
+        """Synchronous wrapper for delete()."""
+        async def _do():
+            async with self:
+                return await self.delete(memory_id)
         return self._run_sync(_do())
