@@ -1,0 +1,103 @@
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: memoryhub-ui
+  namespace: memory-hub-mcp
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: memoryhub-ui:latest
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  triggers: []
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: memoryhub-ui
+  namespace: memory-hub-mcp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memoryhub-ui
+  namespace: memory-hub-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: memoryhub-ui
+  template:
+    metadata:
+      labels:
+        app: memoryhub-ui
+      annotations:
+        alpha.image.policy.openshift.io/resolve-names: '*'
+    spec:
+      containers:
+      - name: memoryhub-ui
+        image: memoryhub-ui:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        envFrom:
+        - secretRef:
+            name: memoryhub-db-credentials
+        env:
+        - name: MEMORYHUB_MCP_SERVER_URL
+          value: "http://mcp-server.memory-hub-mcp.svc:8080/mcp/"
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memoryhub-ui
+  namespace: memory-hub-mcp
+spec:
+  selector:
+    app: memoryhub-ui
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: memoryhub-ui
+  namespace: memory-hub-mcp
+spec:
+  to:
+    kind: Service
+    name: memoryhub-ui
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

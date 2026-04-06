@@ -1,0 +1,59 @@
+apiVersion: dashboard.opendatahub.io/v1
+kind: OdhApplication
+metadata:
+  name: memoryhub
+  namespace: redhat-ods-applications
+  labels:
+    app.opendatahub.io/rhods-dashboard: "true"
+  annotations:
+    opendatahub.io/categories: "Model development"
+spec:
+  displayName: MemoryHub
+  description: >-
+    Centralized agent memory with governance and curation
+    for OpenShift AI workloads.
+  category: Red Hat managed
+  provider: "Red Hat"
+  support: "red hat"
+  route: memoryhub-ui
+  routeNamespace: memory-hub-mcp
+  docsLink: ""
+  getStartedLink: ""
+  getStartedMarkDown: |
+    # MemoryHub
+
+    Centralized, governed memory for AI agents running on OpenShift AI.
+
+    ## Getting Started
+
+    1. Click **Open application** to access the MemoryHub dashboard.
+    2. Browse agent memories in the interactive Memory Graph.
+    3. Review status metrics, scope distribution, and recent activity.
+    4. Use the MCP server endpoint to connect your agents.
+
+    ## Architecture
+
+    - **MCP Server** — Agents read/write memories via the MCP protocol (OAuth 2.1 JWT auth)
+    - **Dashboard** — Platform admins visualize and monitor the memory landscape
+    - **PostgreSQL + pgvector** — Relational storage with vector similarity search
+    - **OAuth 2.1 Auth Service** — Issues short-lived JWTs for agent authentication
+
+    ## Prerequisites
+
+    - The MemoryHub MCP server must be deployed in the `memory-hub-mcp` namespace.
+    - Agents connect via the MCP server Route using OAuth 2.1 JWT tokens.
+    - The PostgreSQL database must be running in the `memoryhub-db` namespace.
+  img: |
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="4" fill="#ee0000"/>
+      <circle cx="18" cy="18" r="10" stroke="#fff" stroke-width="1.5" fill="none"/>
+      <circle cx="18" cy="18" r="3.5" fill="#fff"/>
+      <line x1="18" y1="8" x2="18" y2="12" stroke="#fff" stroke-width="1.5"/>
+      <line x1="18" y1="24" x2="18" y2="28" stroke="#fff" stroke-width="1.5"/>
+      <line x1="8" y1="18" x2="12" y2="18" stroke="#fff" stroke-width="1.5"/>
+      <line x1="24" y1="18" x2="28" y2="18" stroke="#fff" stroke-width="1.5"/>
+      <line x1="11" y1="11" x2="13.5" y2="13.5" stroke="#fff" stroke-width="1.2"/>
+      <line x1="22.5" y1="22.5" x2="25" y2="25" stroke="#fff" stroke-width="1.2"/>
+      <line x1="25" y1="11" x2="22.5" y2="13.5" stroke="#fff" stroke-width="1.2"/>
+      <line x1="13.5" y1="22.5" x2="11" y2="25" stroke="#fff" stroke-width="1.2"/>
+    </svg>

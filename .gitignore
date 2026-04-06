@@ -19,6 +19,8 @@ credentials.json
 secrets.yaml
 secrets.yml
 .DS_Store
+node_modules/
+.build-context/
 seed-clients.json
 
 # Added by ggshield

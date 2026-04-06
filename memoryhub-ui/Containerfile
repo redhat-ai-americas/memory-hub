@@ -1,0 +1,46 @@
+# Stage 1: Build the frontend
+FROM registry.redhat.io/ubi9/nodejs-20:latest AS frontend-build
+
+WORKDIR /opt/app-root/src
+
+COPY frontend/package.json ./
+COPY frontend/package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+COPY frontend/src ./src
+COPY frontend/public ./public
+COPY frontend/index.html ./index.html
+COPY frontend/tsconfig.json ./tsconfig.json
+COPY frontend/tsconfig.node.json ./tsconfig.node.json
+COPY frontend/vite.config.ts ./vite.config.ts
+
+RUN npm run build
+
+# Stage 2: Python runtime serving backend + built frontend
+FROM registry.redhat.io/ubi9/python-311:latest
+
+WORKDIR /opt/app-root/src
+
+# Install Python dependencies
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy and install memoryhub core library from parent project
+COPY --chown=1001:0 memoryhub-core/ ./memoryhub-core/
+RUN pip install --no-cache-dir ./memoryhub-core/
+
+# Copy backend application code
+COPY --chown=1001:0 backend/src/ ./src/
+
+# Copy built frontend from stage 1 (vite outputs to dist/ relative to project root)
+COPY --from=frontend-build /opt/app-root/src/dist ./frontend/dist
+
+# Fix permissions for OpenShift arbitrary UIDs
+RUN find ./src -name "*.py" -exec chmod 644 {} \;
+
+ENV HOST=0.0.0.0 \
+    PORT=8080
+
+USER 1001
+
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
