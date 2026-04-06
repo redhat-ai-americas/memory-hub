@@ -20,8 +20,8 @@ Uses panels 1 (Status Overview), 2 (Memory Graph), 4 (Curation Rules),
 5 (Contradiction Log), and 6 (Observability Links).
 
 **Developer / Team Lead** — Focused on onboarding their agents, managing
-API keys, and understanding what their agents have stored. Uses panels 3
-(Users and Agents), 7 (API Key Management), and the Memory Graph filtered
+OAuth clients, and understanding what their agents have stored. Uses panels 3
+(Users and Agents), 7 (Client Management), and the Memory Graph filtered
 to their agent's owner_id.
 
 ## Panels
@@ -86,7 +86,7 @@ on available time and PatternFly theming constraints.
 #### Filter sidebar
 
 A collapsible sidebar within the panel provides graph-level filtering:
-- Owner (agent or user name — from Authorino Secrets, same source as Panel 3)
+- Owner (agent or user name — from `oauth_clients` table or `DISTINCT owner_id` from `memory_nodes`)
 - Scope (enterprise / organizational / project / user)
 - Date range (created_at or updated_at)
 - Relationship type (filter which edge types are visible)
@@ -126,16 +126,16 @@ PatternFly components: `SearchInput`, `Drawer`, `Label` (scope/weight badges),
 
 List the users and agents whose memories are being managed.
 
-- Table populated from Authorino API key Secrets (label
-  `memoryhub.redhat.com/key=true`) — this is the same data source
-  as the API Key Management panel (Panel 7), giving us the owner
-  roster without a custom MCP tool
+- Table populated from the `oauth_clients` table in the auth service
+  database, joined with memory counts from `memory_nodes`. For
+  deployments without the auth service, falls back to
+  `SELECT DISTINCT owner_id FROM memory_nodes WHERE is_current = true`
 - Columns: name, owner type (agent/user badge), use case, memory
   count (`SELECT COUNT(*) FROM memory_nodes WHERE owner_id = ? AND is_current = true`),
   last active
 - Click through to filter the Memory Graph by that owner
-- Agent vs. human distinction via `memoryhub.redhat.com/owner-type`
-  label on the Secret
+- Agent vs. human distinction via `identity_type` column in
+  `oauth_clients` (values: `user` or `service`)
 
 PatternFly components: `Table`, `Label`, `Badge`.
 
@@ -188,128 +188,68 @@ Links to external dashboards for deeper operational insight.
 
 PatternFly components: `Card`, `SimpleList` with external link icons.
 
-### 7. API Key Management (via Authorino)
+### 7. Client Management (via OAuth 2.1 Auth Service)
 
-Self-service provisioning and lifecycle management for API keys, backed
-by the Authorino operator.
+Self-service provisioning and lifecycle management for OAuth clients,
+backed by the MemoryHub auth service.
 
 This panel turns the landing page into the onboarding point for new
-agents and users — rather than an admin manually creating keys, teams
+agents and users — rather than an admin manually creating clients, teams
 can provision their own through the UI.
 
 #### How it works
 
-Authorino manages API keys as **labeled Kubernetes Secrets** in the
-MemoryHub namespace. The landing page UI creates and lists these Secrets
-via the Kubernetes API — no custom key management code in MemoryHub
-itself.
+The MemoryHub auth service manages OAuth clients in the `oauth_clients`
+table. Each client has credentials for the `client_credentials` grant
+flow, which exchanges the client_id/secret for a short-lived JWT.
+The UI manages these clients via the auth service's admin API.
 
-Each API key Secret carries labels and annotations for metadata:
+Each OAuth client has:
 
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: memoryhub-key-prod-curator
-  namespace: memoryhub
-  labels:
-    authorino.kuadrant.io/managed-by: authorino
-    memoryhub.redhat.com/key: "true"
-    memoryhub.redhat.com/owner-type: agent        # or "user"
-  annotations:
-    memoryhub.redhat.com/owner-name: "prod-curator-agent"
-    memoryhub.redhat.com/use-case: "Production curation pipeline"
-    memoryhub.redhat.com/created-by: "wjackson"
-type: Opaque
-data:
-  api_key: <base64-encoded key>
-```
+| Field | Description |
+|-------|-------------|
+| `client_id` | Unique identifier (e.g., `prod-curator-agent`) |
+| `client_name` | Human-readable name |
+| `identity_type` | `user` or `service` |
+| `tenant_id` | Multi-tenant isolation key |
+| `default_scopes` | Operational scopes (e.g., `memory:read`, `memory:write:user`) |
+| `active` | Whether the client can obtain tokens |
 
-When Authorino is deployed as defense-in-depth, it validates incoming requests against these Secrets before they reach the MCP server, injecting identity headers (`X-Auth-Owner-Name`, `X-Auth-Owner-Type`). However, the primary auth mechanism is the OAuth 2.1 authorization service — agents exchange API keys for short-lived JWTs via the `client_credentials` grant, and the MCP server validates JWTs independently via FastMCP's `JWTVerifier`. See [governance.md](../governance.md) for the full auth architecture.
-
-#### AuthConfig
-
-An Authorino `AuthConfig` CR defines the auth policy for the MCP
-server Route:
-
-```yaml
-apiVersion: authorino.kuadrant.io/v1beta2
-kind: AuthConfig
-metadata:
-  name: memoryhub-api
-  namespace: memoryhub
-spec:
-  hosts:
-    - memoryhub-mcp.apps.<cluster-domain>
-  authentication:
-    api-key:
-      apiKey:
-        selector:
-          matchLabels:
-            memoryhub.redhat.com/key: "true"
-      credentials:
-        authorizationHeader:
-          prefix: Bearer
-  response:
-    success:
-      headers:
-        x-auth-owner-name:
-          plain:
-            selector: auth.identity.metadata.annotations.memoryhub\.redhat\.com/owner-name
-        x-auth-owner-type:
-          plain:
-            selector: auth.identity.metadata.annotations.memoryhub\.redhat\.com/owner-type
-```
+When Authorino is deployed as defense-in-depth, it can additionally
+validate JWTs at the infrastructure layer before requests reach the
+MCP server. This is optional — the MCP server validates JWTs
+independently via `_extract_jwt_from_headers()` in `core/authz.py`.
 
 #### UI panel
 
-- Table of issued API keys, populated by listing Secrets with label
-  `memoryhub.redhat.com/key=true` via the Kubernetes API
-- Columns: name/label, owner type (agent/user), owner name, use case,
-  created date, status (active/revoked annotation)
-- Create new key via modal:
-  - **Name/label** — human-readable identifier (e.g., "prod-curator-agent")
-  - **Owner type** — user or agent (radio)
-  - **Owner name** — who or what will use this key
-  - **Use case** — free-text description of intended purpose
-  - Key is shown once on creation, then only the prefix is visible
-- Revoke: delete the Secret (Authorino stops accepting the key immediately)
-- Rotate: create new Secret with same metadata, delete old one
+- Table of registered clients, populated from `oauth_clients` table
+  via the auth service admin API
+- Columns: client_id, client_name, identity_type (user/service badge),
+  scopes, tenant_id, active status, created date
+- Create new client via modal:
+  - **Client ID** — unique identifier (e.g., "prod-curator-agent")
+  - **Client name** — human-readable description
+  - **Identity type** — user or service (radio)
+  - **Scopes** — checkboxes for operational scopes
+  - Client secret is shown once on creation, then only the prefix is visible
+- Deactivate: set `active = false` (tokens stop being issued)
+- Rotate secret: generate new secret, invalidate old one
 
-#### MCP server changes
+#### MCP server auth flow
 
-The MCP server validates JWTs using FastMCP's `JWTVerifier` at the transport layer. Tools access the authenticated identity via `get_access_token()`:
+The MCP server resolves caller identity via three paths in priority order:
 
-```python
-from fastmcp.server.dependencies import get_access_token
+1. FastMCP `get_access_token()` — when the auth middleware populates it
+2. JWT from `Authorization` header — decoded directly via `_extract_jwt_from_headers()` in `core/authz.py`
+3. Session fallback — `register_session` API key lookup for MCP clients that can't send HTTP headers
 
-@mcp.tool
-async def search_memory(query: str, ...) -> dict:
-    token = get_access_token()
-    user_id = token.claims["sub"]
-    tenant_id = token.claims["tenant_id"]
-    # All queries filtered by tenant_id + scope authorization
-```
-
-The `register_session` tool is retained as a compatibility shim for MCP clients that cannot send HTTP Authorization headers. It is not the primary auth path.
-
-#### Future direction: one agent, one key
-
-A future policy option would enforce a 1:1 mapping between agent
-identity and API key. With Authorino, this becomes an authorization
-rule in the AuthConfig — e.g., a Rego policy or JSON pattern that
-checks whether an owner already has an active key before allowing
-a new one. The constraint lives in Authorino policy, not in
-application code.
+All authorization decisions use `authorize_read()` / `authorize_write()` from `core/authz.py`, which consume a normalized claims dict regardless of which path provided it.
 
 #### Relationship to Users and Agents panel (Panel 3)
 
-The API key Secrets are also the authoritative source for the
-Users and Agents panel — listing Secrets with the
-`memoryhub.redhat.com/key` label gives us the roster of all
-registered owners. This means Panel 3 doesn't need a separate
-owner list endpoint; it queries the same Kubernetes Secrets
-that Authorino uses. Memory counts per owner come from a filtered
+The `oauth_clients` table is the authoritative source for the
+Users and Agents panel — querying it gives us the roster of all
+registered identities. Memory counts per owner come from a filtered
 COUNT query against `memory_nodes`.
 
 PatternFly components: `Table`, `Modal`, `Form`, `ClipboardCopy`

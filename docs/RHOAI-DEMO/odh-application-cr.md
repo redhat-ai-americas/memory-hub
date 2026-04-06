@@ -33,7 +33,7 @@ spec:
   provider: "Red Hat"
   support: "red hat"
   route: memoryhub-ui
-  routeNamespace: memoryhub
+  routeNamespace: memory-hub-mcp
   docsLink: ""                    # TODO: link to published docs
   getStartedLink: ""
   getStartedMarkDown: |
@@ -50,8 +50,8 @@ spec:
 
     ## Prerequisites
 
-    - The MemoryHub MCP server must be deployed in the `memoryhub` namespace.
-    - Agents connect via the `memoryhub` Route using their API key.
+    - The MemoryHub MCP server must be deployed in the `memory-hub-mcp` namespace.
+    - Agents connect via the MCP server Route using OAuth 2.1 JWT tokens.
   img: |
     <!-- TODO: Replace with MemoryHub icon SVG -->
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36">

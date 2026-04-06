@@ -26,7 +26,7 @@ The OdhApplication tile links to this Route.
                                             ▼
                                      ┌──────────────┐
                                      │ FastAPI      │
-                                     │ Backend      │──► k8s API (Authorino Secrets)
+                                     │ Backend      │──► Auth service API (OAuth clients)
                                      └──────┬───────┘
                                             │ SQLAlchemy
                                             ▼
@@ -54,7 +54,7 @@ Authorino or Istio Service Mesh can optionally validate JWTs at the infrastructu
 
 The landing page UI itself is accessed by platform admins via the RHOAI dashboard, so it sits behind OpenShift OAuth (same as the dashboard). For the demo, we can use an `oauth-proxy` sidecar on the UI deployment, or simply rely on the cluster's network policy if all users are already authenticated to the console.
 
-For API key management (creating/revoking keys), the UI talks to the auth service's client registry. Keys are stored as Kubernetes Secrets with MemoryHub labels for Authorino compatibility if deployed.
+For client management (creating/deactivating clients), the UI talks to the auth service's client registry (`oauth_clients` table). Authorino can optionally validate JWTs at the infrastructure layer as defense-in-depth.
 
 ### API Layer
 
@@ -70,9 +70,9 @@ The FastAPI backend handles three concerns:
    and `curator_rules`. pgvector similarity queries for search. No MCP
    protocol involved.
 
-2. **Kubernetes API** — Listing, creating, and deleting Authorino Secrets
-   for API key management. The React app doesn't hold direct k8s API
-   credentials; the backend proxies these calls.
+2. **Auth service API** — Listing, creating, and deactivating OAuth clients
+   for identity management. The React app proxies these calls through the
+   FastAPI backend.
 
 3. **MCP server health** — A simple HTTP health check against the MCP server
    pod to report liveness on the Status Overview panel. This is a plain
@@ -87,9 +87,8 @@ Neither proxies through the other.
   (write_memory, update_memory, etc.) and commits changes to PostgreSQL.
 - The **UI backend** is the read path for humans: it queries PostgreSQL
   directly for dashboards, graph visualization, and admin views.
-- The only writes the UI backend makes are to Kubernetes (Authorino Secrets
-  for API key management) and to `curator_rules` (admin curation rule
-  management).
+- The only writes the UI backend makes are to the auth service (OAuth client
+  management) and to `curator_rules` (admin curation rule management).
 - Both services use the same SQLAlchemy models from `memoryhub-core`,
   so schema changes are reflected consistently.
 
@@ -121,7 +120,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: memoryhub-ui
-  namespace: memoryhub
+  namespace: memory-hub-mcp
 spec:
   replicas: 1
   selector:
@@ -140,7 +139,7 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: memoryhub-ui
-  namespace: memoryhub
+  namespace: memory-hub-mcp
 spec:
   tls:
     termination: edge
