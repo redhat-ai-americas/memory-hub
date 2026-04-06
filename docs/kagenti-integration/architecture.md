@@ -12,8 +12,6 @@ MemoryHub and Kagenti run in separate namespace groups within the same OpenShift
 
 ```
 kagenti-system     Platform components: Ingress Gateway, Shipwright, Kiali, UI
-gateway-system     MCP Gateway: Envoy-based broker, router, controller
-mcp-system         MCP broker, router, controller (backend of gateway-system)
 keycloak           Keycloak IAM
 spire-system       SPIRE server and agents
 <workload-ns>      Agent and tool pods (per-tenant namespaces)
@@ -31,16 +29,14 @@ The two namespace groups communicate over the cluster's internal network. There 
 
 ### Phase 1 Connection Path
 
-In Phase 1, agent pods reach MemoryHub tools through Kagenti's MCP Gateway. The gateway acts as a broker — it holds registrations for downstream MCP servers and routes tool calls to them.
+In Phase 1, agent pods connect directly to the MemoryHub MCP server using the in-cluster Service URL. The connector is registered with Kagenti's adk-server so the platform knows about the tool endpoint, but there is no intermediate routing layer — the agent's MCP client connects directly.
 
 ```
-Agent Pod             MCP Gateway                MemoryHub MCP Server
-(workload-ns)  ---->  (gateway-system, :443)  ---> (memoryhub, :8080, /mcp/)
+Agent Pod             MemoryHub MCP Server
+(workload-ns)  ---->  (memoryhub, :8080, /mcp/)
 ```
 
-The agent calls the gateway using its standard MCP client. The gateway resolves the tool prefix, identifies the downstream server, and forwards the call. MemoryHub's MCP server never exposes itself directly to agent pods in this path.
-
-An alternative direct path exists using the MemoryHub OpenShift Route, bypassing the gateway. This is simpler to configure but loses gateway-level observability and routing features. It is appropriate during early development or when an agent needs low-latency access without going through the gateway.
+This is the standard path: via the in-cluster Kubernetes Service for agent pods in the same cluster, or via the MemoryHub OpenShift Route for external access.
 
 ```
 Agent Pod             OpenShift Route (TLS edge)    MemoryHub MCP Server
@@ -57,10 +53,10 @@ Registering MemoryHub as a connector makes its tools available through the gatew
 
 ### REST Connector Registration
 
-Kagenti's connector API accepts a POST to `/connectors` on the gateway controller:
+Kagenti's connector API accepts a POST to `/api/v1/connectors` on the adk-server:
 
 ```json
-POST /connectors
+POST /api/v1/connectors
 {
   "name": "memoryhub",
   "url": "https://memoryhub-mcp.memoryhub.svc.cluster.local:8080/mcp/",
@@ -71,28 +67,7 @@ POST /connectors
 
 The `streamable_http` transport matches MemoryHub's current deployment, which uses FastMCP with streamable-HTTP (SSE is deprecated and not used).
 
-### MCPServerRegistration CRD
-
-Kagenti's MCP Gateway also supports a Kubernetes-native registration approach via a custom resource. This is the preferred path for production because it integrates with GitOps workflows and survives gateway restarts without re-registration:
-
-```yaml
-apiVersion: mcp.kagenti.com/v1alpha1
-kind: MCPServerRegistration
-metadata:
-  name: memoryhub
-  namespace: memoryhub
-spec:
-  toolPrefix: memory_
-  targetRef:
-    group: gateway.networking.k8s.io
-    kind: HTTPRoute
-    name: memoryhub-mcp-route
-    namespace: memoryhub
-```
-
-The `toolPrefix` field namespaces MemoryHub's tools through the gateway. An agent accessing tools through the gateway sees `memory_write_memory`, `memory_search_memory`, `memory_read_memory`, and so on. Agents that connect directly to MemoryHub's route or internal service see the original tool names without the prefix. This distinction matters for agent code that targets a specific connection path.
-
-MemoryHub resources should carry labels and annotations that identify them to Kagenti's tooling:
+MCP servers in Kagenti are deployed as standard Kubernetes Deployment and Service resources. There is no CRD-based MCP server registration. MemoryHub resources should carry labels and annotations that identify them to Kagenti's tooling:
 
 ```yaml
 labels:
@@ -143,7 +118,7 @@ async def my_agent(
             })
 ```
 
-When connecting through the gateway, tool names carry the `memory_` prefix. The call to `register_session` becomes `memory_register_session`, and so on. Agents connecting directly skip the prefix. To avoid hardcoding this distinction, agents should accept the tool prefix as a configuration value injected at deployment time.
+Agents always see the original tool names (`register_session`, `search_memory`, `write_memory`, etc.) regardless of connection path. There is no tool prefix namespacing applied by the connector registration.
 
 ---
 
@@ -180,10 +155,10 @@ The `MemoryHubExtensionClient` is the outbound-facing counterpart. When an agent
 
 ## ContextStore Architecture (Phase 3)
 
-Kagenti's `ContextStore` interface defines three operations:
+Kagenti's `ContextStore` interface defines three operations. `ContextStoreInstance` is a Protocol (not an ABC), so implementations satisfy it structurally without inheriting from a base class:
 
 ```python
-class ContextStoreInstance(ABC):
+class ContextStoreInstance(Protocol):
     async def load_history(self) -> AsyncIterator[Message | Artifact]:
         ...
     async def store(self, item: Message | Artifact) -> None:
@@ -283,10 +258,8 @@ To promote patterns observed across user-scope memories to organizational knowle
 
 ## Design Constraints and Tradeoffs
 
-**Tool prefix coupling.** The `memory_` prefix introduced by `MCPServerRegistration` means agent code must be written for a specific connection path (gateway vs. direct) or accept the prefix as configuration. There is no automatic prefix negotiation in Phase 1. This is an acceptable tradeoff given the simplicity of configuring a prefix at deployment time.
-
 **Phase 1 API keys are per-deployment, not per-agent.** All agents using the same API key are indistinguishable to MemoryHub's governance layer. Phase 2's token exchange resolves this by binding identity to the Kubernetes ServiceAccount, enabling per-agent RBAC and audit trails.
 
 **ContextStore weight tuning.** The `weight=0.3` choice for conversation history nodes is a starting value. If semantic search results become polluted by conversation turns, the weight should be lowered further or a dedicated `branch_type` exclusion should be added to the search index filter.
 
-**Direct path observability gap.** Agents that connect directly to the MemoryHub OpenShift Route bypass the MCP Gateway's routing layer, losing gateway-level metrics and access logs. Direct-path connections are still observable through MemoryHub's own Prometheus metrics and Grafana dashboards, but the unified gateway-level view of all tool calls is not available for those agents.
+**Observability is MemoryHub-side only.** Since agents connect directly to MemoryHub's MCP server (no intermediate routing layer), all observability for memory operations comes from MemoryHub's own Prometheus metrics and Grafana dashboards. There is no platform-level view of MCP tool calls from Kagenti's side — Kiali shows network traffic but not MCP-level tool invocations.

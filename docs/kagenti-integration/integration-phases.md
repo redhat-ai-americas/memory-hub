@@ -8,14 +8,14 @@ This document defines the phased rollout plan for integrating MemoryHub with Kag
 
 **Goal:** Register MemoryHub as a kagenti connector so any kagenti-deployed agent can discover and use MemoryHub's MCP tools through the platform's standard tool discovery.
 
-Kagenti has a connector system — a REST API (`POST /connectors` on the `adk-server`) for registering external MCP servers. Agents declare an `MCPDemand` for a memory server and receive the MemoryHub MCP endpoint as fulfillment. This is how kagenti is designed to extend; no platform patches required.
+Kagenti has a connector system — a REST API (`POST /api/v1/connectors` on the `adk-server`) for registering external MCP servers. Agents declare an `MCPDemand` for a memory server and receive the MemoryHub MCP endpoint as fulfillment. This is how kagenti is designed to extend; no platform patches required.
 
 ### Deliverables
 
 - Ensure the MemoryHub MCP server's streamable-http endpoint is reachable from kagenti's network (OpenShift Route or in-cluster Service).
-- Document the connector registration process, including the `POST /connectors` payload and how agents declare `MCPDemand`.
+- Document the connector registration process, including the `POST /api/v1/connectors` payload and how agents declare `MCPDemand`.
 - Provide an example agent demonstrating the `register_session` → `search_memory` → `write_memory` flow through kagenti's MCP client pattern.
-- Test connectivity through kagenti's MCP Gateway (the Envoy-based aggregation layer that fronts all MCP traffic).
+- Test connectivity from kagenti-deployed agent pods to the MemoryHub MCP service (in-cluster Service URL and OpenShift Route).
 - Verify and publish the `memoryhub` Python SDK (v0.1.0 exists) to PyPI for agents that prefer typed access over raw MCP calls.
 
 ### Auth Story
@@ -86,7 +86,7 @@ A kagenti agent authenticates via token exchange (no API key involved), accesses
 
 ## Phase 3: MemoryHubContextStore
 
-**Goal:** Implement kagenti's `ContextStore` ABC so every kagenti agent gets durable conversation history across pod restarts with zero code changes.
+**Goal:** Implement kagenti's `ContextStore` Protocol so every kagenti agent gets durable conversation history across pod restarts with zero code changes.
 
 ### How It Works
 
@@ -98,7 +98,7 @@ Conversation persistence only. This is deliberately narrow — the `ContextStore
 
 ### Deliverables
 
-- `MemoryHubContextStore` class implementing kagenti's `ContextStoreInstance` interface (`load_history`, `store`, `delete_history_from_id`).
+- `MemoryHubContextStore` class satisfying kagenti's `ContextStoreInstance` Protocol (`load_history`, `store`, `delete_history_from_id`).
 - Integrated into the `kagenti-memoryhub` package from Phase 2 — no separate install required.
 - Configuration: agents opt in by setting `context_store=MemoryHubContextStore()` in `create_app()`.
 - Documentation showing how to switch from `InMemoryContextStore`.

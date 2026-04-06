@@ -6,7 +6,7 @@ Kagenti (github.com/kagenti/kagenti, v0.5.0) is a Kubernetes-native agent deploy
 
 Agents in Kagenti are standard Kubernetes Deployments annotated with `kagenti.io/type: agent`. This means existing Kubernetes tooling — `kubectl`, Kiali, OpenShift monitoring — works on agents without modification. Kagenti adds two protocols on top of this foundation: A2A (Google's Agent-to-Agent protocol) for structured agent-to-agent communication, and MCP for tool access via a dedicated Envoy-based MCP Gateway.
 
-The platform ships with a production-oriented security stack. SPIFFE/SPIRE provides workload identity and mTLS between services. Keycloak handles OAuth2/OIDC for user-facing authentication. Shipwright enables in-cluster container builds so agents can be deployed directly from source. The installer is Ansible-based and targets OpenShift (tested on OCP 4.20.11). Key namespaces after installation are `kagenti-system`, `gateway-system` (MCP Gateway), `keycloak`, `spire-system`, and `mcp-system`.
+The platform ships with a production-oriented security stack. SPIFFE/SPIRE provides workload identity and mTLS between services. Keycloak handles OAuth2/OIDC for user-facing authentication. Shipwright enables in-cluster container builds so agents can be deployed directly from source. The installer is Ansible-based and targets OpenShift (tested on OCP 4.20.11). Key namespaces after installation are `kagenti-system`, `keycloak`, `spire-system`, and workload namespaces per tenant.
 
 ## Why Integrate
 
@@ -35,7 +35,7 @@ Kagenti is often mentioned alongside LlamaStack, but they solve different proble
 | Framework stance | Framework-neutral | Provides its own framework with provider adapters |
 | Kubernetes integration | Native (agents are K8s Deployments) | None built-in |
 | Agent communication | A2A protocol | LlamaStack APIs, no A2A |
-| MCP support | First-class, dedicated MCP Gateway | MCP as a tool provider |
+| MCP support | First-class; agents connect to MCP servers via connector registration | MCP as a tool provider |
 | Memory and state | Delegated to the agent | Built-in memory providers (vector, key-value) |
 | Security | Zero-trust (SPIFFE/SPIRE, mTLS, Keycloak) | OAuth2/OIDC, Kubernetes auth, RBAC |
 | Identity | SPIFFE/SPIRE workload identity, OAuth2 token exchange | Kubernetes ServiceAccount, OAuth2 tokens |
@@ -45,6 +45,6 @@ These two platforms are complementary. A LlamaStack agent can be containerized a
 
 ## Integration Approach Summary
 
-The integration follows a three-phase approach, ordered from lowest coupling to deepest integration. Phase 1 registers MemoryHub as an MCP connector via Kagenti's MCP Gateway, requiring zero changes to Kagenti itself — agents call MemoryHub tools through the same gateway they already use for other tools. Phase 2 introduces a `MemoryHubExtensionServer` Python package that wires OAuth 2.1 token exchange between Keycloak and MemoryHub's authorization layer, enabling per-agent identity to flow into memory scoping and RBAC enforcement. Phase 3 implements a `MemoryHubContextStore` that replaces or wraps Kagenti's native `ContextStore`, making conversation persistence to MemoryHub transparent to agents without requiring any changes to agent code.
+The integration follows a three-phase approach, ordered from lowest coupling to deepest integration. Phase 1 registers MemoryHub as an MCP connector via Kagenti's connector API (`POST /api/v1/connectors` on the adk-server), requiring zero changes to Kagenti itself — agents call MemoryHub tools using standard MCP client patterns against the MemoryHub service URL. Phase 2 introduces a `MemoryHubExtensionServer` Python package that wires OAuth 2.1 token exchange between Keycloak and MemoryHub's authorization layer, enabling per-agent identity to flow into memory scoping and RBAC enforcement. Phase 3 implements a `MemoryHubContextStore` that replaces or wraps Kagenti's native `ContextStore`, making conversation persistence to MemoryHub transparent to agents without requiring any changes to agent code.
 
 See `integration-phases.md` for the phased rollout plan with acceptance criteria, and `architecture.md` for the technical design covering data flow, identity propagation, and API contracts.

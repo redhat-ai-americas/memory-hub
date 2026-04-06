@@ -45,35 +45,22 @@ http://memoryhub-mcp.memoryhub.svc.cluster.local:8080/mcp/
 
 MemoryHub registers as an MCP tool group using LlamaStack's `remote::model-context-protocol` provider. Two registration approaches are available.
 
-### Persistent Registration
+### Server-Side Configuration (Persistent)
 
-The Tool Groups API registers MemoryHub in LlamaStack's DistributionRegistry. The registration persists across LlamaStack restarts and is the correct approach for production deployments.
+Tool groups are auto-registered from the `run.yaml` configuration at LlamaStack server startup. There is no client API call to register a tool group — the `client.toolgroups.register()` method does not exist in the SDK. The correct approach for production deployments is to add MemoryHub as a `tool_runtime` provider in the LlamaStack server's `run.yaml`:
 
-```python
-from llama_stack_client import LlamaStackClient
-from llama_stack_client.types import URL
-
-client = LlamaStackClient(base_url="http://localhost:8321/v1")
-
-client.toolgroups.register(
-    toolgroup_id="mcp::memoryhub",
-    provider_id="model-context-protocol",
-    mcp_endpoint=URL(uri="http://memoryhub-mcp.memoryhub.svc.cluster.local:8080/mcp/"),
-)
+```yaml
+# In run.yaml
+tool_runtime:
+  - provider_id: memoryhub-mcp
+    provider_type: remote::model-context-protocol
 ```
 
-After registration, agents can reference `"mcp::memoryhub"` in their `toolgroups` list. LlamaStack connects to the MCP endpoint lazily on first tool access, discovers available tools via `list_tools()`, and caches the results.
+The MCP server URL is configured via environment variables or the provider's dynamic configuration — `MCPProviderConfig` has no config fields and `mcp_endpoint` is not a valid field under `tool_runtime[].config`. The tool group `mcp::memoryhub-mcp` is then auto-discovered at server startup via `list_tools()`.
 
-To pass authentication headers at the tool group level (Phase 2 token exchange), the registration accepts `provider_data`:
+After the server starts with this configuration, agents can reference the tool group in their requests. LlamaStack connects to the MCP endpoint lazily on first tool access and caches the tool list for the duration of the session.
 
-```python
-client.toolgroups.register(
-    toolgroup_id="mcp::memoryhub",
-    provider_id="model-context-protocol",
-    mcp_endpoint=URL(uri="http://memoryhub-mcp.memoryhub.svc.cluster.local:8080/mcp/"),
-    provider_data={"mcp_headers": {"Authorization": "Bearer mh-dev-agent1-2026"}},
-)
-```
+To pass authentication headers to the MCP server, use the `mcp_headers` request header on the LlamaStack request — this is a server-side mechanism, not a client registration parameter.
 
 ### Inline Registration
 
@@ -100,40 +87,40 @@ Inline registrations are per-request and carry no persistent state. The `require
 
 ## Agent Consumption Patterns
 
-LlamaStack provides two APIs for agents: the Agents API for multi-turn, session-based interactions, and the Responses API for stateless, OpenAI-compatible interactions. Both support MCP tool groups.
+LlamaStack provides two paths for agent consumption: the `Agent` helper class for multi-turn, session-based interactions, and the Responses API for stateless, OpenAI-compatible interactions. Both support MCP tool groups.
 
-### Via Agents API
+### Via Agent Helper Class
 
-The Agents API manages multi-turn conversations with session state. Agents declare their tool groups at creation time and LlamaStack's tool-calling loop handles MCP invocations transparently — the model decides to call a tool, LlamaStack routes through the MCP tool runtime provider, which invokes the tool on the MemoryHub MCP server and returns the result to the model.
+The `Agent` helper class manages multi-turn conversations with session state. It is the current API for multi-turn agentic workflows — the low-level `client.agents.create()`, `client.agents.session.create()`, and `client.agents.turn.create()` methods are replaced by this higher-level abstraction.
 
 ```python
-agent = client.agents.create(
-    agent_config={
-        "model": "llama-3.3-70b",
-        "instructions": (
-            "You are a helpful assistant with access to persistent memory. "
-            "Search memory at the start of each conversation for relevant context. "
-            "Write important preferences and decisions to memory."
-        ),
-        "toolgroups": ["mcp::memoryhub"],
-        "tool_choice": "auto",
-        "max_infer_iters": 10,
-    }
+from llama_stack_client import Agent
+
+agent = Agent(
+    client,
+    model="llama-3.3-70b",
+    instructions=(
+        "You are a helpful assistant with access to persistent memory. "
+        "Search memory at the start of each conversation for relevant context. "
+        "Write important preferences and decisions to memory."
+    ),
+    tools=[
+        {
+            "type": "mcp",
+            "server_label": "memoryhub",
+            "server_url": "http://memoryhub-mcp.memoryhub.svc.cluster.local:8080/mcp/",
+            "require_approval": "never",
+        }
+    ],
 )
 
-session = client.agents.session.create(
-    agent_id=agent.agent_id,
-    session_name="deployment-planning",
-)
+session_id = agent.create_session("deployment-planning")
 
-for chunk in client.agents.turn.create(
-    agent_id=agent.agent_id,
-    session_id=session.session_id,
+response = agent.create_turn(
     messages=[{"role": "user", "content": "What are my deployment preferences?"}],
-    stream=True,
-):
-    # Agent calls search_memory via MCP, LlamaStack routes to MemoryHub
-    pass
+    session_id=session_id,
+)
+# Agent calls search_memory via MCP, LlamaStack routes to MemoryHub
 ```
 
 The system instructions are critical. LlamaStack agents have no built-in "at the start of each turn, search memory" behavior — memory reads and writes only happen when the model explicitly decides to call the tool. The instructions above prompt the model to treat memory access as part of its standard workflow. Without prompting, the model may use its in-context knowledge and skip memory tools entirely.
@@ -218,18 +205,7 @@ This allows agents to address different scopes within a single MemoryHub deploym
 
 ### Phase 1 — API Key
 
-In Phase 1, the agent calls `register_session` as the first MCP tool invocation. MemoryHub's auth service resolves identity from a static API key. LlamaStack passes authentication headers to MCP servers, so a Bearer token can be forwarded at tool group registration time as an alternative to a tool call:
-
-```python
-client.toolgroups.register(
-    toolgroup_id="mcp::memoryhub",
-    provider_id="model-context-protocol",
-    mcp_endpoint=URL(uri="http://memoryhub-mcp.memoryhub.svc.cluster.local:8080/mcp/"),
-    provider_data={"mcp_headers": {"Authorization": "Bearer mh-dev-agent1-2026"}},
-)
-```
-
-Both paths are equivalent in Phase 1 — API key auth with no per-agent identity. All agents sharing the same key are indistinguishable to MemoryHub's governance layer.
+In Phase 1, the agent calls `register_session` as the first MCP tool invocation. MemoryHub's auth service resolves identity from a static API key. LlamaStack passes authentication headers to MCP servers — the `mcp_headers` mechanism is available server-side and can be configured to forward a Bearer token on every request, making the explicit `register_session` call optional. Either path achieves API key auth with no per-agent identity. All agents sharing the same key are indistinguishable to MemoryHub's governance layer.
 
 ### Phase 2 — Token Exchange (RFC 8693)
 
@@ -304,8 +280,8 @@ providers:
   tool_runtime:
     - provider_id: memoryhub-mcp
       provider_type: remote::model-context-protocol
-      config:
-        mcp_endpoint: "${env.MEMORYHUB_MCP_URL:=http://memoryhub-mcp.memoryhub.svc.cluster.local:8080/mcp/}"
+      # MCPProviderConfig has no config fields; the MCP server URL is configured
+      # via environment variables or the provider's dynamic configuration.
   safety:
     - provider_id: llama-guard
       provider_type: inline::llama-guard

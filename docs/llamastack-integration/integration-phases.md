@@ -13,23 +13,28 @@ LlamaStack has a first-class MCP tool runtime provider (`remote::model-context-p
 ### Deliverables
 
 - Ensure the MemoryHub MCP server endpoint is reachable from LlamaStack pods (OpenShift Route or in-cluster Service).
-- Document both registration paths with working examples (see below).
-- Provide an example agent using the Agents API with `toolgroups: ["mcp::memoryhub"]`.
+- Document the `run.yaml` configuration for adding memoryhub-mcp as a `tool_runtime` provider (server-side, persistent).
+- Document the Responses API inline MCP tool definition path (per-request, no server config needed).
+- Provide an example agent using the `Agent` helper class with inline MCP tools for multi-turn sessions.
 - Provide an example using the Responses API with inline MCP tool definition.
-- Test tool discovery (LlamaStack calls `list_tools` on the MCP server) and invocation end-to-end.
+- Test tool discovery (LlamaStack calls `list_tools` on the MCP server at startup from run.yaml config) and invocation end-to-end.
 - Verify and publish the `memoryhub` Python SDK (v0.1.0 exists) to PyPI for agents that want typed access without going through LlamaStack's tool runtime.
 
 ### Registration Paths
 
-**Via Tool Groups API** (persistent, survives restarts):
+**Via run.yaml** (server-side, persistent — survives restarts):
 
-```python
-client.toolgroups.register(
-    toolgroup_id="mcp::memoryhub",
-    provider_id="model-context-protocol",
-    mcp_endpoint=URL(uri="http://memoryhub-mcp.memoryhub.svc.cluster.local:8080/mcp/"),
-)
+Tool groups are auto-registered at LlamaStack server startup from the `run.yaml` configuration. `client.toolgroups.register()` does not exist in the SDK. Add the memoryhub-mcp provider to the server's `run.yaml`:
+
+```yaml
+tool_runtime:
+  - provider_id: memoryhub-mcp
+    provider_type: remote::model-context-protocol
+    # MCPProviderConfig has no config fields; the MCP server URL is configured
+    # via environment variables or the provider's dynamic configuration.
 ```
+
+The tool group is then auto-discovered at startup. Agents reference it as `mcp::memoryhub-mcp`.
 
 **Via Responses API** (inline, per-request):
 
@@ -50,7 +55,7 @@ client.responses.create(
 
 ### Auth Story
 
-API key via `register_session` — the first MCP tool the agent calls. This works immediately with no OAuth dependency, which is intentional. Phase 1 is about connectivity, not auth sophistication. LlamaStack passes headers to MCP servers, so a Bearer token can also be forwarded if MemoryHub's auth is later configured to accept it.
+API key via `register_session` — the first MCP tool the agent calls. This works immediately with no OAuth dependency, which is intentional. Phase 1 is about connectivity, not auth sophistication. LlamaStack passes headers to MCP servers server-side, so a Bearer token can be forwarded via `mcp_headers` if MemoryHub's auth is configured to accept it without an explicit `register_session` call.
 
 ### Client Access Options
 
@@ -62,7 +67,7 @@ None on the LlamaStack side. This phase only requires the MemoryHub MCP server t
 
 ### Success Criteria
 
-A LlamaStack agent — using both the Agents API and the Responses API paths — can search and write memories through the `mcp::memoryhub` tool group, with tool discovery working correctly on first registration.
+A LlamaStack agent — using both the `Agent` helper class and the Responses API paths — can search and write memories through MemoryHub MCP tools, with tool discovery working correctly (auto-discovered from run.yaml on startup, or inline per-request via the Responses API).
 
 ---
 
@@ -152,7 +157,7 @@ A developer can start a LlamaStack server using the MemoryHub distribution templ
 
 | Phase | What | Auth | LlamaStack Changes | MemoryHub Work |
 |---|---|---|---|---|
-| 1 | MCP Tool Group | API key | None (uses existing MCP provider) | Registration docs, example agents, SDK publish |
+| 1 | MCP Tool Group | API key | None (uses existing MCP provider) | run.yaml config docs, example agents (Agent class + Responses API), SDK publish |
 | 2 | Vector IO Provider + OAuth | Token exchange | None (custom provider) | Provider package, OAuth 2.1 service (shared) |
 | 3 | Distribution Template | Inherited from Phase 2 | None (template, not upstream change) | Distribution template, native primitive exploration |
 

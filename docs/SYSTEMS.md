@@ -1,6 +1,6 @@
 # Subsystem Inventory
 
-MemoryHub is composed of eight subsystems. This document is the map -- each subsystem gets a name, a description, a link to its detailed design doc, and an honest status indicator.
+MemoryHub is composed of ten subsystems. This document is the map -- each subsystem gets a name, a description, a link to its detailed design doc, and an honest status indicator.
 
 | Subsystem | Description | Doc | Status |
 |-----------|-------------|-----|--------|
@@ -12,6 +12,8 @@ MemoryHub is composed of eight subsystems. This document is the map -- each subs
 | operator | Kubernetes Operator with CRDs for lifecycle management | [operator.md](operator.md) | Skeleton |
 | observability | Grafana dashboards and Prometheus metrics for memory operations | [observability.md](observability.md) | TBD |
 | org-ingestion | Pipeline for scanning external sources and ingesting organizational knowledge | [org-ingestion.md](org-ingestion.md) | TBD |
+| kagenti-integration | Integration with Kagenti (K8s-native agent platform): MCP connector, extension package, ContextStore | [kagenti-integration/](kagenti-integration/) | Design |
+| llamastack-integration | Integration with LlamaStack (Meta's agentic API server on RHOAI): MCP tool group, Vector IO provider, distribution template | [llamastack-integration/](llamastack-integration/) | Design |
 
 ## Status definitions
 
@@ -37,6 +39,8 @@ graph LR
     ING[org-ingestion] --> GOV
     OBS[observability] --> MCP & GOV & CUR & SL
     OP[operator] -->|manages all| MCP & GOV & CUR & SL & ING & OBS
+    KAG[kagenti-integration] --> MCP
+    LS[llamastack-integration] --> MCP
 ```
 
 The memory-tree data model is foundational -- storage-layer implements it, governance enforces rules on it, and everything else consumes it. The governance engine is the chokepoint by design: every memory operation passes through it for access control and audit logging. The operator sits above everything, managing lifecycle and configuration.
