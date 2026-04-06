@@ -19,6 +19,7 @@ import { SearchIcon } from '@patternfly/react-icons';
 import type { GraphResponse, SearchMatch } from '@/types';
 import { fetchGraph, searchGraph } from '@/api/client';
 import MemoryDetailDrawer from './MemoryDetailDrawer';
+import type { EdgeInfo } from './MemoryDetailDrawer';
 import { SCOPE_COLORS, SCOPE_OPTIONS } from '@/utils/scopes';
 
 try {
@@ -97,6 +98,21 @@ function buildStylesheet(): any[] {
       },
     },
     {
+      selector: 'edge',
+      style: {
+        'curve-style': 'bezier',
+        'overlay-padding': '8px',
+      },
+    },
+    {
+      selector: 'edge:selected',
+      style: {
+        'line-color': '#F0AB00',
+        'target-arrow-color': '#F0AB00',
+        width: 3,
+      },
+    },
+    {
       selector: 'edge[type = "parent_child"]',
       style: {
         'line-color': '#6A6E73',
@@ -163,6 +179,7 @@ const MemoryGraph: React.FC = () => {
   const [enabledScopes, setEnabledScopes] = useState<Set<string>>(new Set(SCOPE_OPTIONS));
   const [ownerFilter, setOwnerFilter] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<EdgeInfo | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [graphHeight, setGraphHeight] = useState(600);
   const [needsLayout, setNeedsLayout] = useState(true);
@@ -186,6 +203,45 @@ const MemoryGraph: React.FC = () => {
     if (h > 0) setGraphHeight(h);
 
     return () => observer.disconnect();
+  }, []);
+
+  // Register cy event listeners once, using a polling check for cy availability
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      clearInterval(interval);
+
+      const onNodeTap = (evt: cytoscape.EventObject) => {
+        const node = evt.target as cytoscape.NodeSingular;
+        setSelectedEdge(null);
+        setSelectedNodeId(node.id());
+        setDrawerOpen(true);
+      };
+      const onEdgeTap = (evt: cytoscape.EventObject) => {
+        const edge = evt.target as cytoscape.EdgeSingular;
+        setSelectedNodeId(null);
+        setSelectedEdge({
+          sourceId: edge.source().id(),
+          targetId: edge.target().id(),
+          type: edge.data('type') as string,
+        });
+        setDrawerOpen(true);
+      };
+      const onBgTap = (evt: cytoscape.EventObject) => {
+        if (evt.target === cy) {
+          setDrawerOpen(false);
+          setSelectedNodeId(null);
+          setSelectedEdge(null);
+        }
+      };
+
+      cy.on('tap', 'node', onNodeTap);
+      cy.on('tap', 'edge', onEdgeTap);
+      cy.on('tap', onBgTap);
+    }, 100);
+
+    return () => clearInterval(interval);
   }, []);
 
   const loadGraph = useCallback(() => {
@@ -368,9 +424,15 @@ const MemoryGraph: React.FC = () => {
           <MemoryDetailDrawer
             isOpen={drawerOpen}
             nodeId={selectedNodeId}
+            edgeInfo={selectedEdge}
             onClose={() => {
               setDrawerOpen(false);
               setSelectedNodeId(null);
+              setSelectedEdge(null);
+            }}
+            onSelectNode={(id) => {
+              setSelectedEdge(null);
+              setSelectedNodeId(id);
             }}
           >
             {graphData.nodes.length === 0 ? (
@@ -405,18 +467,6 @@ const MemoryGraph: React.FC = () => {
                 cy={(cy: cytoscape.Core) => {
                   cyRef.current = cy;
                   if (needsLayout) setNeedsLayout(false);
-                  cy.removeAllListeners();
-                  cy.on('tap', 'node', (evt: cytoscape.EventObject) => {
-                    const node = evt.target as cytoscape.NodeSingular;
-                    setSelectedNodeId(node.id());
-                    setDrawerOpen(true);
-                  });
-                  cy.on('tap', (evt: cytoscape.EventObject) => {
-                    if (evt.target === cy) {
-                      setDrawerOpen(false);
-                      setSelectedNodeId(null);
-                    }
-                  });
                 }}
               />
             )}
