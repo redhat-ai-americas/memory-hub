@@ -1,209 +1,174 @@
-# Next Session: Python SDK (`memoryhub` on PyPI)
+# Next Session: RBAC Enforcement (#7)
 
 ## Goal
 
-Ship a real `memoryhub` SDK (v0.1.0) that wraps MemoryHub's MCP tools as typed Python methods with transparent OAuth authentication. By end of session: a published package on PyPI that a developer can `pip install memoryhub` and use to search/read/write memories from any Python agent.
+Enforce authorization on every MCP tool so that the deployed MemoryHub server rejects unauthorized access. By end of session: unauthenticated requests are rejected, JWT claims drive all read/write access decisions, and the SDK's transparent auth is verified end-to-end against the live server.
 
 ## What's deployed and working
 
 - MCP server with 12 tools on OpenShift (`https://mcp-server-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/`)
-- **OAuth 2.1 auth service** on OpenShift (`https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com`)
-  - `client_credentials` + `refresh_token` grants
-  - RSA-2048 JWT signing, JWKS endpoint
-  - Seeded clients: wjackson (user), curator-agent (service)
+- OAuth 2.1 auth service on OpenShift (`https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com`)
+- JWTVerifier wired in `memory-hub-mcp/src/core/app.py` but **env-var gated** — `AUTH_JWKS_URI` and `AUTH_ISSUER` are not set in deployment, so it's currently inactive
+- SDK v0.1.0 on PyPI — sends JWTs via OAuth 2.1 client_credentials
 - PostgreSQL + pgvector in `memoryhub-db` namespace
-- Real embeddings via all-MiniLM-L6-v2
-- MCP server has JWTVerifier loaded (validates tokens when present, doesn't reject unauthenticated yet)
-- CI/CD: GH Actions test + release pipelines with trusted publishing
-- `memoryhub` registered on PyPI (0.0.1 placeholder)
-- 175 core + MCP tests, 51 auth tests — all passing
+- 175 core + MCP tests, 51 auth tests, 38 SDK tests — all passing
+- Seeded OAuth clients: `wjackson` (user), `curator-agent` (service)
 
 ## What was completed last session
 
-- Auth service built and deployed (memoryhub-auth/)
-- Migration 006: oauth_clients + refresh_tokens tables
-- MCP server wired with JWTVerifier via AUTH_JWKS_URI env var
-- Key finding: FastMCP 3.2.0 JWTVerifier validates tokens when present but doesn't reject unauthenticated requests. Full enforcement needs RemoteAuthProvider or service-layer checks (planned for #7).
-- Retro at `retrospectives/2026-04-05_oauth-auth-service/RETRO.md`
+- SDK v0.1.0 published to PyPI with transparent OAuth auth
+- SDK has MemoryHubAuth (custom httpx.Auth) that handles client_credentials + auto-refresh
+- All 12 MCP tools wrapped with typed methods
+- 38 SDK tests, 88% coverage
+
+## The problem
+
+Today, the MCP server has **no effective authorization**:
+- `JWTVerifier` is wired but not activated (env vars not set)
+- Most tools have zero auth checks (`read_memory`, `update_memory`, `get_memory_history`)
+- Tools that check auth use `register_session`-based identity, which is process-local and doesn't read JWT claims
+- `search_memory` accepts arbitrary `owner_id` without validation
+- Cross-reference tools (`get_similar_memories`, `get_relationships`) don't filter results by caller's accessible scopes
+- No tenant isolation in any query
 
 ## Session plan
 
-### 1. Design the SDK API surface
+### 1. Implement `authorize_read` and `authorize_write` (core/authz.py)
 
-The SDK wraps MCP tools as typed Python methods. The developer never sees MCP protocol, JWT tokens, or transport details.
-
-**Target API (from governance.md):**
+Create `memory-hub-mcp/src/core/authz.py` with the two shared authorization functions from `governance.md` (lines 154-190):
 
 ```python
-from memoryhub import MemoryHubClient
+def authorize_read(user_claims: dict, memory) -> bool:
+    """Can this JWT bearer read this memory?"""
+    # Tenant isolation → scope-level policy → ownership check
 
-# API key auth (client_credentials grant under the hood)
-client = MemoryHubClient(
-    url="https://mcp-server-memory-hub-mcp.apps.example.com/mcp/",
-    auth_url="https://auth-server-memoryhub-auth.apps.example.com",
-    client_id="wjackson",
-    client_secret="mh-dev-wjackson-2026",
-)
-
-# Or from environment variables
-client = MemoryHubClient.from_env()
-
-# Core operations — async
-results = await client.search("deployment patterns", max_results=5)
-memory = await client.read(memory_id="uuid-here")
-created = await client.write("User prefers Podman over Docker", scope="user", weight=0.9)
-updated = await client.update(memory_id="uuid-here", content="Updated content")
-
-# Lifecycle
-history = await client.get_history(memory_id="uuid-here")
-await client.report_contradiction(memory_id="uuid-here", observed_behavior="...", confidence=0.8)
-
-# Sync wrappers for non-async contexts
-results = client.search_sync("deployment patterns")
+def authorize_write(user_claims: dict, scope: str, owner_id: str) -> bool:
+    """Can this JWT bearer write a memory at this scope for this owner?"""
+    # Operational scope check → tier policy → ownership check
 ```
 
-**Decided:** Use FastMCP `Client` with `BearerAuth` over streamable-http. The server already speaks MCP — no reason to build a REST layer.
+Also implement a `get_claims_from_context(ctx: Context) -> dict` helper that:
+- Extracts JWT claims from FastMCP's `get_access_token()` (when JWTVerifier is active)
+- Falls back to `register_session` identity (compatibility shim for Claude Code MCP transport that can't send Authorization headers)
+- Raises `ToolError` if neither is available (unauthenticated)
 
-**Remaining design decisions to discuss:**
-- Async-first with sync wrappers, or sync-first with async variants?
-- How to handle `register_session` — the SDK should call it automatically after connecting, or skip it if JWT auth is active (it becomes a compatibility shim per governance.md).
-- Environment variable naming: `MEMORYHUB_URL`, `MEMORYHUB_AUTH_URL`, `MEMORYHUB_CLIENT_ID`, `MEMORYHUB_CLIENT_SECRET`?
+### 2. Wire authorization into every tool
 
-### 2. Implement the SDK
+**Per-tool enforcement based on governance.md:**
 
-**Structure in `sdk/`:**
+| Tool | Enforcement needed |
+|------|-------------------|
+| `search_memory` | SQL-level scope filtering: user-scope → `owner_id = caller`, broader scopes → check `has_scope` |
+| `read_memory` | `authorize_read(claims, memory)` after fetch |
+| `write_memory` | `authorize_write(claims, scope, owner_id)` before insert |
+| `update_memory` | Fetch memory, `authorize_write(claims, memory.scope, memory.owner_id)` |
+| `get_memory_history` | Fetch current memory, `authorize_read` check |
+| `report_contradiction` | `authorize_read` on target memory (must be able to see it to contradict it) |
+| `get_similar_memories` | Filter results through `authorize_read` |
+| `get_relationships` | Filter both source node and related nodes through `authorize_read` |
+| `register_session` | Keep as compatibility shim — stores identity for non-JWT clients |
+| `suggest_merge` | `authorize_read` on both memories |
+| `set_curation_rule` | Require `memory:admin` scope or `identity_type: service` |
+| `create_relationship` | `authorize_read` on both source and target |
 
-```
-sdk/
-├── src/memoryhub/
-│   ├── __init__.py          # Exports MemoryHubClient, __version__
-│   ├── client.py            # MemoryHubClient class
-│   ├── auth.py              # Token management (fetch, cache, refresh, retry-on-401)
-│   ├── models.py            # Pydantic models for Memory, SearchResult, etc.
-│   └── exceptions.py        # MemoryHubError, AuthenticationError, NotFoundError
-├── tests/
-│   ├── conftest.py
-│   ├── test_client.py
-│   ├── test_auth.py
-│   └── test_models.py
-├── pyproject.toml           # Already exists (0.0.1 placeholder)
-└── README.md                # Already exists
-```
+### 3. Activate JWTVerifier in deployment
 
-**Auth layer (auth.py):**
-- Calls `POST /token` with `client_credentials` grant
-- Caches the access token in memory
-- Refreshes automatically when expired (checks `exp` claim, refreshes with ~30s buffer)
-- Uses refresh token for seamless rotation
-- Retry-on-401: if a tool call gets 401, refresh token and retry once
+- Set `AUTH_JWKS_URI` and `AUTH_ISSUER` env vars in the MCP server's OpenShift deployment
+- Verify that unauthenticated MCP requests are rejected at transport level
+- Verify that SDK auth (JWT bearer) passes through
 
-**Transport layer:**
-- Uses FastMCP `Client` with `BearerAuth` for MCP protocol over streamable-http (decided)
+### 4. Bridge `register_session` with JWT identity
 
-**Dependencies to add to pyproject.toml:**
-- `httpx` (HTTP client for token endpoint + optional REST transport)
-- `pyjwt` (decode token to check expiry without verification)
-- `pydantic>=2.0` (response models)
-- If using MCP transport: `fastmcp>=2.11.3`
+When JWTVerifier is active, `register_session` becomes a compatibility shim:
+- If the request already has a JWT (from transport auth), `register_session` is a no-op that returns the JWT identity
+- If no JWT, `register_session` performs a client_credentials exchange internally and caches the identity
+- Tools always go through `get_claims_from_context()` which checks JWT first, then session fallback
 
-### 3. Write tests
+### 5. Write tests
 
-- Unit tests for auth token management (mock the token endpoint)
-- Unit tests for response model parsing
-- Integration test: connect to the real deployed MCP server, search memories, verify response structure
-- Test sync wrappers work correctly
+**Unit tests for authz.py:**
+- `test_authorize_read_user_scope_own_memory` — owner can read own user-scope memory
+- `test_authorize_read_user_scope_other_user` — can't read another user's memory
+- `test_authorize_read_organizational_scope` — all authenticated users can read org-scope
+- `test_authorize_read_tenant_isolation` — different tenant always denied
+- `test_authorize_write_user_scope` — can write own user-scope
+- `test_authorize_write_organizational_requires_service` — only service agents write org-scope
+- `test_authorize_write_enterprise_always_rejected` — enterprise writes need HITL
 
-### 4. Publish v0.1.0 to PyPI
+**Integration tests (against live server using SDK):**
+- Unauthenticated request → rejected
+- Authenticated search → returns only accessible memories
+- Write user-scope memory → succeeds
+- Read another user's memory → rejected
+- Update own memory → succeeds
+- Update another user's memory → rejected
 
-- Bump version in pyproject.toml to 0.1.0
-- Update README.md with real usage examples
-- Use `/create-release` to tag and publish via GH Actions trusted publishing
-- Verify: `pip install memoryhub` in a clean venv, run a quick smoke test
+### 6. Update `register_session` shim mode
 
-### 5. Smoke test: use the SDK from a script
-
-Write a small example script that demonstrates the SDK end-to-end:
-```python
-from memoryhub import MemoryHubClient
-
-client = MemoryHubClient.from_env()
-results = await client.search("deployment patterns")
-print(f"Found {len(results)} memories")
-```
+- Detect when JWT is already present in request context
+- Return JWT identity instead of requiring API key lookup
+- Preserve backwards compat for API-key-only clients
 
 ## What we're NOT building this session
 
-- Sync wrappers can be deferred if time is short (async-first is fine for v0.1.0)
-- `platform_token=True` (K8s SA token exchange) — needs token_exchange grant, not built yet
-- CLI client (#25) — separate concern, can wrap the SDK later
-- LlamaStack integration (#27) — depends on SDK being done first
-- RBAC enforcement (#7) — next session after this
-
-## MCP tool → SDK method mapping
-
-| MCP Tool | SDK Method | Priority |
-|----------|-----------|----------|
-| `search_memory` | `client.search()` | Must have |
-| `read_memory` | `client.read()` | Must have |
-| `write_memory` | `client.write()` | Must have |
-| `update_memory` | `client.update()` | Must have |
-| `register_session` | Called internally by client | Must have |
-| `get_memory_history` | `client.get_history()` | Should have |
-| `report_contradiction` | `client.report_contradiction()` | Should have |
-| `get_similar_memories` | `client.get_similar()` | Nice to have |
-| `get_relationships` | `client.get_relationships()` | Nice to have |
-| `create_relationship` | `client.create_relationship()` | Nice to have |
-| `suggest_merge` | `client.suggest_merge()` | Nice to have |
-| `set_curation_rule` | `client.set_curation_rule()` | Nice to have |
+- Audit trail logging (designed in governance.md but can be a separate PR)
+- HITL approval flow for enterprise-scope writes
+- Project membership checks (governance.md has TBD for these)
+- Role-scope matching (governance.md has TODO)
+- Tenant management UI/API
+- `memory:admin` scope operations beyond `set_curation_rule`
 
 ## Architecture reference
 
-**FastMCP Python client with Bearer auth:**
+**JWT claims structure (from auth service):**
+```json
+{
+  "sub": "wjackson",
+  "identity_type": "user",
+  "tenant_id": "default",
+  "scopes": ["memory:read", "memory:write:user"],
+  "iat": 1743904000,
+  "exp": 1743904300,
+  "iss": "https://auth-server-memoryhub-auth.apps.cluster-n7pd5...",
+  "aud": "memoryhub"
+}
+```
+
+**FastMCP access token extraction:**
 ```python
-from fastmcp import Client
-from fastmcp.client.auth import BearerAuth
+from fastmcp import Context
 
-client = Client(
-    "https://mcp-server.apps.example.com/mcp/",
-    auth=BearerAuth(access_token)
-)
-
-async with client:
-    result = await client.call_tool("search_memory", {"query": "test", "max_results": 5})
+async def get_claims(ctx: Context) -> dict:
+    token = ctx.get_access_token()  # Returns decoded JWT claims when JWTVerifier active
 ```
 
-**OAuth token endpoint:**
-```
-POST https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/token
-Content-Type: application/x-www-form-urlencoded
+**Scope hierarchy (from governance.md):**
+| Scope | `memory:read` | `memory:write` |
+|-------|:---:|:---:|
+| `memory:read` | All readable scopes | — |
+| `memory:read:user` | User-scope only | — |
+| `memory:write` | — | All writable scopes |
+| `memory:write:user` | — | User-scope only |
+| `memory:write:organizational` | — | Org-scope (service agents) |
+| `memory:admin` | — | Admin operations |
 
-grant_type=client_credentials&client_id=wjackson&client_secret=mh-dev-wjackson-2026
-```
+**Seeded OAuth clients:**
+- `wjackson`: identity_type=user, scopes=[memory:read, memory:write:user]
+- `curator-agent`: identity_type=service, scopes=[memory:read, memory:write, memory:admin]
 
-Returns: `{"access_token": "eyJ...", "token_type": "bearer", "expires_in": 900, "refresh_token": "...", "scope": "..."}`
+## Key files to modify
+
+- `memory-hub-mcp/src/core/authz.py` — NEW: authorize_read, authorize_write, get_claims_from_context
+- `memory-hub-mcp/src/core/auth.py` — UPDATE: bridge with JWT identity
+- `memory-hub-mcp/src/tools/*.py` — UPDATE: wire authorization into each tool
+- `memory-hub-mcp/src/core/app.py` — VERIFY: JWTVerifier activation
+- `memory-hub-mcp/tests/test_authz.py` — NEW: authorization unit tests
+- `memory-hub-mcp/tests/test_tools_auth.py` — NEW: per-tool auth enforcement tests
 
 ## What comes after this session
 
-- **#7 RBAC enforcement**: Wire RemoteAuthProvider or service-layer authorize_read/authorize_write. SDK already sends JWTs, so enforcement is transparent to SDK users.
-- **#25 CLI client**: Thin wrapper around the SDK with click/typer.
-- **#27 LlamaStack integration**: Use SDK as the memory provider.
-- **#19 RHOAI dashboard**: Unblocked by auth, independent of SDK.
-
-## Open backlog (for context, not this session)
-
-- **#7** — RBAC enforcement (design done, auth service deployed, needs implementation)
-- **#19** — RHOAI dashboard UI
-- **#21** — Evaluate graph viz library
-- **#24** — Write getStartedMarkDown for OdhApplication CR
-- **#10** — Observability: Grafana dashboards + Prometheus metrics
-- **#11** — Org-ingestion pipeline design
-- **#5** — MinIO for S3 object storage
-
-## Key conventions
-
-- SDK lives in `sdk/` directory (already exists with placeholder)
-- Package name is `memoryhub` (already registered on PyPI)
-- Use hatchling for builds (already configured in pyproject.toml)
-- MCP tools MUST be created via `/plan-tools` → `/create-tools` → `/exercise-tools` (not applicable for SDK, but noted)
-- Run tests before committing
-- Deploy and verify on cluster as part of implementation
+- **Audit trail**: `governance.md` has the full schema, just needs migration + logging calls
+- **#25 CLI client**: Thin wrapper around SDK with typer/click
+- **#27 LlamaStack integration**: SDK as memory provider
+- **#19 RHOAI dashboard**: Independent, unblocked
+- **HITL approval flow**: For enterprise-scope writes (deferred from RBAC)
