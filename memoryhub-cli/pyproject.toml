@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memoryhub-cli"
+version = "0.1.0"
+description = "CLI client for MemoryHub — centralized, governed memory for AI agents"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Wes Jackson" },
+]
+keywords = ["ai", "agents", "memory", "cli", "mcp"]
+dependencies = [
+    "memoryhub>=0.1.0",
+    "typer[all]>=0.15",
+    "rich>=13.0",
+]
+
+[project.scripts]
+memoryhub = "memoryhub_cli.main:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memoryhub_cli"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
