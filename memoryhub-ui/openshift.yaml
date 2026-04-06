@@ -73,8 +73,8 @@ spec:
         - name: MEMORYHUB_ADMIN_KEY
           valueFrom:
             secretKeyRef:
-              name: auth-admin-key
-              key: AUTH_ADMIN_KEY
+              name: memoryhub-ui-admin-key
+              key: MEMORYHUB_ADMIN_KEY
         resources:
           limits:
             memory: "512Mi"
@@ -86,11 +86,12 @@ spec:
         image: registry.redhat.io/openshift4/ose-oauth-proxy:v4.14
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 4180
+        - containerPort: 8443
           name: proxy
           protocol: TCP
         args:
-        - --https-address=:4180
+        - --http-address=127.0.0.1:4180
+        - --https-address=:8443
         - --provider=openshift
         - --openshift-service-account=memoryhub-ui
         - --upstream=http://localhost:8080
@@ -134,8 +135,8 @@ spec:
     app: memoryhub-ui
   ports:
   - name: proxy
-    port: 4180
-    targetPort: 4180
+    port: 8443
+    targetPort: 8443
     protocol: TCP
   - name: app
     port: 8080
@@ -152,7 +153,7 @@ spec:
     kind: Service
     name: memoryhub-ui
   port:
-    targetPort: 4180
+    targetPort: 8443
   tls:
     termination: reencrypt
     insecureEdgeTerminationPolicy: Redirect

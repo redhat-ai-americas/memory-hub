@@ -6,13 +6,6 @@ metadata:
   namespace: memory-hub-mcp
   annotations:
     serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"memoryhub-ui"}}'
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: memoryhub-ui-proxy
-  namespace: memory-hub-mcp
-type: Opaque
-stringData:
-  # REQUIRED: Populate before deployment. Generate with: openssl rand -base64 32
-  session-secret: ""
+# The memoryhub-ui-proxy Secret (session-secret) must be created separately:
+#   python3 -c "import secrets; print(secrets.token_urlsafe(24), end='')" | head -c 32 > /tmp/ss.txt
+#   oc create secret generic memoryhub-ui-proxy --from-file=session-secret=/tmp/ss.txt -n memory-hub-mcp
