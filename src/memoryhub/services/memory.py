@@ -7,7 +7,7 @@ and receive an explicit AsyncSession (no hidden global state).
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Integer, and_, func, or_, select
+from sqlalchemy import Integer, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,7 +24,12 @@ from memoryhub.models.schemas import (
 from memoryhub.models.utils import generate_stub
 from memoryhub.services.curation.pipeline import run_curation_pipeline
 from memoryhub.services.embeddings import EmbeddingService
-from memoryhub.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
+from memoryhub.services.exceptions import (
+    ContradictionNotFoundError,
+    MemoryAlreadyDeletedError,
+    MemoryNotCurrentError,
+    MemoryNotFoundError,
+)
 
 
 async def create_memory(
@@ -117,7 +122,7 @@ async def read_memory(
     if depth > 0:
         options.append(selectinload(MemoryNode.children))
 
-    stmt = select(MemoryNode).where(MemoryNode.id == memory_id).options(*options)
+    stmt = select(MemoryNode).where(MemoryNode.id == memory_id, MemoryNode.deleted_at.is_(None)).options(*options)
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
 
@@ -264,6 +269,83 @@ async def update_memory(
     return node_to_read(new_node, has_children=has_children, has_rationale=has_rationale)
 
 
+async def delete_memory(
+    memory_id: uuid.UUID,
+    session: AsyncSession,
+) -> dict:
+    """Soft-delete a memory and its entire version chain.
+
+    Marks the target node and all nodes in its version chain with
+    deleted_at = now. Relationships are left intact (they reference
+    deleted nodes, which are filtered from queries). Returns a summary
+    dict with the count of deleted versions.
+
+    Raises MemoryNotFoundError if the node doesn't exist, or
+    MemoryAlreadyDeletedError if already soft-deleted.
+    """
+    stmt = select(MemoryNode).where(MemoryNode.id == memory_id)
+    result = await session.execute(stmt)
+    node = result.scalar_one_or_none()
+
+    if node is None:
+        raise MemoryNotFoundError(memory_id)
+
+    if node.deleted_at is not None:
+        raise MemoryAlreadyDeletedError(memory_id)
+
+    now = datetime.now(UTC)
+
+    # Walk the version chain backwards to find all versions
+    version_ids: set[uuid.UUID] = set()
+    current = node
+
+    # Walk backwards (previous_version_id)
+    while current is not None and current.id not in version_ids:
+        version_ids.add(current.id)
+        if current.previous_version_id is not None:
+            prev_stmt = select(MemoryNode).where(MemoryNode.id == current.previous_version_id)
+            prev_result = await session.execute(prev_stmt)
+            current = prev_result.scalar_one_or_none()
+        else:
+            current = None
+
+    # Walk forward: find any nodes whose previous_version_id points to nodes we've seen
+    # (handles the case where we were given an old version ID)
+    changed = True
+    while changed:
+        changed = False
+        fwd_stmt = select(MemoryNode).where(
+            MemoryNode.previous_version_id.in_(list(version_ids)),
+            ~MemoryNode.id.in_(list(version_ids)),
+        )
+        fwd_result = await session.execute(fwd_stmt)
+        for fwd_node in fwd_result.scalars().all():
+            version_ids.add(fwd_node.id)
+            changed = True
+
+    # Also delete child branches of all versions in the chain
+    child_stmt = select(MemoryNode).where(MemoryNode.parent_id.in_(list(version_ids)))
+    child_result = await session.execute(child_stmt)
+    child_ids = {child.id for child in child_result.scalars().all()}
+    all_ids = version_ids | child_ids
+
+    # Bulk soft-delete
+    await session.execute(
+        update(MemoryNode)
+        .where(MemoryNode.id.in_(list(all_ids)))
+        .values(deleted_at=now, is_current=False)
+    )
+
+    await session.commit()
+
+    return {
+        "deleted_id": str(memory_id),
+        "versions_deleted": len(version_ids),
+        "branches_deleted": len(child_ids),
+        "total_deleted": len(all_ids),
+    }
+
+
 async def search_memories(
     query: str,
     session: AsyncSession,
@@ -291,7 +373,7 @@ async def search_memories(
     query_embedding = await embedding_service.embed(query)
 
     # Build base filters
-    filters = []
+    filters = [MemoryNode.deleted_at.is_(None)]
     if current_only:
         filters.append(MemoryNode.is_current.is_(True))
     if scope is not None:
@@ -529,7 +611,7 @@ async def _bulk_branch_flags(
             func.count(MemoryNode.id).label("child_count"),
             func.sum(func.cast(MemoryNode.branch_type == "rationale", Integer)).label("rationale_count"),
         )
-        .where(MemoryNode.parent_id.in_(parent_ids))
+        .where(MemoryNode.parent_id.in_(parent_ids), MemoryNode.deleted_at.is_(None))
         .group_by(MemoryNode.parent_id)
     )
     result = await session.execute(stmt)
@@ -549,10 +631,13 @@ async def _compute_branch_flags(
     Otherwise, runs a lightweight existence check.
     """
     if depth > 0 and node.children is not None:
-        has_children = len(node.children) > 0
-        has_rationale = any(c.branch_type == "rationale" for c in node.children)
+        active_children = [c for c in node.children if c.deleted_at is None]
+        has_children = len(active_children) > 0
+        has_rationale = any(c.branch_type == "rationale" for c in active_children)
     else:
-        children_stmt = select(MemoryNode.id, MemoryNode.branch_type).where(MemoryNode.parent_id == node.id)
+        children_stmt = select(MemoryNode.id, MemoryNode.branch_type).where(
+            MemoryNode.parent_id == node.id, MemoryNode.deleted_at.is_(None)
+        )
         children_result = await session.execute(children_stmt)
         rows = children_result.all()
         has_children = len(rows) > 0

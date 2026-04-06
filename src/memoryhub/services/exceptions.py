@@ -36,6 +36,14 @@ class ContradictionNotFoundError(Exception):
         super().__init__(f"Contradiction report {contradiction_id} not found")
 
 
+class MemoryAlreadyDeletedError(Exception):
+    """Raised when attempting to delete an already-deleted memory."""
+
+    def __init__(self, memory_id: uuid.UUID) -> None:
+        self.memory_id = memory_id
+        super().__init__(f"Memory node {memory_id} is already deleted")
+
+
 class RelationshipNotFoundError(Exception):
     """Raised when a graph relationship cannot be found."""
 

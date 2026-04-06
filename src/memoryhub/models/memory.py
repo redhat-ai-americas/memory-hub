@@ -70,6 +70,9 @@ class MemoryNode(TimestampMixin, Base):
     # Embedding (384 dims for sentence-transformers/all-MiniLM-L6-v2)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
 
+    # Soft-delete
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+
     # Extensible metadata
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
 
