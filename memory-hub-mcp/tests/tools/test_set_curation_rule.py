@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import src.tools.auth as auth_mod
 from src.tools.set_curation_rule import set_curation_rule
 
 
@@ -51,16 +52,15 @@ def test_set_curation_rule_default_values():
 @pytest.mark.asyncio
 async def test_set_curation_rule_requires_auth():
     """Unauthenticated calls return an error."""
-    with patch("src.tools.set_curation_rule.require_auth", side_effect=RuntimeError("Not authenticated")):
-        result = await set_curation_rule(name="my_rule")
+    auth_mod._current_session = None
+    result = await set_curation_rule(name="my_rule")
     assert result["error"] is True
 
 
 @pytest.mark.asyncio
 async def test_set_curation_rule_invalid_tier():
     """Invalid tier returns an error with valid options."""
-    with patch("src.tools.set_curation_rule.require_auth", return_value={"user_id": "test"}):
-        result = await set_curation_rule(name="my_rule", tier="magic")
+    result = await set_curation_rule(name="my_rule", tier="magic")
     assert result["error"] is True
     assert "regex" in result["message"]
 
@@ -68,8 +68,7 @@ async def test_set_curation_rule_invalid_tier():
 @pytest.mark.asyncio
 async def test_set_curation_rule_invalid_action():
     """Invalid action returns an error with valid options."""
-    with patch("src.tools.set_curation_rule.require_auth", return_value={"user_id": "test"}):
-        result = await set_curation_rule(name="my_rule", action="destroy")
+    result = await set_curation_rule(name="my_rule", action="destroy")
     assert result["error"] is True
     assert "flag" in result["message"]
 
@@ -87,7 +86,6 @@ async def test_set_curation_rule_protected_system_rule():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.set_curation_rule.require_auth", return_value={"user_id": "test"}),
         patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
     ):
@@ -126,7 +124,6 @@ async def test_set_curation_rule_create_success():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.set_curation_rule.require_auth", return_value={"user_id": "test"}),
         patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
         patch("src.tools.set_curation_rule.create_rule", new_callable=AsyncMock, return_value=mock_rule),

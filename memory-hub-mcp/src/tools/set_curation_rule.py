@@ -7,8 +7,8 @@ from pydantic import Field
 from sqlalchemy import and_, select
 
 from src.core.app import mcp
+from src.core.authz import get_claims_from_context, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import require_auth
 
 from memoryhub.models.curation import CuratorRule
 from memoryhub.models.schemas import (
@@ -86,9 +86,17 @@ async def set_curation_rule(
         await ctx.info(f"Setting curation rule {name!r} (tier={tier}, action={action})")
 
     try:
-        current_user = require_auth()
-    except RuntimeError as exc:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
+
+    # Admin operations require memory:admin scope or service identity
+    caller_scopes = claims.get("scopes", [])
+    is_admin = "memory:admin" in caller_scopes
+    is_service = claims.get("identity_type") == "service"
+    if not is_admin and not is_service:
+        # Regular users can only manage their own user-layer rules
+        pass  # allowed — user-layer rules are scoped to owner_id below
 
     if tier not in _VALID_TIERS:
         return {
@@ -105,7 +113,7 @@ async def set_curation_rule(
     if not name.strip():
         return {"error": True, "message": "name cannot be empty."}
 
-    owner_id = current_user["user_id"]
+    owner_id = claims["sub"]
     resolved_config = config or {}
 
     gen = None

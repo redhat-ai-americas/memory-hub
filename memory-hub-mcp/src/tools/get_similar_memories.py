@@ -1,14 +1,15 @@
 """Get memories similar to a given memory, with similarity scores."""
 
 import uuid
+from types import SimpleNamespace
 from typing import Annotated, Any
 
 from fastmcp import Context
 from pydantic import Field
 
 from src.core.app import mcp
+from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import require_auth
 
 from memoryhub.services.curation.similarity import get_similar_memories as get_similar_memories_service
 from memoryhub.services.exceptions import MemoryNotFoundError
@@ -58,8 +59,8 @@ async def get_similar_memories(
         await ctx.info(f"Finding memories similar to {memory_id}")
 
     try:
-        require_auth()
-    except RuntimeError as exc:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
 
     try:
@@ -85,6 +86,22 @@ async def get_similar_memories(
         for item in result.get("results", []):
             if "id" in item:
                 item["id"] = str(item["id"])
+
+        # Post-fetch RBAC filter: remove results the caller can't read
+        if "results" in result:
+            original_count = len(result["results"])
+            accessible = []
+            for item in result["results"]:
+                mem_proxy = SimpleNamespace(
+                    scope=item.get("scope", "user"),
+                    owner_id=item.get("owner_id", ""),
+                )
+                if authorize_read(claims, mem_proxy):
+                    accessible.append(item)
+            result["results"] = accessible
+            omitted = original_count - len(accessible)
+            if omitted > 0:
+                result["omitted_count"] = omitted
 
         return result
 

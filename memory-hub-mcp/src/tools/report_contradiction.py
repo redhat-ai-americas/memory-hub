@@ -8,10 +8,14 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from src.core.app import mcp
-from src.tools._deps import get_authenticated_owner, get_db_session, release_db_session
+from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
+from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub.services.exceptions import MemoryNotFoundError
-from memoryhub.services.memory import report_contradiction as _report_contradiction
+from memoryhub.services.memory import (
+    read_memory as _read_memory,
+    report_contradiction as _report_contradiction,
+)
 
 CONTRADICTION_THRESHOLD = 5
 
@@ -82,10 +86,19 @@ async def report_contradiction(
             "Provide a valid UUID (e.g., '550e8400-e29b-41d4-a716-446655440000')."
         )
 
-    reporter = get_authenticated_owner() or "unknown"
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc))
+    reporter = claims["sub"]
 
     session, gen = await get_db_session()
     try:
+        # Verify caller can see the memory being contradicted
+        target_memory = await _read_memory(parsed_id, session)
+        if not authorize_read(claims, target_memory):
+            raise ToolError(f"Not authorized to access memory {memory_id}.")
+
         contradiction_count = await _report_contradiction(
             memory_id=parsed_id,
             observed_behavior=observed_behavior,

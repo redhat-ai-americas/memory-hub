@@ -1,14 +1,15 @@
 """Get graph relationships for a memory node, with optional provenance tracing."""
 
 import uuid
+from types import SimpleNamespace
 from typing import Annotated, Any
 
 from fastmcp import Context
 from pydantic import Field
 
 from src.core.app import mcp
+from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import require_auth
 
 from memoryhub.models.schemas import RelationshipType
 from memoryhub.services.exceptions import MemoryNotFoundError
@@ -77,8 +78,8 @@ async def get_relationships(
         await ctx.info(f"Getting {direction} relationships for {node_id}")
 
     try:
-        require_auth()
-    except RuntimeError as exc:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
 
     try:
@@ -123,16 +124,43 @@ async def get_relationships(
             "count": len(rels),
         }
 
+        # Post-fetch RBAC filter on related nodes
+        original_rels = result["relationships"]
+        accessible_rels = []
+        for rel in original_rels:
+            for node_key in ("source_node", "target_node"):
+                node_data = rel.get(node_key)
+                if node_data and isinstance(node_data, dict):
+                    proxy = SimpleNamespace(
+                        scope=node_data.get("scope", "user"),
+                        owner_id=node_data.get("owner_id", ""),
+                    )
+                    if not authorize_read(claims, proxy):
+                        break
+            else:
+                accessible_rels.append(rel)
+        omitted = len(original_rels) - len(accessible_rels)
+        result["relationships"] = accessible_rels
+        result["count"] = len(accessible_rels)
+        if omitted > 0:
+            result["omitted_count"] = omitted
+
         if include_provenance:
             provenance_steps = await trace_provenance(parsed_node_id, session)
-            result["provenance_chain"] = [
-                {
-                    "hop": step["hop"],
-                    "node": step["node"].model_dump(mode="json"),
-                    "relationship": step["relationship"].model_dump(mode="json"),
-                }
-                for step in provenance_steps
-            ]
+            accessible_steps = []
+            for step in provenance_steps:
+                node_dump = step["node"].model_dump(mode="json")
+                proxy = SimpleNamespace(
+                    scope=node_dump.get("scope", "user"),
+                    owner_id=node_dump.get("owner_id", ""),
+                )
+                if authorize_read(claims, proxy):
+                    accessible_steps.append({
+                        "hop": step["hop"],
+                        "node": node_dump,
+                        "relationship": step["relationship"].model_dump(mode="json"),
+                    })
+            result["provenance_chain"] = accessible_steps
 
         return result
 

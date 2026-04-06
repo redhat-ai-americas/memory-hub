@@ -41,11 +41,20 @@ async def release_db_session(gen):
 def get_authenticated_owner() -> str | None:
     """Return the authenticated user's user_id, or None if no session is registered.
 
-    Tools that want to fall back silently use this. Tools that must enforce auth
-    should call src.tools.auth.require_auth() directly.
+    Deprecated: Use get_claims_from_context() from src.core.authz instead.
     """
     try:
         user = require_auth()
         return user["user_id"]
     except RuntimeError:
+        return None
+
+
+def get_caller_id() -> str | None:
+    """Return the caller's identity from JWT or session, or None."""
+    try:
+        from src.core.authz import get_claims_from_context
+        claims = get_claims_from_context()
+        return claims["sub"]
+    except Exception:
         return None

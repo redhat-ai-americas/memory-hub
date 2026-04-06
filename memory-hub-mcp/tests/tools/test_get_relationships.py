@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import src.tools.auth as auth_mod
 from src.tools.get_relationships import get_relationships
 
 
@@ -48,16 +49,15 @@ def test_get_relationships_default_values():
 @pytest.mark.asyncio
 async def test_get_relationships_requires_auth():
     """Unauthenticated calls return an error."""
-    with patch("src.tools.get_relationships.require_auth", side_effect=RuntimeError("Not authenticated")):
-        result = await get_relationships(node_id=str(uuid.uuid4()))
+    auth_mod._current_session = None
+    result = await get_relationships(node_id=str(uuid.uuid4()))
     assert result["error"] is True
 
 
 @pytest.mark.asyncio
 async def test_get_relationships_invalid_uuid():
     """Bad UUID format returns a clear error."""
-    with patch("src.tools.get_relationships.require_auth", return_value={"user_id": "test"}):
-        result = await get_relationships(node_id="not-a-uuid")
+    result = await get_relationships(node_id="not-a-uuid")
     assert result["error"] is True
     assert "Invalid node_id format" in result["message"]
 
@@ -65,11 +65,10 @@ async def test_get_relationships_invalid_uuid():
 @pytest.mark.asyncio
 async def test_get_relationships_invalid_direction():
     """Invalid direction returns an error with valid options."""
-    with patch("src.tools.get_relationships.require_auth", return_value={"user_id": "test"}):
-        result = await get_relationships(
-            node_id=str(uuid.uuid4()),
-            direction="sideways",
-        )
+    result = await get_relationships(
+        node_id=str(uuid.uuid4()),
+        direction="sideways",
+    )
     assert result["error"] is True
     assert "outgoing" in result["message"]
 
@@ -77,11 +76,10 @@ async def test_get_relationships_invalid_direction():
 @pytest.mark.asyncio
 async def test_get_relationships_invalid_type():
     """Invalid relationship_type returns an error."""
-    with patch("src.tools.get_relationships.require_auth", return_value={"user_id": "test"}):
-        result = await get_relationships(
-            node_id=str(uuid.uuid4()),
-            relationship_type="bad_type",
-        )
+    result = await get_relationships(
+        node_id=str(uuid.uuid4()),
+        relationship_type="bad_type",
+    )
     assert result["error"] is True
     assert "derived_from" in result["message"]
 
@@ -99,7 +97,6 @@ async def test_get_relationships_success():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.get_relationships.require_auth", return_value={"user_id": "test"}),
         patch("src.tools.get_relationships.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.get_relationships.release_db_session", new_callable=AsyncMock),
         patch("src.tools.get_relationships.get_relationships_service", new_callable=AsyncMock, return_value=[mock_rel]),

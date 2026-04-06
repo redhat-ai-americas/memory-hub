@@ -2,10 +2,12 @@
 
 import inspect
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import src.tools.auth as auth_mod
 from src.tools.suggest_merge import suggest_merge
 
 
@@ -38,24 +40,23 @@ def test_suggest_merge_has_required_parameters():
 @pytest.mark.asyncio
 async def test_suggest_merge_requires_auth():
     """Unauthenticated calls return an error."""
-    with patch("src.tools.suggest_merge.require_auth", side_effect=RuntimeError("Not authenticated")):
-        result = await suggest_merge(
-            memory_a_id=str(uuid.uuid4()),
-            memory_b_id=str(uuid.uuid4()),
-            reasoning="duplicates",
-        )
+    auth_mod._current_session = None
+    result = await suggest_merge(
+        memory_a_id=str(uuid.uuid4()),
+        memory_b_id=str(uuid.uuid4()),
+        reasoning="duplicates",
+    )
     assert result["error"] is True
 
 
 @pytest.mark.asyncio
 async def test_suggest_merge_invalid_uuid():
     """Bad UUID format returns a clear error."""
-    with patch("src.tools.suggest_merge.require_auth", return_value={"user_id": "test"}):
-        result = await suggest_merge(
-            memory_a_id="bad-uuid",
-            memory_b_id=str(uuid.uuid4()),
-            reasoning="duplicates",
-        )
+    result = await suggest_merge(
+        memory_a_id="bad-uuid",
+        memory_b_id=str(uuid.uuid4()),
+        reasoning="duplicates",
+    )
     assert result["error"] is True
     assert "Invalid memory_a_id format" in result["message"]
 
@@ -64,12 +65,11 @@ async def test_suggest_merge_invalid_uuid():
 async def test_suggest_merge_self_reference():
     """Same source and target returns an error."""
     same_id = str(uuid.uuid4())
-    with patch("src.tools.suggest_merge.require_auth", return_value={"user_id": "test"}):
-        result = await suggest_merge(
-            memory_a_id=same_id,
-            memory_b_id=same_id,
-            reasoning="duplicates",
-        )
+    result = await suggest_merge(
+        memory_a_id=same_id,
+        memory_b_id=same_id,
+        reasoning="duplicates",
+    )
     assert result["error"] is True
     assert "must be different" in result["message"]
 
@@ -77,12 +77,11 @@ async def test_suggest_merge_self_reference():
 @pytest.mark.asyncio
 async def test_suggest_merge_empty_reasoning():
     """Empty reasoning returns an error."""
-    with patch("src.tools.suggest_merge.require_auth", return_value={"user_id": "test"}):
-        result = await suggest_merge(
-            memory_a_id=str(uuid.uuid4()),
-            memory_b_id=str(uuid.uuid4()),
-            reasoning="   ",
-        )
+    result = await suggest_merge(
+        memory_a_id=str(uuid.uuid4()),
+        memory_b_id=str(uuid.uuid4()),
+        reasoning="   ",
+    )
     assert result["error"] is True
     assert "reasoning cannot be empty" in result["message"]
 
@@ -100,10 +99,12 @@ async def test_suggest_merge_success():
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
 
+    mock_memory = SimpleNamespace(scope="user", owner_id="test-user")
+
     with (
-        patch("src.tools.suggest_merge.require_auth", return_value={"user_id": "test"}),
         patch("src.tools.suggest_merge.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.suggest_merge.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.suggest_merge._read_memory", new_callable=AsyncMock, return_value=mock_memory),
         patch("src.tools.suggest_merge.create_relationship_service", new_callable=AsyncMock, return_value=mock_result),
     ):
         result = await suggest_merge(

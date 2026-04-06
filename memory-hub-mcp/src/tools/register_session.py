@@ -39,6 +39,26 @@ async def register_session(
     After registration, write_memory and search_memory will automatically scope
     operations to your user_id. Returns your identity and accessible memory scopes.
     """
+    # When JWT auth is active, session registration is unnecessary
+    try:
+        from fastmcp.server.dependencies import get_access_token
+        token = get_access_token()
+    except Exception:
+        token = None
+
+    if token is not None:
+        jwt_claims = token.claims
+        return {
+            "user_id": jwt_claims.get("sub", token.client_id),
+            "name": jwt_claims.get("name", jwt_claims.get("sub", token.client_id)),
+            "scopes": list(token.scopes),
+            "auth_method": "jwt",
+            "message": (
+                f"JWT authentication active for {jwt_claims.get('sub', token.client_id)}. "
+                "Session registration is not needed when using JWT auth."
+            ),
+        }
+
     user = authenticate(api_key)
 
     if user is None:

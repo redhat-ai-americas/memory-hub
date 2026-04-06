@@ -7,6 +7,7 @@ from fastmcp import Context
 from pydantic import Field
 
 from src.core.app import mcp
+from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub.services.exceptions import MemoryNotFoundError
@@ -70,6 +71,18 @@ async def read_memory(
         session, gen = await get_db_session()
 
         node = await _read_memory(parsed_id, session, depth=depth)
+
+        try:
+            claims = get_claims_from_context()
+        except AuthenticationError as exc:
+            return {"error": True, "message": str(exc)}
+
+        if not authorize_read(claims, node):
+            return {
+                "error": True,
+                "message": f"Not authorized to read memory {memory_id}.",
+            }
+
         result = node.model_dump(mode="json")
 
         # Include version history if requested and we're at the node level

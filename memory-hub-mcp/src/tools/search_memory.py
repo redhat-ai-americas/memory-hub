@@ -14,8 +14,12 @@ from pydantic import Field
 from memoryhub.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
 from memoryhub.services.memory import search_memories
 from src.core.app import mcp
+from src.core.authz import (
+    get_claims_from_context,
+    build_authorized_scopes,
+    AuthenticationError,
+)
 from src.tools._deps import (
-    get_authenticated_owner,
     get_db_session,
     get_embedding_service,
     release_db_session,
@@ -94,10 +98,19 @@ async def search_memory(
             "Query cannot be empty. Provide a natural language search query."
         )
 
+    # Resolve caller identity via JWT or session fallback.
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc))
+
+    # Build RBAC visibility filter
+    authorized = build_authorized_scopes(claims)
+
     # Resolve owner_id: default to authenticated user when not explicitly set.
     # An empty string signals "no filter" (search all accessible owners).
     if owner_id is None:
-        owner_id = get_authenticated_owner()
+        owner_id = claims["sub"]
     elif owner_id == "":
         owner_id = None
 
@@ -122,6 +135,7 @@ async def search_memory(
             weight_threshold=weight_threshold,
             max_results=max_results,
             current_only=current_only,
+            authorized_scopes=authorized,
         )
 
         if not results:

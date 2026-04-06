@@ -18,8 +18,10 @@ from memoryhub.services.exceptions import (
     MemoryNotCurrentError,
     MemoryNotFoundError,
 )
+from memoryhub.services.memory import read_memory as _read_memory
 from memoryhub.services.memory import update_memory as svc_update_memory
 from src.core.app import mcp
+from src.core.authz import get_claims_from_context, authorize_write, AuthenticationError
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session
 
 
@@ -85,6 +87,18 @@ async def update_memory(
 
     session, gen = await get_db_session()
     try:
+        try:
+            claims = get_claims_from_context()
+        except AuthenticationError as exc:
+            raise ToolError(str(exc))
+
+        # Fetch existing memory to check authorization
+        existing = await _read_memory(parsed_id, session)
+        if not authorize_write(claims, existing.scope, existing.owner_id):
+            raise ToolError(
+                f"Not authorized to update this {existing.scope}-scope memory."
+            )
+
         if ctx:
             await ctx.info(f"Updating memory {memory_id}")
 

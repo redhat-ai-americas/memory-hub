@@ -7,12 +7,13 @@ from fastmcp import Context
 from pydantic import Field, ValidationError
 
 from src.core.app import mcp
+from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import require_auth
 
 from memoryhub.models.schemas import RelationshipCreate, RelationshipType
 from memoryhub.services.exceptions import MemoryNotFoundError
 from memoryhub.services.graph import create_relationship as create_relationship_service
+from memoryhub.services.memory import read_memory as _read_memory
 
 _VALID_TYPES = [t.value for t in RelationshipType]
 
@@ -63,8 +64,8 @@ async def create_relationship(
         await ctx.info(f"Creating {relationship_type!r} relationship {source_id} -> {target_id}")
 
     try:
-        current_user = require_auth()
-    except RuntimeError as exc:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
 
     if relationship_type not in _VALID_TYPES:
@@ -98,25 +99,34 @@ async def create_relationship(
             "message": "source_id and target_id must be different — self-referential edges are not allowed.",
         }
 
-    try:
-        rel_create = RelationshipCreate(
-            source_id=parsed_source_id,
-            target_id=parsed_target_id,
-            relationship_type=relationship_type,
-            created_by=current_user["user_id"],
-            metadata=metadata,
-        )
-    except ValidationError as exc:
-        errors = exc.errors()
-        messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
-        return {
-            "error": True,
-            "message": "Parameter validation failed:\n" + "\n".join(messages),
-        }
-
     gen = None
     try:
         session, gen = await get_db_session()
+
+        # Verify read access to both nodes
+        for node_id, label in [(parsed_source_id, "source_id"), (parsed_target_id, "target_id")]:
+            try:
+                node = await _read_memory(node_id, session)
+            except MemoryNotFoundError:
+                return {"error": True, "message": f"Memory node {node_id} not found."}
+            if not authorize_read(claims, node):
+                return {"error": True, "message": f"Not authorized to access {label} ({node_id})."}
+
+        try:
+            rel_create = RelationshipCreate(
+                source_id=parsed_source_id,
+                target_id=parsed_target_id,
+                relationship_type=relationship_type,
+                created_by=claims["sub"],
+                metadata=metadata,
+            )
+        except ValidationError as exc:
+            errors = exc.errors()
+            messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
+            return {
+                "error": True,
+                "message": "Parameter validation failed:\n" + "\n".join(messages),
+            }
         result = await create_relationship_service(rel_create, session)
         return result.model_dump(mode="json")
 

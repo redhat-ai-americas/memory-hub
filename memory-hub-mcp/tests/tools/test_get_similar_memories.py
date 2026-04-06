@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import src.tools.auth as auth_mod
 from src.tools.get_similar_memories import get_similar_memories
 
 
@@ -48,16 +49,15 @@ def test_get_similar_memories_default_values():
 @pytest.mark.asyncio
 async def test_get_similar_memories_requires_auth():
     """Unauthenticated calls return an error."""
-    with patch("src.tools.get_similar_memories.require_auth", side_effect=RuntimeError("Not authenticated")):
-        result = await get_similar_memories(memory_id=str(uuid.uuid4()))
+    auth_mod._current_session = None
+    result = await get_similar_memories(memory_id=str(uuid.uuid4()))
     assert result["error"] is True
 
 
 @pytest.mark.asyncio
 async def test_get_similar_memories_invalid_uuid():
     """Bad UUID format returns a clear error."""
-    with patch("src.tools.get_similar_memories.require_auth", return_value={"user_id": "test"}):
-        result = await get_similar_memories(memory_id="not-a-uuid")
+    result = await get_similar_memories(memory_id="not-a-uuid")
     assert result["error"] is True
     assert "Invalid memory_id format" in result["message"]
 
@@ -69,7 +69,6 @@ async def test_get_similar_memories_success():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.get_similar_memories.require_auth", return_value={"user_id": "test"}),
         patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
         patch(

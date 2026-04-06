@@ -7,12 +7,13 @@ from fastmcp import Context
 from pydantic import Field
 
 from src.core.app import mcp
+from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import require_auth
 
 from memoryhub.models.schemas import RelationshipCreate
 from memoryhub.services.exceptions import MemoryNotFoundError
 from memoryhub.services.graph import create_relationship as create_relationship_service
+from memoryhub.services.memory import read_memory as _read_memory
 
 
 @mcp.tool(
@@ -50,8 +51,8 @@ async def suggest_merge(
         await ctx.info(f"Suggesting merge: {memory_a_id} + {memory_b_id}")
 
     try:
-        current_user = require_auth()
-    except RuntimeError as exc:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
 
     try:
@@ -82,21 +83,30 @@ async def suggest_merge(
             "message": "reasoning cannot be empty.",
         }
 
-    rel_create = RelationshipCreate(
-        source_id=parsed_a,
-        target_id=parsed_b,
-        relationship_type="conflicts_with",
-        created_by=current_user["user_id"],
-        metadata={
-            "merge_suggested": True,
-            "reasoning": reasoning.strip(),
-            "suggested_by": current_user["user_id"],
-        },
-    )
-
     gen = None
     try:
         session, gen = await get_db_session()
+
+        # Verify read access to both memories
+        for mid, label in [(parsed_a, "memory_a_id"), (parsed_b, "memory_b_id")]:
+            try:
+                mem = await _read_memory(mid, session)
+            except MemoryNotFoundError:
+                return {"error": True, "message": f"Memory {mid} not found."}
+            if not authorize_read(claims, mem):
+                return {"error": True, "message": f"Not authorized to access {label} ({mid})."}
+
+        rel_create = RelationshipCreate(
+            source_id=parsed_a,
+            target_id=parsed_b,
+            relationship_type="conflicts_with",
+            created_by=claims["sub"],
+            metadata={
+                "merge_suggested": True,
+                "reasoning": reasoning.strip(),
+                "suggested_by": claims["sub"],
+            },
+        )
         result = await create_relationship_service(rel_create, session)
 
         return {

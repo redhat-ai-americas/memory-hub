@@ -8,10 +8,12 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from src.core.app import mcp
+from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub.services.exceptions import MemoryNotFoundError
 from memoryhub.services.memory import get_memory_history as _get_memory_history
+from memoryhub.services.memory import read_memory as _read_memory
 
 
 @mcp.tool(
@@ -71,6 +73,16 @@ async def get_memory_history(
 
     session, gen = await get_db_session()
     try:
+        try:
+            claims = get_claims_from_context()
+        except AuthenticationError as exc:
+            raise ToolError(str(exc))
+
+        # Authorize against the memory itself before revealing history
+        memory_node = await _read_memory(parsed_id, session)
+        if not authorize_read(claims, memory_node):
+            raise ToolError(f"Not authorized to view history for memory {memory_id}.")
+
         history_result = await _get_memory_history(
             parsed_id, session, max_versions=max_versions, offset=offset
         )
