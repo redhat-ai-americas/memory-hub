@@ -12,6 +12,7 @@ from fastmcp import FastMCP
 from src.tools.write_memory import write_memory
 from src.tools.read_memory import read_memory
 from src.tools.update_memory import update_memory
+from src.tools.delete_memory import delete_memory
 from src.tools.search_memory import search_memory
 from src.tools.get_memory_history import get_memory_history
 from src.tools.report_contradiction import report_contradiction
@@ -40,8 +41,8 @@ mcp = FastMCP(
 )
 
 for tool_fn in [register_session, write_memory, read_memory, update_memory,
-                search_memory, get_memory_history, report_contradiction,
-                create_relationship, get_relationships,
+                delete_memory, search_memory, get_memory_history,
+                report_contradiction, create_relationship, get_relationships,
                 get_similar_memories, suggest_merge, set_curation_rule]:
     mcp.add_tool(tool_fn)
 

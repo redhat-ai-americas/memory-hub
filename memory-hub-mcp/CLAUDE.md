@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Adding a new tool — REGISTER IT IN main.py
+
+**This server does NOT use the dynamic loader.** `src/main.py` (lines 12–46) statically imports each tool module and calls `mcp.add_tool()` explicitly. The comment in `main.py` explains why: the template's `UnifiedMCPServer`/`load_all` was designed for FastMCP 2 and doesn't register tools correctly in v3.
+
+**When you add a new tool, you MUST also:**
+1. Add `from src.tools.<name> import <name>` to the imports in `src/main.py`
+2. Add `<name>` to the list passed to `mcp.add_tool()`
+
+If you forget, the tool file will deploy to the container and the loader will silently skip it — `list_tools` will not include it and there will be no error in the logs. Verify with mcp-test-mcp after deployment.
+
 ## Build and Test Commands
 
 ```bash
