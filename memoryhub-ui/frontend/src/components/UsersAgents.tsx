@@ -7,9 +7,6 @@ import {
   Label,
   Spinner,
   Title,
-  Toolbar,
-  ToolbarContent,
-  ToolbarItem,
 } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import type { UserEntry } from '@/types';
@@ -46,21 +43,21 @@ const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
   }
 
   return (
-    <div style={{ padding: '1.5rem' }}>
+    <div style={{ padding: '1.5rem', overflow: 'auto', height: '100%' }}>
       {error && (
         <Alert variant="danger" title="Error loading users" isInline style={{ marginBottom: '1rem' }}>
           {error}
         </Alert>
       )}
 
-      <Toolbar>
-        <ToolbarContent>
-          <ToolbarItem>
-            <Title headingLevel="h2" size="lg">Users &amp; Agents</Title>
-          </ToolbarItem>
-        </ToolbarContent>
-      </Toolbar>
+      <div style={{ marginBottom: '1rem' }}>
+        <Title headingLevel="h2" size="lg">Users &amp; Agents</Title>
+        <Content component="small" style={{ color: 'var(--pf-v6-global--Color--200)', marginTop: '0.25rem' }}>
+          Registered OAuth clients and memory owners. Click &quot;View Memories&quot; to see an owner&apos;s memories in the graph.
+        </Content>
+      </div>
 
+      <div style={{ overflowX: 'auto' }}>
       <Table aria-label="Users and agents" variant="compact">
         <Thead>
           <Tr>
@@ -122,6 +119,7 @@ const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
           )}
         </Tbody>
       </Table>
+      </div>
     </div>
   );
 };

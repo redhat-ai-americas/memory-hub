@@ -70,7 +70,7 @@ const StatusOverview: React.FC = () => {
     .join(', ');
 
   return (
-    <div style={{ padding: '1.5rem' }}>
+    <div style={{ padding: '1.5rem', overflow: 'auto', height: '100%' }}>
       <Grid hasGutter>
         {/* Card 1: Total Memories */}
         <GridItem sm={12} md={6}>

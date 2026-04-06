@@ -118,3 +118,78 @@ class ClientCreatedResponse(ClientResponse):
 class SecretRotatedResponse(BaseModel):
     client_id: str
     client_secret: str
+
+
+# --- Curation Rules ---
+
+class CurationRuleResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    trigger: str
+    tier: str
+    config: dict
+    action: str
+    scope_filter: str | None
+    layer: str
+    owner_id: str | None
+    override: bool
+    enabled: bool
+    priority: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateRuleRequest(BaseModel):
+    name: str
+    description: str | None = None
+    trigger: str = "on_write"
+    tier: str  # "regex" or "embedding"
+    config: dict = {}
+    action: str  # "block", "quarantine", "flag", etc.
+    scope_filter: str | None = None
+    layer: str = "user"
+    owner_id: str | None = None
+    override: bool = False
+    enabled: bool = True
+    priority: int = 100
+
+
+class UpdateRuleRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    trigger: str | None = None
+    tier: str | None = None
+    config: dict | None = None
+    action: str | None = None
+    scope_filter: str | None = None
+    layer: str | None = None
+    owner_id: str | None = None
+    override: bool | None = None
+    enabled: bool | None = None
+    priority: int | None = None
+
+
+# --- Contradiction Reports ---
+
+class ContradictionResponse(BaseModel):
+    id: str
+    memory_id: str
+    observed_behavior: str
+    confidence: float
+    reporter: str
+    created_at: datetime
+    resolved: bool
+    resolved_at: datetime | None
+
+
+class ContradictionStatsResponse(BaseModel):
+    total: int
+    unresolved: int
+    high_confidence: int  # > 0.8
+    medium_confidence: int  # 0.5 - 0.8
+    low_confidence: int  # < 0.5
+
+
+class UpdateContradictionRequest(BaseModel):
+    resolved: bool

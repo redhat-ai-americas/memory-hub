@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Button,
-  Content,
   Masthead,
   MastheadMain,
   MastheadBrand,
@@ -18,11 +17,13 @@ import {
 import { BarsIcon } from '@patternfly/react-icons';
 
 import ClientManagement from './components/ClientManagement';
+import ContradictionLog from './components/ContradictionLog';
+import CurationRules from './components/CurationRules';
 import MemoryGraph from './components/MemoryGraph';
 import StatusOverview from './components/StatusOverview';
 import UsersAgents from './components/UsersAgents';
 
-type ActivePanel = 'graph' | 'status' | 'users' | 'clients';
+type ActivePanel = 'graph' | 'status' | 'users' | 'rules' | 'contradictions' | 'clients';
 
 interface NavEntry {
   id: string;
@@ -35,8 +36,8 @@ const NAV_ITEMS: NavEntry[] = [
   { id: 'graph', label: 'Memory Graph', panel: 'graph' },
   { id: 'status', label: 'Status Overview', panel: 'status' },
   { id: 'users', label: 'Users & Agents', panel: 'users' },
-  { id: 'curation', label: 'Curation Rules', disabled: true },
-  { id: 'contradictions', label: 'Contradictions', disabled: true },
+  { id: 'curation', label: 'Curation Rules', panel: 'rules' },
+  { id: 'contradictions', label: 'Contradictions', panel: 'contradictions' },
   { id: 'observability', label: 'Observability', disabled: true },
   { id: 'clients', label: 'Client Management', panel: 'clients' },
 ];
@@ -51,8 +52,14 @@ const App: React.FC = () => {
     setActivePanel('graph');
   };
 
+  const handleNavigateToMemory = (_memoryId: string) => {
+    // Navigate to graph panel — future: highlight the specific node
+    setGraphOwnerFilter(undefined);
+    setActivePanel('graph');
+  };
+
   const masthead = (
-    <Masthead>
+    <Masthead style={{ backgroundColor: '#1b1d21' }}>
       <MastheadToggle>
         <Button variant="plain" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
           <BarsIcon />
@@ -80,11 +87,7 @@ const App: React.FC = () => {
           </Title>
         </MastheadBrand>
       </MastheadMain>
-      <MastheadContent>
-        <Content component="small" style={{ color: 'rgba(255,255,255,0.7)' }}>
-          Agent Memory Dashboard
-        </Content>
-      </MastheadContent>
+      <MastheadContent />
     </Masthead>
   );
 
@@ -116,10 +119,12 @@ const App: React.FC = () => {
   );
 
   return (
-    <Page masthead={masthead} sidebar={sidebar} style={{ height: '100vh', overflow: 'hidden' }}>
+    <Page masthead={masthead} sidebar={sidebar} style={{ height: '100vh' }}>
       {activePanel === 'graph' && <MemoryGraph initialOwnerFilter={graphOwnerFilter} />}
       {activePanel === 'status' && <StatusOverview />}
       {activePanel === 'users' && <UsersAgents onNavigateToGraph={handleNavigateToGraph} />}
+      {activePanel === 'rules' && <CurationRules />}
+      {activePanel === 'contradictions' && <ContradictionLog onNavigateToMemory={handleNavigateToMemory} />}
       {activePanel === 'clients' && <ClientManagement />}
     </Page>
   );

@@ -135,7 +135,7 @@ const ClientManagement: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '1.5rem' }}>
+    <div style={{ padding: '1.5rem', overflow: 'auto', height: '100%' }}>
       {error && (
         <Alert variant="danger" title="Error loading clients" isInline style={{ marginBottom: '1rem' }}>
           {error}
@@ -147,11 +147,15 @@ const ClientManagement: React.FC = () => {
         </Alert>
       )}
 
+      <div style={{ marginBottom: '1rem' }}>
+        <Title headingLevel="h2" size="lg">Client Management</Title>
+        <Content component="small" style={{ color: 'var(--pf-v6-global--Color--200)', marginTop: '0.25rem' }}>
+          Manage OAuth 2.1 clients that authenticate agents and services to MemoryHub.
+        </Content>
+      </div>
+
       <Toolbar>
         <ToolbarContent>
-          <ToolbarItem>
-            <Title headingLevel="h2" size="lg">Client Management</Title>
-          </ToolbarItem>
           <ToolbarItem align={{ default: 'alignEnd' }}>
             <Button variant="primary" onClick={() => setCreateModalOpen(true)}>
               Create Client
@@ -160,67 +164,69 @@ const ClientManagement: React.FC = () => {
         </ToolbarContent>
       </Toolbar>
 
-      <Table aria-label="OAuth clients" variant="compact">
-        <Thead>
-          <Tr>
-            <Th>Client ID</Th>
-            <Th>Name</Th>
-            <Th>Type</Th>
-            <Th>Scopes</Th>
-            <Th>Tenant</Th>
-            <Th>Status</Th>
-            <Th>Created</Th>
-            <Th>Actions</Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {clients.length === 0 ? (
+      <div style={{ overflowX: 'auto' }}>
+        <Table aria-label="OAuth clients" variant="compact">
+          <Thead>
             <Tr>
-              <Td colSpan={8}>
-                <Content component="small" style={{ color: 'var(--pf-v6-global--Color--200)', textAlign: 'center', padding: '2rem' }}>
-                  No clients registered yet. Click &quot;Create Client&quot; to get started.
-                </Content>
-              </Td>
+              <Th>Client ID</Th>
+              <Th>Name</Th>
+              <Th>Type</Th>
+              <Th>Scopes</Th>
+              <Th>Tenant</Th>
+              <Th>Status</Th>
+              <Th>Created</Th>
+              <Th>Actions</Th>
             </Tr>
-          ) : (
-            clients.map((c) => (
-              <Tr key={c.client_id}>
-                <Td dataLabel="Client ID"><code>{c.client_id}</code></Td>
-                <Td dataLabel="Name">{c.client_name}</Td>
-                <Td dataLabel="Type">
-                  <Label color={c.identity_type === 'service' ? 'blue' : 'grey'} isCompact>
-                    {c.identity_type}
-                  </Label>
-                </Td>
-                <Td dataLabel="Scopes">
-                  <Content component="small">{c.default_scopes.join(', ')}</Content>
-                </Td>
-                <Td dataLabel="Tenant">{c.tenant_id}</Td>
-                <Td dataLabel="Status">
-                  <Label color={c.active ? 'green' : 'red'} isCompact>
-                    {c.active ? 'Active' : 'Inactive'}
-                  </Label>
-                </Td>
-                <Td dataLabel="Created">{formatDate(c.created_at)}</Td>
-                <Td dataLabel="Actions">
-                  <Flex gap={{ default: 'gapSm' }}>
-                    <FlexItem>
-                      <Button variant="secondary" size="sm" onClick={() => handleToggleActive(c)}>
-                        {c.active ? 'Deactivate' : 'Activate'}
-                      </Button>
-                    </FlexItem>
-                    <FlexItem>
-                      <Button variant="warning" size="sm" onClick={() => handleRotateSecret(c.client_id)}>
-                        Rotate Secret
-                      </Button>
-                    </FlexItem>
-                  </Flex>
+          </Thead>
+          <Tbody>
+            {clients.length === 0 ? (
+              <Tr>
+                <Td colSpan={8}>
+                  <Content component="small" style={{ color: 'var(--pf-v6-global--Color--200)', textAlign: 'center', padding: '2rem' }}>
+                    No clients registered yet. Click &quot;Create Client&quot; to get started.
+                  </Content>
                 </Td>
               </Tr>
-            ))
-          )}
-        </Tbody>
-      </Table>
+            ) : (
+              clients.map((c) => (
+                <Tr key={c.client_id}>
+                  <Td dataLabel="Client ID"><code>{c.client_id}</code></Td>
+                  <Td dataLabel="Name">{c.client_name}</Td>
+                  <Td dataLabel="Type">
+                    <Label color={c.identity_type === 'service' ? 'blue' : 'grey'} isCompact>
+                      {c.identity_type}
+                    </Label>
+                  </Td>
+                  <Td dataLabel="Scopes">
+                    <Content component="small">{c.default_scopes.join(', ')}</Content>
+                  </Td>
+                  <Td dataLabel="Tenant">{c.tenant_id}</Td>
+                  <Td dataLabel="Status">
+                    <Label color={c.active ? 'green' : 'red'} isCompact>
+                      {c.active ? 'Active' : 'Inactive'}
+                    </Label>
+                  </Td>
+                  <Td dataLabel="Created">{formatDate(c.created_at)}</Td>
+                  <Td dataLabel="Actions">
+                    <Flex gap={{ default: 'gapSm' }}>
+                      <FlexItem>
+                        <Button variant="secondary" size="sm" onClick={() => handleToggleActive(c)}>
+                          {c.active ? 'Deactivate' : 'Activate'}
+                        </Button>
+                      </FlexItem>
+                      <FlexItem>
+                        <Button variant="warning" size="sm" onClick={() => handleRotateSecret(c.client_id)}>
+                          Rotate Secret
+                        </Button>
+                      </FlexItem>
+                    </Flex>
+                  </Td>
+                </Tr>
+              ))
+            )}
+          </Tbody>
+        </Table>
+      </div>
 
       {/* Create Client Modal */}
       <Modal

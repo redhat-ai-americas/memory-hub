@@ -1,13 +1,18 @@
 import type {
   ClientCreatedResponse,
   ClientResponse,
+  ContradictionReport,
+  ContradictionStats,
   CreateClientPayload,
+  CreateRulePayload,
+  CurationRule,
   GraphResponse,
   MemoryDetail,
   SearchMatch,
   SecretRotatedResponse,
   StatsResponse,
   UpdateClientPayload,
+  UpdateRulePayload,
   UserEntry,
   VersionEntry,
 } from '@/types';
@@ -92,4 +97,50 @@ export async function rotateClientSecret(clientId: string): Promise<SecretRotate
 
 export async function fetchUsers(): Promise<UserEntry[]> {
   return apiFetch<UserEntry[]>('/users');
+}
+
+// --- Curation Rules ---
+
+export async function fetchRules(params?: { tier?: string; enabled?: boolean; layer?: string }): Promise<CurationRule[]> {
+  const qs = new URLSearchParams();
+  if (params?.tier) qs.set('tier', params.tier);
+  if (params?.enabled !== undefined) qs.set('enabled', String(params.enabled));
+  if (params?.layer) qs.set('layer', params.layer);
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  return apiFetch<CurationRule[]>(`/rules${query}`);
+}
+
+export async function createRule(payload: CreateRulePayload): Promise<CurationRule> {
+  return apiPost<CurationRule>('/rules', payload);
+}
+
+export async function updateRule(ruleId: string, payload: UpdateRulePayload): Promise<CurationRule> {
+  return apiPatch<CurationRule>(`/rules/${encodeURIComponent(ruleId)}`, payload);
+}
+
+export async function deleteRule(ruleId: string): Promise<void> {
+  const response = await fetch(`${BASE}/rules/${encodeURIComponent(ruleId)}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`API error ${response.status}: ${detail}`);
+  }
+}
+
+// --- Contradiction Reports ---
+
+export async function fetchContradictions(params?: { resolved?: boolean; min_confidence?: number; max_confidence?: number }): Promise<ContradictionReport[]> {
+  const qs = new URLSearchParams();
+  if (params?.resolved !== undefined) qs.set('resolved', String(params.resolved));
+  if (params?.min_confidence !== undefined) qs.set('min_confidence', String(params.min_confidence));
+  if (params?.max_confidence !== undefined) qs.set('max_confidence', String(params.max_confidence));
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  return apiFetch<ContradictionReport[]>(`/contradictions${query}`);
+}
+
+export async function updateContradiction(reportId: string, resolved: boolean): Promise<ContradictionReport> {
+  return apiPatch<ContradictionReport>(`/contradictions/${encodeURIComponent(reportId)}`, { resolved });
+}
+
+export async function fetchContradictionStats(): Promise<ContradictionStats> {
+  return apiFetch<ContradictionStats>('/contradictions/stats');
 }

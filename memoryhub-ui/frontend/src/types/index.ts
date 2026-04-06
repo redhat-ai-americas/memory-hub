@@ -120,3 +120,74 @@ export interface UserEntry {
   memory_count: number;
   last_active: string | null;
 }
+
+// --- Curation Rules ---
+
+export interface CurationRule {
+  id: string;
+  name: string;
+  description: string | null;
+  trigger: string; // "on_write" | "on_read" | "periodic" | "on_contradiction_count"
+  tier: 'regex' | 'embedding';
+  config: Record<string, unknown>;
+  action: string; // "block" | "quarantine" | "flag" | "reject_with_pointer" | "merge" | "decay_weight"
+  scope_filter: string | null;
+  layer: 'system' | 'organizational' | 'user';
+  owner_id: string | null;
+  override: boolean;
+  enabled: boolean;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRulePayload {
+  name: string;
+  description?: string;
+  trigger?: string;
+  tier: 'regex' | 'embedding';
+  config?: Record<string, unknown>;
+  action: string;
+  scope_filter?: string;
+  layer?: string;
+  owner_id?: string;
+  override?: boolean;
+  enabled?: boolean;
+  priority?: number;
+}
+
+export interface UpdateRulePayload {
+  name?: string;
+  description?: string;
+  trigger?: string;
+  tier?: string;
+  config?: Record<string, unknown>;
+  action?: string;
+  scope_filter?: string;
+  layer?: string;
+  owner_id?: string;
+  override?: boolean;
+  enabled?: boolean;
+  priority?: number;
+}
+
+// --- Contradiction Reports ---
+
+export interface ContradictionReport {
+  id: string;
+  memory_id: string;
+  observed_behavior: string;
+  confidence: number;
+  reporter: string;
+  created_at: string;
+  resolved: boolean;
+  resolved_at: string | null;
+}
+
+export interface ContradictionStats {
+  total: number;
+  unresolved: number;
+  high_confidence: number;
+  medium_confidence: number;
+  low_confidence: number;
+}

@@ -2,10 +2,13 @@
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from memoryhub.models.contradiction import ContradictionReport
+from memoryhub.models.curation import CuratorRule
 from memoryhub.models.memory import MemoryNode, MemoryRelationship
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +18,11 @@ from src.database import get_db
 from src.schemas import (
     ClientCreatedResponse,
     ClientResponse,
+    ContradictionResponse,
+    ContradictionStatsResponse,
     CreateClientRequest,
+    CreateRuleRequest,
+    CurationRuleResponse,
     GraphEdge,
     GraphNode,
     GraphResponse,
@@ -26,6 +33,8 @@ from src.schemas import (
     SecretRotatedResponse,
     StatsResponse,
     UpdateClientRequest,
+    UpdateContradictionRequest,
+    UpdateRuleRequest,
     VersionEntry,
 )
 
@@ -464,3 +473,220 @@ async def list_users(db: DbDep, settings: SettingsDep):
         }
         for owner_id, stats in owner_stats.items()
     ]
+
+
+# ---------------------------------------------------------------------------
+# Curation Rules
+# ---------------------------------------------------------------------------
+
+
+def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
+    return CurationRuleResponse(
+        id=str(rule.id),
+        name=rule.name,
+        description=rule.description,
+        trigger=rule.trigger,
+        tier=rule.tier,
+        config=rule.config,
+        action=rule.action,
+        scope_filter=rule.scope_filter,
+        layer=rule.layer,
+        owner_id=rule.owner_id,
+        override=rule.override,
+        enabled=rule.enabled,
+        priority=rule.priority,
+        created_at=rule.created_at,
+        updated_at=rule.updated_at,
+    )
+
+
+@router.get("/api/rules", response_model=list[CurationRuleResponse])
+async def list_rules(
+    db: DbDep,
+    tier: str | None = Query(default=None),
+    enabled: bool | None = Query(default=None),
+    layer: str | None = Query(default=None),
+):
+    """List all curation rules with optional filters."""
+    stmt = select(CuratorRule).order_by(CuratorRule.priority)
+    if tier:
+        stmt = stmt.where(CuratorRule.tier == tier)
+    if enabled is not None:
+        stmt = stmt.where(CuratorRule.enabled == enabled)
+    if layer:
+        stmt = stmt.where(CuratorRule.layer == layer)
+    result = await db.execute(stmt)
+    rules = result.scalars().all()
+    return [_rule_to_response(r) for r in rules]
+
+
+@router.post("/api/rules", response_model=CurationRuleResponse, status_code=201)
+async def create_rule(body: CreateRuleRequest, db: DbDep):
+    """Create a new curation rule."""
+    rule = CuratorRule(
+        name=body.name,
+        description=body.description,
+        trigger=body.trigger,
+        tier=body.tier,
+        config=body.config,
+        action=body.action,
+        scope_filter=body.scope_filter,
+        layer=body.layer,
+        owner_id=body.owner_id,
+        override=body.override,
+        enabled=body.enabled,
+        priority=body.priority,
+    )
+    db.add(rule)
+    await db.commit()
+    await db.refresh(rule)
+    return _rule_to_response(rule)
+
+
+@router.get("/api/rules/{rule_id}", response_model=CurationRuleResponse)
+async def get_rule(rule_id: str, db: DbDep):
+    """Get a single curation rule by ID."""
+    try:
+        parsed_id = uuid.UUID(rule_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}")
+    result = await db.execute(select(CuratorRule).where(CuratorRule.id == parsed_id))
+    rule = result.scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
+    return _rule_to_response(rule)
+
+
+@router.patch("/api/rules/{rule_id}", response_model=CurationRuleResponse)
+async def update_rule(rule_id: str, body: UpdateRuleRequest, db: DbDep):
+    """Update a curation rule (toggle enabled, change priority, etc.)."""
+    try:
+        parsed_id = uuid.UUID(rule_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}")
+    result = await db.execute(select(CuratorRule).where(CuratorRule.id == parsed_id))
+    rule = result.scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
+    update_data = body.model_dump(exclude_none=True)
+    for field, value in update_data.items():
+        setattr(rule, field, value)
+    await db.commit()
+    await db.refresh(rule)
+    return _rule_to_response(rule)
+
+
+@router.delete("/api/rules/{rule_id}", status_code=204)
+async def delete_rule(rule_id: str, db: DbDep):
+    """Delete a curation rule."""
+    try:
+        parsed_id = uuid.UUID(rule_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}")
+    result = await db.execute(select(CuratorRule).where(CuratorRule.id == parsed_id))
+    rule = result.scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
+    await db.delete(rule)
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Contradiction Log
+# ---------------------------------------------------------------------------
+
+
+def _contradiction_to_response(report: ContradictionReport) -> ContradictionResponse:
+    return ContradictionResponse(
+        id=str(report.id),
+        memory_id=str(report.memory_id),
+        observed_behavior=report.observed_behavior,
+        confidence=report.confidence,
+        reporter=report.reporter,
+        created_at=report.created_at,
+        resolved=report.resolved,
+        resolved_at=report.resolved_at,
+    )
+
+
+@router.get("/api/contradictions", response_model=list[ContradictionResponse])
+async def list_contradictions(
+    db: DbDep,
+    resolved: bool | None = Query(default=None),
+    min_confidence: float | None = Query(default=None),
+    max_confidence: float | None = Query(default=None),
+):
+    """List contradiction reports with optional filters."""
+    stmt = select(ContradictionReport).order_by(ContradictionReport.created_at.desc())
+    if resolved is not None:
+        stmt = stmt.where(ContradictionReport.resolved == resolved)
+    if min_confidence is not None:
+        stmt = stmt.where(ContradictionReport.confidence >= min_confidence)
+    if max_confidence is not None:
+        stmt = stmt.where(ContradictionReport.confidence <= max_confidence)
+    result = await db.execute(stmt)
+    reports = result.scalars().all()
+    return [_contradiction_to_response(r) for r in reports]
+
+
+@router.get("/api/contradictions/stats", response_model=ContradictionStatsResponse)
+async def contradiction_stats(db: DbDep):
+    """Summary counts for the contradiction log dashboard."""
+    total_result = await db.execute(
+        select(func.count()).select_from(ContradictionReport)
+    )
+    total = total_result.scalar_one()
+
+    unresolved_result = await db.execute(
+        select(func.count()).select_from(ContradictionReport).where(
+            ContradictionReport.resolved.is_(False)
+        )
+    )
+    unresolved = unresolved_result.scalar_one()
+
+    high_result = await db.execute(
+        select(func.count()).select_from(ContradictionReport).where(
+            ContradictionReport.confidence > 0.8
+        )
+    )
+    high = high_result.scalar_one()
+
+    medium_result = await db.execute(
+        select(func.count()).select_from(ContradictionReport).where(
+            ContradictionReport.confidence.between(0.5, 0.8)
+        )
+    )
+    medium = medium_result.scalar_one()
+
+    low_result = await db.execute(
+        select(func.count()).select_from(ContradictionReport).where(
+            ContradictionReport.confidence < 0.5
+        )
+    )
+    low = low_result.scalar_one()
+
+    return ContradictionStatsResponse(
+        total=total,
+        unresolved=unresolved,
+        high_confidence=high,
+        medium_confidence=medium,
+        low_confidence=low,
+    )
+
+
+@router.patch("/api/contradictions/{report_id}", response_model=ContradictionResponse)
+async def update_contradiction(report_id: str, body: UpdateContradictionRequest, db: DbDep):
+    """Mark a contradiction report as resolved or unresolved."""
+    try:
+        parsed_id = uuid.UUID(report_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID: {report_id!r}")
+    result = await db.execute(select(ContradictionReport).where(ContradictionReport.id == parsed_id))
+    report = result.scalar_one_or_none()
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
+    report.resolved = body.resolved
+    report.resolved_at = datetime.now(timezone.utc) if body.resolved else None
+    await db.commit()
+    await db.refresh(report)
+    return _contradiction_to_response(report)
