@@ -7,7 +7,7 @@ and receive an explicit AsyncSession (no hidden global state).
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Integer, func, select
+from sqlalchemy import Integer, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -273,6 +273,7 @@ async def search_memories(
     weight_threshold: float = 0.8,
     max_results: int = 20,
     current_only: bool = True,
+    authorized_scopes: dict[str, str | None] | None = None,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity.
 
@@ -282,6 +283,10 @@ async def search_memories(
 
     Falls back to weight-based ordering with synthetic scores when pgvector
     is not available (e.g., SQLite in tests).
+
+    When authorized_scopes is provided, results are filtered to only include
+    memories the caller is authorized to read. The dict maps scope names to
+    required owner_id values (None means no owner filter for that scope).
     """
     query_embedding = await embedding_service.embed(query)
 
@@ -293,6 +298,23 @@ async def search_memories(
         filters.append(MemoryNode.scope == scope)
     if owner_id is not None:
         filters.append(MemoryNode.owner_id == owner_id)
+
+    # RBAC visibility filter: restrict results to authorized scopes
+    if authorized_scopes is not None:
+        if not authorized_scopes:
+            return []  # no authorized scopes → no results
+        scope_conditions = []
+        for scope_name, required_owner in authorized_scopes.items():
+            if required_owner is not None:
+                scope_conditions.append(
+                    and_(
+                        MemoryNode.scope == scope_name,
+                        MemoryNode.owner_id == required_owner,
+                    )
+                )
+            else:
+                scope_conditions.append(MemoryNode.scope == scope_name)
+        filters.append(or_(*scope_conditions))
 
     use_pgvector = True
     try:
