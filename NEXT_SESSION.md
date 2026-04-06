@@ -1,147 +1,166 @@
-# Next Session: MemoryHub Dashboard — Memory Graph + Status Overview (#19)
+# Next Session: Dashboard Admin — Client Management, Users/Agents, oauth-proxy
 
 ## Goal
 
-Build and deploy the first two panels of the MemoryHub landing page UI (Memory Graph + Status Overview) and register the OdhApplication tile in the RHOAI dashboard. By end of session: clicking the MemoryHub tile in RHOAI opens a PatternFly 6 app showing an interactive force-directed memory graph with scope coloring, plus headline metrics.
+Add admin functionality to the MemoryHub dashboard: self-service OAuth client management (Panel 7), a Users/Agents roster (Panel 3), and oauth-proxy to secure the UI Route. By end of session: platform admins can create/deactivate OAuth clients for agents, see who's using MemoryHub, and the dashboard is behind OpenShift auth.
 
 ## What's deployed and working
 
 - MCP server with RBAC enforcement on OpenShift (`mcp-server` in `memory-hub-mcp` namespace)
-- OAuth 2.1 auth service (`auth-server` in `memoryhub-auth` namespace)
+- OAuth 2.1 auth service (`auth-server` in `memoryhub-auth` namespace) — POST /token, /.well-known/*, /healthz
 - PostgreSQL + pgvector in `memoryhub-db` namespace
-- SDK v0.1.0 on PyPI with JWT auth — 8 integration tests passing
-- 102 MCP tests, 106 core tests, 8 SDK integration tests — all passing
-- RHOAI dashboard with OdhApplication CRD available on cluster
+- SDK v0.1.0 on PyPI with JWT auth
+- **Dashboard with Memory Graph + Status Overview** (`memoryhub-ui` in `memory-hub-mcp` namespace)
+  - Interactive force-directed graph (cytoscape.js/fcose), scope coloring, edge click relationship view
+  - Status cards: total memories, donut chart, activity feed, MCP health
+  - OdhApplication tile registered in RHOAI
+- `noCache: true` on all BuildConfigs (no more stale layer issues)
 
 ## Design references
 
-- `docs/RHOAI-DEMO/README.md` — overview and index
-- `docs/RHOAI-DEMO/landing-page-design.md` — 7-panel spec (updated for OAuth 2.1)
-- `docs/RHOAI-DEMO/ui-architecture.md` — Option A: standalone PatternFly app + FastAPI BFF
-- `docs/RHOAI-DEMO/odh-application-cr.md` — OdhApplication CR manifest
+- `docs/RHOAI-DEMO/landing-page-design.md` — Panels 3 and 7 specs
+- `docs/RHOAI-DEMO/ui-architecture.md` — oauth-proxy sidecar, auth service admin API
+- `memoryhub-auth/src/models.py` — OAuthClient and RefreshToken SQLAlchemy models
 
 ## Session scope
 
-### Panel 2: Memory Graph (hero panel)
+### 1. Auth service admin API (`memoryhub-auth/`)
 
-Interactive force-directed graph visualization of the memory landscape.
+The auth service currently only has token issuance. Add client management endpoints:
 
-**Data:**
-- Nodes: `memory_nodes WHERE is_current = true` — each node is a memory
-- Edges: parent-child (from `parent_id`) + explicit relationships (from `memory_relationships`)
+```
+GET    /admin/clients              → list all clients
+POST   /admin/clients              → create client (returns client_secret once)
+GET    /admin/clients/{client_id}  → get client detail
+PATCH  /admin/clients/{client_id}  → update (deactivate, change scopes)
+POST   /admin/clients/{client_id}/rotate-secret → generate new secret
+```
 
-**Visual encoding:**
-- Node color by scope: enterprise=red, organizational=blue, project=green, user=grey
-- Node size by weight (higher weight = larger)
-- Edge style by type: solid=parent-child, dashed=derived_from, dotted=related_to, red=conflicts_with
-- Node click opens detail drawer with full content, metadata, version history
+**OAuthClient model** (already exists in `memoryhub-auth/src/models.py`):
+- client_id (String, unique), client_secret_hash (String), client_name (String)
+- identity_type (String: user/service), tenant_id (String), default_scopes (JSON)
+- active (Boolean), created_at, updated_at
 
-**Interactions:**
-- Search input → pgvector similarity query → highlight matching nodes
-- Filter sidebar: scope, owner, date range
-- Zoom, pan, drag nodes
+These endpoints are admin-only. For this session, protect them with a shared admin secret header (`X-Admin-Key`). In production, they'd be behind the oauth-proxy.
 
-**Library:** Evaluate cytoscape.js vs d3-force vs vis.js. Cytoscape.js is the leading candidate (flexible layouts, good React integration, built-in event handling).
+### 2. Panel 7: Client Management (frontend + BFF)
 
-### Panel 1: Status Overview
+Self-service OAuth client provisioning.
 
-Headline metrics in a card grid.
+**Table columns:** client_id, client_name, identity_type (user/service badge), scopes, tenant_id, active status, created date
 
-| Card | Data source |
-|------|------------|
-| Total memories | `COUNT(*) FROM memory_nodes WHERE is_current = true` |
-| Memories by scope | `GROUP BY scope` → donut chart |
-| Recent activity | `ORDER BY updated_at DESC LIMIT 10` → time feed |
-| MCP server health | HTTP health check |
+**Actions:**
+- Create client via modal: client_id, client_name, identity_type dropdown, scopes checkboxes, tenant_id
+- Secret shown once in a confirmation modal after creation (with copy button)
+- Deactivate: toggle active status (soft delete, no hard delete)
+- Rotate secret: generates new secret, invalidates old, shows new secret once
 
-PatternFly components: `Card`, `Grid`, `ChartDonut`, `DescriptionList`.
+**BFF endpoints to add:**
+```
+GET    /api/clients              → proxy to auth service /admin/clients
+POST   /api/clients              → proxy to auth service
+PATCH  /api/clients/{client_id}  → proxy to auth service
+POST   /api/clients/{client_id}/rotate-secret → proxy to auth service
+```
 
-### OdhApplication CR registration
+### 3. Panel 3: Users and Agents
 
-Apply the CR from `docs/RHOAI-DEMO/odh-application-cr.md` to register the MemoryHub tile in the RHOAI dashboard. Update `#24` (getStartedMarkDown content) at the same time.
+Read-only roster of all identities using MemoryHub.
 
-## Architecture (Option A from design doc)
+**Data sources:**
+- Primary: `oauth_clients` table via auth service admin API (authoritative identity list)
+- Enrichment: `SELECT owner_id, COUNT(*), MAX(updated_at) FROM memory_nodes WHERE is_current = true GROUP BY owner_id` for memory counts and last active time
+
+**Table columns:** name, type (user/service badge), use case (from client_name), memory count, last active
+
+**Interaction:** Click a row to filter the Memory Graph by that owner_id (navigate to graph panel with owner filter pre-set).
+
+### 4. oauth-proxy sidecar
+
+Add OpenShift oauth-proxy to the memoryhub-ui Deployment so the dashboard requires OpenShift login.
+
+**Changes:**
+- Add `oauth-proxy` sidecar container to the Deployment
+- Create ServiceAccount with `serviceaccounts.openshift.io/oauth-redirectreference` annotation
+- Route terminates TLS at oauth-proxy (port 4180), which proxies to the app (port 8080)
+- Update Route to point to oauth-proxy port
+- Update Service to expose both ports
+
+The oauth-proxy authenticates users via OpenShift OAuth and passes the authenticated identity downstream. The dashboard itself doesn't need to validate tokens — it's behind the proxy.
+
+## Architecture
 
 ```
 RHOAI Dashboard
-  └─ OdhApplication tile → memoryhub-ui Route
+  └─ OdhApplication tile → memoryhub-ui Route (TLS)
                                 │
                     ┌───────────┴────────────┐
-                    │   memoryhub-ui         │
-                    │   React + PatternFly 6 │
-                    │   (Vite, nginx on UBI) │
+                    │   oauth-proxy :4180     │ ← OpenShift OAuth login
                     └───────────┬────────────┘
-                                │ REST API
+                                │ (authenticated)
                     ┌───────────┴────────────┐
-                    │   memoryhub-bff        │
-                    │   FastAPI backend      │
-                    │   (reads PostgreSQL    │
-                    │    directly, not MCP)  │
+                    │   memoryhub-ui :8080    │
+                    │   React + FastAPI BFF   │
                     └───────────┬────────────┘
-                                │ SQLAlchemy
-                    ┌───────────┴────────────┐
-                    │   PostgreSQL + pgvector │
-                    └────────────────────────┘
+                          │           │
+              ┌───────────┘           └───────────┐
+              │ SQLAlchemy                        │ HTTP
+    ┌─────────┴──────────┐            ┌───────────┴────────────┐
+    │ PostgreSQL+pgvector │            │ auth-server :8081      │
+    └────────────────────┘            │ /admin/clients/*       │
+                                      └────────────────────────┘
 ```
-
-Both components deploy to the `memory-hub-mcp` namespace alongside the MCP server.
 
 ## Implementation plan
 
-### 1. FastAPI BFF (`memoryhub-ui/backend/`)
+### Step 1: Auth service admin API
 
-REST API endpoints consumed by the React frontend:
+Add `memoryhub-auth/src/routes/admin.py`:
+- CRUD endpoints for oauth_clients
+- Pydantic schemas for client creation (input) and client detail (output)
+- Client secret generation: `secrets.token_urlsafe(32)`, hash with bcrypt, return plaintext once
+- Admin auth: `X-Admin-Key` header checked against `ADMIN_KEY` env var
+- Tests for all endpoints
 
-```
-GET  /api/graph          → nodes + edges for the memory graph
-GET  /api/graph/search   → pgvector similarity search, returns matching node IDs
-GET  /api/stats          → headline metrics (counts, scope distribution)
-GET  /api/memory/{id}    → full memory detail for the drawer
-GET  /api/memory/{id}/history → version history
-GET  /healthz            → liveness probe
-```
+Redeploy auth service to `memoryhub-auth` namespace.
 
-Uses `memoryhub-core` library for SQLAlchemy models (same as MCP server). Reads only — no writes through the UI in this session.
+### Step 2: BFF proxy endpoints
 
-### 2. React frontend (`memoryhub-ui/frontend/`)
+Add to `memoryhub-ui/backend/src/routes.py`:
+- `/api/clients` endpoints that proxy to the auth service admin API
+- BFF adds the `X-Admin-Key` header from its own env var (frontend never sees the admin key)
+- Auth service URL from `MEMORYHUB_AUTH_SERVICE_URL` env var
 
-- Vite + React 18 + TypeScript
-- PatternFly 6 (`@patternfly/react-core`, `@patternfly/react-charts`)
-- Graph library (cytoscape.js or alternative from #21 evaluation)
-- PatternFly `Page` layout with sidebar nav (panels 1+2, placeholders for 3-7)
-- Memory detail drawer on node click
+### Step 3: Frontend panels
 
-### 3. Containerization
+- `ClientManagement.tsx` — Table with create modal, deactivate toggle, rotate secret action
+- `UsersAgents.tsx` — Read-only roster with memory counts, click-to-filter
+- Wire into App.tsx sidebar nav (replace placeholder items)
+- Add `SecretRevealModal.tsx` — one-time secret display with copy button
 
-Two containers:
-- **Frontend:** Multi-stage build — node for building, nginx on UBI 9 for serving
-- **Backend:** Python on UBI 9, same pattern as MCP server Containerfile
+### Step 4: oauth-proxy sidecar
 
-Or single container with FastAPI serving both the API and static files (simpler for demo).
+- Update `memoryhub-ui/openshift.yaml` with sidecar container, ServiceAccount, updated Route
+- Create `memoryhub-ui/openshift/oauth-proxy-sa.yaml` for the ServiceAccount
+- Test that unauthenticated requests redirect to OpenShift login
 
-### 4. OpenShift deployment
+### Step 5: Redeploy everything
 
-- Deployment, Service, Route in `memory-hub-mcp` namespace
-- Route name: `memoryhub-ui` (referenced by OdhApplication CR)
-- DB credentials from existing `memoryhub-db-credentials` Secret
-
-### 5. OdhApplication CR
-
-Apply the manifest from `docs/RHOAI-DEMO/odh-application-cr.md` with:
-- Updated `getStartedMarkDown` content (#24)
-- `routeNamespace: memory-hub-mcp`
-- SVG icon (simple branded placeholder)
+- Auth service with admin API
+- memoryhub-ui with new panels + oauth-proxy
+- Verify end-to-end: login → dashboard → create client → see in roster
 
 ## What we're NOT building this session
 
-- Panels 3-7 (Users/Agents, Curation Rules, Contradiction Log, Observability Links, Client Management) — placeholders only
-- Write operations through the UI (all read-only)
-- oauth-proxy sidecar for admin auth (defer to next session)
-- Graph library evaluation (#21) — pick one and go; can swap later
+- Panels 4-6 (Curation Rules, Contradiction Log, Observability Links)
+- Role-based access control on the admin API (all authenticated users are admins for now)
+- Client secret rotation notifications
+- Audit logging for client management operations
 
 ## What comes after
 
-- **#10 Grafana dashboards** — observability metrics, feeds Panel 6
-- **Panels 3-7** — incremental additions to the landing page
-- **oauth-proxy** for admin auth on the UI Route
+- **Panels 4+5** — Curation Rules and Contradiction Log
+- **#10 Grafana dashboards** — observability metrics for Panel 6
+- **RBAC on admin API** — restrict client management to specific users/groups
 - **#25 CLI client** — typer/click wrapper around the SDK
+- **#36 Frontend component tests** — Vitest + React Testing Library
