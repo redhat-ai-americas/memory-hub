@@ -538,7 +538,15 @@ class FocusedSearchResult:
 
 
 def _cosine_distance(a: list[float], b: list[float]) -> float:
-    """Cosine distance for two vectors. Range [0, 2]; 0 = identical."""
+    """Cosine distance for two vectors. Range [0, 2]; 0 = identical.
+
+    Always returns a Python float, even when the input lists contain
+    numpy.float32 elements (pgvector returns numpy arrays in production).
+    pydantic_core.to_jsonable_python rejects numpy scalars, so any numpy
+    leakage into the response dict breaks FastMCP's structured-output
+    serialization with a confusing "outputSchema defined but no structured
+    output returned" error.
+    """
     dot = 0.0
     na = 0.0
     nb = 0.0
@@ -551,7 +559,7 @@ def _cosine_distance(a: list[float], b: list[float]) -> float:
     sim = dot / (math.sqrt(na) * math.sqrt(nb))
     # Clamp to handle floating-point drift outside [-1, 1].
     sim = max(-1.0, min(1.0, sim))
-    return 1.0 - sim
+    return float(1.0 - sim)
 
 
 async def search_memories_with_focus(

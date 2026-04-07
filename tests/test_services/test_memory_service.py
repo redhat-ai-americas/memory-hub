@@ -850,3 +850,48 @@ async def test_search_with_focus_returns_empty_when_no_authorized_scopes(
     # ran and the bundle reports the distance + threshold.
     assert bundle.pivot_distance is not None
     assert bundle.pivot_threshold == DEFAULT_PIVOT_THRESHOLD
+
+
+def test_cosine_distance_returns_python_float_for_numpy_inputs():
+    """Regression for the focus-path serialization bug.
+
+    pgvector returns embeddings as numpy arrays in production. Without
+    an explicit float() cast, _cosine_distance propagates numpy.float32
+    out, which breaks pydantic_core.to_jsonable_python and causes
+    FastMCP to drop structured output (manifesting as the confusing
+    "outputSchema defined but no structured output returned" error).
+    The mock embedding service used by the rest of this suite returns
+    Python lists, so this regression would not have been caught
+    without an explicit numpy test.
+    """
+    import pydantic_core
+    try:
+        import numpy as np
+    except ImportError:
+        pytest.skip("numpy not installed")
+
+    from memoryhub.services.memory import _cosine_distance
+
+    # Build a numpy embedding the way pgvector would.
+    np_embedding = np.array([0.1] * 384, dtype=np.float32)
+    list_form = list(np_embedding)
+    assert type(list_form[0]).__name__ == "float32"
+
+    distance = _cosine_distance(list_form, list_form)
+    assert isinstance(distance, float)
+    assert type(distance).__name__ == "float"  # not numpy.float32
+
+    # Round-trip through pydantic_core to confirm the response shape
+    # the production code emits is fully jsonable. This is the exact
+    # call that FastMCP's convert_result makes; if it raises, the
+    # tool result loses its structured_content and the MCP layer
+    # fires the outputSchema error.
+    payload = {
+        "results": [],
+        "total_matching": 0,
+        "has_more": False,
+        "pivot_suggested": False,
+        "pivot_reason": None,
+        "relevance_score": max(0.0, 1.0 - distance),
+    }
+    pydantic_core.to_jsonable_python(payload)  # must not raise
