@@ -1,6 +1,15 @@
 """MemoryHub — Centralized, governed memory for AI agents."""
 
 from memoryhub.client import MemoryHubClient
+from memoryhub.config import (
+    CONFIG_FILENAME,
+    ConfigError,
+    MemoryLoadingConfig,
+    ProjectConfig,
+    RetrievalDefaults,
+    find_project_config,
+    load_project_config,
+)
 from memoryhub.exceptions import (
     AuthenticationError,
     ConnectionFailedError,
@@ -18,5 +27,13 @@ __all__ = [
     "NotFoundError",
     "ToolError",
     "ConnectionFailedError",
+    # Project configuration
+    "CONFIG_FILENAME",
+    "ConfigError",
+    "MemoryLoadingConfig",
+    "ProjectConfig",
+    "RetrievalDefaults",
+    "find_project_config",
+    "load_project_config",
     "__version__",
 ]

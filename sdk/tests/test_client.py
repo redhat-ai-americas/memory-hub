@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from memoryhub.client import MemoryHubClient
+from memoryhub.config import ProjectConfig, RetrievalDefaults
 from memoryhub.exceptions import ConnectionFailedError, MemoryHubError, NotFoundError, ToolError
 from memoryhub.models import ContradictionResult, HistoryResult, Memory, SearchResult, WriteResult
 
@@ -125,6 +126,163 @@ async def test_search(client):
     call_args = mock_mcp.call_tool.call_args
     assert call_args[0][0] == "search_memory"
     assert call_args[0][1]["query"] == "Podman vs Docker"
+
+
+async def test_search_defaults_pass_through_new_params(client):
+    """Default call must forward mode/max_response_tokens/include_branches."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("any")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["mode"] == "full"
+    assert forwarded["max_response_tokens"] == 4000
+    assert forwarded["include_branches"] is False
+
+
+async def test_search_explicit_new_params(client):
+    """Caller-supplied mode/budget/include_branches propagate."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search(
+        "any",
+        mode="index",
+        max_response_tokens=1500,
+        include_branches=True,
+    )
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["mode"] == "index"
+    assert forwarded["max_response_tokens"] == 1500
+    assert forwarded["include_branches"] is True
+
+
+async def test_search_applies_project_config_retrieval_defaults():
+    """Loaded project config fills in unset search() args."""
+    pc = ProjectConfig(
+        retrieval_defaults=RetrievalDefaults(
+            max_results=25, max_response_tokens=8000, default_mode="index"
+        )
+    )
+    c = MemoryHubClient(
+        url="https://fake.example.com/mcp/",
+        auth_url="https://fake.example.com",
+        client_id="test",
+        client_secret="test-secret",
+        project_config=pc,
+    )
+    mock_mcp = AsyncMock()
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+    c._mcp = mock_mcp
+
+    await c.search("anything")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["max_results"] == 25
+    assert forwarded["max_response_tokens"] == 8000
+    assert forwarded["mode"] == "index"
+
+
+async def test_search_explicit_args_override_project_config():
+    """Caller-supplied args win over project config defaults."""
+    pc = ProjectConfig(
+        retrieval_defaults=RetrievalDefaults(
+            max_results=25, max_response_tokens=8000, default_mode="index"
+        )
+    )
+    c = MemoryHubClient(
+        url="https://fake.example.com/mcp/",
+        auth_url="https://fake.example.com",
+        client_id="test",
+        client_secret="test-secret",
+        project_config=pc,
+    )
+    mock_mcp = AsyncMock()
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+    c._mcp = mock_mcp
+
+    await c.search("anything", max_results=5, max_response_tokens=500, mode="full_only")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["max_results"] == 5
+    assert forwarded["max_response_tokens"] == 500
+    assert forwarded["mode"] == "full_only"
+
+
+def test_from_env_auto_discovers_config(monkeypatch, tmp_path):
+    """from_env() with auto-discovery picks up a .memoryhub.yaml from cwd."""
+    monkeypatch.setenv("MEMORYHUB_URL", "https://mcp.example.com/mcp/")
+    monkeypatch.setenv("MEMORYHUB_AUTH_URL", "https://auth.example.com")
+    monkeypatch.setenv("MEMORYHUB_CLIENT_ID", "my-client")
+    monkeypatch.setenv("MEMORYHUB_CLIENT_SECRET", "s3cr3t")
+    (tmp_path / ".memoryhub.yaml").write_text(
+        "retrieval_defaults:\n  max_results: 42\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    c = MemoryHubClient.from_env()
+
+    assert c._project_config.retrieval_defaults.max_results == 42
+
+
+def test_from_env_can_opt_out_of_auto_discover(monkeypatch, tmp_path):
+    """auto_discover_config=False uses all-default config even if a file exists."""
+    monkeypatch.setenv("MEMORYHUB_URL", "https://mcp.example.com/mcp/")
+    monkeypatch.setenv("MEMORYHUB_AUTH_URL", "https://auth.example.com")
+    monkeypatch.setenv("MEMORYHUB_CLIENT_ID", "my-client")
+    monkeypatch.setenv("MEMORYHUB_CLIENT_SECRET", "s3cr3t")
+    (tmp_path / ".memoryhub.yaml").write_text(
+        "retrieval_defaults:\n  max_results: 42\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    c = MemoryHubClient.from_env(auto_discover_config=False)
+
+    assert c._project_config.retrieval_defaults.max_results == 10
+
+
+async def test_search_nested_branches_round_trip(client):
+    """Nested branches in the response land on the Memory via extra='allow'."""
+    c, mock_mcp = client
+    parent_with_branches = {
+        **MINIMAL_MEMORY,
+        "id": "mem-parent",
+        "has_rationale": True,
+        "branches": [
+            {
+                **MINIMAL_MEMORY,
+                "id": "mem-branch",
+                "parent_id": "mem-parent",
+                "branch_type": "rationale",
+                "content": "Podman is rootless by default.",
+            }
+        ],
+    }
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "results": [parent_with_branches],
+            "total_matching": 1,
+            "has_more": False,
+        }
+    )
+
+    result = await c.search("Podman rationale", include_branches=True)
+
+    assert result.results[0].id == "mem-parent"
+    # Pydantic extra='allow' exposes the nested branches as an attribute.
+    branches = result.results[0].model_extra["branches"]
+    assert len(branches) == 1
+    assert branches[0]["id"] == "mem-branch"
 
 
 # ── read ─────────────────────────────────────────────────────────────────────

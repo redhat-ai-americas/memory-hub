@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from typing import Any
+from typing import Any, Literal
 
 from fastmcp import Client
 
 from memoryhub.auth import MemoryHubAuth
+from memoryhub.config import ProjectConfig, load_project_config
 from memoryhub.exceptions import (
     ConnectionFailedError,
     MemoryHubError,
@@ -55,7 +56,23 @@ class MemoryHubClient:
         auth_url: str,
         client_id: str,
         client_secret: str,
+        *,
+        project_config: ProjectConfig | None = None,
     ) -> None:
+        """Construct a MemoryHubClient.
+
+        Args:
+            url: Streamable-HTTP endpoint of the MemoryHub MCP server.
+            auth_url: Base URL of the OAuth 2.1 auth service.
+            client_id: OAuth client ID.
+            client_secret: OAuth client secret.
+            project_config: Optional project-level config. When omitted,
+                all-defaults :class:`ProjectConfig` is used; the
+                ``retrieval_defaults`` section is applied to outbound
+                ``search_memory`` calls when callers do not pass an
+                explicit value. Use :func:`memoryhub.load_project_config`
+                or :meth:`from_env` to auto-discover ``.memoryhub.yaml``.
+        """
         self._url = url
         self._auth = MemoryHubAuth(
             auth_url=auth_url,
@@ -63,10 +80,25 @@ class MemoryHubClient:
             client_secret=client_secret,
         )
         self._mcp: Client | None = None
+        self._project_config = project_config or ProjectConfig()
 
     @classmethod
-    def from_env(cls) -> MemoryHubClient:
+    def from_env(
+        cls,
+        *,
+        config_path: str | None = None,
+        auto_discover_config: bool = True,
+    ) -> MemoryHubClient:
         """Create a client from environment variables.
+
+        Args:
+            config_path: Explicit path to a ``.memoryhub.yaml`` file. When
+                set, ``auto_discover_config`` is ignored and the file
+                must exist.
+            auto_discover_config: When True (default), walk up from the
+                current working directory looking for ``.memoryhub.yaml``
+                and apply its ``retrieval_defaults`` to outbound search
+                calls. Set False to skip discovery entirely.
 
         Reads: MEMORYHUB_URL, MEMORYHUB_AUTH_URL, MEMORYHUB_CLIENT_ID,
         MEMORYHUB_CLIENT_SECRET.
@@ -91,11 +123,18 @@ class MemoryHubClient:
                 f"Missing required environment variables: {', '.join(missing)}"
             )
 
+        project_config: ProjectConfig | None = None
+        if config_path is not None:
+            project_config = load_project_config(config_path)
+        elif auto_discover_config:
+            project_config = load_project_config()
+
         return cls(
             url=url,
             auth_url=auth_url,
             client_id=client_id,
             client_secret=client_secret,
+            project_config=project_config,
         )
 
     async def __aenter__(self) -> MemoryHubClient:
@@ -162,11 +201,54 @@ class MemoryHubClient:
         *,
         scope: str | None = None,
         owner_id: str | None = None,
-        max_results: int = 10,
+        max_results: int | None = None,
         weight_threshold: float = 0.0,
         current_only: bool = True,
+        mode: Literal["full", "index", "full_only"] | None = None,
+        max_response_tokens: int | None = None,
+        include_branches: bool = False,
     ) -> SearchResult:
-        """Search memories using semantic similarity."""
+        """Search memories using semantic similarity.
+
+        Args:
+            query: Natural language search query.
+            scope: Filter to a specific scope, or None for all accessible scopes.
+            owner_id: Filter to a specific owner. None defaults to the
+                authenticated user; pass an empty string to search across all
+                accessible owners.
+            max_results: Maximum results to return (1-50). When omitted, falls
+                back to the project config's ``retrieval_defaults.max_results``
+                (default 10).
+            weight_threshold: Memories with weight below this return as stubs
+                in mode='full'. Ignored when mode='full_only'.
+            current_only: If True, return only current versions.
+            mode: Result detail mode. ``"full"`` returns full content for
+                weight >= weight_threshold and stubs below it. ``"index"``
+                returns stubs for everything regardless of weight.
+                ``"full_only"`` ignores weight_threshold. When omitted, falls
+                back to the project config's
+                ``retrieval_defaults.default_mode`` (default ``"full"``).
+                Token budget may still degrade entries to stubs in any mode.
+            max_response_tokens: Soft cap on the total response token cost.
+                Results are packed in similarity order; once the cap is hit,
+                remaining matches degrade to stubs. When omitted, falls back
+                to the project config's
+                ``retrieval_defaults.max_response_tokens`` (default 4000).
+            include_branches: If True, branches whose parent is also in the
+                result set are nested under the parent in a ``"branches"``
+                field. Default False drops them; the agent can drill in via
+                ``read_memory`` using ``has_rationale``/``has_children`` flags.
+                Branches whose parent is not in the result set are always
+                returned as top-level entries regardless of this flag.
+        """
+        defaults = self._project_config.retrieval_defaults
+        if max_results is None:
+            max_results = defaults.max_results
+        if mode is None:
+            mode = defaults.default_mode
+        if max_response_tokens is None:
+            max_response_tokens = defaults.max_response_tokens
+
         data = await self._call("search_memory", {
             "query": query,
             "scope": scope,
@@ -174,6 +256,9 @@ class MemoryHubClient:
             "max_results": max_results,
             "weight_threshold": weight_threshold,
             "current_only": current_only,
+            "mode": mode,
+            "max_response_tokens": max_response_tokens,
+            "include_branches": include_branches,
         })
         return SearchResult.model_validate(data)
 
