@@ -112,6 +112,7 @@ class MemoryNodeStub(BaseModel):
     model_config = {"from_attributes": True}
 
     id: uuid.UUID
+    parent_id: uuid.UUID | None = None
     stub: str
     scope: MemoryScope
     weight: float

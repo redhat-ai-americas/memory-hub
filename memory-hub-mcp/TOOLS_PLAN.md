@@ -88,21 +88,31 @@ The tools are designed around the tree-based memory model: memories are nodes wi
 
 ### search_memory
 
-- **Purpose**: Semantic search across all memories the agent has access to. This is the primary discovery mechanism — agents don't need to know memory IDs upfront. The query is embedded via pgvector and compared against stored memory embeddings. Results are a mix of full content (for high-weight matches) and stubs (for lower-weight matches), keeping the response token-efficient.
+- **Purpose**: Semantic search across all memories the agent has access to. This is the primary discovery mechanism — agents don't need to know memory IDs upfront. The query is embedded via pgvector and compared against stored memory embeddings. Results are a mix of full content (for high-weight matches) and stubs (for lower-weight matches), keeping the response token-efficient. The response shape is tunable via three sizing controls: `mode`, `max_response_tokens`, and `include_branches` (see below).
 - **Parameters**:
   - `query` (string, required): Natural language search query. Be specific — "container runtime preferences" works better than "containers". The query is embedded and compared via cosine similarity.
   - `scope` (string, optional): Filter to a specific scope (user, project, role, organizational, enterprise). Omit to search all accessible scopes.
   - `owner_id` (string, optional): Filter to a specific owner's memories. Useful for searching within a particular user's or project's context.
-  - `max_results` (integer, optional, default 10): Maximum number of results to return. Results are ranked by relevance. Keep low (5-15) to avoid context bloat.
-  - `weight_threshold` (float, optional, default 0.0): Only return memories with weight >= this value. Set to 0.8 to see only high-priority memories.
+  - `max_results` (integer, optional, default 10): Maximum number of results to return. Results are ranked by relevance. Keep low (5-15) to avoid context bloat. Branch handling may reduce the page below this value when `include_branches=false` (the default).
+  - `weight_threshold` (float, optional, default 0.0): Memories with weight below this value return as stubs instead of full content. Set to 0.8 to stub low-priority matches. Ignored when `mode='full_only'`.
   - `current_only` (boolean, optional, default true): If true, only returns current versions. Set to false for forensic searches across all versions.
+  - `mode` (string, optional, default `"full"`): Result detail mode. Issue #57.
+    - `"full"` — current behavior. Full content for `weight >= weight_threshold`, stubs below.
+    - `"index"` — stubs everything regardless of weight. Use for exploratory "what's in here?" or audit/cleanup workflows when topic-level coverage matters more than content depth.
+    - `"full_only"` — never stubs, ignoring `weight_threshold`. Use for specific-question answering when zero round-trips matters.
+  - `max_response_tokens` (integer, optional, default 4000, range 100-20000): Soft cap on the response payload. Results are packed in similarity order; once the running cost exceeds the cap, the offending entry and every subsequent entry are degraded to stub form. Stubs are always included even past the cap so the agent never silently misses a ranked match. Issue #57.
+  - `include_branches` (boolean, optional, default false): Branch handling. Issue #56.
+    - `false` (default) — branches (rationale, provenance, etc.) whose parent is also in the result set are dropped from the page. The agent uses the parent's `has_rationale` / `has_children` flags to drill in via `read_memory`.
+    - `true` — branches whose parent is in the result set are returned nested under the parent in a `branches` field rather than ranked as siblings. Forensic and audit workflows that want full depth use this.
+    - Branches whose parent is **not** in the result set are always returned as top-level entries with `parent_id` populated regardless of this flag.
 - **Returns**: An object with three top-level fields:
   - `results`: Array ranked by relevance. Each entry includes:
-    - For high-weight memories (weight >= deployment threshold): full content, scope, weight, branch indicators
-    - For lower-weight memories: stub text, scope, weight, branch indicators (has_rationale, has_children)
-    - A `result_type` field ("full" or "stub") so the agent knows what it's looking at
+    - For high-weight memories (weight >= `weight_threshold`): full content, scope, weight, branch indicators
+    - For lower-weight memories or budget-degraded entries: stub text, scope, weight, branch indicators (`has_rationale`, `has_children`), `parent_id`
+    - A `result_type` field (`"full"` or `"stub"`) so the agent knows what it's looking at
     - A `relevance_score` (0-1) from the vector similarity search
-  - `total_matching` (integer): Count of all memories matching the filter set (scope/owner/current_only/RBAC), independent of `max_results`. Useful for "showing N of M" displays and for deciding whether to broaden the query.
+    - When `include_branches=true`: an optional `branches` list of nested branch entries (each with the same shape as a top-level entry, including `result_type` and `relevance_score`)
+  - `total_matching` (integer): Count of all memories matching the filter set (scope/owner/current_only/RBAC), independent of `max_results` and of the branch-omission rule. Useful for "showing N of M" displays and for deciding whether to broaden the query.
   - `has_more` (boolean): True when `total_matching > len(results)`. Indicates that narrowing filters or paginating would reveal additional matches.
 
   Earlier spec drafts described a single `total_accessible` field that conflated "page size" and "total matches"; that field was replaced with the unambiguous `total_matching` + `has_more` pair (see #53).
@@ -113,7 +123,18 @@ The tools are designed around the tree-based memory model: memories are nodes wi
   ```
   search_memory(query="container runtime preferences and build requirements", scope="user", owner_id="wjackson", max_results=5)
   ```
-  Returns: "prefers Podman" (full, weight 0.9, has_rationale=true), "current project: memory-hub" (stub, weight 0.8), etc.
+  Returns: "prefers Podman" (full, weight 0.9, has_rationale=true), "current project: memory-hub" (stub, weight 0.8), etc. By default the rationale branch is omitted; the agent calls `read_memory` to expand it on demand.
+
+  Exploring an unfamiliar memory store with cheap topic coverage:
+  ```
+  search_memory(query="anything project-related", mode="index", max_results=30)
+  ```
+  Returns 30 stubs regardless of weight — useful for getting your bearings before drilling into specifics.
+
+  Forensic walk that needs every branch nested under its parent:
+  ```
+  search_memory(query="auth decisions", include_branches=true, max_response_tokens=8000)
+  ```
 
 ### get_memory_history
 

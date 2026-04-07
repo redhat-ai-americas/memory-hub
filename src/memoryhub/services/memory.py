@@ -479,6 +479,7 @@ async def search_memories(
                 (
                     MemoryNodeStub(
                         id=node.id,
+                        parent_id=node.parent_id,
                         stub=node.stub,
                         scope=node.scope,
                         weight=node.weight,
