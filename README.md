@@ -11,7 +11,7 @@ It works with any agent framework that speaks MCP — Claude Code, kagenti LangG
 | Component | Path | What it is |
 |---|---|---|
 | **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing 13 tools (search, read, write, update, delete, history, similarity, relationships, curation, contradiction, session) over streamable-HTTP. The primary agent surface. |
-| **Server-side library** | [`src/memoryhub/`](src/memoryhub/) | SQLAlchemy models, service layer, embedding integration, RBAC enforcement (`core/authz.py`). The MCP server, BFF, and auth service all import from here. |
+| **Server-side library** | [`src/memoryhub_core/`](src/memoryhub_core/) | SQLAlchemy models, service layer, embedding integration, RBAC enforcement (`core/authz.py`). Distribution name `memoryhub-core`; import name `memoryhub_core`. The MCP server, BFF, alembic migrations, and the seed-OAuth-clients script all import from here. |
 | **Python SDK** | [`sdk/`](sdk/) | `pip install memoryhub` — typed async client wrapping the MCP tools. OAuth 2.1 token management is automatic. See [`sdk/README.md`](sdk/README.md). |
 | **CLI** | [`memoryhub-cli/`](memoryhub-cli/) | `pip install memoryhub-cli` — terminal client for search/read/write/delete plus `memoryhub config init` for generating project-level `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md` rule files. |
 | **Dashboard UI** | [`memoryhub-ui/`](memoryhub-ui/) | React + PatternFly 6 frontend behind a FastAPI BFF, deployed as a single container. Six panels: Memory Graph, Status Overview, Users & Agents, Client Management, Curation Rules, Contradiction Log. OAuth-proxy sidecar in front of OpenShift login. |
@@ -93,7 +93,7 @@ memoryhub config init                    # set up .memoryhub.yaml + agent rule f
               │                      │                      │
       ┌───────▼───────┐    ┌─────────▼─────────┐   ┌────────▼──────────┐
       │  authz / RBAC │    │ services / models │   │  embedding model  │
-      │  (JWT verify, │    │  (src/memoryhub/) │   │  + cross-encoder  │
+      │  (JWT verify, │    │ (memoryhub_core)  │   │  + cross-encoder  │
       │   scope match)│    │                   │   │  (RHOAI vLLM)     │
       └───────┬───────┘    └─────────┬─────────┘   └───────────────────┘
               │                      │
@@ -103,7 +103,7 @@ memoryhub config init                    # set up .memoryhub.yaml + agent rule f
       └─────────────────┘   └──────────────────┘
 ```
 
-Every memory operation flows through the MCP server, which delegates to the service layer in `src/memoryhub/`. The service layer enforces authorization via `core/authz.py` (JWT-first, session-fallback). The OAuth 2.1 authorization server runs as a separate service. PostgreSQL with pgvector handles relational, vector, and graph queries; an external all-MiniLM-L6-v2 embedding model and an `ms-marco-MiniLM-L12-v2` cross-encoder reranker both run on OpenShift AI's vLLM serving. Reranker is optional with graceful cosine fallback when unavailable.
+Every memory operation flows through the MCP server, which delegates to the service layer in `src/memoryhub_core/`. The service layer enforces authorization via `core/authz.py` (JWT-first, session-fallback). The OAuth 2.1 authorization server runs as a separate service. PostgreSQL with pgvector handles relational, vector, and graph queries; an external all-MiniLM-L6-v2 embedding model and an `ms-marco-MiniLM-L12-v2` cross-encoder reranker both run on OpenShift AI's vLLM serving. Reranker is optional with graceful cosine fallback when unavailable.
 
 For the full design and the deployment topology, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). For the per-subsystem map, see [`docs/SYSTEMS.md`](docs/SYSTEMS.md).
 
@@ -111,7 +111,7 @@ For the full design and the deployment topology, see [`docs/ARCHITECTURE.md`](do
 
 ```
 memory-hub/
-├── src/memoryhub/              # Server-side library (services, storage, models, authz)
+├── src/memoryhub_core/         # Server-side library (services, storage, models, authz)
 ├── memory-hub-mcp/             # FastMCP 3 MCP server (deployed)
 ├── memoryhub-auth/             # OAuth 2.1 authorization server (deployed)
 ├── memoryhub-ui/               # Dashboard: React + PatternFly 6 frontend, FastAPI BFF (deployed)
@@ -127,7 +127,7 @@ memory-hub/
 └── benchmarks/                 # Empirical benchmark results (e.g. two-vector-retrieval/)
 ```
 
-A note on the package name: there are two Python packages in this repo that both declare `name = "memoryhub"` — the server-side library at `src/memoryhub/` and the SDK at `sdk/src/memoryhub/`. They never coexist in the same environment (the server is bundled into the MCP container; the SDK is installed from PyPI), but the shared name is a known footgun being tracked as issue #55. See [`docs/package-layout.md`](docs/package-layout.md).
+A note on the package layout: the server-side library at `src/memoryhub_core/` is published locally as `memoryhub-core` (used by the MCP server, BFF, alembic, and the root test suite), while the client SDK at `sdk/src/memoryhub/` is published to PyPI as `memoryhub`. Distinct distribution names, distinct import names. See [`docs/package-layout.md`](docs/package-layout.md) for the rationale.
 
 ## Development
 

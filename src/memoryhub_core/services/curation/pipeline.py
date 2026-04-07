@@ -9,9 +9,9 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from memoryhub.services.curation.rules import load_rules, seed_default_rules
-from memoryhub.services.curation.scanner import scan_content, scan_with_custom_patterns
-from memoryhub.services.curation.similarity import check_similarity
+from memoryhub_core.services.curation.rules import load_rules, seed_default_rules
+from memoryhub_core.services.curation.scanner import scan_content, scan_with_custom_patterns
+from memoryhub_core.services.curation.similarity import check_similarity
 
 # Actions that immediately halt the pipeline and block the write.
 _TERMINAL_ACTIONS = {"block", "quarantine", "reject_with_pointer"}

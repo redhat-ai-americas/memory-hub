@@ -6,9 +6,10 @@ WORKDIR /opt/app-root/src
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy memoryhub core library from parent project
-COPY --chown=1001:0 memoryhub-core/ ./memoryhub-core/
-RUN pip install --no-cache-dir ./memoryhub-core/
+# Copy memoryhub_core library from parent project (the server-side library;
+# distinct from the `memoryhub` SDK on PyPI -- see docs/package-layout.md).
+COPY --chown=1001:0 memoryhub_core/ ./memoryhub_core/
+RUN pip install --no-cache-dir ./memoryhub_core/
 
 # Copy MCP server application code
 COPY --chown=1001:0 src/ ./src/

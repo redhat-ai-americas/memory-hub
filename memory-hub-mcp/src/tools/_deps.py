@@ -2,13 +2,13 @@
 
 import os
 
-from memoryhub.services.database import get_session
-from memoryhub.services.embeddings import (
+from memoryhub_core.services.database import get_session
+from memoryhub_core.services.embeddings import (
     EmbeddingService,
     HttpEmbeddingService,
     MockEmbeddingService,
 )
-from memoryhub.services.rerank import (
+from memoryhub_core.services.rerank import (
     HttpRerankerService,
     NoopRerankerService,
     RerankerService,

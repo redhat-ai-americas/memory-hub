@@ -36,7 +36,7 @@ def test_authorize_read(claims, memory_scope, memory_owner, expected):
 
 def test_authorize_read_with_enum_scope():
     """authorize_read should handle MemoryScope enum values."""
-    from memoryhub.models.schemas import MemoryScope
+    from memoryhub_core.models.schemas import MemoryScope
 
     memory = SimpleNamespace(scope=MemoryScope.USER, owner_id="alice")
     claims = {"sub": "alice", "scopes": ["memory:read"]}
@@ -64,7 +64,7 @@ def test_authorize_write(claims, scope, owner_id, expected):
 
 def test_authorize_write_with_enum_scope():
     """authorize_write should handle MemoryScope enum values."""
-    from memoryhub.models.schemas import MemoryScope
+    from memoryhub_core.models.schemas import MemoryScope
 
     claims = {"sub": "alice", "scopes": ["memory:write:user"]}
     assert authorize_write(claims, MemoryScope.USER, "alice") is True

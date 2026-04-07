@@ -13,26 +13,26 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import Integer, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from memoryhub.config import AppSettings
-from memoryhub.models.contradiction import ContradictionReport
-from memoryhub.models.memory import MemoryNode
-from memoryhub.models.schemas import (
+from memoryhub_core.config import AppSettings
+from memoryhub_core.models.contradiction import ContradictionReport
+from memoryhub_core.models.memory import MemoryNode
+from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryNodeRead,
     MemoryNodeStub,
     MemoryNodeUpdate,
     MemoryVersionInfo,
 )
-from memoryhub.models.utils import generate_stub
-from memoryhub.services.curation.pipeline import run_curation_pipeline
-from memoryhub.services.embeddings import EmbeddingService
-from memoryhub.services.exceptions import (
+from memoryhub_core.models.utils import generate_stub
+from memoryhub_core.services.curation.pipeline import run_curation_pipeline
+from memoryhub_core.services.embeddings import EmbeddingService
+from memoryhub_core.services.exceptions import (
     ContradictionNotFoundError,
     MemoryAlreadyDeletedError,
     MemoryNotCurrentError,
     MemoryNotFoundError,
 )
-from memoryhub.services.rerank import RERANK_MAX_BATCH, RerankerService
+from memoryhub_core.services.rerank import RERANK_MAX_BATCH, RerankerService
 
 logger = logging.getLogger(__name__)
 

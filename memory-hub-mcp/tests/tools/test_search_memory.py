@@ -61,7 +61,7 @@ def _fake_search_result(stub: str, weight: float):
     """Build a (MemoryNodeStub, score) tuple for use as a fake search result."""
     import uuid as _uuid
 
-    from memoryhub.models.schemas import MemoryNodeStub, MemoryScope
+    from memoryhub_core.models.schemas import MemoryNodeStub, MemoryScope
 
     return (
         MemoryNodeStub(
@@ -96,7 +96,7 @@ def _fake_full_result(
     import uuid as _uuid
     from datetime import datetime, timezone
 
-    from memoryhub.models.schemas import MemoryNodeRead, MemoryScope, StorageType
+    from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, StorageType
 
     return (
         MemoryNodeRead(
@@ -632,7 +632,7 @@ def _fake_focused_bundle(
     fallback_reason: str | None = None,
 ):
     """Build a FocusedSearchResult-shaped object for tool-layer mocks."""
-    from memoryhub.services.memory import FocusedSearchResult
+    from memoryhub_core.services.memory import FocusedSearchResult
 
     return FocusedSearchResult(
         results=page_results,

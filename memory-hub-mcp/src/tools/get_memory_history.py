@@ -11,9 +11,9 @@ from src.core.app import mcp
 from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
 
-from memoryhub.services.exceptions import MemoryNotFoundError
-from memoryhub.services.memory import get_memory_history as _get_memory_history
-from memoryhub.services.memory import read_memory as _read_memory
+from memoryhub_core.services.exceptions import MemoryNotFoundError
+from memoryhub_core.services.memory import get_memory_history as _get_memory_history
+from memoryhub_core.services.memory import read_memory as _read_memory
 
 
 @mcp.tool(

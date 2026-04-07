@@ -11,8 +11,8 @@ from src.core.app import mcp
 from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
 
-from memoryhub.services.exceptions import MemoryNotFoundError
-from memoryhub.services.memory import (
+from memoryhub_core.services.exceptions import MemoryNotFoundError
+from memoryhub_core.services.memory import (
     read_memory as _read_memory,
     report_contradiction as _report_contradiction,
 )

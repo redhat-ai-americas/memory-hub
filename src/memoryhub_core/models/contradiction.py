@@ -8,7 +8,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from memoryhub.models.base import Base
+from memoryhub_core.models.base import Base
 
 
 class ContradictionReport(Base):

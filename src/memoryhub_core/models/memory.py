@@ -15,7 +15,7 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Tex
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from memoryhub.models.base import Base, TimestampMixin
+from memoryhub_core.models.base import Base, TimestampMixin
 
 
 class MemoryNode(TimestampMixin, Base):

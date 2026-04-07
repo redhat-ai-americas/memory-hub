@@ -10,8 +10,8 @@ from src.core.app import mcp
 from src.core.authz import get_claims_from_context, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
 
-from memoryhub.models.curation import CuratorRule
-from memoryhub.models.schemas import (
+from memoryhub_core.models.curation import CuratorRule
+from memoryhub_core.models.schemas import (
     CuratorRuleCreate,
     CuratorRuleRead,
     RuleAction,
@@ -19,7 +19,7 @@ from memoryhub.models.schemas import (
     RuleTier,
     RuleTrigger,
 )
-from memoryhub.services.curation.rules import create_rule
+from memoryhub_core.services.curation.rules import create_rule
 
 _VALID_TIERS = [t.value for t in RuleTier]
 _VALID_ACTIONS = [a.value for a in RuleAction]

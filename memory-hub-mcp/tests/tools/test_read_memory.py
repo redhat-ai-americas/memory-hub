@@ -56,7 +56,7 @@ def _fake_node(scope: str = "user", owner_id: str = "wjackson", branch_count: in
     """Build a stand-in for the read_memory service return value."""
     import datetime as _dt
 
-    from memoryhub.models.schemas import MemoryNodeRead, MemoryScope, StorageType
+    from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, StorageType
 
     return MemoryNodeRead(
         id=uuid.uuid4(),

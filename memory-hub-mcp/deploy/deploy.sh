@@ -8,7 +8,7 @@
 # docs/admin and the retros first.
 #
 # Steps:
-#   1. Prepare build context (MCP server + memoryhub-core library)
+#   1. Prepare build context (MCP server + memoryhub_core library)
 #   2. Create namespace if needed
 #   3. Apply manifests (configmap, secret, imagestream, buildconfig,
 #      deployment, service, route)

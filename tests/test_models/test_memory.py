@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from memoryhub.models.schemas import (
+from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryNodeRead,
     MemoryNodeStub,
@@ -15,7 +15,7 @@ from memoryhub.models.schemas import (
     MemoryVersionInfo,
     StorageType,
 )
-from memoryhub.models.utils import STUB_CONTENT_LIMIT, generate_stub
+from memoryhub_core.models.utils import STUB_CONTENT_LIMIT, generate_stub
 
 # ---------------------------------------------------------------------------
 # Enums

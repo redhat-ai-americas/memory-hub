@@ -4,7 +4,7 @@
 # The Containerfile expects:
 #   - frontend/          (React app source for the Node build stage)
 #   - backend/           (FastAPI BFF source)
-#   - memoryhub-core/    (shared SQLAlchemy models library)
+#   - memoryhub_core/    (shared SQLAlchemy models library)
 #
 # This script stages everything into .build-context/ for `oc start-build --from-dir`.
 set -euo pipefail
@@ -40,11 +40,13 @@ cp "$PROJECT_ROOT/backend/requirements.txt" "$BUILD_DIR/backend/"
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
     --exclude='.mypy_cache' "$PROJECT_ROOT/backend/src/" "$BUILD_DIR/backend/src/"
 
-# Copy memoryhub core library (same pattern as MCP server)
-mkdir -p "$BUILD_DIR/memoryhub-core/src"
-cp "$REPO_ROOT/pyproject.toml" "$BUILD_DIR/memoryhub-core/"
+# Copy memoryhub_core library (same pattern as MCP server). Previously
+# this script staged to memoryhub-core/ while the Containerfile read from
+# memoryhub/ -- a real bug fixed during the #55 rename.
+mkdir -p "$BUILD_DIR/memoryhub_core/src"
+cp "$REPO_ROOT/pyproject.toml" "$BUILD_DIR/memoryhub_core/"
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
-    "$REPO_ROOT/src/memoryhub/" "$BUILD_DIR/memoryhub-core/src/memoryhub/"
+    "$REPO_ROOT/src/memoryhub_core/" "$BUILD_DIR/memoryhub_core/src/memoryhub_core/"
 
 # Fix permissions — Claude Code Write tool creates 600; OpenShift needs 644
 FIXED_COUNT=$(find "$BUILD_DIR" -name "*.py" -perm 600 2>/dev/null | wc -l | tr -d ' ')

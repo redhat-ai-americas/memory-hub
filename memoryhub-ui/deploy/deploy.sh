@@ -2,7 +2,7 @@
 # Deploy the MemoryHub UI to OpenShift.
 #
 # Steps:
-#   1. Prepare build context (frontend + backend + memoryhub-core)
+#   1. Prepare build context (frontend + backend + memoryhub_core)
 #   2. Ensure namespace exists
 #   3. Apply manifests (imagestream, buildconfig, deployment, service, route)
 #   4. Run binary build from the staged context

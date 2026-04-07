@@ -12,11 +12,11 @@ from sqlalchemy import Text, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.types import TypeDecorator
 
-from memoryhub.models.base import Base
-from memoryhub.models.contradiction import ContradictionReport
-from memoryhub.models.curation import CuratorRule
-from memoryhub.models.memory import MemoryNode, MemoryRelationship
-from memoryhub.services.embeddings import MockEmbeddingService
+from memoryhub_core.models.base import Base
+from memoryhub_core.models.contradiction import ContradictionReport
+from memoryhub_core.models.curation import CuratorRule
+from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
+from memoryhub_core.services.embeddings import MockEmbeddingService
 
 
 class _JsonEncodedVector(TypeDecorator):

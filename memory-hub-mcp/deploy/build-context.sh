@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepare build context for the MCP server container.
 #
-# The Containerfile expects a memoryhub-core/ directory alongside the MCP
+# The Containerfile expects a memoryhub_core/ directory alongside the MCP
 # server source. This script stages both into a temporary .build-context/
 # directory so that `oc start-build --from-dir` has everything it needs.
 set -euo pipefail
@@ -22,11 +22,11 @@ cp "$PROJECT_ROOT/conftest.py" "$BUILD_DIR/"
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
     --exclude='.mypy_cache' "$PROJECT_ROOT/src/" "$BUILD_DIR/src/"
 
-# Copy memoryhub core library (needed by Containerfile COPY memoryhub-core/)
-mkdir -p "$BUILD_DIR/memoryhub-core/src"
-cp "$REPO_ROOT/pyproject.toml" "$BUILD_DIR/memoryhub-core/"
+# Copy memoryhub_core library (needed by Containerfile COPY memoryhub_core/)
+mkdir -p "$BUILD_DIR/memoryhub_core/src"
+cp "$REPO_ROOT/pyproject.toml" "$BUILD_DIR/memoryhub_core/"
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
-    "$REPO_ROOT/src/memoryhub/" "$BUILD_DIR/memoryhub-core/src/memoryhub/"
+    "$REPO_ROOT/src/memoryhub_core/" "$BUILD_DIR/memoryhub_core/src/memoryhub_core/"
 
 # Fix permissions — Claude Code Write tool creates 600; OpenShift needs 644
 FIXED_COUNT=$(find "$BUILD_DIR" -name "*.py" -perm 600 2>/dev/null | wc -l | tr -d ' ')

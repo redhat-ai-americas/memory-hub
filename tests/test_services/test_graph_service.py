@@ -9,15 +9,15 @@ import uuid
 
 import pytest
 
-from memoryhub.models.schemas import (
+from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryScope,
     RelationshipCreate,
     RelationshipRead,
     RelationshipType,
 )
-from memoryhub.services.exceptions import MemoryNotFoundError, RelationshipNotFoundError
-from memoryhub.services.graph import (
+from memoryhub_core.services.exceptions import MemoryNotFoundError, RelationshipNotFoundError
+from memoryhub_core.services.graph import (
     create_relationship,
     delete_relationship,
     find_related,
@@ -25,7 +25,7 @@ from memoryhub.services.graph import (
     get_subtree,
     trace_provenance,
 )
-from memoryhub.services.memory import create_memory
+from memoryhub_core.services.memory import create_memory
 
 
 def _make_create_data(**overrides) -> MemoryNodeCreate:

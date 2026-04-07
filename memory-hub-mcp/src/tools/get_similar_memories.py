@@ -14,9 +14,9 @@ from src.core.authz import (
 )
 from src.tools._deps import get_db_session, release_db_session
 
-from memoryhub.services.curation.similarity import get_similar_memories as get_similar_memories_service
-from memoryhub.services.exceptions import MemoryNotFoundError
-from memoryhub.services.memory import read_memory as read_memory_service
+from memoryhub_core.services.curation.similarity import get_similar_memories as get_similar_memories_service
+from memoryhub_core.services.exceptions import MemoryNotFoundError
+from memoryhub_core.services.memory import read_memory as read_memory_service
 
 
 @mcp.tool(

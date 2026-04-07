@@ -354,7 +354,7 @@ class TestMemoryHistoryEndpoint:
                 app.dependency_overrides.clear()
 
     async def test_returns_404_when_service_raises_not_found(self, test_settings):
-        from memoryhub.services.exceptions import MemoryNotFoundError
+        from memoryhub_core.services.exceptions import MemoryNotFoundError
 
         missing_id = uuid.uuid4()
 

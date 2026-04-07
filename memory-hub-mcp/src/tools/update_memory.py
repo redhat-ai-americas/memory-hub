@@ -12,14 +12,14 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from memoryhub.models.schemas import MemoryNodeUpdate
-from memoryhub.services.exceptions import (
+from memoryhub_core.models.schemas import MemoryNodeUpdate
+from memoryhub_core.services.exceptions import (
     MemoryAccessDeniedError,
     MemoryNotCurrentError,
     MemoryNotFoundError,
 )
-from memoryhub.services.memory import read_memory as _read_memory
-from memoryhub.services.memory import update_memory as svc_update_memory
+from memoryhub_core.services.memory import read_memory as _read_memory
+from memoryhub_core.services.memory import update_memory as svc_update_memory
 from src.core.app import mcp
 from src.core.authz import get_claims_from_context, authorize_write, AuthenticationError
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session

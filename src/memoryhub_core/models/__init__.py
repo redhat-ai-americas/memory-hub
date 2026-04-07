@@ -1,10 +1,10 @@
 """Memory data models (Pydantic + SQLAlchemy)."""
 
-from memoryhub.models.base import Base, TimestampMixin
-from memoryhub.models.contradiction import ContradictionReport
-from memoryhub.models.curation import CuratorRule
-from memoryhub.models.memory import MemoryNode, MemoryRelationship
-from memoryhub.models.schemas import (
+from memoryhub_core.models.base import Base, TimestampMixin
+from memoryhub_core.models.contradiction import ContradictionReport
+from memoryhub_core.models.curation import CuratorRule
+from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
+from memoryhub_core.models.schemas import (
     CurationResult,
     CuratorRuleCreate,
     CuratorRuleRead,
@@ -23,7 +23,7 @@ from memoryhub.models.schemas import (
     RuleTrigger,
     StorageType,
 )
-from memoryhub.models.utils import generate_stub
+from memoryhub_core.models.utils import generate_stub
 
 __all__ = [
     "Base",

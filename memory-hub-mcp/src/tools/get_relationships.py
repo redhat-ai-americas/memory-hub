@@ -11,9 +11,9 @@ from src.core.app import mcp
 from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
 from src.tools._deps import get_db_session, release_db_session
 
-from memoryhub.models.schemas import RelationshipType
-from memoryhub.services.exceptions import MemoryNotFoundError
-from memoryhub.services.graph import (
+from memoryhub_core.models.schemas import RelationshipType
+from memoryhub_core.services.exceptions import MemoryNotFoundError
+from memoryhub_core.services.graph import (
     get_relationships as get_relationships_service,
     trace_provenance,
 )

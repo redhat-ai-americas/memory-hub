@@ -14,9 +14,9 @@ from src.tools._deps import (
     release_db_session,
 )
 
-from memoryhub.models.schemas import MemoryNodeCreate
-from memoryhub.services.exceptions import MemoryAccessDeniedError, MemoryNotFoundError
-from memoryhub.services.memory import create_memory
+from memoryhub_core.models.schemas import MemoryNodeCreate
+from memoryhub_core.services.exceptions import MemoryAccessDeniedError, MemoryNotFoundError
+from memoryhub_core.services.memory import create_memory
 
 
 @mcp.tool(

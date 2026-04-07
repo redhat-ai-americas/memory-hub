@@ -8,10 +8,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "Creating MemoryHub project structure in ${ROOT}..."
 
-# Core library
-mkdir -p "${ROOT}/src/memoryhub/models"
-mkdir -p "${ROOT}/src/memoryhub/storage"
-mkdir -p "${ROOT}/src/memoryhub/services"
+# Core library (memoryhub_core; distinct from the SDK at sdk/src/memoryhub/)
+mkdir -p "${ROOT}/src/memoryhub_core/models"
+mkdir -p "${ROOT}/src/memoryhub_core/storage"
+mkdir -p "${ROOT}/src/memoryhub_core/services"
 
 # Tests
 mkdir -p "${ROOT}/tests/test_models"

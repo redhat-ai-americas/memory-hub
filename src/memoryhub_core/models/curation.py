@@ -11,7 +11,7 @@ from sqlalchemy import Boolean, Index, Integer, String, Text, UniqueConstraint, 
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from memoryhub.models.base import Base, TimestampMixin
+from memoryhub_core.models.base import Base, TimestampMixin
 
 
 class CuratorRule(TimestampMixin, Base):

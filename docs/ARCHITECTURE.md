@@ -27,8 +27,8 @@ graph TB
 
     subgraph "Inside MCP server pod"
         AUTHZ[core/authz.py<br/>JWT verify, RBAC,<br/>scope filtering]
-        SVC[src/memoryhub/services/<br/>memory + graph + curation]
-        MOD[src/memoryhub/models/<br/>SQLAlchemy]
+        SVC[src/memoryhub_core/services/<br/>memory + graph + curation]
+        MOD[src/memoryhub_core/models/<br/>SQLAlchemy]
     end
 
     subgraph "memoryhub-db namespace"
@@ -58,7 +58,7 @@ graph TB
     SVC --> RR
 ```
 
-Every memory operation flows through the MCP server. The server applies authorization in `core/authz.py` (JWT-first, session-fallback) before any tool call reaches the service layer. The service layer in `src/memoryhub/services/` is the single source of truth for memory CRUD, search, graph relationships, and curation; the MCP tools are thin wrappers that call into it.
+Every memory operation flows through the MCP server. The server applies authorization in `core/authz.py` (JWT-first, session-fallback) before any tool call reaches the service layer. The service layer in `src/memoryhub_core/services/` is the single source of truth for memory CRUD, search, graph relationships, and curation; the MCP tools are thin wrappers that call into it.
 
 The OAuth 2.1 authorization server runs in a separate namespace and never touches PostgreSQL. The MCP server validates incoming JWTs against the auth server's JWKS endpoint; the dashboard BFF brokers admin client management calls. SDK consumers fetch tokens via `client_credentials` and refresh transparently. Token rotation, JWKS caching, and signature validation are all handled by FastMCP 3's built-in `JWTVerifier`.
 
@@ -224,11 +224,11 @@ External cluster routes:
 
 ## What's decided and what's open
 
-**Decided and shipped.** Tree-based memory model. PostgreSQL + pgvector for relational + vector + graph in one database. MCP as the primary agent interface. OAuth 2.1 with `client_credentials` and short-lived JWTs. Service-layer RBAC enforced via `core/authz.py`. Stateless session focus with cross-encoder reranking and graceful cosine fallback. `.memoryhub.yaml` schema with Pydantic v2 in the SDK. CLI with `memoryhub config init` for project-level setup. Single-namespace co-location of MCP + UI; separate namespaces for auth and database. Dashboard with six panels behind oauth-proxy. Three-namespace deployment topology.
+**Decided and shipped.** Tree-based memory model. PostgreSQL + pgvector for relational + vector + graph in one database. MCP as the primary agent interface. OAuth 2.1 with `client_credentials` and short-lived JWTs. Service-layer RBAC enforced via `core/authz.py`. Stateless session focus with cross-encoder reranking and graceful cosine fallback. `.memoryhub.yaml` schema with Pydantic v2 in the SDK. CLI with `memoryhub config init` for project-level setup. Single-namespace co-location of MCP + UI; separate namespaces for auth and database. Dashboard with six panels behind oauth-proxy. Three-namespace deployment topology. Server-side library renamed to `memoryhub-core` (distribution name) / `memoryhub_core` (import name) so it no longer collides with the published SDK (#55 closed).
 
 **Decided, not yet implemented.** Kubernetes Operator with CRDs (skeleton only). Valkey-backed session vector store (deferred until #61 or #62 lands). Audit logging stub interface (#67). FIPS end-to-end validation. `token_exchange` grant for platform-integrated agents. Project-scope membership enforcement (#64) — currently scope filtering treats project membership as implicit.
 
-**Open.** Multi-cluster federation. CRD naming and structure for the operator. Grafana dashboard layouts. The actor_id / driver_id model for distinguishing the agent that wrote a memory from the human it acted for (#66). HIPAA / PHI detection patterns in the curation pipeline (#68). The `memoryhub` Python package naming collision between server and SDK (#55) is decided in principle (rename the server-side package) but not yet executed; see [`package-layout.md`](package-layout.md).
+**Open.** Multi-cluster federation. CRD naming and structure for the operator. Grafana dashboard layouts. The actor_id / driver_id model for distinguishing the agent that wrote a memory from the human it acted for (#66). HIPAA / PHI detection patterns in the curation pipeline (#68).
 
 The architecture is designed to let these open questions be resolved incrementally. The core data flow and subsystem boundaries are stable; the internals of each subsystem are where the remaining design work lives.
 

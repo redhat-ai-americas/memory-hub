@@ -9,15 +9,15 @@ import uuid
 
 import pytest
 
-from memoryhub.models.schemas import (
+from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryNodeRead,
     MemoryNodeStub,
     MemoryNodeUpdate,
     MemoryScope,
 )
-from memoryhub.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
-from memoryhub.services.memory import (
+from memoryhub_core.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
+from memoryhub_core.services.memory import (
     DEFAULT_PIVOT_THRESHOLD,
     create_memory,
     get_memory_history,
@@ -28,7 +28,7 @@ from memoryhub.services.memory import (
     search_memories_with_focus,
     update_memory,
 )
-from memoryhub.services.rerank import NoopRerankerService, RerankerService
+from memoryhub_core.services.rerank import NoopRerankerService, RerankerService
 
 
 def _make_create_data(**overrides) -> MemoryNodeCreate:
@@ -214,7 +214,7 @@ async def test_update_memory_deep_copies_branches(async_session, embedding_servi
     # children directly via SQL to confirm the deep-copy behavior.
     from sqlalchemy import select as _select
 
-    from memoryhub.models.memory import MemoryNode as _MemoryNode
+    from memoryhub_core.models.memory import MemoryNode as _MemoryNode
 
     new_version = await read_memory(updated.id, async_session)
     assert new_version.branch_count == 2
@@ -411,7 +411,7 @@ async def test_get_memory_history_walks_chain_bidirectionally(
 
 async def test_report_contradiction(async_session, embedding_service):
     from sqlalchemy import select
-    from memoryhub.models.contradiction import ContradictionReport
+    from memoryhub_core.models.contradiction import ContradictionReport
 
     node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
 
@@ -463,7 +463,7 @@ async def test_report_contradiction_preserves_existing_metadata(async_session, e
 
 async def test_report_contradiction_resolved_not_counted(async_session, embedding_service):
     from sqlalchemy import select
-    from memoryhub.models.contradiction import ContradictionReport
+    from memoryhub_core.models.contradiction import ContradictionReport
 
     node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
 
@@ -504,7 +504,7 @@ async def test_resolve_contradiction(async_session, embedding_service):
     )
 
     from sqlalchemy import select
-    from memoryhub.models.contradiction import ContradictionReport
+    from memoryhub_core.models.contradiction import ContradictionReport
 
     result = await async_session.execute(
         select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
@@ -530,7 +530,7 @@ async def test_resolve_contradiction_already_resolved(async_session, embedding_s
     )
 
     from sqlalchemy import select
-    from memoryhub.models.contradiction import ContradictionReport
+    from memoryhub_core.models.contradiction import ContradictionReport
 
     result = await async_session.execute(
         select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
@@ -870,7 +870,7 @@ def test_cosine_distance_returns_python_float_for_numpy_inputs():
     except ImportError:
         pytest.skip("numpy not installed")
 
-    from memoryhub.services.memory import _cosine_distance
+    from memoryhub_core.services.memory import _cosine_distance
 
     # Build a numpy embedding the way pgvector would.
     np_embedding = np.array([0.1] * 384, dtype=np.float32)

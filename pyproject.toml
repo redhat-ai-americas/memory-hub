@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "memoryhub"
-version = "0.2.0"
-description = "Kubernetes-native agent memory for OpenShift AI"
+name = "memoryhub-core"
+version = "0.3.0"
+description = "Kubernetes-native agent memory for OpenShift AI -- server-side library (models, services, storage, RBAC). Distinct from the `memoryhub` SDK on PyPI; see docs/package-layout.md."
 requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0",

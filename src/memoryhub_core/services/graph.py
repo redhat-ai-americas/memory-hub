@@ -11,14 +11,14 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from memoryhub.models.memory import MemoryNode, MemoryRelationship
-from memoryhub.models.schemas import (
+from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
+from memoryhub_core.models.schemas import (
     MemoryNodeRead,
     RelationshipCreate,
     RelationshipRead,
 )
-from memoryhub.services.exceptions import MemoryNotFoundError, RelationshipNotFoundError
-from memoryhub.services.memory import node_to_read
+from memoryhub_core.services.exceptions import MemoryNotFoundError, RelationshipNotFoundError
+from memoryhub_core.services.memory import node_to_read
 
 _MAX_DEPTH_CAP = 10
 _MAX_HOPS_CAP = 5

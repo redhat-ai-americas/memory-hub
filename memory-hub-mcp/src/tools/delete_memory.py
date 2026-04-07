@@ -16,13 +16,13 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from memoryhub.services.exceptions import (
+from memoryhub_core.services.exceptions import (
     MemoryAccessDeniedError,
     MemoryAlreadyDeletedError,
     MemoryNotFoundError,
 )
-from memoryhub.services.memory import delete_memory as svc_delete_memory
-from memoryhub.services.memory import read_memory as _read_memory
+from memoryhub_core.services.memory import delete_memory as svc_delete_memory
+from memoryhub_core.services.memory import read_memory as _read_memory
 
 from src.core.app import mcp
 from src.core.authz import (

@@ -7,16 +7,16 @@ so pipeline tests with embeddings only verify the fallback path is clean.
 
 import pytest
 
-from memoryhub.models.schemas import (
+from memoryhub_core.models.schemas import (
     CuratorRuleCreate,
     RuleAction,
     RuleLayer,
     RuleTier,
     RuleTrigger,
 )
-import memoryhub.services.curation.pipeline as curation_pipeline
-from memoryhub.services.curation.pipeline import run_curation_pipeline
-from memoryhub.services.curation.rules import create_rule, load_rules, seed_default_rules
+import memoryhub_core.services.curation.pipeline as curation_pipeline
+from memoryhub_core.services.curation.pipeline import run_curation_pipeline
+from memoryhub_core.services.curation.rules import create_rule, load_rules, seed_default_rules
 
 
 # -- Helper --

@@ -12,8 +12,8 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from memoryhub.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
-from memoryhub.services.memory import (
+from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
+from memoryhub_core.services.memory import (
     count_search_matches,
     search_memories,
     search_memories_with_focus,

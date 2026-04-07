@@ -1,6 +1,6 @@
 """Alembic environment configuration.
 
-Loads the database URL from memoryhub.config at runtime, overriding
+Loads the database URL from memoryhub_core.config at runtime, overriding
 the placeholder in alembic.ini.
 """
 
@@ -9,7 +9,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from memoryhub.config import DatabaseSettings
+from memoryhub_core.config import DatabaseSettings
 
 # Alembic Config object (provides access to alembic.ini values)
 config = context.config
@@ -23,7 +23,7 @@ db_settings = DatabaseSettings()
 config.set_main_option("sqlalchemy.url", db_settings.sync_url)
 
 # Import models' MetaData for autogenerate support.
-from memoryhub.models import Base  # noqa: E402
+from memoryhub_core.models import Base  # noqa: E402
 
 target_metadata = Base.metadata
 

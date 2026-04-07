@@ -7,10 +7,10 @@ No LLM calls happen on the write path.
 Primary entry point: run_curation_pipeline
 """
 
-from memoryhub.services.curation.pipeline import run_curation_pipeline
-from memoryhub.services.curation.rules import create_rule, load_rules, seed_default_rules
-from memoryhub.services.curation.scanner import ScanResult, scan_content, scan_with_custom_patterns
-from memoryhub.services.curation.similarity import SimilarityResult, check_similarity, get_similar_memories
+from memoryhub_core.services.curation.pipeline import run_curation_pipeline
+from memoryhub_core.services.curation.rules import create_rule, load_rules, seed_default_rules
+from memoryhub_core.services.curation.scanner import ScanResult, scan_content, scan_with_custom_patterns
+from memoryhub_core.services.curation.similarity import SimilarityResult, check_similarity, get_similar_memories
 
 __all__ = [
     "ScanResult",

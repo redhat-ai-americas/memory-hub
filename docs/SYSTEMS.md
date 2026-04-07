@@ -99,4 +99,3 @@ External RHOAI services that MemoryHub depends on but does not own:
 - **Phase 2 of agent-memory-ergonomics** -- #61 (session focus history as a usage signal) and #62 (Pattern E real-time push notifications) are both unblocked by #58 but not yet started. Both will need a Valkey-backed store for session focus vectors.
 - **Audit logging** for governance is a stub interface (#67), not yet wired through.
 - **FIPS compliance** is inherited from the cluster's FIPS mode but has not been validated end-to-end.
-- **#55 (memoryhub package naming collision)** -- the server-side library at `src/memoryhub/` and the SDK at `sdk/src/memoryhub/` both declare `name = "memoryhub"`. Tracked as a follow-up rename. See [`package-layout.md`](package-layout.md).

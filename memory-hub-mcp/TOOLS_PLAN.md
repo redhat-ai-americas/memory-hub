@@ -347,7 +347,7 @@ Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase
 
 ### Phase 3 (current)
 
-13. **delete_memory** — Depends on the `deleted_at` column (Alembic 007), the `delete_memory()` service-layer function in `memoryhub.services.memory`, and the `MemoryAlreadyDeletedError` exception. The tool itself is a thin authorization + service-layer wrapper. Refs #42.
+13. **delete_memory** — Depends on the `deleted_at` column (Alembic 007), the `delete_memory()` service-layer function in `memoryhub_core.services.memory`, and the `MemoryAlreadyDeletedError` exception. The tool itself is a thin authorization + service-layer wrapper. Refs #42.
 
 ## Dependencies
 
@@ -360,16 +360,16 @@ Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase
 
 ### Phase 2 (resolved)
 
-- **Graph service** (`memoryhub.services.graph`): 6 async functions for creating/querying relationships and traversals. Built in #4.
-- **Curation service** (`memoryhub.services.curation`): Pipeline, scanner, similarity, and rules modules. Built in #6 Phase 2a.
+- **Graph service** (`memoryhub_core.services.graph`): 6 async functions for creating/querying relationships and traversals. Built in #4.
+- **Curation service** (`memoryhub_core.services.curation`): Pipeline, scanner, similarity, and rules modules. Built in #6 Phase 2a.
 - **`memory_relationships` table**: Migration 003, deployed.
 - **`curator_rules` table**: Migration 004, deployed. Default system rules seeded.
 
 ### Phase 3 (resolved)
 
 - **`deleted_at` column on `memory_nodes`**: Alembic migration 007, applied to dev DB.
-- **`delete_memory()` service function** (`memoryhub.services.memory`): Walks the version chain (both directions), collects child branches, and bulk soft-deletes via `UPDATE`. Returns a count summary.
-- **`MemoryAlreadyDeletedError` exception** (`memoryhub.services.exceptions`): Distinguishes "already deleted" from "not found" so the tool can return a 409-equivalent message.
+- **`delete_memory()` service function** (`memoryhub_core.services.memory`): Walks the version chain (both directions), collects child branches, and bulk soft-deletes via `UPDATE`. Returns a count summary.
+- **`MemoryAlreadyDeletedError` exception** (`memoryhub_core.services.exceptions`): Distinguishes "already deleted" from "not found" so the tool can return a 409-equivalent message.
 - **All read paths filter `deleted_at IS NULL`**: `read_memory`, `search_memories`, `_bulk_branch_flags`, `_compute_branch_flags`, and the BFF queries (graph, search, stats, users).
 
 ## Open Questions (Phase 1 — Resolved)

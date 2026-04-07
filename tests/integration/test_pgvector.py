@@ -19,18 +19,18 @@ from sqlalchemy import select
 pytestmark = pytest.mark.integration
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import memoryhub.services.curation.pipeline as pipeline_module
-from memoryhub.models.curation import CuratorRule
-from memoryhub.models.schemas import (
+import memoryhub_core.services.curation.pipeline as pipeline_module
+from memoryhub_core.models.curation import CuratorRule
+from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryNodeUpdate,
     MemoryScope,
     RelationshipCreate,
     RelationshipType,
 )
-from memoryhub.services.embeddings import EMBEDDING_DIM, MockEmbeddingService
-from memoryhub.services.graph import create_relationship, get_relationships, trace_provenance
-from memoryhub.services.memory import create_memory, search_memories, update_memory
+from memoryhub_core.services.embeddings import EMBEDDING_DIM, MockEmbeddingService
+from memoryhub_core.services.graph import create_relationship, get_relationships, trace_provenance
+from memoryhub_core.services.memory import create_memory, search_memories, update_memory
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ async def test_embedding_stored_as_vector_not_json(
     memory, _ = await create_memory(_make(content), async_session, embedding_service, skip_curation=True)
 
     # Read back directly from ORM to inspect the raw stored type.
-    from memoryhub.models.memory import MemoryNode
+    from memoryhub_core.models.memory import MemoryNode
 
     stmt = select(MemoryNode).where(MemoryNode.id == memory.id)
     result = await async_session.execute(stmt)
@@ -181,7 +181,7 @@ async def test_embedding_roundtrip_matches_mock_service(
 
     memory, _ = await create_memory(_make(content), async_session, embedding_service, skip_curation=True)
 
-    from memoryhub.models.memory import MemoryNode
+    from memoryhub_core.models.memory import MemoryNode
 
     stmt = select(MemoryNode).where(MemoryNode.id == memory.id)
     result = await async_session.execute(stmt)
@@ -256,7 +256,7 @@ async def test_curation_nearest_score_close_to_one_for_identical_content(
 
     # Re-run the pipeline directly to inspect the score without persisting.
     embedding = await embedding_service.embed(content)
-    from memoryhub.services.curation.pipeline import run_curation_pipeline
+    from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 
     result = await run_curation_pipeline(
         content=content,
@@ -324,7 +324,7 @@ async def test_check_similarity_returns_score_not_none(
     reset_rules_seeded,
 ) -> None:
     """check_similarity returns a non-None nearest_score on PostgreSQL."""
-    from memoryhub.services.curation.similarity import check_similarity
+    from memoryhub_core.services.curation.similarity import check_similarity
 
     owner_id = "similarity-direct-test"
     content = "redis is an in-memory key-value data store"
@@ -368,7 +368,7 @@ async def test_pipeline_seeds_default_rules_on_first_call(
     )
     assert not pipeline_module._rules_seeded
 
-    from memoryhub.services.curation.pipeline import run_curation_pipeline
+    from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 
     await run_curation_pipeline(
         content="test content for rule seeding verification",
@@ -401,7 +401,7 @@ async def test_pipeline_skips_seeding_on_subsequent_calls(
     reset_rules_seeded,
 ) -> None:
     """After _rules_seeded=True, the pipeline does not re-seed rules."""
-    from memoryhub.services.curation.pipeline import run_curation_pipeline
+    from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 
     # First call seeds the rules.
     embedding = await embedding_service.embed("first call seeds rules")
@@ -626,7 +626,7 @@ async def test_update_memory_new_version_has_fresh_embedding(
     assert updated.is_current is True
 
     # Verify the new version has a stored embedding that differs from the original.
-    from memoryhub.models.memory import MemoryNode
+    from memoryhub_core.models.memory import MemoryNode
 
     stmt = select(MemoryNode).where(MemoryNode.id == updated.id)
     result = await async_session.execute(stmt)

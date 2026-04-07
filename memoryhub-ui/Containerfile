@@ -25,9 +25,11 @@ WORKDIR /opt/app-root/src
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy and install memoryhub package (contains SQLAlchemy models + SDK)
-COPY --chown=1001:0 memoryhub/ ./memoryhub/
-RUN pip install --no-cache-dir ./memoryhub/
+# Copy and install memoryhub_core library (contains SQLAlchemy models +
+# services that the BFF imports). Distinct from the `memoryhub` SDK on PyPI;
+# see docs/package-layout.md.
+COPY --chown=1001:0 memoryhub_core/ ./memoryhub_core/
+RUN pip install --no-cache-dir ./memoryhub_core/
 
 # Copy backend application code
 COPY --chown=1001:0 backend/src/ ./src/

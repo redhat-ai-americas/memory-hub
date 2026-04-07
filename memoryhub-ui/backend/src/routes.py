@@ -7,11 +7,11 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from memoryhub.models.contradiction import ContradictionReport
-from memoryhub.models.curation import CuratorRule
-from memoryhub.models.memory import MemoryNode, MemoryRelationship
-from memoryhub.services.exceptions import MemoryNotFoundError
-from memoryhub.services.memory import (
+from memoryhub_core.models.contradiction import ContradictionReport
+from memoryhub_core.models.curation import CuratorRule
+from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
+from memoryhub_core.services.exceptions import MemoryNotFoundError
+from memoryhub_core.services.memory import (
     get_memory_history as get_memory_history_service,
 )
 from sqlalchemy import func, select, text

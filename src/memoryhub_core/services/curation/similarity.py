@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from memoryhub.models.memory import MemoryNode
+from memoryhub_core.models.memory import MemoryNode
 
 
 @dataclass
@@ -101,7 +101,7 @@ async def get_similar_memories(
     source = source_result.scalar_one_or_none()
 
     if source is None:
-        from memoryhub.services.exceptions import MemoryNotFoundError
+        from memoryhub_core.services.exceptions import MemoryNotFoundError
 
         raise MemoryNotFoundError(memory_id)
 

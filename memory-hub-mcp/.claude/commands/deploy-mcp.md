@@ -70,7 +70,7 @@ Command:
 
 The script (deploy/deploy.sh) will:
   1. Prepare a build context via deploy/build-context.sh (this stages
-     ../src/memoryhub/ as memoryhub-core/ for the Containerfile)
+     ../src/memoryhub_core/ as memoryhub_core/ for the Containerfile)
   2. Apply deploy/users-configmap.yaml
   3. Apply deploy/openshift.yaml
   4. Run `oc start-build memory-hub-mcp --from-dir=<staged> -n memory-hub-mcp --follow`
@@ -133,6 +133,6 @@ Brief summary to the user:
 
 - The namespace is `memory-hub-mcp` and the deployment is `memory-hub-mcp`. Both are hardcoded in `deploy/deploy.sh`. Do not override.
 - There are other services in the `memory-hub-mcp` namespace (e.g. `memoryhub-ui`). Never use cluster-wide delete operations. Always scope to `app.kubernetes.io/name=memory-hub-mcp`.
-- The `memoryhub` server-side package source lives at the **repo root** (`src/memoryhub/`), NOT in `sdk/src/memoryhub/`. The build context script copies the root one. See `docs/package-layout.md`.
-- If the build fails because of import errors involving `memoryhub.services` or `memoryhub.storage`, you are probably editing `sdk/src/memoryhub/` instead of `src/memoryhub/`. See `docs/package-layout.md`.
+- The server-side library source lives at the **repo root** as `src/memoryhub_core/` (distribution name `memoryhub-core`, import name `memoryhub_core`). The SDK at `sdk/src/memoryhub/` is a different package published to PyPI. See `docs/package-layout.md`.
+- If the build fails because of import errors involving `memoryhub_core.services` or `memoryhub_core.storage`, you are probably editing `sdk/src/memoryhub/` instead of `src/memoryhub_core/`. See `docs/package-layout.md`.
 - If `mcp-test-mcp` is not available, STOP and ask the user to enable it. Do not declare success without verifying the deployed tools.

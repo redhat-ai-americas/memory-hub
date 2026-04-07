@@ -5,8 +5,8 @@ import uuid
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from memoryhub.models.curation import CuratorRule
-from memoryhub.models.schemas import CuratorRuleCreate
+from memoryhub_core.models.curation import CuratorRule
+from memoryhub_core.models.schemas import CuratorRuleCreate
 
 # Layer precedence: higher index = higher layer (can protect with override=True)
 _LAYER_ORDER = {"system": 0, "organizational": 1, "user": 2}

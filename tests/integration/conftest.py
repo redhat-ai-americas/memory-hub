@@ -21,8 +21,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from memoryhub.config import DatabaseSettings
-from memoryhub.services.embeddings import MockEmbeddingService
+from memoryhub_core.config import DatabaseSettings
+from memoryhub_core.services.embeddings import MockEmbeddingService
 
 # Mark every test in this package as an integration test automatically.
 pytestmark = pytest.mark.integration
