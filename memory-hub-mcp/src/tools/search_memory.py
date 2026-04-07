@@ -12,7 +12,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
-from memoryhub.services.memory import search_memories
+from memoryhub.services.memory import count_search_matches, search_memories
 from src.core.app import mcp
 from src.core.authz import (
     get_claims_from_context,
@@ -92,6 +92,14 @@ async def search_memory(
     """Search memories using semantic similarity. Returns ranked results as a mix of
     full content (high-weight) and lightweight stubs (lower-weight). Use read_memory
     to expand stubs that look interesting.
+
+    Response fields:
+      - results: the page of ranked matches (size <= max_results).
+      - total_matching: total count of memories matching the filter set
+        (scope/owner/current_only/RBAC), independent of max_results. Use this
+        to display "showing N of M" or to gauge whether to broaden the query.
+      - has_more: true when total_matching > len(results); indicates that
+        narrowing filters or paging would reveal additional matches.
     """
     if not query.strip():
         raise ToolError(
@@ -138,10 +146,21 @@ async def search_memory(
             authorized_scopes=authorized,
         )
 
+        # Count all matching memories under the same filter set so the agent
+        # can tell whether more matches exist beyond this page.
+        total_matching = await count_search_matches(
+            session=session,
+            scope=scope,
+            owner_id=owner_id,
+            current_only=current_only,
+            authorized_scopes=authorized,
+        )
+
         if not results:
             return {
                 "results": [],
-                "total_accessible": 0,
+                "total_matching": total_matching,
+                "has_more": False,
                 "message": (
                     "No memories found matching your query. "
                     "Try broader search terms or remove scope/owner filters."
@@ -162,7 +181,8 @@ async def search_memory(
 
         return {
             "results": formatted,
-            "total_accessible": len(formatted),
+            "total_matching": total_matching,
+            "has_more": total_matching > len(formatted),
         }
 
     finally:

@@ -346,6 +346,66 @@ async def delete_memory(
     }
 
 
+def _build_search_filters(
+    scope: str | None,
+    owner_id: str | None,
+    current_only: bool,
+    authorized_scopes: dict[str, str | None] | None,
+) -> list | None:
+    """Build the SQL filter list shared by search_memories and count_search_matches.
+
+    Returns None if authorized_scopes was provided but empty (callers should
+    short-circuit to "no results"). This avoids duplicating the filter logic
+    between the search query and the count query that backs has_more.
+    """
+    filters = [MemoryNode.deleted_at.is_(None)]
+    if current_only:
+        filters.append(MemoryNode.is_current.is_(True))
+    if scope is not None:
+        filters.append(MemoryNode.scope == scope)
+    if owner_id is not None:
+        filters.append(MemoryNode.owner_id == owner_id)
+
+    if authorized_scopes is not None:
+        if not authorized_scopes:
+            return None  # no authorized scopes → no results
+        scope_conditions = []
+        for scope_name, required_owner in authorized_scopes.items():
+            if required_owner is not None:
+                scope_conditions.append(
+                    and_(
+                        MemoryNode.scope == scope_name,
+                        MemoryNode.owner_id == required_owner,
+                    )
+                )
+            else:
+                scope_conditions.append(MemoryNode.scope == scope_name)
+        filters.append(or_(*scope_conditions))
+
+    return filters
+
+
+async def count_search_matches(
+    session: AsyncSession,
+    scope: str | None = None,
+    owner_id: str | None = None,
+    current_only: bool = True,
+    authorized_scopes: dict[str, str | None] | None = None,
+) -> int:
+    """Count memories matching the same filter set used by search_memories.
+
+    Used by the search_memory tool to compute has_more for pagination, since
+    search_memories itself only returns a single page of results. The query
+    parameter and weight_threshold are intentionally absent: total_matching
+    is independent of the embedding similarity ranking.
+    """
+    filters = _build_search_filters(scope, owner_id, current_only, authorized_scopes)
+    if filters is None:
+        return 0
+    stmt = select(func.count()).select_from(MemoryNode).where(*filters)
+    return (await session.execute(stmt)).scalar() or 0
+
+
 async def search_memories(
     query: str,
     session: AsyncSession,
@@ -372,31 +432,9 @@ async def search_memories(
     """
     query_embedding = await embedding_service.embed(query)
 
-    # Build base filters
-    filters = [MemoryNode.deleted_at.is_(None)]
-    if current_only:
-        filters.append(MemoryNode.is_current.is_(True))
-    if scope is not None:
-        filters.append(MemoryNode.scope == scope)
-    if owner_id is not None:
-        filters.append(MemoryNode.owner_id == owner_id)
-
-    # RBAC visibility filter: restrict results to authorized scopes
-    if authorized_scopes is not None:
-        if not authorized_scopes:
-            return []  # no authorized scopes → no results
-        scope_conditions = []
-        for scope_name, required_owner in authorized_scopes.items():
-            if required_owner is not None:
-                scope_conditions.append(
-                    and_(
-                        MemoryNode.scope == scope_name,
-                        MemoryNode.owner_id == required_owner,
-                    )
-                )
-            else:
-                scope_conditions.append(MemoryNode.scope == scope_name)
-        filters.append(or_(*scope_conditions))
+    filters = _build_search_filters(scope, owner_id, current_only, authorized_scopes)
+    if filters is None:
+        return []
 
     use_pgvector = True
     try:
