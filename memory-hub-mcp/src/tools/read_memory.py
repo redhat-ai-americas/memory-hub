@@ -77,8 +77,16 @@ async def read_memory(
         result = node.model_dump(mode="json")
 
         if include_versions:
+            # get_memory_history returns a dict with a "versions" list plus
+            # pagination metadata; embed both so callers see total_versions
+            # and has_more without a follow-up call.
             history = await get_memory_history(parsed_id, session)
-            result["version_history"] = [v.model_dump(mode="json") for v in history]
+            result["version_history"] = {
+                "versions": [v.model_dump(mode="json") for v in history["versions"]],
+                "total_versions": history["total_versions"],
+                "has_more": history["has_more"],
+                "offset": history["offset"],
+            }
 
         return result
 

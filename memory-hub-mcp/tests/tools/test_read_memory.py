@@ -119,12 +119,13 @@ async def test_read_memory_include_versions_unconditional():
 
     The previous behavior gated version_history on depth == 0; now that depth
     is gone, version_history must always be returned when include_versions is
-    true.
+    true. The mock here mirrors the real get_memory_history return shape (a
+    dict with "versions" list + pagination keys) so the tool's iteration is
+    exercised against the real contract, not a misleading list-shaped mock.
     """
     fake_node = _fake_node(branch_count=2)
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
-    fake_history = [object()]  # arbitrary objects -- model_dump is mocked
 
     class _DumpableHistory:
         def model_dump(self, mode="json"):
@@ -147,7 +148,12 @@ async def test_read_memory_include_versions_unconditional():
             patch(
                 "src.tools.read_memory.get_memory_history",
                 new_callable=AsyncMock,
-                return_value=[_DumpableHistory()],
+                return_value={
+                    "versions": [_DumpableHistory()],
+                    "total_versions": 1,
+                    "has_more": False,
+                    "offset": 0,
+                },
             ),
         ):
             result = await read_memory(
@@ -157,8 +163,10 @@ async def test_read_memory_include_versions_unconditional():
         auth_mod._current_session = None
 
     assert "version_history" in result
-    assert len(result["version_history"]) == 1
-    assert result["version_history"][0] == {"id": "v1", "version": 1}
+    assert result["version_history"]["total_versions"] == 1
+    assert result["version_history"]["has_more"] is False
+    assert len(result["version_history"]["versions"]) == 1
+    assert result["version_history"]["versions"][0] == {"id": "v1", "version": 1}
 
 
 @pytest.mark.asyncio
