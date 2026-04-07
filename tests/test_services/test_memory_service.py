@@ -327,6 +327,47 @@ async def test_get_memory_history_not_found(async_session):
         await get_memory_history(uuid.uuid4(), async_session)
 
 
+async def test_get_memory_history_walks_chain_bidirectionally(
+    async_session, embedding_service
+):
+    """Regression for #49: history walks both directions from any version ID.
+
+    Pre-#49 the walker only followed previous_version_id backward, so
+    passing the oldest version ID returned just that one node and
+    total_versions=1. Verify all three call sites (oldest, middle, current)
+    return the full chain.
+    """
+    v1, _ = await create_memory(
+        _make_create_data(content="v1"), async_session, embedding_service
+    )
+    v2 = await update_memory(
+        v1.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service
+    )
+    v3 = await update_memory(
+        v2.id, MemoryNodeUpdate(content="v3"), async_session, embedding_service
+    )
+
+    expected_versions = {1, 2, 3}
+
+    for label, version_id in [
+        ("oldest", v1.id),
+        ("middle", v2.id),
+        ("current", v3.id),
+    ]:
+        result = await get_memory_history(version_id, async_session)
+        assert result["total_versions"] == 3, (
+            f"calling with the {label} version ID should return all 3 versions"
+        )
+        assert {v.version for v in result["versions"]} == expected_versions, (
+            f"calling with the {label} version ID should yield versions {expected_versions}"
+        )
+        # Newest-first ordering must hold regardless of which ID was passed
+        versions_in_order = [v.version for v in result["versions"]]
+        assert versions_in_order == sorted(versions_in_order, reverse=True), (
+            f"calling with the {label} version ID must return newest-first"
+        )
+
+
 # -- report_contradiction --
 
 

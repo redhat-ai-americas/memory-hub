@@ -288,33 +288,8 @@ async def delete_memory(
 
     now = datetime.now(UTC)
 
-    # Walk the version chain backwards to find all versions
-    version_ids: set[uuid.UUID] = set()
-    current = node
-
-    # Walk backwards (previous_version_id)
-    while current is not None and current.id not in version_ids:
-        version_ids.add(current.id)
-        if current.previous_version_id is not None:
-            prev_stmt = select(MemoryNode).where(MemoryNode.id == current.previous_version_id)
-            prev_result = await session.execute(prev_stmt)
-            current = prev_result.scalar_one_or_none()
-        else:
-            current = None
-
-    # Walk forward: find any nodes whose previous_version_id points to nodes we've seen
-    # (handles the case where we were given an old version ID)
-    changed = True
-    while changed:
-        changed = False
-        fwd_stmt = select(MemoryNode).where(
-            MemoryNode.previous_version_id.in_(list(version_ids)),
-            ~MemoryNode.id.in_(list(version_ids)),
-        )
-        fwd_result = await session.execute(fwd_stmt)
-        for fwd_node in fwd_result.scalars().all():
-            version_ids.add(fwd_node.id)
-            changed = True
+    chain_nodes = await _walk_version_chain(node, session)
+    version_ids: set[uuid.UUID] = {n.id for n in chain_nodes}
 
     # Also delete child branches of all versions in the chain
     child_stmt = select(MemoryNode).where(MemoryNode.parent_id.in_(list(version_ids)))
@@ -504,9 +479,11 @@ async def get_memory_history(
     max_versions: int = 20,
     offset: int = 0,
 ) -> dict:
-    """Walk the previous_version_id chain to build a paginated version history.
+    """Build a paginated version history for a memory.
 
-    Returns a dict with:
+    Walks the version chain in both directions from `memory_id`, so callers
+    can pass any version ID (oldest, newest, or middle) and get back the
+    full chain. Returns a dict with:
       - versions: list[MemoryVersionInfo] (newest-first, paginated)
       - total_versions: int (total count in the chain)
       - has_more: bool (whether more versions exist beyond this page)
@@ -519,29 +496,19 @@ async def get_memory_history(
     if node is None:
         raise MemoryNotFoundError(memory_id)
 
-    all_versions: list[MemoryVersionInfo] = []
-    visited: set[uuid.UUID] = set()
-    current = node
-
-    while current is not None and current.id not in visited:
-        visited.add(current.id)
-        all_versions.append(
-            MemoryVersionInfo(
-                id=current.id,
-                version=current.version,
-                is_current=current.is_current,
-                created_at=current.created_at,
-                stub=current.stub,
-                content=current.content,
-                expires_at=current.expires_at,
-            )
+    chain_nodes = await _walk_version_chain(node, session)
+    all_versions: list[MemoryVersionInfo] = [
+        MemoryVersionInfo(
+            id=n.id,
+            version=n.version,
+            is_current=n.is_current,
+            created_at=n.created_at,
+            stub=n.stub,
+            content=n.content,
+            expires_at=n.expires_at,
         )
-        if current.previous_version_id is not None:
-            prev_stmt = select(MemoryNode).where(MemoryNode.id == current.previous_version_id)
-            prev_result = await session.execute(prev_stmt)
-            current = prev_result.scalar_one_or_none()
-        else:
-            current = None
+        for n in chain_nodes
+    ]
 
     # Newest first (highest version number first)
     all_versions.sort(key=lambda v: v.version, reverse=True)
@@ -634,6 +601,53 @@ async def resolve_contradiction(
 
 
 # -- Internal helpers --
+
+
+async def _walk_version_chain(
+    start: MemoryNode,
+    session: AsyncSession,
+) -> list[MemoryNode]:
+    """Return every node in `start`'s version chain (both directions).
+
+    Walks `previous_version_id` backward from `start`, then iteratively
+    walks forward via reverse-pointers (nodes whose previous_version_id
+    is in the visited set) until the chain is closed. The result is
+    deduplicated and order-independent; callers that need ordering should
+    sort by `version`.
+
+    Used by `delete_memory` (so an old version ID still soft-deletes the
+    whole chain) and `get_memory_history` (so an agent can pass any
+    version ID and get the full history). Pre-#49 the two used divergent
+    walkers; this helper is the single source of truth.
+    """
+    visited: dict[uuid.UUID, MemoryNode] = {}
+    current: MemoryNode | None = start
+
+    # Backward walk along previous_version_id
+    while current is not None and current.id not in visited:
+        visited[current.id] = current
+        if current.previous_version_id is not None:
+            prev_stmt = select(MemoryNode).where(
+                MemoryNode.id == current.previous_version_id
+            )
+            current = (await session.execute(prev_stmt)).scalar_one_or_none()
+        else:
+            current = None
+
+    # Forward walk: pull in any node whose previous_version_id points at
+    # something we've already visited. Repeat until no new nodes appear.
+    changed = True
+    while changed:
+        changed = False
+        fwd_stmt = select(MemoryNode).where(
+            MemoryNode.previous_version_id.in_(list(visited.keys())),
+            ~MemoryNode.id.in_(list(visited.keys())),
+        )
+        for fwd_node in (await session.execute(fwd_stmt)).scalars().all():
+            visited[fwd_node.id] = fwd_node
+            changed = True
+
+    return list(visited.values())
 
 
 async def _bulk_branch_flags(
