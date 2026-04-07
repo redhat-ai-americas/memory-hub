@@ -1,18 +1,22 @@
 """Get memories similar to a given memory, with similarity scores."""
 
 import uuid
-from types import SimpleNamespace
 from typing import Annotated, Any
 
 from fastmcp import Context
 from pydantic import Field
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_read,
+    get_claims_from_context,
+)
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub.services.curation.similarity import get_similar_memories as get_similar_memories_service
 from memoryhub.services.exceptions import MemoryNotFoundError
+from memoryhub.services.memory import read_memory as read_memory_service
 
 
 @mcp.tool(
@@ -74,6 +78,18 @@ async def get_similar_memories(
     gen = None
     try:
         session, gen = await get_db_session()
+
+        # Authorize the caller against the source memory. The similarity
+        # service restricts results to (owner_id, scope) of the source, so once
+        # the caller is allowed to read the source, every returned item is in
+        # the same authorization domain and no post-fetch filter is needed.
+        source = await read_memory_service(parsed_memory_id, session)
+        if not authorize_read(claims, source):
+            return {
+                "error": True,
+                "message": f"Not authorized to read memory {memory_id}.",
+            }
+
         result = await get_similar_memories_service(
             parsed_memory_id,
             session,
@@ -86,22 +102,6 @@ async def get_similar_memories(
         for item in result.get("results", []):
             if "id" in item:
                 item["id"] = str(item["id"])
-
-        # Post-fetch RBAC filter: remove results the caller can't read
-        if "results" in result:
-            original_count = len(result["results"])
-            accessible = []
-            for item in result["results"]:
-                mem_proxy = SimpleNamespace(
-                    scope=item.get("scope", "user"),
-                    owner_id=item.get("owner_id", ""),
-                )
-                if authorize_read(claims, mem_proxy):
-                    accessible.append(item)
-            result["results"] = accessible
-            omitted = original_count - len(accessible)
-            if omitted > 0:
-                result["omitted_count"] = omitted
 
         return result
 

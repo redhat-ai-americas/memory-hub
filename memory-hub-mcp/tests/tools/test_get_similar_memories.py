@@ -65,18 +65,128 @@ async def test_get_similar_memories_invalid_uuid():
 @pytest.mark.asyncio
 async def test_get_similar_memories_success():
     """Successful query returns paged results."""
+    from types import SimpleNamespace
+
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
+    fake_source = SimpleNamespace(scope="user", owner_id="wjackson")
 
     with (
         patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.get_similar_memories.read_memory_service",
+            new_callable=AsyncMock,
+            return_value=fake_source,
+        ),
         patch(
             "src.tools.get_similar_memories.get_similar_memories_service",
             new_callable=AsyncMock,
             return_value={"results": [], "total": 0, "has_more": False},
         ),
     ):
-        result = await get_similar_memories(memory_id=str(uuid.uuid4()))
+        # Authenticate as the source's owner so authorize_read passes.
+        auth_mod._current_session = {
+            "user_id": "wjackson",
+            "scopes": ["user"],
+            "identity_type": "user",
+        }
+        try:
+            result = await get_similar_memories(memory_id=str(uuid.uuid4()))
+        finally:
+            auth_mod._current_session = None
     assert result["total"] == 0
     assert result["has_more"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_similar_memories_returns_results_for_owner():
+    """Regression for #47: results from the service must reach the caller.
+
+    The previous post-fetch RBAC filter dropped every result because the
+    service-layer items only contain {id, stub, score} -- not scope/owner_id --
+    so the SimpleNamespace defaults rejected everything via authorize_read.
+    Verify that when the caller owns the source, all returned items pass
+    through unchanged.
+    """
+    from types import SimpleNamespace
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_source = SimpleNamespace(scope="user", owner_id="wjackson")
+    sim_id = uuid.uuid4()
+    service_results = {
+        "results": [
+            {"id": sim_id, "stub": "similar 1", "score": 0.92},
+            {"id": uuid.uuid4(), "stub": "similar 2", "score": 0.85},
+        ],
+        "total": 2,
+        "has_more": False,
+    }
+
+    with (
+        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
+        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.get_similar_memories.read_memory_service",
+            new_callable=AsyncMock,
+            return_value=fake_source,
+        ),
+        patch(
+            "src.tools.get_similar_memories.get_similar_memories_service",
+            new_callable=AsyncMock,
+            return_value=service_results,
+        ),
+    ):
+        auth_mod._current_session = {
+            "user_id": "wjackson",
+            "scopes": ["user"],
+            "identity_type": "user",
+        }
+        try:
+            result = await get_similar_memories(memory_id=str(uuid.uuid4()))
+        finally:
+            auth_mod._current_session = None
+
+    assert result.get("error") is not True
+    assert "results" in result
+    assert len(result["results"]) == 2
+    assert result["total"] == 2
+    # IDs must be JSON-serializable strings, not UUID objects
+    assert all(isinstance(item["id"], str) for item in result["results"])
+
+
+@pytest.mark.asyncio
+async def test_get_similar_memories_unauthorized_for_other_owner():
+    """Regression for #47: callers cannot read memories outside their scope.
+
+    Even though the post-fetch filter is gone, caller-vs-source authorization
+    must still reject reads of memories owned by other users at user scope.
+    """
+    from types import SimpleNamespace
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    other_owner_source = SimpleNamespace(scope="user", owner_id="someone-else")
+
+    with (
+        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
+        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.get_similar_memories.read_memory_service",
+            new_callable=AsyncMock,
+            return_value=other_owner_source,
+        ),
+    ):
+        auth_mod._current_session = {
+            "user_id": "wjackson",
+            "scopes": ["user"],
+            "identity_type": "user",
+        }
+        try:
+            result = await get_similar_memories(memory_id=str(uuid.uuid4()))
+        finally:
+            auth_mod._current_session = None
+
+    assert result["error"] is True
+    assert "Not authorized" in result["message"]
