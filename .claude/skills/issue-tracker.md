@@ -41,6 +41,7 @@ OWNER=rdwj
 - `subsystem:operator`
 - `subsystem:observability`
 - `subsystem:org-ingestion`
+- `subsystem:auth`
 
 ### Type labels
 
