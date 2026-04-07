@@ -15,9 +15,9 @@ llama-stack-ns     LlamaStack pod (rh-dev distribution, :8321)
                    KServe InferenceService (vLLM model serving)
                    PostgreSQL (metadata, conversations, vector stores)
 
-memoryhub          MCP Server pods, Curator, Ingestion pipeline, Operator
-memoryhub-db       PostgreSQL primary + replica
-memoryhub-storage  MinIO
+memory-hub-mcp     MCP Server pod, Dashboard UI pod (BFF + oauth-proxy sidecar)
+memoryhub-auth     OAuth 2.1 authorization server
+memoryhub-db       PostgreSQL with pgvector
 ```
 
 MemoryHub's namespace group is unchanged by this integration. The LlamaStack namespaces communicate with MemoryHub over the cluster's internal network, with no shared namespace between them.
@@ -28,7 +28,7 @@ LlamaStack's MCP utility layer connects directly to MCP server endpoints. There 
 
 ```
 LlamaStack Pod          MemoryHub MCP Server
-(llama-stack-ns, :8321)  →  (memoryhub, :8080, /mcp/)
+(llama-stack-ns, :8321)  →  (memory-hub-mcp, :8080, /mcp/)
 ```
 
 The MCP utility layer auto-detects transport protocol: it tries `streamable_http` first and falls back to SSE. MemoryHub's FastMCP server uses streamable-HTTP (SSE is deprecated), so the negotiation succeeds on the first attempt. Sessions are cached per `(endpoint, headers_hash)` with a 1-hour TTL, so the first request to a tool group incurs a `list_tools()` call; subsequent requests within the session use the cached tool list.

@@ -20,9 +20,9 @@ spire-system       SPIRE server and agents
 MemoryHub occupies its own namespace group, unchanged by this integration:
 
 ```
-memoryhub          MCP Server pods, Curator, Ingestion pipeline, Operator
-memoryhub-db       PostgreSQL primary + replica
-memoryhub-storage  MinIO
+memory-hub-mcp     MCP Server pod, Dashboard UI pod (BFF + oauth-proxy sidecar)
+memoryhub-auth     OAuth 2.1 authorization server
+memoryhub-db       PostgreSQL with pgvector
 ```
 
 The two namespace groups communicate over the cluster's internal network. There is no shared namespace; the boundary between them is explicit and crossed only via defined API contracts.
@@ -33,14 +33,14 @@ In Phase 1, agent pods connect directly to the MemoryHub MCP server using the in
 
 ```
 Agent Pod             MemoryHub MCP Server
-(workload-ns)  ---->  (memoryhub, :8080, /mcp/)
+(workload-ns)  ---->  (memory-hub-mcp, :8080, /mcp/)
 ```
 
 This is the standard path: via the in-cluster Kubernetes Service for agent pods in the same cluster, or via the MemoryHub OpenShift Route for external access.
 
 ```
-Agent Pod             OpenShift Route (TLS edge)    MemoryHub MCP Server
-(workload-ns)  ---->  memoryhub-mcp.<cluster-domain> ---> (memoryhub, :8080)
+Agent Pod             OpenShift Route (TLS edge)              MemoryHub MCP Server
+(workload-ns)  ---->  memory-hub-mcp-memory-hub-mcp.<domain>  ---> (memory-hub-mcp, :8080)
 ```
 
 The route terminates TLS at the OpenShift router; traffic to the MCP Server is plain HTTP inside the cluster. This matches the existing MemoryHub deployment model.

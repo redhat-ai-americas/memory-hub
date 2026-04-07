@@ -2,7 +2,7 @@
 
 Centralized, governed memory for AI agents on OpenShift AI. MemoryHub gives every agent in your organization a shared, persistent memory layer with multi-tier scoping (`user` / `project` / `role` / `organizational` / `enterprise`), version history, semantic search via pgvector, an immutable audit trail, and an OAuth 2.1 authorization story.
 
-It works with any agent framework that speaks MCP — Claude Code, kagenti LangGraph agents, LlamaStack workflows, custom Python agents — and ships a typed Python SDK and a CLI for direct use.
+It works with any agent framework that speaks MCP — Claude Code, kagenti-deployed agents (LangGraph, CrewAI, AG2, …), LlamaStack workflows, custom Python agents — and ships a typed Python SDK and a CLI for direct use.
 
 **Status (2026-04-07).** Core memory operations, OAuth 2.1 + JWT auth with service-layer RBAC, the dashboard UI, the published Python SDK, and the agent-memory-ergonomics work (search shape, session focus vector with cross-encoder reranking, project config + rule generation) are all shipped. The Kubernetes operator and the curator-as-background-agent layer are still on the roadmap. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem status table.
 

@@ -2,7 +2,7 @@
 
 ## What Is Kagenti
 
-Kagenti (github.com/kagenti/kagenti, v0.5.0) is a Kubernetes-native agent deployment platform developed by IBM and Red Hat. Its central design principle is framework neutrality: Kagenti wraps LangGraph, CrewAI, AutoGen, Marvin, and AG2 without replacing them, providing infrastructure for deploying and operating agents at scale on OpenShift rather than dictating how agents are built.
+Kagenti ([github.com/kagenti/kagenti](https://github.com/kagenti/kagenti)) is a Kubernetes-native agent deployment platform incubated at Red Hat (planned as part of OpenShift AI). Its central design principle is framework neutrality: Kagenti wraps existing agent frameworks — LangGraph, CrewAI, AG2, and others — without replacing them, providing infrastructure for deploying and operating agents at scale on OpenShift rather than dictating how agents are built. See the upstream repository for the current list of supported frameworks and the active version.
 
 Agents in Kagenti are standard Kubernetes Deployments annotated with `kagenti.io/type: agent`. This means existing Kubernetes tooling — `kubectl`, Kiali, OpenShift monitoring — works on agents without modification. Kagenti adds two protocols on top of this foundation: A2A (Google's Agent-to-Agent protocol) for structured agent-to-agent communication, and MCP for tool access via a dedicated Envoy-based MCP Gateway.
 
