@@ -4,19 +4,36 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
 from memoryhub_cli.config import get_connection_params, save_config
+from memoryhub_cli.project_config import (
+    InitChoices,
+    LoadingPattern,
+    SessionShape,
+    build_project_config,
+    rewrite_rule_file,
+    suggest_pattern,
+    write_init_files,
+)
 
 app = typer.Typer(
     name="memoryhub",
     help="CLI client for MemoryHub — centralized, governed memory for AI agents.",
     no_args_is_help=True,
 )
+config_app = typer.Typer(
+    name="config",
+    help="Manage project-level MemoryHub configuration (.memoryhub.yaml).",
+    no_args_is_help=True,
+)
+app.add_typer(config_app, name="config")
 console = Console()
 err_console = Console(stderr=True)
 
@@ -293,6 +310,169 @@ def history(
     if result.has_more:
         console.print(
             f"[dim]Showing {len(result.versions)} of {result.total_versions} versions[/dim]"
+        )
+
+
+# ── memoryhub config init / regenerate ───────────────────────────────────────
+
+
+_SHAPE_PROMPT = """\
+What's this project's typical session shape?
+  1) One topic per session, narrow scope (focused)
+  2) Multiple topics per session, broad context needed (broad)
+  3) Sessions evolve — start narrow, may pivot (adaptive)\
+"""
+
+_PATTERN_PROMPT = """\
+How should memories load?
+  1) Eager — load at session start (best for broad)
+  2) Lazy — load after first user turn (best for focused)
+  3) Lazy + rebias on pivot (best for adaptive)
+  4) Just-in-time — never preload, search on demand\
+"""
+
+_FOCUS_PROMPT = """\
+How should session focus be inferred?
+  1) Declared — agent will ask
+  2) Inferred from working directory
+  3) Inferred from first user turn
+  4) Auto (try inference, fall back to ask)\
+"""
+
+_CONTRADICTION_BLURB = """\
+Cross-domain contradiction detection:
+  Focused mode loads only memories matching session topic. If you make
+  a decision in this session that contradicts a memory from a different
+  topic, the agent won't catch it. You can value this coverage over
+  token efficiency by switching to broad mode.\
+"""
+
+
+_SHAPE_BY_INDEX: dict[int, SessionShape] = {1: "focused", 2: "broad", 3: "adaptive"}
+_PATTERN_BY_INDEX: dict[int, LoadingPattern] = {
+    1: "eager",
+    2: "lazy",
+    3: "lazy_with_rebias",
+    4: "jit",
+}
+_FOCUS_BY_INDEX = {1: "declared", 2: "directory", 3: "first_turn", 4: "auto"}
+
+
+def _prompt_choice(prompt_text: str, choices: dict, default: int) -> int:
+    """Prompt for an integer in `choices`, defaulting to `default`."""
+    while True:
+        console.print(prompt_text)
+        raw = typer.prompt(f"Choice [{default}]", default=str(default))
+        try:
+            value = int(raw)
+        except ValueError:
+            err_console.print(f"[red]Not a number: {raw}[/red]")
+            continue
+        if value in choices:
+            return value
+        err_console.print(
+            f"[red]Pick one of: {', '.join(str(k) for k in choices)}[/red]"
+        )
+
+
+@config_app.command("init")
+def config_init(
+    project_dir: Path = typer.Option(
+        Path("."),
+        "--dir",
+        "-d",
+        help="Project directory (defaults to cwd).",
+        file_okay=False,
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite existing .memoryhub.yaml or generated rule file.",
+    ),
+):
+    """Walk through project setup and write `.memoryhub.yaml` + the
+    generated `.claude/rules/memoryhub-loading.md` rule file."""
+    project_dir = project_dir.resolve()
+    console.print(f"[bold]Configuring MemoryHub for[/bold] {project_dir}\n")
+
+    shape_idx = _prompt_choice(_SHAPE_PROMPT, _SHAPE_BY_INDEX, default=1)
+    shape = _SHAPE_BY_INDEX[shape_idx]
+
+    suggested_pattern = suggest_pattern(shape)
+    pattern_default = next(
+        i for i, p in _PATTERN_BY_INDEX.items() if p == suggested_pattern
+    )
+    pattern_idx = _prompt_choice(_PATTERN_PROMPT, _PATTERN_BY_INDEX, default=pattern_default)
+    pattern = _PATTERN_BY_INDEX[pattern_idx]
+
+    focus_idx = _prompt_choice(_FOCUS_PROMPT, _FOCUS_BY_INDEX, default=4)
+    focus_source = _FOCUS_BY_INDEX[focus_idx]
+
+    console.print(f"\n{_CONTRADICTION_BLURB}\n")
+    keep_contradictions = typer.confirm(
+        "Keep contradiction detection across all domains?",
+        default=False,
+    )
+
+    choices = InitChoices(
+        session_shape=shape,
+        pattern=pattern,
+        focus_source=focus_source,
+        cross_domain_contradiction_detection=keep_contradictions,
+    )
+    config = build_project_config(choices)
+
+    try:
+        result = write_init_files(config, project_dir, overwrite=force)
+    except FileExistsError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(f"\n[green]Wrote {result.yaml_path}[/green]")
+    console.print(f"[green]Wrote {result.rule_path}[/green]")
+    if result.legacy_backup is not None:
+        console.print(
+            f"[yellow]Backed up legacy rule to {result.legacy_backup}.[/yellow]\n"
+            f"Review and delete the .bak when you're satisfied with the new rule."
+        )
+
+
+@config_app.command("regenerate")
+def config_regenerate(
+    project_dir: Path = typer.Option(
+        Path("."),
+        "--dir",
+        "-d",
+        help="Project directory (defaults to cwd).",
+        file_okay=False,
+    ),
+):
+    """Re-render `.claude/rules/memoryhub-loading.md` from `.memoryhub.yaml`.
+
+    Use this after editing the YAML by hand to refresh the rule file
+    without running the interactive prompt again.
+    """
+    project_dir = project_dir.resolve()
+    yaml_path = project_dir / CONFIG_FILENAME
+    if not yaml_path.is_file():
+        err_console.print(
+            f"[red]No {CONFIG_FILENAME} in {project_dir}.[/red]\n"
+            "Run [bold]memoryhub config init[/bold] first."
+        )
+        raise typer.Exit(1)
+
+    try:
+        config = load_project_config(yaml_path)
+    except ConfigError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    result = rewrite_rule_file(config, project_dir)
+    console.print(f"[green]Regenerated {result.rule_path}[/green]")
+    if result.legacy_backup is not None:
+        console.print(
+            f"[yellow]Backed up legacy rule to {result.legacy_backup}.[/yellow]"
         )
 
 
