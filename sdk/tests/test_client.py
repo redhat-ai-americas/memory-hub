@@ -604,6 +604,90 @@ async def test_none_args_stripped(client):
     assert forwarded["query"] == "query"
 
 
+# ── session focus (#61) ──────────────────────────────────────────────────────
+
+
+async def test_set_session_focus_forwards_arguments(client):
+    """set_session_focus should forward focus + project to the MCP tool."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "session_id": "wjackson",
+            "user_id": "wjackson",
+            "project": "memory-hub",
+            "focus": "deployment",
+            "expires_at": "2026-04-07T12:45:00+00:00",
+            "message": "ok",
+        }
+    )
+
+    result = await c.set_session_focus("deployment", "memory-hub")
+
+    assert result["session_id"] == "wjackson"
+    assert result["project"] == "memory-hub"
+    assert result["focus"] == "deployment"
+
+    mock_mcp.call_tool.assert_awaited_once()
+    call_args = mock_mcp.call_tool.call_args
+    assert call_args[0][0] == "set_session_focus"
+    assert call_args[0][1] == {"focus": "deployment", "project": "memory-hub"}
+
+
+async def test_get_focus_history_forwards_date_range(client):
+    """get_focus_history should forward project/start_date/end_date."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "project": "memory-hub",
+            "start_date": "2026-04-01",
+            "end_date": "2026-04-07",
+            "total_sessions": 3,
+            "histogram": [
+                {"focus": "deployment", "count": 2},
+                {"focus": "auth", "count": 1},
+            ],
+        }
+    )
+
+    result = await c.get_focus_history(
+        "memory-hub",
+        start_date="2026-04-01",
+        end_date="2026-04-07",
+    )
+
+    assert result["total_sessions"] == 3
+    assert result["histogram"][0] == {"focus": "deployment", "count": 2}
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["project"] == "memory-hub"
+    assert forwarded["start_date"] == "2026-04-01"
+    assert forwarded["end_date"] == "2026-04-07"
+
+
+async def test_get_focus_history_strips_none_dates(client):
+    """When start_date/end_date are omitted they must be dropped from the
+    outbound payload, not sent as explicit None (the tool expects absent =
+    defaults applied server-side)."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "project": "memory-hub",
+            "start_date": "2026-03-08",
+            "end_date": "2026-04-07",
+            "total_sessions": 0,
+            "histogram": [],
+        }
+    )
+
+    await c.get_focus_history("memory-hub")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["project"] == "memory-hub"
+    # None values are stripped by _call before sending
+    assert "start_date" not in forwarded
+    assert "end_date" not in forwarded
+
+
 # ── sync wrapper ──────────────────────────────────────────────────────────────
 
 

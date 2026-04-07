@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memoryhub-valkey-data
+  labels:
+    app.kubernetes.io/name: memoryhub-valkey
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

@@ -1,0 +1,84 @@
+# NOTE: The upstream valkey/valkey image runs as uid 999. OpenShift assigns
+# random UIDs by default via the restricted SCC, which breaks the image.
+# This Deployment uses a dedicated ServiceAccount (memoryhub-valkey) granted
+# the "anyuid" SCC, scoping the grant to just this workload rather than the
+# namespace's default SA. See README.md for the prerequisite oc adm command.
+#
+# Uses strategy.Recreate because the PVC is ReadWriteOnce -- a rolling update
+# would hit a multi-attach error when the old pod still holds the volume.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memoryhub-valkey
+  labels:
+    app.kubernetes.io/name: memoryhub-valkey
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoryhub-valkey
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memoryhub-valkey
+        app.kubernetes.io/part-of: memoryhub
+        app.kubernetes.io/component: cache
+    spec:
+      serviceAccountName: memoryhub-valkey
+      securityContext:
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: valkey
+          image: docker.io/valkey/valkey:8.0-alpine
+          args:
+            - "--appendonly"
+            - "yes"
+            - "--dir"
+            - "/data"
+            - "--save"
+            - "60 1000"
+            - "--maxmemory"
+            - "512mb"
+            - "--maxmemory-policy"
+            - "noeviction"
+          ports:
+            - containerPort: 6379
+              name: valkey
+              protocol: TCP
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 768Mi
+              cpu: "1"
+          volumeMounts:
+            - name: valkey-data
+              mountPath: /data
+          livenessProbe:
+            exec:
+              command:
+                - valkey-cli
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - valkey-cli
+                - ping
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: valkey-data
+          persistentVolumeClaim:
+            claimName: memoryhub-valkey-data

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: memoryhub-valkey
+  labels:
+    app.kubernetes.io/name: memoryhub-valkey
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: cache
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: valkey
+  selector:
+    app.kubernetes.io/name: memoryhub-valkey

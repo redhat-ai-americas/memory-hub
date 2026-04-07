@@ -15,6 +15,7 @@ dependencies = [
     "pydantic-settings",
     "minio",
     "alembic",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +26,7 @@ dev = [
     "ruff",
     "aiosqlite",
     "greenlet",
+    "fakeredis>=2.20",
 ]
 
 [tool.setuptools.packages.find]

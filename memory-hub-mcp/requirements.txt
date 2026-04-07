@@ -3,6 +3,7 @@ pyyaml>=6.0.2
 python-dotenv>=1.1.1
 watchdog>=6.0.0
 pyjwt>=2.10.1
+redis>=5.0
 # memoryhub_core library dependencies
 sqlalchemy>=2.0
 asyncpg

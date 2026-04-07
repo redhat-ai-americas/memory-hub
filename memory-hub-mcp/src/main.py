@@ -24,6 +24,9 @@ from src.tools.get_similar_memories import get_similar_memories
 from src.tools.suggest_merge import suggest_merge
 from src.tools.set_curation_rule import set_curation_rule
 
+from src.tools.set_session_focus import set_session_focus
+from src.tools.get_focus_history import get_focus_history
+
 mcp = FastMCP(
     "MemoryHub",
     instructions=(
@@ -43,7 +46,8 @@ mcp = FastMCP(
 for tool_fn in [register_session, write_memory, read_memory, update_memory,
                 delete_memory, search_memory, get_memory_history,
                 report_contradiction, create_relationship, get_relationships,
-                get_similar_memories, suggest_merge, set_curation_rule]:
+                get_similar_memories, suggest_merge, set_curation_rule,
+                set_session_focus, get_focus_history]:
     mcp.add_tool(tool_fn)
 
 

@@ -103,6 +103,11 @@ spec:
           value: "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com"
         - name: AUTH_AUDIENCE
           value: "memoryhub"
+        # Valkey backs session focus history (#61) and, when it lands, the
+        # #62 Pattern E push-side broadcast filter. The Valkey pod runs in
+        # the same namespace (memory-hub-mcp) per deploy/valkey/.
+        - name: MEMORYHUB_VALKEY_URL
+          value: "redis://memoryhub-valkey.memory-hub-mcp.svc.cluster.local:6379/0"
         resources:
           limits:
             memory: "512Mi"

@@ -325,6 +325,82 @@ Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase
   ```
   Returns the same shape; the agent's authorization to delete came from `memory:admin` rather than ownership.
 
+---
+
+## Phase 4 Tools: Session Focus History (#61)
+
+Phase 4 adds two tools that make session focus a stored, analyzable signal rather than a per-call parameter that vanishes after each `search_memory`. Issue #61 tracks the feature. The complementary #62 (Pattern E push-side broadcast filter) reuses the same Valkey schema; #62's tools land in a later phase.
+
+### Design Principles for Phase 4
+
+**Stateless per-call focus on `search_memory` stays as-is; stateful declaration is separate.** Layer 2 (#58) deliberately made `search_memory`'s `focus` parameter stateless to sidestep the coordination/scaling questions around stored focus state. That decision was correct for retrieval — per-call focus is cheap and avoids every coordination issue. For the usage-signal and broadcast-filter use cases (#61 / #62), though, we need the focus to be stored somewhere both history aggregation and broadcast code can read. A new tool `set_session_focus` writes to that stored place without changing `search_memory`'s contract.
+
+**Advisory-only feedback.** The histogram from `get_focus_history` is a readable signal, not a weight-tuning input. Humans and agents consume it informationally. Auto-nudging weights based on the histogram, or blending the histogram as a third retrieval vector, are explicitly out of scope for this phase — they would compound the complexity of the two-vector work #58 just landed without empirical justification.
+
+**Valkey is the store of record for transient focus state.** Per the team-wide Valkey-first infrastructure rule, session state lives in Valkey, not PostgreSQL. Two key prefixes:
+- `memoryhub:sessions:<session_id>` — active-session hash (focus, focus_vector, user_id, project, created_at, expires_at) with TTL matching JWT lifetime. Used by both #61 (write side) and #62 (broadcast-filter read side, when it lands).
+- `memoryhub:session_focus_history:<project>:<yyyy-mm-dd>` — append-only JSON entries per project per day. 30-day retention via key TTL.
+
+### set_session_focus
+
+- **Purpose**: Declare the current session's focus topic — the narrow area the conversation is about, such as "deployment" or "MCP tool design". Writes the focus to two Valkey records simultaneously: (a) an active-session hash keyed by `session_id` carrying the focus string and its 384-dim embedded vector with a TTL matching the JWT lifetime, and (b) an append-only JSON entry in a per-project per-day history list. The SDK usually infers the focus from the working directory or the first user turn per `.memoryhub.yaml`, but agents can declare focus explicitly or update it mid-session when the conversation pivots.
+- **Parameters**:
+  - `focus` (string, required): A short natural-language topic describing the session's current focus. 5-10 words work best. Examples: "deployment", "MCP tool design for session focus", "UI panel for curation rules".
+  - `project` (string, required): The project identifier this session belongs to. Typically matches the `project` field of project-scope memories and the `project` value in `.memoryhub.yaml`. Required so the history aggregation can scope per-project.
+- **Returns**: A dict with:
+  - `session_id` (string): The authenticated session_id the focus was recorded under. Same session_id that `register_session` surfaces.
+  - `user_id` (string): The authenticated user_id from the JWT or session-fallback.
+  - `project` (string): The project identifier derived from the authenticated identity.
+  - `focus` (string): Echo of the declared focus.
+  - `expires_at` (string, ISO datetime): When the active-session record will auto-expire from Valkey.
+  - `message` (string): Human-readable confirmation.
+- **Error Cases**:
+  - "focus must not be empty. Provide a 5-10 word topic describing the session's current focus." — Empty or whitespace-only focus.
+  - "No authenticated session found. Call register_session first, or provide a JWT in the Authorization header." — No auth context available.
+  - "Session focus store is unavailable: [reason]. Focus was not recorded; retry after the backend recovers." — Valkey unreachable. Surfaces as an MCP error so the agent knows the write didn't land.
+- **Tool Annotations**:
+  - `readOnlyHint: false` — Writes Valkey state.
+  - `destructiveHint: false` — Doesn't destroy prior state; the TTL handles eviction.
+  - `idempotentHint: false` — A retry creates an additional history entry; it is not a no-op.
+  - `openWorldHint: false` — Only affects the Valkey instance co-located with the MCP server.
+- **Example Usage**: Declaring the session's focus at the start of a deployment work session:
+  ```
+  set_session_focus(focus="MCP server deployment to OpenShift", project="memory-hub")
+  ```
+  Updating focus mid-session when the conversation pivots:
+  ```
+  set_session_focus(focus="debugging the OAuth token exchange flow", project="memory-hub")
+  ```
+
+### get_focus_history
+
+- **Purpose**: Retrieve an aggregated per-project histogram of session focus declarations across a date range. Answers the question "what has this project actually been working on recently?" by aggregating the append-only history log from `set_session_focus` calls. Advisory-only — the histogram is a readable signal that humans and agents can consume to inform their own decisions (e.g., an agent declaring focus for a new session can check what topics are most active; a human can spot coverage gaps). It does NOT auto-tune memory weights or blend into retrieval ranking.
+- **Parameters**:
+  - `project` (string, required): The project identifier to query. Typically matches the `project` field of project-scope memories and the `.memoryhub.yaml` project identifier.
+  - `start_date` (string, optional, ISO date YYYY-MM-DD): Start of the date range, inclusive. Defaults to 30 days before `end_date`.
+  - `end_date` (string, optional, ISO date YYYY-MM-DD): End of the date range, inclusive. Defaults to today (UTC).
+- **Returns**: A dict with:
+  - `project` (string): Echo of the input.
+  - `start_date` / `end_date` (strings): The window that was actually queried (useful when defaults were applied).
+  - `total_sessions` (integer): Number of focus declarations in the window.
+  - `histogram` (list of dicts): Sorted by count descending, ties broken by focus string. Each entry: `{"focus": str, "count": int}`. Empty list if `total_sessions` is 0.
+- **Error Cases**:
+  - "start_date (X) is after end_date (Y). Provide dates as YYYY-MM-DD where start_date <= end_date." — Inverted range.
+  - "Invalid date format: 'X'. Expected ISO format YYYY-MM-DD." — Malformed date string.
+  - "Session focus store is unavailable: [reason]. Histogram data cannot be retrieved until the backend recovers." — Valkey unreachable.
+- **Tool Annotations**:
+  - `readOnlyHint: true` — Pure read from Valkey.
+  - `destructiveHint: false`
+  - `idempotentHint: true` — Repeat calls return the same result for the same window (ignoring intervening writes).
+  - `openWorldHint: false`
+- **Example Usage**: Checking what a project has been working on over the last two weeks:
+  ```
+  get_focus_history(project="memory-hub", start_date="2026-03-25", end_date="2026-04-07")
+  ```
+  Returns: `{"project": "memory-hub", "total_sessions": 18, "histogram": [{"focus": "deployment", "count": 8}, {"focus": "MCP tool design", "count": 5}, {"focus": "auth", "count": 3}, {"focus": "UI", "count": 2}]}`. A new-session agent reads this to decide whether to default its focus to "deployment" or ask the user.
+
+---
+
 ## Implementation Order
 
 ### Phase 1 (complete)
@@ -345,9 +421,14 @@ Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase
 11. **suggest_merge** — Depends on create_relationship (uses it under the hood to create a `conflicts_with` edge).
 12. **set_curation_rule** — Depends on curation rules service (done in #6 Phase 2a). Most independent of the Phase 2 tools.
 
-### Phase 3 (current)
+### Phase 3 (complete)
 
 13. **delete_memory** — Depends on the `deleted_at` column (Alembic 007), the `delete_memory()` service-layer function in `memoryhub_core.services.memory`, and the `MemoryAlreadyDeletedError` exception. The tool itself is a thin authorization + service-layer wrapper. Refs #42.
+
+### Phase 4 (current)
+
+14. **set_session_focus** — Depends on the Valkey deployment (`deploy/valkey/`), the `memoryhub_core.services.valkey_client.ValkeyClient` wrapper, and the existing embedding service (reused to compute the focus vector). Writes to both the active-session hash and the per-project per-day history list in one pipeline. Refs #61.
+15. **get_focus_history** — Depends on `ValkeyClient.read_focus_history`. Pure read aggregator that counts focus string occurrences across the date range. Refs #61.
 
 ## Dependencies
 
@@ -371,6 +452,12 @@ Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase
 - **`delete_memory()` service function** (`memoryhub_core.services.memory`): Walks the version chain (both directions), collects child branches, and bulk soft-deletes via `UPDATE`. Returns a count summary.
 - **`MemoryAlreadyDeletedError` exception** (`memoryhub_core.services.exceptions`): Distinguishes "already deleted" from "not found" so the tool can return a 409-equivalent message.
 - **All read paths filter `deleted_at IS NULL`**: `read_memory`, `search_memories`, `_bulk_branch_flags`, `_compute_branch_flags`, and the BFF queries (graph, search, stats, users).
+
+### Phase 4 (resolved)
+
+- **Valkey 8.x deployment** (`deploy/valkey/`): Single-pod Deployment + Service + PVC in `memory-hub-mcp` namespace. Dedicated `memoryhub-valkey` ServiceAccount with `anyuid` SCC grant scoped to just this workload.
+- **`ValkeyClient` wrapper** (`memoryhub_core.services.valkey_client`): Async client over `redis.asyncio` (Valkey is protocol-compatible). Provides `write_session_focus`, `read_focus_history`, `ping`, and vector base64 codec helpers. Tests use `fakeredis` for in-memory Valkey emulation.
+- **`MEMORYHUB_VALKEY_URL` env var**: Connection string passed to the MCP server pod, e.g. `redis://memoryhub-valkey.memory-hub-mcp.svc.cluster.local:6379/0`.
 
 ## Open Questions (Phase 1 — Resolved)
 

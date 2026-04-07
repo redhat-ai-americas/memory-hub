@@ -480,6 +480,68 @@ class MemoryHubClient:
         })
         return CurationRuleResult.model_validate(data)
 
+    # ── Session focus (#61) ─────────────────────────────────────────
+
+    async def set_session_focus(
+        self,
+        focus: str,
+        project: str,
+    ) -> dict[str, Any]:
+        """Declare the current session's focus topic for #61 history.
+
+        Writes the focus string and its embedded vector to Valkey so both
+        the per-project focus histogram (consumed via
+        :meth:`get_focus_history`) and the #62 Pattern E broadcast filter
+        can read it. The SDK normally infers the focus from the working
+        directory or first user turn per ``.memoryhub.yaml``; agents can
+        also declare it explicitly.
+
+        Args:
+            focus: A 5-10 word natural-language topic describing the session.
+            project: The project identifier this session belongs to.
+                Typically matches the ``project`` field of project-scope
+                memories and the project name the agent is working in.
+
+        Returns:
+            A dict with ``session_id``, ``user_id``, ``project``, ``focus``,
+            ``expires_at``, and ``message``.
+        """
+        return await self._call("set_session_focus", {
+            "focus": focus,
+            "project": project,
+        })
+
+    async def get_focus_history(
+        self,
+        project: str,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Retrieve the per-project session focus histogram for a date range.
+
+        Advisory-only usage signal — the histogram answers "what has this
+        project been working on recently?" but does not auto-tune memory
+        weights or retrieval ranking.
+
+        Args:
+            project: The project identifier to query.
+            start_date: Inclusive start in YYYY-MM-DD. Defaults server-side
+                to 30 days before ``end_date``.
+            end_date: Inclusive end in YYYY-MM-DD. Defaults server-side to
+                today (UTC).
+
+        Returns:
+            A dict with ``project``, ``start_date``, ``end_date``,
+            ``total_sessions``, and ``histogram`` (list of ``{focus, count}``
+            sorted by count descending, ties alphabetical).
+        """
+        return await self._call("get_focus_history", {
+            "project": project,
+            "start_date": start_date,
+            "end_date": end_date,
+        })
+
     # ── Sync wrappers ───────────────────────────────────────────────
 
     def _run_sync(self, coro):

@@ -44,6 +44,21 @@ class MinIOSettings(BaseSettings):
     secure: bool = True
 
 
+class ValkeySettings(BaseSettings):
+    """Valkey (Redis-compatible) connection settings. Env prefix: MEMORYHUB_VALKEY_
+
+    Used for session focus state (#61) and, when it lands, Pattern E push-side
+    broadcast filtering (#62). Any Redis client library works unchanged since
+    Valkey is protocol-compatible.
+    """
+
+    model_config = {"env_prefix": "MEMORYHUB_VALKEY_"}
+
+    url: str = "redis://localhost:6379/0"
+    session_ttl_seconds: int = 900  # 15 minutes, matches default JWT lifetime
+    history_retention_days: int = 30  # per-day list keys auto-expire after this
+
+
 class AppSettings(BaseSettings):
     """Application-level settings. Env prefix: MEMORYHUB_"""
 
