@@ -37,6 +37,72 @@ if ! oc whoami &>/dev/null; then
     exit 1
 fi
 
+# Step 0: Preflight — tool registration sanity check.
+#
+# main.py uses static tool registration (the dynamic loader is not used —
+# see memory-hub-mcp/CLAUDE.md for the history). Every tool file in
+# src/tools/ must be both imported AND added to the mcp.add_tool list.
+# Forgetting either is a silent failure: the file deploys but the tool
+# does not appear in list_tools, with no error in the pod logs. This
+# bit us during the delete_memory work (see retrospectives/
+# 2026-04-06_memory-deletion-cli-client/RETRO.md).
+#
+# Catch it before building, not after deploying.
+echo ""
+echo "Preflight: tool registration check..."
+TOOLS_DIR="$PROJECT_ROOT/src/tools" \
+MAIN_PY="$PROJECT_ROOT/src/main.py" \
+python3 - <<'PYEOF' || exit 1
+import os, re, sys
+
+main_py = os.environ["MAIN_PY"]
+tools_dir = os.environ["TOOLS_DIR"]
+
+with open(main_py) as f:
+    src = f.read()
+
+# Files in src/tools/ that are tool implementations (exclude __init__,
+# private/dunder modules, and the known auth helper utility module).
+NON_TOOL_FILES = {"auth.py"}
+files = {
+    f[:-3]
+    for f in os.listdir(tools_dir)
+    if f.endswith(".py") and not f.startswith("_") and f not in NON_TOOL_FILES
+}
+
+# Tools imported into main.py via `from src.tools.NAME import NAME`.
+imports = set(re.findall(r"^from src\.tools\.([a-z_][a-z_0-9]*) import", src, re.M))
+
+# Tools actually registered via the `for tool_fn in [...]:` loop.
+loop = re.search(r"for tool_fn in \[(.*?)\]:", src, re.DOTALL)
+if not loop:
+    sys.exit("ERROR: could not find `for tool_fn in [...]:` loop in src/main.py")
+registered = set(re.findall(r"[a-z_][a-z_0-9]*", loop.group(1)))
+
+errors = []
+missing_imports = files - imports
+if missing_imports:
+    errors.append(f"  files NOT imported in main.py: {sorted(missing_imports)}")
+extra_imports = imports - files
+if extra_imports:
+    errors.append(f"  imports without a corresponding file: {sorted(extra_imports)}")
+missing_reg = files - registered
+if missing_reg:
+    errors.append(f"  files NOT in the mcp.add_tool list: {sorted(missing_reg)}")
+
+if errors:
+    print("ERROR: tool registration mismatch in src/main.py")
+    for line in errors:
+        print(line)
+    print()
+    print("The MCP server uses static tool registration. Every file in")
+    print("src/tools/ must be imported AND added to the mcp.add_tool list")
+    print("in src/main.py. See memory-hub-mcp/CLAUDE.md (Adding a new tool).")
+    sys.exit(1)
+
+print(f"OK: {len(files)} tools registered")
+PYEOF
+
 # Step 1: Prepare build context
 "$SCRIPT_DIR/build-context.sh"
 BUILD_DIR="$PROJECT_ROOT/.build-context"
