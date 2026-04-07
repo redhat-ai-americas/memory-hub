@@ -259,14 +259,14 @@ Loaded: {'tools': 0, 'resources': 0, 'prompts': 0, 'middleware': 0}
 
 **Automatic Fixes in Place**:
 1. **Containerfile**: `RUN find ./src -name "*.py" -exec chmod 644 {} \;` ensures correct permissions in every build
-2. **deploy.sh**: Fixes permissions in the build context and reports how many files were fixed
+2. **deploy/build-context.sh**: Fixes permissions in the build context and reports how many files were fixed
 
 **Manual Fix** (if needed):
 ```bash
 find src -name "*.py" -perm 600 -exec chmod 644 {} \;
 ```
 
-**Why This Happens**: This is Claude Code security behavior, not OS behavior. The Write tool intentionally creates files with restrictive permissions to prevent accidental exposure of sensitive content. The Containerfile and deploy.sh fixes ensure this doesn't break OpenShift deployments.
+**Why This Happens**: This is Claude Code security behavior, not OS behavior. The Write tool intentionally creates files with restrictive permissions to prevent accidental exposure of sensitive content. The Containerfile and `deploy/build-context.sh` fixes ensure this doesn't break OpenShift deployments.
 
 ### Import Namespace Issue
 

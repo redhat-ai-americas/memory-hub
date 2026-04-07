@@ -97,8 +97,9 @@ TESTING.md
 
 # Scripts not needed in container
 remove_examples.sh
-deploy.sh
+deploy/
 Makefile
 
 # OpenShift YAML (applied separately, not needed in image)
-openshift.yaml
+deploy/openshift.yaml
+deploy/users-configmap.yaml

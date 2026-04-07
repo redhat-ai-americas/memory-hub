@@ -94,8 +94,11 @@ See [CLAUDE.md](CLAUDE.md) for detailed documentation on the workflow, known iss
 ├── .fips-agents-cli/   # Generator templates
 ├── .template-info      # Template version tracking (for updates)
 ├── Containerfile       # Container definition
-├── openshift.yaml      # OpenShift manifests
-├── deploy.sh           # Deployment script
+├── deploy/             # OpenShift deploy assets
+│   ├── deploy.sh       #   Canonical deploy entrypoint (called by `make deploy`)
+│   ├── build-context.sh#   Stages MCP src + memoryhub-core into .build-context/
+│   ├── openshift.yaml  #   BuildConfig, Deployment, Service, Route, Secret
+│   └── users-configmap.yaml
 ├── requirements.txt    # Python dependencies
 └── Makefile           # Common tasks
 ```

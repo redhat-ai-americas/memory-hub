@@ -3,20 +3,23 @@
 # Variables
 VENV ?= .venv
 PYTHON ?= python3
-PROJECT ?= mcp-demo
+
+# The OpenShift namespace is hardcoded in deploy/deploy.sh on purpose.
+# See the comment in that script for the history.
+NAMESPACE := memory-hub-mcp
 
 # Default target
 help:
-	@echo "MCP Server Template - Available Commands"
-	@echo "========================================"
+	@echo "memory-hub-mcp - Available Commands"
+	@echo "==================================="
 	@echo "Local Development:"
 	@echo "  make install     - Install dependencies"
 	@echo "  make run-local   - Run server locally (STDIO mode)"
 	@echo "  make test-local  - Test with cmcp locally"
 	@echo "  make test        - Run pytest suite"
 	@echo ""
-	@echo "OpenShift Deployment:"
-	@echo "  make deploy      - Deploy to OpenShift (PROJECT=name)"
+	@echo "OpenShift Deployment (always to namespace: $(NAMESPACE)):"
+	@echo "  make deploy      - Build + deploy via deploy/deploy.sh"
 	@echo "  make clean       - Remove from OpenShift"
 	@echo ""
 	@echo "Other:"
@@ -45,15 +48,15 @@ test-local:
 test:
 	$(VENV)/bin/pytest tests/ -v
 
-# Deploy to OpenShift
+# Deploy to OpenShift (namespace is hardcoded in deploy/deploy.sh)
 deploy:
-	@echo "Deploying to OpenShift project: $(PROJECT)"
-	./deploy.sh $(PROJECT)
+	./deploy/deploy.sh
 
 # Clean up OpenShift deployment
 clean:
-	@echo "Cleaning up OpenShift project: $(PROJECT)"
-	@oc delete -f openshift.yaml -n $(PROJECT) --ignore-not-found=true || echo "Not deployed or already cleaned"
+	@echo "Cleaning up namespace: $(NAMESPACE)"
+	@oc delete -f deploy/openshift.yaml -n $(NAMESPACE) --ignore-not-found=true || echo "Not deployed or already cleaned"
+	@oc delete -f deploy/users-configmap.yaml -n $(NAMESPACE) --ignore-not-found=true || true
 
 # Development shortcuts
 dev: run-local

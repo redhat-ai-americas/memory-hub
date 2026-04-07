@@ -189,9 +189,9 @@ from tools.my_tool import my_tool  # WRONG
    source .venv/bin/activate
    ```
 
-3. **Permission denied (deploy.sh)**
+3. **Permission denied (deploy script)**
    ```bash
-   chmod +x deploy.sh
+   chmod +x deploy/deploy.sh deploy/build-context.sh
    ```
 
 ### OpenShift Issues

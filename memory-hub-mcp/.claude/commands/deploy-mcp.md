@@ -1,162 +1,138 @@
 ---
-description: Deploy MCP server to OpenShift with pre-flight checks
+description: Deploy memory-hub-mcp to OpenShift via the project-canonical deploy/deploy.sh
 ---
 
-# Deploy MCP Server
+# Deploy memory-hub-mcp
 
-You are deploying an MCP server to OpenShift. This command handles pre-deployment checks and delegates the build/deploy to a terminal-worker subagent.
+Deploy the MemoryHub MCP server to OpenShift. This command is **specific to memory-hub-mcp** — the namespace, deployment name, and script paths are all hardcoded for this project. Do NOT use the generic fips-agents template flow.
 
-## Arguments
+## No arguments
 
-- **PROJECT**: (required) The OpenShift project/namespace name (e.g., `weather-mcp`)
+The OpenShift namespace (`memory-hub-mcp`) and deployment name (`memory-hub-mcp`) are hardcoded in `deploy/deploy.sh` on purpose. Past incidents with template-default namespaces (`mcp-demo`) and parameterized scripts created duplicate deployments and lost work. Do not parameterize without reading the retros first.
 
 ## Prerequisites
 
-- Tools should be implemented and tested (`/create-tools`)
-- Ergonomics should be verified (`/exercise-tools`)
-- `mcp-test-mcp` MCP server must be available for verification
+- Tools are implemented and tested
+- Local pytest suite passes
+- `mcp-test-mcp` is available in the calling agent's tool list (verify before starting; if not, STOP and ask)
+- Logged in to the right OpenShift cluster (`oc whoami`)
 
-## Your Task
+## Step 1: Pre-deployment checks (in main context)
 
-### Step 1: Pre-deployment Checks
+Run these in the main conversation, not delegated:
 
-Run these checks before deployment:
+### A. File permissions
 
-#### A. Permission Fix
 ```bash
-find src -name "*.py" -perm 600 -exec chmod 644 {} \;
+find memory-hub-mcp/src -name "*.py" -perm 600 -exec chmod 644 {} \;
 ```
 
-#### B. Verify .dockerignore
-Check that `.dockerignore` excludes:
-- `__pycache__/`
-- `.venv/`
-- `tests/`
-- `.env`
+### B. Test suite
 
-#### C. Run Tests
 ```bash
-.venv/bin/pytest tests/ -v --ignore=tests/examples/
+cd memory-hub-mcp && .venv/bin/pytest tests/ -v --ignore=tests/examples/
 ```
-If tests fail, STOP and report. Do not deploy broken code.
 
-#### D. Check for Secrets
+If tests fail, STOP. Do not deploy broken code.
+
+### C. Baseline cluster state
+
+Capture exactly what's deployed before you change anything:
+
 ```bash
-# Quick check for common patterns
-grep -r "password\s*=" src/ --include="*.py" || true
-grep -r "api_key\s*=" src/ --include="*.py" || true
-grep -r "secret\s*=" src/ --include="*.py" || true
+oc get deploy memory-hub-mcp -n memory-hub-mcp -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+oc get pods -n memory-hub-mcp -l app.kubernetes.io/name=memory-hub-mcp
 ```
-If found, warn user and ask for confirmation.
 
-### Step 2: Delegate Deployment to Terminal Worker
+You should see exactly one running pod and one image. Save the pod name — you will compare against it post-deploy to confirm a fresh rollout actually happened.
 
-Use the Task tool to launch a `terminal-worker` subagent with this prompt:
+If you see more than one `memory-hub-mcp` deployment or more than one running pod, STOP and investigate before deploying. Do not run `make deploy` until the baseline is clean.
+
+### D. Secret scan
+
+```bash
+gitleaks detect --source=memory-hub-mcp/ --no-banner --no-git
+```
+
+If secrets are flagged, STOP and warn the user.
+
+## Step 2: Delegate the build to terminal-worker
+
+The `make deploy` step runs a long, verbose `oc start-build` and a rollout. Delegate this single step to a `terminal-worker` subagent — but with a project-specific prompt that does NOT introduce parameters or rename anything. Use this exact delegation prompt:
 
 ```
-Deploy the MCP server to OpenShift.
+Run the memory-hub-mcp deploy script and report the result.
 
-Project/Namespace: <PROJECT>
+Working directory: /Users/wjackson/Developer/memory-hub/memory-hub-mcp
 
-Run these commands in sequence:
-1. make deploy PROJECT=<PROJECT>
-2. Wait for rollout: oc rollout status deployment/<deployment-name> -n <PROJECT> --timeout=300s
-3. Get the route: oc get route -n <PROJECT> -o jsonpath='{.items[0].spec.host}'
+Command:
+  make deploy
+
+The script (deploy/deploy.sh) will:
+  1. Prepare a build context via deploy/build-context.sh (this stages
+     ../src/memoryhub/ as memoryhub-core/ for the Containerfile)
+  2. Apply deploy/users-configmap.yaml
+  3. Apply deploy/openshift.yaml
+  4. Run `oc start-build memory-hub-mcp --from-dir=<staged> -n memory-hub-mcp --follow`
+  5. Run `oc rollout restart deployment/memory-hub-mcp -n memory-hub-mcp`
+  6. Wait up to 300s for rollout
+  7. Verify exactly one ready pod
+  8. Print the route URL
+
+Do NOT modify the script. Do NOT pass extra arguments. Do NOT change
+namespaces or deployment names. The hardcoding is intentional.
 
 Report:
-- Whether deployment succeeded
-- The route URL if successful
-- Any errors encountered
+  - Whether the build succeeded
+  - Whether the rollout completed
+  - The number of ready pods after rollout
+  - The route URL
+  - Any errors or warnings (especially the "expected 1 ready pod" check)
+  - The final ~50 lines of build output if anything failed
 ```
 
-### Step 3: Verify Deployment
+## Step 3: Verify the rollout actually happened (in main context)
 
-After the terminal-worker reports success:
+Compare the post-deploy state against the baseline you captured in Step 1.C:
 
-#### A. Check if mcp-test-mcp is Available
-
-Look for these tools in your available MCP tools:
-- `mcp__mcp-test-mcp__test_tool`
-- `mcp__mcp-test-mcp__list_tools`
-
-If NOT available:
-```
-STOP: mcp-test-mcp is not available. Please enable it and try again.
-I need mcp-test-mcp to verify the deployed MCP server works correctly.
+```bash
+oc get pods -n memory-hub-mcp -l app.kubernetes.io/name=memory-hub-mcp
+oc get deploy memory-hub-mcp -n memory-hub-mcp -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 ```
 
-#### B. Verify Tools with mcp-test-mcp
+The pod name MUST be different from the baseline pod name. If it is the same, the rollout did not pick up the new image — investigate before declaring success. The deploy script's `oc rollout restart` should prevent this, but verify.
 
-Use mcp-test-mcp to:
-1. List tools on the deployed server
-2. Test at least one tool with valid input
-3. Test error handling with invalid input
+If the rollout is sticky (same pod name, but you know the build succeeded), it is acceptable to delete the pod manually:
 
-Example verification:
-```
-# List tools
-mcp-test-mcp list_tools --server-url https://<route>/mcp/
-
-# Test a tool
-mcp-test-mcp test_tool --server-url https://<route>/mcp/ --tool-name get_weather --params '{"location": "Austin, TX"}'
+```bash
+oc delete pod <old-pod-name> -n memory-hub-mcp
 ```
 
-### Step 4: Report Results
+The Deployment will spin up a fresh one from the latest image. **Never delete the Deployment itself** without explicit user approval — there are several other services in the `memory-hub-mcp` namespace (notably `memoryhub-ui`) that must not be touched.
 
-Provide a deployment summary:
+## Step 4: Verify deployed tools with mcp-test-mcp
 
-```markdown
-## Deployment Summary
-
-**Project**: <PROJECT>
-**Route**: https://<route>
-**Status**: SUCCESS / FAILED
-
-### Pre-deployment Checks
-- [x] Permissions fixed
-- [x] .dockerignore verified
-- [x] Tests passed (N tests)
-- [x] No hardcoded secrets found
-
-### Deployed Tools
-1. tool_name_one - Verified working
-2. tool_name_two - Verified working
-3. tool_name_three - Verified working
-
-### Verification Results
-- Tool listing: PASS
-- Happy path test: PASS
-- Error handling test: PASS
-
-### Next Steps
-[Any recommendations or notes]
+```
+connect_to_server name=memory-hub-mcp url=https://<route-host>/mcp/
+list_tools server_name=memory-hub-mcp
 ```
 
-## Important Guidelines
+Spot-check at least one tool that this deploy was supposed to fix. For full ergonomics verification, follow `memory-hub-mcp/.claude/commands/exercise-tools.md` rather than running ad-hoc tests here.
 
-- **NEVER skip the permission fix** - this is a known issue with subagent-created files
-- **ALWAYS run tests before deploying** - don't deploy broken code
-- **Use terminal-worker for deployment** - keeps main context clean
-- **Verify with mcp-test-mcp** - don't assume deployment worked
-- If mcp-test-mcp is unavailable, STOP and ask user to enable it
-- Each MCP server should deploy to its own project to avoid naming collisions
+## Step 5: Report
 
-## Error Recovery
+Brief summary to the user:
 
-### Build Fails
-Check:
-- Are all dependencies in `requirements.txt`?
-- Are there import errors? Check with `python -c "from src.main import main"`
-- Permission issues? Re-run the permission fix
+- Whether deploy succeeded
+- Old pod → new pod (proves fresh rollout)
+- Route URL
+- Which tools were spot-checked and the result
+- Pointer to the next step (e.g. "ready for /exercise-tools" or "Wave 2 fixes verified")
 
-### Pod Won't Start
-Check:
-- `oc logs deployment/<name> -n <PROJECT>`
-- Missing environment variables?
-- Permission denied errors → re-run permission fix and redeploy
+## Important guidelines
 
-### mcp-test-mcp Can't Connect
-Check:
-- Is the route correct?
-- Is the path `/mcp/`? (trailing slash matters)
-- Check pod logs for startup errors
+- The namespace is `memory-hub-mcp` and the deployment is `memory-hub-mcp`. Both are hardcoded in `deploy/deploy.sh`. Do not override.
+- There are other services in the `memory-hub-mcp` namespace (e.g. `memoryhub-ui`). Never use cluster-wide delete operations. Always scope to `app.kubernetes.io/name=memory-hub-mcp`.
+- The `memoryhub` server-side package source lives at the **repo root** (`src/memoryhub/`), NOT in `sdk/src/memoryhub/`. The build context script copies the root one. See `docs/package-layout.md`.
+- If the build fails because of import errors involving `memoryhub.services` or `memoryhub.storage`, you are probably editing `sdk/src/memoryhub/` instead of `src/memoryhub/`. See `docs/package-layout.md`.
+- If `mcp-test-mcp` is not available, STOP and ask the user to enable it. Do not declare success without verifying the deployed tools.
