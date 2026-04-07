@@ -10,6 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from memoryhub.models.contradiction import ContradictionReport
 from memoryhub.models.curation import CuratorRule
 from memoryhub.models.memory import MemoryNode, MemoryRelationship
+from memoryhub.services.exceptions import MemoryNotFoundError
+from memoryhub.services.memory import (
+    get_memory_history as get_memory_history_service,
+)
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -336,42 +340,39 @@ async def get_memory(memory_id: str, db: DbDep):
 
 @router.get("/api/memory/{memory_id}/history", response_model=list[VersionEntry])
 async def get_memory_history(memory_id: str, db: DbDep):
-    """Return the full version chain for a memory, newest first."""
+    """Return the full version chain for a memory, newest first.
+
+    Delegates to ``memoryhub.services.memory.get_memory_history`` so the
+    walker is bidirectional and a middle-version ID still returns the
+    entire chain. Previously this endpoint hand-rolled a backward-only
+    walker that was a parallel copy of the bug fixed in #49 at the
+    service layer. See #63.
+    """
     try:
         parsed_id = uuid.UUID(memory_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}")
 
-    # Find the node (any version)
-    result = await db.execute(select(MemoryNode).where(MemoryNode.id == parsed_id))
-    node = result.scalar_one_or_none()
-    if node is None:
+    try:
+        # Large max_versions preserves the BFF's unpaginated contract.
+        # Version chains are realistically 10s of entries; pagination at
+        # the BFF layer is future work and not part of the #63 walker fix.
+        result = await get_memory_history_service(
+            memory_id=parsed_id, session=db, max_versions=10_000
+        )
+    except MemoryNotFoundError:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
-
-    # Walk the previous_version_id chain to collect all versions
-    chain: list[MemoryNode] = [node]
-    current = node
-    seen: set[uuid.UUID] = {current.id}
-
-    while current.previous_version_id and current.previous_version_id not in seen:
-        seen.add(current.previous_version_id)
-        prev_result = await db.execute(select(MemoryNode).where(MemoryNode.id == current.previous_version_id))
-        prev = prev_result.scalar_one_or_none()
-        if prev is None:
-            break
-        chain.append(prev)
-        current = prev
 
     return [
         VersionEntry(
-            id=str(n.id),
-            version=n.version,
-            is_current=n.is_current,
-            stub=n.stub,
-            content=n.content,
-            created_at=n.created_at,
+            id=str(v.id),
+            version=v.version,
+            is_current=v.is_current,
+            stub=v.stub,
+            content=v.content,
+            created_at=v.created_at,
         )
-        for n in chain
+        for v in result["versions"]
     ]
 
 

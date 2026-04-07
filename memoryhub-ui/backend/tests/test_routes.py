@@ -263,3 +263,131 @@ class TestMemoryDetailEndpoint:
             assert response.status_code == 422
         finally:
             app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+class TestMemoryHistoryEndpoint:
+    """Regression tests for the /api/memory/{id}/history walker fix (#63).
+
+    The BFF endpoint previously hand-rolled a backward-only walker that was
+    a parallel copy of the bug fixed by #49 at the service layer. The fix
+    delegates to ``memoryhub.services.memory.get_memory_history`` so that
+    middle-version IDs resolve the full chain. These tests pin the route's
+    contract with the service function so a future refactor can't silently
+    reintroduce the backward-only walk.
+    """
+
+    async def test_returns_full_chain_from_service(self, test_settings):
+        memory_id = uuid.uuid4()
+        v1_id = uuid.uuid4()
+        v2_id = uuid.uuid4()
+        v3_id = memory_id  # caller passed the current version
+
+        # Service returns a dict with newest-first "versions" list; this
+        # mirrors the real get_memory_history shape so the test catches
+        # mock/real drift the way #52 taught us to.
+        v1 = MagicMock(
+            id=v1_id,
+            version=1,
+            is_current=False,
+            stub="v1 stub",
+            content="v1 content",
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        v2 = MagicMock(
+            id=v2_id,
+            version=2,
+            is_current=False,
+            stub="v2 stub",
+            content="v2 content",
+            created_at=datetime(2026, 1, 2, tzinfo=UTC),
+        )
+        v3 = MagicMock(
+            id=v3_id,
+            version=3,
+            is_current=True,
+            stub="v3 stub",
+            content="v3 content",
+            created_at=datetime(2026, 1, 3, tzinfo=UTC),
+        )
+        service_result = {
+            "versions": [v3, v2, v1],  # newest-first
+            "total_versions": 3,
+            "has_more": False,
+            "offset": 0,
+        }
+
+        db_session = _make_db_session([])
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        with patch(
+            "src.routes.get_memory_history_service",
+            new=AsyncMock(return_value=service_result),
+        ) as mock_service:
+            try:
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as ac:
+                    response = await ac.get(f"/api/memory/{memory_id}/history")
+
+                assert response.status_code == 200
+                body = response.json()
+                assert len(body) == 3
+                # Newest first — the whole point of the #63 fix is that the
+                # BFF now gets a sorted chain regardless of which version ID
+                # the caller passed, not a truncated backward walk.
+                assert [v["version"] for v in body] == [3, 2, 1]
+                assert body[0]["id"] == str(v3_id)
+                assert body[0]["is_current"] is True
+                assert body[2]["id"] == str(v1_id)
+                assert body[2]["is_current"] is False
+
+                # Verify the BFF delegates to the service function (not a
+                # hand-rolled walker) and passes a large max_versions to
+                # preserve the unpaginated BFF contract.
+                mock_service.assert_awaited_once()
+                call_kwargs = mock_service.await_args.kwargs
+                assert call_kwargs["memory_id"] == memory_id
+                assert call_kwargs["max_versions"] >= 1000
+            finally:
+                app.dependency_overrides.clear()
+
+    async def test_returns_404_when_service_raises_not_found(self, test_settings):
+        from memoryhub.services.exceptions import MemoryNotFoundError
+
+        missing_id = uuid.uuid4()
+
+        db_session = _make_db_session([])
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        with patch(
+            "src.routes.get_memory_history_service",
+            new=AsyncMock(side_effect=MemoryNotFoundError(missing_id)),
+        ):
+            try:
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as ac:
+                    response = await ac.get(f"/api/memory/{missing_id}/history")
+
+                assert response.status_code == 404
+                assert "not found" in response.json()["detail"].lower()
+            finally:
+                app.dependency_overrides.clear()
+
+    async def test_returns_422_for_invalid_uuid(self, test_settings):
+        db_session = _make_db_session([])
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as ac:
+                response = await ac.get("/api/memory/not-a-uuid/history")
+
+            assert response.status_code == 422
+        finally:
+            app.dependency_overrides.clear()
