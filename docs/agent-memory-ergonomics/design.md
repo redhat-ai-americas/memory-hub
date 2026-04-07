@@ -1,8 +1,15 @@
-# Agent Memory Ergonomics
+# Agent Memory Ergonomics — Design
 
 How memory-hub feels from the consuming agent's perspective, and what design changes would make it work better. This doc covers two related concerns: the *shape* of `search_memory` responses (branches, stubs, modes), and the *policy* of when an agent should call memory-hub at all (loading patterns, session focus, project config).
 
 **Status: Design.** Captured from a working session on 2026-04-07 where the consuming agent walked through the current behavior and proposed targeted changes. Implementation tracked via the issues linked in the [Implementation Candidates](#implementation-candidates) section.
+
+**Companion documents** in this folder:
+- [`overview.md`](overview.md) — Narrative landing page for the effort.
+- [`open-questions.md`](open-questions.md) — Tracked list of unresolved design questions, with what would resolve each.
+- [`research/fastmcp-3-push-notifications.md`](research/fastmcp-3-push-notifications.md) — Evidence behind the Pattern E (real-time push) feasibility claims.
+- [`research/two-vector-retrieval.md`](research/two-vector-retrieval.md) — Ranking math options for session-focus biasing (#58).
+- [`research/pivot-detection.md`](research/pivot-detection.md) — Server-side vs agent-side pivot detection for Pattern C (#58 adjacent).
 
 ## Context
 
@@ -137,14 +144,11 @@ Patterns A-D all describe *pull* behavior: the agent decides when to call `searc
 
 This pattern is **additive**, not exclusive. An agent can combine Pattern A (eager pull at session start) with live subscription (push for updates after that), or Pattern C (lazy pull with rebias) with live subscription. Push-only without any pull is a degenerate case worth mentioning — some swarm scenarios might use it where the server-side focus filter decides what the agent cares about — but most agents will combine push with one of the pull patterns.
 
-### Feasibility (FastMCP 3 confirmed 2026-04-07)
+### Feasibility
 
-Researched against the FastMCP 3 source at `/Users/wjackson/Developer/MCP/fastmcp`. Findings:
+FastMCP 3 supports this end-to-end via its streamable-http transport and the existing `ResourceUpdatedNotification` primitive. The distributed notification queue (Valkey-backed) that already powers task status updates is reusable for memory broadcasts. The key open verification item is the subscriber-lifecycle hook for pure-listener agents that don't submit tasks.
 
-- **Streamable-http transport supports bidirectional message flow.** Server-initiated notifications work over the existing transport — no transport change needed.
-- **The relevant MCP primitive is `ResourceUpdatedNotification`** (`notifications/resources/updated`), sent from a tool via `await ctx.send_notification(mcp.types.ResourceUpdatedNotification(params=...))`. Per spec, the notification carries only the resource URI; clients are expected to refetch via `resources/read` (or `read_memory`) to get content.
-- **Out of the box, `ctx.send_notification` only reaches the calling session.** For broadcast to other connected sessions, FastMCP exposes a distributed notification queue at `fastmcp/server/tasks/notifications.py` (`push_notification(session_id, notification, docket)`), which LPUSHes to per-session queues that subscriber loops drain. This subsystem currently powers task status notifications and is reusable for memory broadcasts.
-- **The queue uses Valkey** (memory-hub's standard distributed cache; Valkey is API-compatible with Redis, so FastMCP's existing Redis client code works unchanged against a Valkey backend).
+See [`research/fastmcp-3-push-notifications.md`](research/fastmcp-3-push-notifications.md) for the full investigation, source pointers, and the items that still need in-cluster verification before implementation.
 
 ### What memory-hub needs on top of FastMCP's primitives
 
@@ -268,15 +272,7 @@ The focus declarations themselves become data worth keeping. If memory-hub recor
 
 ## Open Questions
 
-1. **Two-vector retrieval ranking math.** Weighted sum vs rerank-after-recall vs pgvector composite query — which performs best? Needs benchmarking on a synthetic workload.
-2. **Pivot detection algorithm.** Should the agent self-detect (LLM judgment), or should the server detect (embedding distance from session vector exceeds threshold)? Server-side is more consistent; agent-side is more flexible. Maybe both, with the server providing a hint the agent can override.
-3. **Where does focus source inference live?** Working-directory inference is project-specific and probably belongs in the agent's environment rather than the MCP server. First-turn inference belongs in the agent. Only declared focus is server-aware. This may push the inference logic into the SDK rather than the server.
-4. **Migration path for existing projects.** Projects using the current `memoryhub-integration.md` rule should be able to run `memory-hub config` without breaking anything. The CLI should detect existing rules and offer to merge or replace.
-5. **Should `mode: index` results omit content entirely, or include short snippets?** Snippets are more useful for the agent but cost more tokens. Likely a sub-knob.
-6. **Push payload: URI-only or full content?** MCP spec says `ResourceUpdatedNotification` carries only the URI, requiring clients to refetch. Memory-hub could define a custom notification method (`notifications/memoryhub/memory_written`) carrying the full record — non-spec but valid since MCP allows custom methods. Trade-off: spec compliance and small notifications vs latency and round-trip count.
-7. **Subscriber lifecycle for pure-listener agents.** FastMCP starts notification subscribers when a task is submitted. Agents that don't submit tasks but want to listen for broadcasts need a subscriber loop started at session-registration time. Need to verify FastMCP supports this hook before committing to Pattern E.
-8. **Reliable queue vs pub/sub for fanout.** FastMCP's notification queueing is Valkey LPUSH/BRPOP with retry — reliable but O(N) per write. Valkey pub/sub is fire-and-forget and scales better via Valkey-side fanout, but disconnected agents miss notifications and have to catch up via search on reconnect. Pick per-deployment based on swarm size and tolerance for missed updates.
-9. **Push fanout cost at scale.** O(N) reliable-queue fanout is fine up to ~100 agents. Beyond that, benchmark before committing. May need a hybrid: pub/sub for transient updates, reliable queue for high-importance writes.
+The nine open questions that surfaced while drafting this design have been lifted into their own tracking doc at [`open-questions.md`](open-questions.md), where each one has a "what would resolve it" note and a dependency pointer. Deep investigations that need their own space (FastMCP feasibility, ranking math, pivot detection) live under [`research/`](research/).
 
 ## Implementation Candidates
 
@@ -292,7 +288,11 @@ This design generates several implementation candidates. Each gets a backlog iss
 
 ## Cross-references
 
-- `docs/mcp-server.md` — current tool surface, including `search_memory` parameters and response shape
-- `docs/memory-tree.md` — branch model (rationale, provenance) that motivates the branch-handling discussion
-- `docs/storage-layer.md` — pgvector usage that the two-vector retrieval proposal builds on
-- `.claude/rules/memoryhub-integration.md` — current hand-written loading rule, the manual precursor to the generated rule file
+- `../mcp-server.md` — current tool surface, including `search_memory` parameters and response shape
+- `../memory-tree.md` — branch model (rationale, provenance) that motivates the branch-handling discussion
+- `../storage-layer.md` — pgvector usage that the two-vector retrieval proposal builds on
+- `../../.claude/rules/memoryhub-integration.md` — current hand-written loading rule, the manual precursor to the generated rule file
+
+## History
+
+This file was originally at `docs/agent-memory-ergonomics.md` as a single flat document. It was moved into `docs/agent-memory-ergonomics/` on 2026-04-07 when the accompanying research files were added. The seven implementation candidate issues (#56–#62) reference the old path in their issue bodies — that path still resolves via git history, and the issues will be updated when each is picked up.
