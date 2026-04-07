@@ -124,32 +124,37 @@ Scope enforcement happens at two layers: the infrastructure layer (Authorino) an
 
 This separation is deliberate. Authentication is generic infrastructure that belongs at the route level. Authorization requires domain knowledge (memory scopes, ownership rules) that only the application can evaluate.
 
-#### Current state (Phase 2)
+#### Current state (shipped 2026-04-07)
 
-The MCP server's `auth.py` provides session-based API key authentication. `register_session` validates a key against a users ConfigMap and stores the identity in process-local state. Individual tools call `require_auth()` or `get_authenticated_owner()` to retrieve the identity.
+Service-layer RBAC enforcement is fully implemented in `memory-hub-mcp/src/core/authz.py`. The `JWTVerifier` is wired into the deployed MCP server with `AUTH_JWKS_URI` and `AUTH_ISSUER` environment variables pointing at the OAuth 2.1 authorization server. Every tool that touches memory data is enforced.
 
-Enforcement is inconsistent across tools:
+The enforcement architecture:
 
-| Tool | Auth required | Owner filtering | Scope check |
-|------|--------------|----------------|-------------|
-| `write_memory` | Yes (if owner_id omitted) | User-scope: must match self | `has_scope` check |
-| `search_memory` | No | Defaults to self, but caller can override | None |
-| `read_memory` | No | None — UUID lookup only | None |
-| `get_similar_memories` | Yes | Implicit (source node's owner) | None |
-| `get_relationships` | Yes | None | None |
+- **`get_claims_from_context()`** extracts the caller's identity, JWT-first with a session-shim fallback for the dev-path API key flow. Both paths produce the same claim shape so the rest of the enforcement code does not branch on auth method.
+- **`build_authorized_scopes(claims)`** maps the token's access-tier scopes (`memory:read:user`, `memory:read:project`, etc.) onto a SQL filter clause that limits visible memories to those the caller is authorized to read.
+- **`authorize_read(claims, memory)`** and **`authorize_write(claims, scope, owner_id)`** are called by every tool before any service-layer call. They are the per-record version of the SQL filter, used when a tool has a specific node in hand rather than a query.
 
-The gaps are significant: `read_memory` has zero enforcement, `search_memory` accepts arbitrary `owner_id` values, and `write_memory` can be bypassed by passing an explicit `owner_id` without a session.
+| Tool | Authentication | Authorization |
+|------|---------------|---------------|
+| `register_session` | API key compatibility shim only — not the primary auth path | Sets up session-shim claims for tools that follow |
+| `write_memory` | Required | `authorize_write(claims, scope, owner_id)` |
+| `read_memory` | Required | `authorize_read(claims, memory)` |
+| `update_memory` | Required | `authorize_read` + `authorize_write` |
+| `delete_memory` | Required | `authorize_read` + `authorize_write` |
+| `search_memory` | Required | SQL-level scope filter via `build_authorized_scopes` (RBAC violations are impossible by construction) |
+| `get_memory_history` | Required | `authorize_read` on the head node, propagates to all versions |
+| `get_similar_memories` | Required | Post-fetch filtering with `omitted_count` reported in the response |
+| `get_relationships` | Required | Post-fetch filtering with `omitted_count` |
+| `create_relationship` | Required | `authorize_write` on both source and target |
+| `suggest_merge` | Required | `authorize_read` on both candidates |
+| `set_curation_rule` | Required | `authorize_write` on the rule scope |
+| `report_contradiction` | Required | `authorize_read` on the target memory |
 
-#### Target state
+Cross-reference tools (`get_similar_memories`, `get_relationships`) intentionally do post-fetch filtering rather than SQL-level filtering because the caller is asking "what is connected to this memory?" — the hidden-results count is itself information the caller may need (it tells them whether a relationship exists that they cannot see). The `omitted_count` field in the response surfaces that count without leaking the underlying data.
 
-Every tool that touches memory data must:
+#### Implementation reference
 
-1. **Require authentication.** Call `require_auth()` unconditionally. No unauthenticated access to any memory operation.
-2. **Enforce ownership on reads.** `search_memory` must filter results to memories the caller is authorized to see. `read_memory` must verify the caller has access to the memory's scope before returning content.
-3. **Enforce ownership on writes.** `write_memory` must always validate scope access, regardless of whether `owner_id` is explicitly passed.
-4. **Filter cross-references.** `get_similar_memories` and `get_relationships` must not leak memories the caller can't access.
-
-The enforcement logic belongs in a shared authorization function, not duplicated per-tool:
+The authorization functions look like this (paraphrased from `core/authz.py`):
 
 ```python
 def authorize_read(user_claims: dict, memory: MemoryNode) -> bool:

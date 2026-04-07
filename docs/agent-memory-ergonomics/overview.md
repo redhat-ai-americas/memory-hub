@@ -4,7 +4,7 @@
 
 An effort to make memory-hub usable — not just functional — from the consuming agent's perspective. memory-hub ships 13 MCP tools that cover every operation an agent needs, but tools without policy don't get used well, and response shapes that are "technically correct" can still force agents into multi-round-trip dances or silent misses. This effort captures the current rough edges and proposes targeted changes.
 
-This folder is the design artifact for that effort. It is not a spec; it is a living set of proposals, research notes, and open questions that seven GitHub issues (#56–#62) are pulling implementation from.
+This folder is the design artifact for that effort. It is not a spec; it is a living set of proposals, research notes, and open questions that seven GitHub issues (#56–#62) pulled implementation from. **Layers 1-3 shipped 2026-04-07; Phase 2 (#61, #62) is unblocked but not yet started.** See the [Implementation Status](#implementation-status) section below for the per-issue picture.
 
 ## Why Now
 
@@ -47,15 +47,20 @@ Two Phase 2 items sit on top of the above:
 
 ## Implementation Status
 
-As of 2026-04-07, nothing in this design has been implemented. All seven issues (#56–#62) are in Backlog, waiting on a design-first pass and the completion of the currently-scheduled small session (BFF walker fix + #36/#43 decision) plus kagenti research.
+All three layers shipped on 2026-04-07. The day's work landed in this order:
 
-Expected order of implementation:
+1. **#56 + #57** (Layer 1, search response shape) — `mcp-server: Add mode/token-budget and branch-handling to search_memory` (commit `5409a36`).
+2. **#73** (SDK prep) — surface the new search params on `MemoryHubClient.search()`.
+3. **#59** (Layer 3 schema) — `.memoryhub.yaml` schema and Pydantic loader in the SDK (commit `5edc821`).
+4. **#60** (Layer 3 CLI) — `memoryhub config init` and `memoryhub config regenerate` with per-pattern rule file templates (commit `420bdb5`).
+5. **#58** (Layer 2) — session focus vector with two-vector retrieval. The benchmark surfaced a fundamentally different design space than the original Options A/B/C: a cross-encoder reranker (`ms-marco-MiniLM-L12-v2`) was deployed mid-session and the winning approach became NEW-1 (RRF blend over cross-encoder rerank). Stateless per-call focus on `search_memory`. Resolved Q1 (ranking math) and Q2 (pivot detection). Commits `754adfe` and `0f3b9bc` (numpy.float32 leak fix caught by post-deploy mcp-test-mcp verification).
 
-1. **#56 + #57** (Layer 1) — One session, four commits, server-side only. Natural to land together.
-2. **#59 + #60** (Layer 3 without Layer 2 knobs) — Depends on #56/#57's field names being locked. SDK build-out starts here.
-3. **#58** (Layer 2) — Design-first session: pick ranking math, write benchmarks, then code.
-4. **#62** (Pattern E) — Only after #58 lands.
-5. **#61** (usage signal) — Phase 2, order TBD.
+The retrospective for #58 is at [`retrospectives/2026-04-07_session-focus-vector-58/RETRO.md`](../../retrospectives/2026-04-07_session-focus-vector-58/RETRO.md). Per-candidate status markers with commit pointers live in [`design.md`](design.md) §Implementation Candidates.
+
+**Phase 2 — open.** Both depend on #58 having landed.
+
+- **#61** — Session focus history as a usage signal. Record focus declarations per session, build a per-project histogram. Will need a Valkey-backed store for session focus vectors (which #58 deliberately punted on by going stateless).
+- **#62** — Pattern E real-time push notifications. Server-push broadcast on memory writes via FastMCP 3's distributed notification queueing, pre-filtered by session focus vector. Same Valkey dependency as #61. The agent-side half of the hybrid pivot detection from Q2 already shipped in #60's Pattern C rule template; the server-side `pivot_suggested` hint shipped with #58.
 
 ## Cross-references
 
