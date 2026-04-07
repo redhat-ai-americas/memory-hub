@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Integer, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from memoryhub.config import AppSettings
 from memoryhub.models.contradiction import ContradictionReport
@@ -111,41 +110,30 @@ async def create_memory(
 async def read_memory(
     memory_id: uuid.UUID,
     session: AsyncSession,
-    depth: int = 0,
 ) -> MemoryNodeRead:
     """Read a memory node by ID.
 
-    If depth > 0, eagerly loads children (one level). Raises
-    MemoryNotFoundError if the node does not exist.
+    Returns the node with branch_count populated via a single COUNT query.
+    Branches are no longer loaded inline -- callers that need branch contents
+    should query them explicitly via search_memory or follow-up read_memory
+    calls. Raises MemoryNotFoundError if the node does not exist.
     """
-    options = []
-    if depth > 0:
-        options.append(selectinload(MemoryNode.children))
-
-    stmt = select(MemoryNode).where(MemoryNode.id == memory_id, MemoryNode.deleted_at.is_(None)).options(*options)
+    stmt = select(MemoryNode).where(
+        MemoryNode.id == memory_id, MemoryNode.deleted_at.is_(None)
+    )
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
 
     if node is None:
         raise MemoryNotFoundError(memory_id)
 
-    has_children, has_rationale = await _compute_branch_flags(node, session, depth)
-    read = node_to_read(node, has_children=has_children, has_rationale=has_rationale)
-
-    # Populate branches when depth > 0 and children were eagerly loaded
-    if depth > 0 and node.children:
-        read.branches = [
-            MemoryNodeStub(
-                id=child.id,
-                stub=child.stub,
-                scope=child.scope,
-                weight=child.weight,
-                branch_type=child.branch_type,
-            )
-            for child in node.children
-        ]
-
-    return read
+    has_children, has_rationale, branch_count = await _compute_branch_flags(node, session)
+    return node_to_read(
+        node,
+        has_children=has_children,
+        has_rationale=has_rationale,
+        branch_count=branch_count,
+    )
 
 
 async def update_memory(
@@ -266,7 +254,12 @@ async def update_memory(
 
     has_children = len(old_children) > 0
     has_rationale = any(c.branch_type == "rationale" for c in old_children)
-    return node_to_read(new_node, has_children=has_children, has_rationale=has_rationale)
+    return node_to_read(
+        new_node,
+        has_children=has_children,
+        has_rationale=has_rationale,
+        branch_count=len(old_children),
+    )
 
 
 async def delete_memory(
@@ -472,11 +465,18 @@ async def search_memories(
     results: list[tuple[MemoryNodeRead | MemoryNodeStub, float]] = []
     for node, distance in nodes_with_distance:
         relevance_score = max(0.0, 1.0 - distance)
-        has_children, has_rationale = branch_flags.get(node.id, (False, False))
+        has_children, has_rationale, branch_count = branch_flags.get(
+            node.id, (False, False, 0)
+        )
         if node.weight >= weight_threshold:
             results.append(
                 (
-                    node_to_read(node, has_children=has_children, has_rationale=has_rationale),
+                    node_to_read(
+                        node,
+                        has_children=has_children,
+                        has_rationale=has_rationale,
+                        branch_count=branch_count,
+                    ),
                     relevance_score,
                 )
             )
@@ -639,10 +639,10 @@ async def resolve_contradiction(
 async def _bulk_branch_flags(
     parent_ids: list[uuid.UUID],
     session: AsyncSession,
-) -> dict[uuid.UUID, tuple[bool, bool]]:
-    """Compute has_children and has_rationale for multiple parent IDs in one query.
+) -> dict[uuid.UUID, tuple[bool, bool, int]]:
+    """Compute has_children, has_rationale, and branch_count for multiple parents.
 
-    Returns a dict mapping parent_id -> (has_children, has_rationale).
+    Returns a dict mapping parent_id -> (has_children, has_rationale, branch_count).
     Parents with no children are absent from the dict.
     """
     if not parent_ids:
@@ -660,38 +660,42 @@ async def _bulk_branch_flags(
     result = await session.execute(stmt)
     rows = result.all()
 
-    return {row.parent_id: (row.child_count > 0, (row.rationale_count or 0) > 0) for row in rows}
+    return {
+        row.parent_id: (
+            row.child_count > 0,
+            (row.rationale_count or 0) > 0,
+            int(row.child_count or 0),
+        )
+        for row in rows
+    }
 
 
 async def _compute_branch_flags(
     node: MemoryNode,
     session: AsyncSession,
-    depth: int,
-) -> tuple[bool, bool]:
-    """Determine has_children and has_rationale for a node.
+) -> tuple[bool, bool, int]:
+    """Determine has_children, has_rationale, and branch_count for a node.
 
-    If depth > 0 and children were eagerly loaded, inspects them directly.
-    Otherwise, runs a lightweight existence check.
+    Runs a single query for the count + rationale-presence flag instead of
+    loading the child rows themselves -- read_memory no longer expands
+    branches inline.
     """
-    if depth > 0 and node.children is not None:
-        active_children = [c for c in node.children if c.deleted_at is None]
-        has_children = len(active_children) > 0
-        has_rationale = any(c.branch_type == "rationale" for c in active_children)
-    else:
-        children_stmt = select(MemoryNode.id, MemoryNode.branch_type).where(
-            MemoryNode.parent_id == node.id, MemoryNode.deleted_at.is_(None)
-        )
-        children_result = await session.execute(children_stmt)
-        rows = children_result.all()
-        has_children = len(rows) > 0
-        has_rationale = any(row.branch_type == "rationale" for row in rows)
-    return has_children, has_rationale
+    children_stmt = select(MemoryNode.branch_type).where(
+        MemoryNode.parent_id == node.id, MemoryNode.deleted_at.is_(None)
+    )
+    children_result = await session.execute(children_stmt)
+    rows = children_result.all()
+    branch_count = len(rows)
+    has_children = branch_count > 0
+    has_rationale = any(row.branch_type == "rationale" for row in rows)
+    return has_children, has_rationale, branch_count
 
 
 def node_to_read(
     node: MemoryNode,
     has_children: bool,
     has_rationale: bool,
+    branch_count: int = 0,
 ) -> MemoryNodeRead:
     """Convert a MemoryNode ORM instance to a MemoryNodeRead schema."""
     return MemoryNodeRead(
@@ -714,4 +718,5 @@ def node_to_read(
         expires_at=node.expires_at,
         has_children=has_children,
         has_rationale=has_rationale,
+        branch_count=branch_count,
     )

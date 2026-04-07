@@ -112,10 +112,11 @@ async def test_read_memory_with_children(async_session, embedding_service):
         embedding_service,
     )
 
-    result = await read_memory(parent.id, async_session, depth=1)
+    result = await read_memory(parent.id, async_session)
 
     assert result.has_children is True
     assert result.has_rationale is True
+    assert result.branch_count == 2
 
 
 async def test_read_memory_not_found(async_session):
@@ -205,17 +206,31 @@ async def test_update_memory_deep_copies_branches(async_session, embedding_servi
     assert updated.has_children is True
     assert updated.has_rationale is True
 
-    # Read the new version with depth=1 to see its branches
-    new_with_branches = await read_memory(updated.id, async_session, depth=1)
-    assert new_with_branches.branches is not None
-    assert len(new_with_branches.branches) == 2
+    # Read the new version and verify branch_count reflects the deep copy.
+    # read_memory no longer expands branches inline, so query the new version's
+    # children directly via SQL to confirm the deep-copy behavior.
+    from sqlalchemy import select as _select
+
+    from memoryhub.models.memory import MemoryNode as _MemoryNode
+
+    new_version = await read_memory(updated.id, async_session)
+    assert new_version.branch_count == 2
+    assert new_version.has_children is True
+    assert new_version.has_rationale is True
+
+    children_stmt = _select(_MemoryNode).where(
+        _MemoryNode.parent_id == updated.id,
+        _MemoryNode.deleted_at.is_(None),
+    )
+    children = (await async_session.execute(children_stmt)).scalars().all()
+    assert len(children) == 2
 
     # The copied branches should have different IDs than the originals
-    copied_ids = {b.id for b in new_with_branches.branches}
+    copied_ids = {c.id for c in children}
     assert rationale.id not in copied_ids
 
-    # But the content should match
-    copied_rationale = [b for b in new_with_branches.branches if b.branch_type == "rationale"]
+    # But the rationale branch_type should still be present
+    copied_rationale = [c for c in children if c.branch_type == "rationale"]
     assert len(copied_rationale) == 1
 
 

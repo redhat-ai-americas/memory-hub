@@ -98,7 +98,7 @@ class MemoryNodeRead(BaseModel):
     expires_at: datetime | None = None
     has_children: bool = False  # populated by service layer, not from ORM
     has_rationale: bool = False  # populated by service layer, not from ORM
-    branches: list["MemoryNodeStub"] | None = None  # populated when depth > 0
+    branch_count: int = 0  # populated by service layer via COUNT(*) over children
     relationships: list["RelationshipRead"] | None = None  # populated when requested
 
 

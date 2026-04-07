@@ -1,4 +1,4 @@
-"""Retrieve a memory by ID with optional branch depth expansion."""
+"""Retrieve a memory by ID, with optional version history."""
 
 import uuid
 from typing import Annotated, Any
@@ -26,16 +26,6 @@ async def read_memory(
         str,
         Field(description="The UUID of the memory to read."),
     ],
-    depth: Annotated[
-        int,
-        Field(
-            description=(
-                "How many levels of branches to include. "
-                "0 = just this node, 1 = include direct children. "
-                "Rarely need more than 1."
-            ),
-        ),
-    ] = 0,
     include_versions: Annotated[
         bool,
         Field(
@@ -47,10 +37,11 @@ async def read_memory(
     ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Retrieve a memory by ID with optional branch depth expansion.
+    """Retrieve a memory by ID.
 
-    At depth 0, returns just the node. At depth 1, includes all direct child
-    branches (rationale, provenance, etc.) with their full content. Use
+    Returns the node with branch_count set to the number of direct child
+    branches. Branch contents are not loaded inline -- to inspect them, use
+    search_memory or follow up with read_memory on a specific child ID. Use
     include_versions=true to see how the memory evolved over time.
     """
     if ctx:
@@ -70,7 +61,7 @@ async def read_memory(
     try:
         session, gen = await get_db_session()
 
-        node = await _read_memory(parsed_id, session, depth=depth)
+        node = await _read_memory(parsed_id, session)
 
         try:
             claims = get_claims_from_context()
@@ -85,8 +76,7 @@ async def read_memory(
 
         result = node.model_dump(mode="json")
 
-        # Include version history if requested and we're at the node level
-        if include_versions and depth == 0:
+        if include_versions:
             history = await get_memory_history(parsed_id, session)
             result["version_history"] = [v.model_dump(mode="json") for v in history]
 
