@@ -8,7 +8,7 @@ The tools are designed around the tree-based memory model: memories are nodes wi
 
 ## Design Principles Applied
 
-**Fewer, powerful tools.** We consolidated get_branches into read_memory (via a depth parameter) and dropped the speculative get_context tool. 6 tools cover the full agent workflow: write → search → read (with depth) → update → history → report contradictions.
+**Fewer, powerful tools.** We dropped the speculative get_context and get_branches tools. 6 tools cover the full agent workflow: write → search → read → update → history → report contradictions. `read_memory` returns a `branch_count` summary; agents fetch specific branches via `search_memory` or follow-up `read_memory` calls rather than via a `depth` parameter.
 
 **Tool descriptions as steering mechanisms.** Each tool description explains the tree model concepts (stubs, branches, weight) so agents understand how to use MemoryHub effectively. An agent that's never seen MemoryHub before should be able to use it correctly from the descriptions alone.
 
@@ -48,20 +48,25 @@ The tools are designed around the tree-based memory model: memories are nodes wi
 
 ### read_memory
 
-- **Purpose**: Retrieve a specific memory by ID, with optional depth expansion into branches. At depth 0, returns just the node. At depth 1, includes all direct child branches (rationale, provenance, etc.) with their full content. This is how agents "crawl deeper" after seeing a stub in search results.
+- **Purpose**: Retrieve a specific memory by ID. Returns the node with a `branch_count` summary of its direct children; branch contents are not loaded inline. Agents that want to inspect specific branches issue follow-up `search_memory` or `read_memory` calls. When a historical (non-current) version is requested, the response carries a `current_version_id` pointer so the caller can pivot to the live version in one round-trip.
 - **Parameters**:
   - `memory_id` (string/UUID, required): The ID of the memory to read.
-  - `depth` (integer, optional, default 0): How many levels of branches to include. 0 = just this node. 1 = this node + direct children. 2 = children + grandchildren. Rarely need more than 1.
-  - `include_versions` (boolean, optional, default false): If true, includes a summary of the version history alongside the current content. Useful when an agent needs to understand how a memory evolved.
-- **Returns**: The memory node with full content, metadata, version info, and (if depth > 0) an array of branch nodes with their content and types. Each branch includes its own has_children flag so the agent knows if there's more depth available.
+  - `include_versions` (boolean, optional, default false): If true, includes the full version history (paginated) alongside the current content. Useful when an agent needs to understand how a memory evolved.
+- **Returns**: The memory node with full content, metadata, version info, and:
+  - `branch_count` (integer): Number of direct child branches under this node. Computed via a single COUNT query — branch rows are not fetched.
+  - `has_children` / `has_rationale` (booleans): Convenience flags for the common "are there branches" / "is there a rationale branch" checks.
+  - `current_version_id` (string/UUID or null): When `is_current` is false, points at the live version of this memory's chain. Null when the requested node is itself current. Lets agents pivot to the current version in one extra `read_memory` call.
+  - When `include_versions=true`, an additional `version_history` object: `{versions, total_versions, has_more, offset}` matching the `get_memory_history` shape.
 - **Error Cases**:
   - "Memory [id] not found. It may have been deleted, or you may not have access to this memory's scope." — Memory doesn't exist or is inaccessible.
-  - "Memory [id] is not current (version [N] superseded by version [M]). Returning the current version instead. Pass include_versions=true to see the full history." — Agent requested a superseded version; returns current by default with a note.
-- **Example Usage**: Reading a memory and its rationale:
+  - "Not authorized to read memory [id]." — Caller is authenticated but doesn't have read access to this memory's scope.
+
+  Historical reads do **not** error: they return the historical row plus a `current_version_id` pointer (see #51). Earlier spec drafts described an "is not current — returning the current version instead" warning; that design was replaced with the pointer field so agents can choose whether to follow the link.
+- **Example Usage**: Reading a memory and discovering it's superseded:
   ```
-  read_memory(memory_id="abc-123", depth=1)
+  read_memory(memory_id="abc-123")
   ```
-  Returns: the memory content + any branches (rationale, provenance, etc.) as nested objects.
+  Returns the v1 row with `is_current=false`, `current_version_id="def-456"`. The agent reads `def-456` if it wants the live content.
 
 ### update_memory
 
@@ -91,12 +96,16 @@ The tools are designed around the tree-based memory model: memories are nodes wi
   - `max_results` (integer, optional, default 10): Maximum number of results to return. Results are ranked by relevance. Keep low (5-15) to avoid context bloat.
   - `weight_threshold` (float, optional, default 0.0): Only return memories with weight >= this value. Set to 0.8 to see only high-priority memories.
   - `current_only` (boolean, optional, default true): If true, only returns current versions. Set to false for forensic searches across all versions.
-- **Returns**: An array of results ranked by relevance. Each result includes:
-  - For high-weight memories (weight >= deployment threshold): full content, scope, weight, branch indicators
-  - For lower-weight memories: stub text, scope, weight, branch indicators (has_rationale, has_children)
-  - A `result_type` field ("full" or "stub") so the agent knows what it's looking at
-  - A `relevance_score` (0-1) from the vector similarity search
-  The response also includes a `total_accessible` count so the agent knows if there are more results beyond max_results.
+- **Returns**: An object with three top-level fields:
+  - `results`: Array ranked by relevance. Each entry includes:
+    - For high-weight memories (weight >= deployment threshold): full content, scope, weight, branch indicators
+    - For lower-weight memories: stub text, scope, weight, branch indicators (has_rationale, has_children)
+    - A `result_type` field ("full" or "stub") so the agent knows what it's looking at
+    - A `relevance_score` (0-1) from the vector similarity search
+  - `total_matching` (integer): Count of all memories matching the filter set (scope/owner/current_only/RBAC), independent of `max_results`. Useful for "showing N of M" displays and for deciding whether to broaden the query.
+  - `has_more` (boolean): True when `total_matching > len(results)`. Indicates that narrowing filters or paginating would reveal additional matches.
+
+  Earlier spec drafts described a single `total_accessible` field that conflated "page size" and "total matches"; that field was replaced with the unambiguous `total_matching` + `has_more` pair (see #53).
 - **Error Cases**:
   - "No memories found matching your query. Try broader search terms or remove scope/owner filters." — Empty results with guidance.
   - "Invalid scope filter: [value]. Valid scopes: user, project, role, organizational, enterprise." — Bad scope parameter.
@@ -273,8 +282,9 @@ Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase
   - `total_deleted` (integer): Sum of versions + branches. This is the total number of rows the tool affected.
   The agent uses this to confirm the scope of the deletion: if the agent expected to delete a single memory but `total_deleted` is 8, it knows the memory had a deep history or many branches and can mention this to the user.
 - **Error Cases**:
-  - "Memory [id] not found. It may have already been deleted, or you may not have read access to its scope." — The memory doesn't exist OR the caller's claims don't include `memory:read` for the memory's scope. We don't distinguish these to avoid leaking the existence of memories the caller can't see.
-  - "Memory [id] has already been deleted. Use get_memory_history to see when it was deleted." — Returned when the memory exists but its `deleted_at` is already set. This is a 409-equivalent: idempotent retries are safe but the agent should know the second call did nothing.
+  - "Memory [id] not found. It may have already been deleted, or you may not have read access to its scope." — The memory doesn't exist, has already been soft-deleted, OR the caller doesn't have `memory:read` for the memory's scope. **All three of these collapse to a single not-found error.**
+
+    Earlier spec drafts proposed a distinct "Memory [id] has already been deleted. Use get_memory_history to see when it was deleted." 409-equivalent for the already-deleted case. The implementation deliberately rejects that distinction because it would leak the *existence* of memories the caller can't read: a non-reader could probe IDs and infer "this UUID once existed and is now deleted" from the differentiated error. Folding all three causes into "not found" preserves the deleted state's invisibility to non-readers. See `src/tools/delete_memory.py` for the well-commented rationale; this is by design and should not be reverted.
   - "Not authorized to delete this [scope]-scope memory. You need either ownership of the memory or the memory:admin scope." — Caller has read access but not write access to this memory's scope, and is not a memory:admin. Tells the agent exactly what would unblock the call.
   - "Invalid memory_id format: '[value]'. Expected a UUID string." — The memory_id parameter wasn't a valid UUID. Standard format error.
 - **Tool Annotations**:
@@ -300,7 +310,7 @@ Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase
 
 1. **register_session** — Authentication and session setup.
 2. **write_memory** — Foundation. Now includes curation pipeline integration (secrets scanning, embedding dedup, similar_count feedback).
-3. **read_memory** — Depth expansion and branch traversal.
+3. **read_memory** — Single-node read with branch_count summary; historical-version reads include a current_version_id pointer.
 4. **search_memory** — Semantic search via pgvector.
 5. **update_memory** — Versioning with deep copy of branches.
 6. **get_memory_history** — Version chain traversal.
