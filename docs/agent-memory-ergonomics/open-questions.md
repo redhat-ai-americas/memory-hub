@@ -34,7 +34,7 @@ Server-side is more consistent across agents; agent-side is more flexible. A hyb
 
 ## Q3. Where does focus source inference live?
 
-**Status:** Open
+**Status:** Resolved 2026-04-07
 **Affects:** #58, #60
 
 The design says focus can come from three sources: declared (agent calls `register_session(focus="...")`), inferred from working directory + git state, or inferred from the first user turn. Declared focus is obviously server-aware. But:
@@ -44,21 +44,16 @@ The design says focus can come from three sources: declared (agent calls `regist
 
 That means only declared focus is genuinely server-aware. The SDK or the agent has to wrap the inference logic. This pushes #58's scope toward the SDK side of the line and simplifies the server side.
 
-**What would resolve it:** A clear split decision: inference lives in the SDK (`memoryhub.infer_focus(cwd=..., first_turn=...)` returning a string the agent passes to `register_session`), and the server only knows the final focus string. The SDK build-out (#59/#60) is the natural place to land the inference helpers.
+**Resolution:** Inference lives in the SDK, server only sees the final string. The `.memoryhub.yaml` schema shipped in #59 keeps `focus_source: declared | directory | first_turn | auto` so projects can declare their preferred source, but the actual inference helpers are owned by the SDK. #58 will add `memoryhub.infer_focus(cwd=..., first_turn=...)` (or similar) as part of its session-vector work; the MCP server's `register_session` tool continues to accept a plain focus string and knows nothing about how it was derived. Decided with @rdwj during the 2026-04-07 #59/#60/#73 session.
 
 ## Q4. Migration path for existing projects
 
-**Status:** Open
+**Status:** Resolved 2026-04-07
 **Affects:** #60
 
-Projects currently using `.claude/rules/memoryhub-integration.md` (a hand-written loading rule) should be able to run `memory-hub config init` without breaking anything. The CLI needs to detect existing rules and offer to merge or replace.
+Projects currently using `.claude/rules/memoryhub-integration.md` (a hand-written loading rule) should be able to run `memoryhub config init` without breaking anything. The CLI needs to detect existing rules and offer to merge or replace.
 
-**What would resolve it:** Concrete decision on the CLI's migration behavior. Options:
-- **Replace** — back up the old file, write the new one, print a diff. Clean but destructive.
-- **Merge** — parse the old file, identify overlapping sections, interactively resolve. Hard to implement for freeform markdown.
-- **Sidecar** — leave the old file in place, write the new one next to it with a name like `memoryhub-loading.md`, and let the project manually pick which to keep. Safest.
-
-Recommendation leans toward sidecar for v1, replace as an opt-in `--force` flag.
+**Resolution:** Replace, not sidecar. The rationale ("what would we do if we didn't have the old rule? — write the new one; keeping two rule files is confusing") came up during the 2026-04-07 session with @rdwj. Implemented in commit `420bdb5`: `memoryhub config init` writes the new file at `.claude/rules/memoryhub-loading.md` and renames any pre-existing `memoryhub-integration.md` to `memoryhub-integration.md.bak` (numeric `.bak.N` for repeat runs). No merge path was built — freeform markdown is too hard to reconcile mechanically, and the backup is recoverable if the user wants to pull prose from the old rule into the YAML.
 
 ## Q5. Should `mode: index` results omit content entirely, or include short snippets?
 

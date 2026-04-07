@@ -2,7 +2,7 @@
 
 How memory-hub feels from the consuming agent's perspective, and what design changes would make it work better. This doc covers two related concerns: the *shape* of `search_memory` responses (branches, stubs, modes), and the *policy* of when an agent should call memory-hub at all (loading patterns, session focus, project config).
 
-**Status: Design.** Captured from a working session on 2026-04-07 where the consuming agent walked through the current behavior and proposed targeted changes. Implementation tracked via the issues linked in the [Implementation Candidates](#implementation-candidates) section.
+**Status: Layer 1 and Layer 3 shipped 2026-04-07; Layer 2 (session focus vector, #58) still design-first.** Captured from a working session on 2026-04-07 where the consuming agent walked through the current behavior and proposed targeted changes. Per-candidate status markers live in the [Implementation Candidates](#implementation-candidates) section.
 
 **Companion documents** in this folder:
 - [`overview.md`](overview.md) — Narrative landing page for the effort.
@@ -244,9 +244,11 @@ For memory-hub itself, the right defaults are `mode: focused, pattern: lazy_with
 
 ### Generated rule file
 
-The CLI generates `.claude/rules/memoryhub-loading.md` from the YAML. The current hand-written `.claude/rules/memoryhub-integration.md` is essentially a manual version of this. The generated file would replace it (or live alongside it for behaviors the generator doesn't yet cover).
+The CLI generates `.claude/rules/memoryhub-loading.md` from the YAML. The current hand-written `.claude/rules/memoryhub-integration.md` is a manual version of this. The generated file replaces it — a pre-existing integration rule is renamed to `.bak` on first `memoryhub config init` run (see Q4 resolution).
 
-For Pattern C the generated rule looks something like:
+**Shipped 2026-04-07.** The templates live as string constants in `memoryhub-cli/src/memoryhub_cli/project_config.py` (`_PATTERN_BLOCKS`, `_HYGIENE_BLOCK`, `_CONTRADICTION_ENABLED`, `_CONTRADICTION_DISABLED`, `_RULE_HEADER`). The shipped templates are richer than the Pattern C example below: each pattern's generated file is fully self-contained (session start, during-session, memory hygiene, contradiction handling, "do not hand-edit" preamble). The example below is preserved as the minimal design-intent version.
+
+For Pattern C the minimal generated rule looks something like:
 
 ```markdown
 ## MemoryHub Loading Pattern: Lazy + Rebias
@@ -276,15 +278,15 @@ The nine open questions that surfaced while drafting this design have been lifte
 
 ## Implementation Candidates
 
-This design generates several implementation candidates. Each gets a backlog issue linked to this doc.
+This design generates several implementation candidates. Each gets a backlog issue linked to this doc. Status markers reflect what has landed on `main`; see the linked issues for details.
 
-1. **Search response shape: branch nesting and `include_branches` parameter.** Stop surfacing branches as siblings of their parent in the same result set. Trust the `has_rationale` / `has_children` flags. Add `include_branches: true` for forensic workflows. When branches are returned, nest them under the parent.
-2. **Search response: token budget and `mode` parameter.** Add `max_response_tokens` cap and `mode: full | index | full_only` parameter. Improve the stub format to remain a snippet, not a topic label. Optional: large-memory preview form.
-3. **Two-vector retrieval with session focus.** Embed a session focus string at `register_session` time. Bias subsequent `search_memory` calls by the session vector with configurable weight. Benchmark the ranking math. **Note: the session vector embedded here is reused on the push side by Pattern E (#7) — broadcast notifications are pre-filtered against the same session vector so subscribers only receive writes that match their declared focus.** The two efforts should be designed and reviewed together.
-4. **Project configuration: `.memoryhub.yaml` schema and loader.** Define the schema, write the loader, surface the config to the SDK and the server.
-5. **`memory-hub config` CLI with rule generation.** Interactive setup command that writes both `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`. Templates for Patterns A/B/C/D, plus the optional Pattern E live-subscription overlay.
-6. **Session focus history as a usage signal.** Record focus declarations per session, aggregate into a per-project histogram. Phase 2 — don't block on this.
-7. **Real-time push (Pattern E): server-push notifications for swarm broadcast.** Add `ResourceUpdatedNotification` broadcast on memory writes via FastMCP 3's distributed notification queueing (Valkey-backed). Maintain an agent session registry. Pre-filter broadcasts by session focus vector (reuses #3). Add `live_subscription` and related config knobs to the YAML schema (#4). Phase 2 — depends on #3 landing first.
+1. **[SHIPPED 2026-04-07 · #56]** Search response shape: branch nesting and `include_branches` parameter. Stop surfacing branches as siblings of their parent in the same result set. Trust the `has_rationale` / `has_children` flags. Add `include_branches: true` for forensic workflows. When branches are returned, nest them under the parent. *Landed in commit `5409a36`.*
+2. **[SHIPPED 2026-04-07 · #57]** Search response: token budget and `mode` parameter. Add `max_response_tokens` cap and `mode: full | index | full_only` parameter. The stub format stays a snippet, not a topic label. Q5 (large-memory preview form) deferred. *Landed in commit `5409a36`.*
+3. **[OPEN · #58 · Phase 2]** Two-vector retrieval with session focus. Embed a session focus string at `register_session` time. Bias subsequent `search_memory` calls by the session vector with configurable weight. Benchmark the ranking math. **The session vector embedded here is reused on the push side by Pattern E (#62) — broadcast notifications are pre-filtered against the same session vector so subscribers only receive writes that match their declared focus.** The two efforts should be designed and reviewed together. Research in [`research/two-vector-retrieval.md`](research/two-vector-retrieval.md) (Option B rerank-after-recall is the provisional recommendation; benchmark pending) and [`research/pivot-detection.md`](research/pivot-detection.md) (hybrid agent-side + server-side detection, agent-side ships in Candidate 5's rule template).
+4. **[SHIPPED 2026-04-07 · #59]** Project configuration: `.memoryhub.yaml` schema and loader. Pydantic v2 schema in `sdk/src/memoryhub/config.py` with `memory_loading`, `retrieval_defaults`, and forward-declared Pattern E knobs. `MemoryHubClient` applies `retrieval_defaults` to outbound `search_memory` calls when the caller omits them. Focus inference (Q3 resolved: SDK owns it, server only sees the final string) defers to the #58 implementation. *Landed in commit `5edc821`.* Prep commit `5edc821` (also closes #73) surfaces the new search params on the SDK.
+5. **[SHIPPED 2026-04-07 · #60]** `memoryhub config` CLI with rule generation. Interactive setup command that writes both `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`. Templates for Patterns A/B/C/D ship as string constants in `memoryhub-cli/src/memoryhub_cli/project_config.py`; the shipped templates are richer than the example block below (they include memory hygiene, contradiction handling, and the "do not hand-edit" preamble). Pattern E live-subscription overlay deferred until #62 lands. Q4 resolved: legacy `memoryhub-integration.md` is renamed to `.bak` (not kept as a sidecar). *Landed in commit `420bdb5`.*
+6. **[OPEN · #61 · Phase 2]** Session focus history as a usage signal. Record focus declarations per session, aggregate into a per-project histogram. Don't block on this; opens once #58 lands.
+7. **[OPEN · #62 · Phase 2]** Real-time push (Pattern E): server-push notifications for swarm broadcast. Add `ResourceUpdatedNotification` broadcast on memory writes via FastMCP 3's distributed notification queueing (Valkey-backed). Maintain an agent session registry. Pre-filter broadcasts by session focus vector (reuses Candidate 3). Config knobs (`live_subscription`, `push_payload`, `push_filter_weight`, `push_transport`) already exist in the `.memoryhub.yaml` schema shipped by Candidate 4, though the SDK does not yet consume them. Depends on #58 landing first.
 
 ## Cross-references
 
