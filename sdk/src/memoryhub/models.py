@@ -33,6 +33,7 @@ class Memory(BaseModel):
     has_children: bool = False
     has_rationale: bool = False
     branch_count: int = 0
+    current_version_id: str | None = None
     relationships: list[dict[str, Any]] | None = None
     relevance_score: float | None = None
     result_type: str | None = None  # "full" or "stub"

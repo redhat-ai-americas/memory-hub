@@ -99,6 +99,10 @@ class MemoryNodeRead(BaseModel):
     has_children: bool = False  # populated by service layer, not from ORM
     has_rationale: bool = False  # populated by service layer, not from ORM
     branch_count: int = 0  # populated by service layer via COUNT(*) over children
+    # When this node is not the current version of its memory, points at the
+    # current version so callers can pivot in one round-trip. None when this
+    # node is itself current.
+    current_version_id: uuid.UUID | None = None
     relationships: list["RelationshipRead"] | None = None  # populated when requested
 
 

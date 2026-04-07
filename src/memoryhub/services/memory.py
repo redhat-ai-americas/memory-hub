@@ -116,7 +116,10 @@ async def read_memory(
     Returns the node with branch_count populated via a single COUNT query.
     Branches are no longer loaded inline -- callers that need branch contents
     should query them explicitly via search_memory or follow-up read_memory
-    calls. Raises MemoryNotFoundError if the node does not exist.
+    calls. When the requested node is a historical (non-current) version,
+    populates current_version_id by walking the version chain forward, so
+    callers can pivot to the live version in a single round-trip.
+    Raises MemoryNotFoundError if the node does not exist.
     """
     stmt = select(MemoryNode).where(
         MemoryNode.id == memory_id, MemoryNode.deleted_at.is_(None)
@@ -128,11 +131,27 @@ async def read_memory(
         raise MemoryNotFoundError(memory_id)
 
     has_children, has_rationale, branch_count = await _compute_branch_flags(node, session)
+
+    current_version_id: uuid.UUID | None = None
+    if not node.is_current:
+        # Walk the full chain (both directions) and pick the current node.
+        # _walk_version_chain is the same helper used by get_memory_history
+        # and delete_memory; it handles the case where the caller passed a
+        # middle version ID. There is at most one is_current=true node in a
+        # well-formed chain; if none exists (e.g., the chain has been fully
+        # superseded but not yet pruned), leave the pointer as None.
+        chain = await _walk_version_chain(node, session)
+        for n in chain:
+            if n.is_current and n.deleted_at is None:
+                current_version_id = n.id
+                break
+
     return node_to_read(
         node,
         has_children=has_children,
         has_rationale=has_rationale,
         branch_count=branch_count,
+        current_version_id=current_version_id,
     )
 
 
@@ -710,6 +729,7 @@ def node_to_read(
     has_children: bool,
     has_rationale: bool,
     branch_count: int = 0,
+    current_version_id: uuid.UUID | None = None,
 ) -> MemoryNodeRead:
     """Convert a MemoryNode ORM instance to a MemoryNodeRead schema."""
     return MemoryNodeRead(
@@ -733,4 +753,5 @@ def node_to_read(
         has_children=has_children,
         has_rationale=has_rationale,
         branch_count=branch_count,
+        current_version_id=current_version_id,
     )

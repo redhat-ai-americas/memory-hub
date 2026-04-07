@@ -327,6 +327,41 @@ async def test_get_memory_history_not_found(async_session):
         await get_memory_history(uuid.uuid4(), async_session)
 
 
+async def test_read_memory_historical_version_surfaces_current_pointer(
+    async_session, embedding_service
+):
+    """Regression for #51: historical reads include a pointer to the current version.
+
+    Reading a superseded version should populate current_version_id so the
+    caller can pivot in one round-trip. Reading the current version should
+    leave the field as None.
+    """
+    v1, _ = await create_memory(
+        _make_create_data(content="v1"), async_session, embedding_service
+    )
+    v2 = await update_memory(
+        v1.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service
+    )
+    v3 = await update_memory(
+        v2.id, MemoryNodeUpdate(content="v3"), async_session, embedding_service
+    )
+
+    # Reading the oldest version surfaces a pointer to v3
+    result_v1 = await read_memory(v1.id, async_session)
+    assert result_v1.is_current is False
+    assert result_v1.current_version_id == v3.id
+
+    # Reading the middle version surfaces the same pointer
+    result_v2 = await read_memory(v2.id, async_session)
+    assert result_v2.is_current is False
+    assert result_v2.current_version_id == v3.id
+
+    # Reading the current version leaves current_version_id None
+    result_v3 = await read_memory(v3.id, async_session)
+    assert result_v3.is_current is True
+    assert result_v3.current_version_id is None
+
+
 async def test_get_memory_history_walks_chain_bidirectionally(
     async_session, embedding_service
 ):
