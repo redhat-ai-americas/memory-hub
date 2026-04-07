@@ -601,3 +601,226 @@ async def test_search_memory_new_parameters_have_defaults():
     assert params["include_branches"].default is False
     assert "max_response_tokens" in params
     assert params["max_response_tokens"].default == 4000
+
+
+# ---------------------------------------------------------------------------
+# #58 — session focus and two-vector retrieval
+# ---------------------------------------------------------------------------
+
+
+def test_search_memory_focus_parameters_have_defaults():
+    """Verify the new focus / session_focus_weight parameters have the
+    expected defaults: focus is optional (None) and the bias weight
+    matches the schema default of 0.4."""
+    sig = inspect.signature(search_memory)
+    params = sig.parameters
+
+    assert "focus" in params
+    assert params["focus"].default is None
+    assert "session_focus_weight" in params
+    assert params["session_focus_weight"].default == 0.4
+
+
+def _fake_focused_bundle(
+    page_results,
+    *,
+    pivot_suggested: bool = False,
+    pivot_distance: float | None = 0.4,
+    pivot_threshold: float = 0.55,
+    pivot_reason: str | None = None,
+    used_reranker: bool = True,
+    fallback_reason: str | None = None,
+):
+    """Build a FocusedSearchResult-shaped object for tool-layer mocks."""
+    from memoryhub.services.memory import FocusedSearchResult
+
+    return FocusedSearchResult(
+        results=page_results,
+        pivot_suggested=pivot_suggested,
+        pivot_distance=pivot_distance,
+        pivot_threshold=pivot_threshold,
+        pivot_reason=pivot_reason,
+        used_reranker=used_reranker,
+        fallback_reason=fallback_reason,
+    )
+
+
+async def _run_focused_search(
+    bundle,
+    total_matching,
+    **call_kwargs,
+):
+    """Helper that patches the focus path and runs search_memory.
+
+    Mirrors `_patched_search_call` but routes through
+    `search_memories_with_focus` instead of `search_memories`. The plain
+    `search_memories` is also patched (with a value that should NEVER
+    be returned) so a routing bug surfaces as a clear assertion failure
+    instead of silently using the wrong path.
+    """
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    fake_reranker = AsyncMock()
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch(
+                "src.tools.search_memory.release_db_session",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.get_reranker_service",
+                return_value=fake_reranker,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories_with_focus",
+                new_callable=AsyncMock,
+                return_value=bundle,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value="WRONG_PATH_USED",
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=total_matching,
+            ),
+        ):
+            return await search_memory(query="memory", **call_kwargs)
+    finally:
+        auth_mod._current_session = None
+
+
+@pytest.mark.asyncio
+async def test_search_memory_no_focus_routes_to_plain_path():
+    """Without focus, the tool calls search_memories, not the focused path,
+    and pivot fields are absent from the response."""
+    full, score = _fake_full_result("plain memory", weight=0.9)
+    result = await _patched_search_call(
+        page_results=[(full, score)],
+        total_matching=1,
+    ).run()
+
+    assert "pivot_suggested" not in result
+    assert "pivot_reason" not in result
+    assert "focus_fallback_reason" not in result
+
+
+@pytest.mark.asyncio
+async def test_search_memory_focus_routes_to_focused_path():
+    """With focus set, the tool calls search_memories_with_focus and
+    surfaces pivot fields in the response."""
+    full, score = _fake_full_result("focus-aware memory", weight=0.9)
+    bundle = _fake_focused_bundle(
+        [(full, score)],
+        pivot_suggested=False,
+        pivot_distance=0.32,
+        pivot_threshold=0.55,
+        pivot_reason=None,
+    )
+    result = await _run_focused_search(
+        bundle,
+        total_matching=1,
+        focus="OpenShift deployment",
+    )
+
+    assert len(result["results"]) == 1
+    assert result["pivot_suggested"] is False
+    assert result["pivot_reason"] is None
+    assert "focus_fallback_reason" not in result
+
+
+@pytest.mark.asyncio
+async def test_search_memory_focus_pivot_signal_surfaces():
+    """When the focused service emits pivot_suggested=True, the tool
+    surfaces both the flag and the human-readable reason."""
+    full, score = _fake_full_result("off-topic memory", weight=0.9)
+    bundle = _fake_focused_bundle(
+        [(full, score)],
+        pivot_suggested=True,
+        pivot_distance=0.71,
+        pivot_threshold=0.55,
+        pivot_reason="query vector distance from session focus is 0.710 (threshold 0.55)",
+    )
+    result = await _run_focused_search(
+        bundle,
+        total_matching=1,
+        focus="OpenShift deployment",
+    )
+
+    assert result["pivot_suggested"] is True
+    assert "0.710" in result["pivot_reason"]
+    assert "threshold" in result["pivot_reason"]
+
+
+@pytest.mark.asyncio
+async def test_search_memory_focus_fallback_reason_surfaces():
+    """When the focused service degrades to cosine fallback, the response
+    includes focus_fallback_reason for operator debugging."""
+    full, score = _fake_full_result("memory", weight=0.9)
+    bundle = _fake_focused_bundle(
+        [(full, score)],
+        pivot_suggested=False,
+        used_reranker=False,
+        fallback_reason="reranker call failed (TimeoutError); falling back to cosine rank",
+    )
+    result = await _run_focused_search(
+        bundle,
+        total_matching=1,
+        focus="some focus",
+    )
+
+    assert result["focus_fallback_reason"].startswith("reranker call failed")
+
+
+@pytest.mark.asyncio
+async def test_search_memory_focus_empty_results_still_emits_pivot():
+    """An empty result list with focus set still includes the pivot signal."""
+    bundle = _fake_focused_bundle(
+        [],
+        pivot_suggested=True,
+        pivot_distance=0.7,
+        pivot_threshold=0.55,
+        pivot_reason="query vector distance from session focus is 0.700 (threshold 0.55)",
+    )
+    result = await _run_focused_search(
+        bundle,
+        total_matching=0,
+        focus="something",
+    )
+
+    assert result["results"] == []
+    assert result["total_matching"] == 0
+    assert result["has_more"] is False
+    assert result["pivot_suggested"] is True
+    assert "threshold" in result["pivot_reason"]
+
+
+@pytest.mark.asyncio
+async def test_search_memory_whitespace_only_focus_routes_to_plain_path():
+    """A focus string of just whitespace should be treated as 'no focus' and
+    not trigger the focused path."""
+    full, score = _fake_full_result("plain memory", weight=0.9)
+    result = await _patched_search_call(
+        page_results=[(full, score)],
+        total_matching=1,
+        focus="   ",
+    ).run()
+
+    assert "pivot_suggested" not in result

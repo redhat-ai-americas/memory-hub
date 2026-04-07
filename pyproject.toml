@@ -42,4 +42,5 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: tests requiring real PostgreSQL + pgvector (deselect with '-m not integration')",
+    "perf: benchmark suite that talks to deployed embedding/reranker services (opt-in via '-m perf')",
 ]

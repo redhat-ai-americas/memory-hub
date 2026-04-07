@@ -18,14 +18,17 @@ from memoryhub.models.schemas import (
 )
 from memoryhub.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
 from memoryhub.services.memory import (
+    DEFAULT_PIVOT_THRESHOLD,
     create_memory,
     get_memory_history,
     read_memory,
     report_contradiction,
     resolve_contradiction,
     search_memories,
+    search_memories_with_focus,
     update_memory,
 )
+from memoryhub.services.rerank import NoopRerankerService, RerankerService
 
 
 def _make_create_data(**overrides) -> MemoryNodeCreate:
@@ -607,3 +610,243 @@ async def test_search_memories_current_only(async_session, embedding_service):
 
     # Only the current version should be returned
     assert all((r.is_current if isinstance(r, MemoryNodeRead) else True) for r, _ in results)
+
+
+# -- search_memories_with_focus (#58) --
+
+
+class _StubReranker(RerankerService):
+    """Reranker that reverses input order, with a usage counter.
+
+    Reversing makes the cross-encoder reordering observable in tests
+    without requiring a real model -- if the test sees the reversed
+    order in the output, the rerank stage ran. The counter lets tests
+    verify the rerank was called the expected number of times.
+    """
+
+    is_configured = True
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def rerank(self, query, texts):
+        self.calls += 1
+        return list(range(len(texts) - 1, -1, -1))
+
+
+async def test_search_with_focus_no_focus_short_circuits(
+    async_session, embedding_service
+):
+    """Empty/zero-weight focus should match plain search_memories output."""
+    await create_memory(
+        _make_create_data(content="podman build --platform linux/amd64", weight=0.9),
+        async_session,
+        embedding_service,
+    )
+    await create_memory(
+        _make_create_data(content="OAuth client credentials grant", weight=0.9),
+        async_session,
+        embedding_service,
+    )
+
+    bundle = await search_memories_with_focus(
+        query="podman",
+        session=async_session,
+        embedding_service=embedding_service,
+        focus_string="",  # empty focus should short-circuit
+        owner_id="user-123",
+    )
+
+    # Short-circuit means no pivot signal is computed and no rerank
+    # call is needed. Results match the cosine baseline.
+    assert bundle.pivot_suggested is False
+    assert bundle.pivot_distance is None
+    assert bundle.used_reranker is False
+    assert bundle.fallback_reason is None
+    assert len(bundle.results) >= 1
+
+
+async def test_search_with_focus_zero_weight_short_circuits(
+    async_session, embedding_service
+):
+    """session_focus_weight=0.0 should also bypass the focus path."""
+    await create_memory(
+        _make_create_data(content="OpenShift route TLS termination", weight=0.9),
+        async_session,
+        embedding_service,
+    )
+    bundle = await search_memories_with_focus(
+        query="route TLS",
+        session=async_session,
+        embedding_service=embedding_service,
+        focus_string="OpenShift",
+        session_focus_weight=0.0,
+        owner_id="user-123",
+    )
+    assert bundle.used_reranker is False
+    assert bundle.pivot_suggested is False
+    assert bundle.pivot_distance is None
+
+
+async def test_search_with_focus_runs_reranker_when_configured(
+    async_session, embedding_service
+):
+    """When focus is set and reranker is configured, the rerank runs once."""
+    for content in (
+        "podman build --platform linux/amd64",
+        "OpenShift BuildConfig binary source type",
+        "container image registry pull policy",
+    ):
+        await create_memory(
+            _make_create_data(content=content, weight=0.9),
+            async_session,
+            embedding_service,
+        )
+
+    stub_reranker = _StubReranker()
+    bundle = await search_memories_with_focus(
+        query="container deployment",
+        session=async_session,
+        embedding_service=embedding_service,
+        focus_string="OpenShift container build",
+        session_focus_weight=0.4,
+        reranker=stub_reranker,
+        owner_id="user-123",
+        max_results=5,
+    )
+
+    assert stub_reranker.calls == 1
+    assert bundle.used_reranker is True
+    assert bundle.fallback_reason is None
+    assert len(bundle.results) >= 1
+
+
+async def test_search_with_focus_falls_back_when_reranker_fails(
+    async_session, embedding_service
+):
+    """Reranker exceptions are caught; the bundle reports the fallback reason."""
+    await create_memory(
+        _make_create_data(content="podman containerfile patterns", weight=0.9),
+        async_session,
+        embedding_service,
+    )
+
+    class _ExplodingReranker(RerankerService):
+        is_configured = True
+
+        async def rerank(self, query, texts):
+            raise RuntimeError("simulated reranker outage")
+
+    bundle = await search_memories_with_focus(
+        query="container",
+        session=async_session,
+        embedding_service=embedding_service,
+        focus_string="OpenShift",
+        session_focus_weight=0.4,
+        reranker=_ExplodingReranker(),
+        owner_id="user-123",
+    )
+    assert bundle.used_reranker is False
+    assert bundle.fallback_reason is not None
+    # The fallback reason records the exception type (not the message,
+    # which may contain sensitive data). The actual message still
+    # appears in the warning log for operator debugging.
+    assert "RuntimeError" in bundle.fallback_reason
+    assert "falling back" in bundle.fallback_reason
+    # Results still come back from the cosine fallback path.
+    assert len(bundle.results) >= 1
+
+
+async def test_search_with_focus_skips_rerank_when_noop(
+    async_session, embedding_service
+):
+    """NoopRerankerService.is_configured=False causes the rerank stage to skip."""
+    await create_memory(
+        _make_create_data(content="podman build linux amd64", weight=0.9),
+        async_session,
+        embedding_service,
+    )
+    bundle = await search_memories_with_focus(
+        query="podman build",
+        session=async_session,
+        embedding_service=embedding_service,
+        focus_string="OpenShift container build",
+        session_focus_weight=0.4,
+        reranker=NoopRerankerService(),
+        owner_id="user-123",
+    )
+    assert bundle.used_reranker is False
+    assert bundle.fallback_reason is not None
+    assert "not configured" in bundle.fallback_reason
+
+
+async def test_search_with_focus_emits_pivot_signal_for_distant_query(
+    async_session, embedding_service
+):
+    """A query string that diverges from the focus should set pivot_suggested.
+
+    The mock embedding service produces embeddings via word-hash sums,
+    so two strings with no shared words map to nearly orthogonal
+    vectors -- cosine distance >= ~1.0, well above the 0.55 threshold.
+    """
+    await create_memory(
+        _make_create_data(content="random unrelated content", weight=0.9),
+        async_session,
+        embedding_service,
+    )
+    bundle = await search_memories_with_focus(
+        query="alpha bravo charlie delta",
+        session=async_session,
+        embedding_service=embedding_service,
+        focus_string="kilo lima mike november",
+        session_focus_weight=0.4,
+        owner_id="user-123",
+        pivot_threshold=DEFAULT_PIVOT_THRESHOLD,
+    )
+    assert bundle.pivot_suggested is True
+    assert bundle.pivot_distance is not None
+    assert bundle.pivot_distance > DEFAULT_PIVOT_THRESHOLD
+    assert bundle.pivot_reason is not None
+    assert "threshold" in bundle.pivot_reason
+
+
+async def test_search_with_focus_no_pivot_when_query_aligned_with_focus(
+    async_session, embedding_service
+):
+    """Same-words query and focus should sit close enough to clear the threshold."""
+    await create_memory(
+        _make_create_data(content="podman openshift build", weight=0.9),
+        async_session,
+        embedding_service,
+    )
+    bundle = await search_memories_with_focus(
+        query="podman openshift build",
+        session=async_session,
+        embedding_service=embedding_service,
+        focus_string="podman openshift build",
+        session_focus_weight=0.4,
+        owner_id="user-123",
+    )
+    # Identical strings should have distance ~ 0, far below threshold.
+    assert bundle.pivot_suggested is False
+    assert bundle.pivot_distance is not None
+    assert bundle.pivot_distance < DEFAULT_PIVOT_THRESHOLD
+
+
+async def test_search_with_focus_returns_empty_when_no_authorized_scopes(
+    async_session, embedding_service
+):
+    """Empty authorized_scopes short-circuits to no results, with pivot still computed."""
+    bundle = await search_memories_with_focus(
+        query="anything",
+        session=async_session,
+        embedding_service=embedding_service,
+        focus_string="something",
+        session_focus_weight=0.4,
+        authorized_scopes={},  # explicitly empty
+    )
+    assert bundle.results == []
+    # Pivot computation is independent of the DB filter, so it still
+    # ran and the bundle reports the distance + threshold.
+    assert bundle.pivot_distance is not None
+    assert bundle.pivot_threshold == DEFAULT_PIVOT_THRESHOLD

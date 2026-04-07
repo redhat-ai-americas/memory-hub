@@ -207,6 +207,8 @@ class MemoryHubClient:
         mode: Literal["full", "index", "full_only"] | None = None,
         max_response_tokens: int | None = None,
         include_branches: bool = False,
+        focus: str | None = None,
+        session_focus_weight: float | None = None,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -240,16 +242,28 @@ class MemoryHubClient:
                 ``read_memory`` using ``has_rationale``/``has_children`` flags.
                 Branches whose parent is not in the result set are always
                 returned as top-level entries regardless of this flag.
+            focus: Optional session focus string (#58, two-vector retrieval).
+                When set, retrieval biases toward memories matching the focus
+                in addition to the query. Pass per call (stateless); the SDK
+                does not yet read ``focus_source`` from project config since
+                inference belongs in the consumer code (Q3 resolution).
+            session_focus_weight: Strength of the focus bias (0.0-1.0).
+                Ignored when focus is None. Defaults to the project config's
+                ``memory_loading.session_focus_weight`` when omitted (schema
+                default 0.4).
         """
         defaults = self._project_config.retrieval_defaults
+        loading = self._project_config.memory_loading
         if max_results is None:
             max_results = defaults.max_results
         if mode is None:
             mode = defaults.default_mode
         if max_response_tokens is None:
             max_response_tokens = defaults.max_response_tokens
+        if session_focus_weight is None:
+            session_focus_weight = loading.session_focus_weight
 
-        data = await self._call("search_memory", {
+        payload: dict[str, Any] = {
             "query": query,
             "scope": scope,
             "owner_id": owner_id,
@@ -259,7 +273,15 @@ class MemoryHubClient:
             "mode": mode,
             "max_response_tokens": max_response_tokens,
             "include_branches": include_branches,
-        })
+        }
+        # Only forward focus params when the caller actually supplied a
+        # focus string. Sending session_focus_weight without focus would
+        # be a no-op on the server but adds noise to the wire format.
+        if focus is not None:
+            payload["focus"] = focus
+            payload["session_focus_weight"] = session_focus_weight
+
+        data = await self._call("search_memory", payload)
         return SearchResult.model_validate(data)
 
     async def read(

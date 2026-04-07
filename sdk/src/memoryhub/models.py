@@ -72,13 +72,23 @@ class DeleteResult(BaseModel):
 
 
 class SearchResult(BaseModel):
-    """Result of a search_memory operation."""
+    """Result of a search_memory operation.
+
+    The ``pivot_*`` fields are populated only when the caller passed a
+    ``focus`` argument to :meth:`MemoryHubClient.search`. They let the
+    agent notice when the immediate query has drifted off the declared
+    focus and decide whether to rebias (see #58, Pattern C pivot
+    detection). When no focus was declared, these fields are ``None``.
+    """
 
     model_config = ConfigDict(extra="allow")
 
     results: list[Memory]
     total_matching: int = 0
     has_more: bool = False
+    pivot_suggested: bool | None = None
+    pivot_reason: str | None = None
+    focus_fallback_reason: str | None = None
 
 
 class VersionEntry(BaseModel):

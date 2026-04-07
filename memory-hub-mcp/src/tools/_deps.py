@@ -8,9 +8,15 @@ from memoryhub.services.embeddings import (
     HttpEmbeddingService,
     MockEmbeddingService,
 )
+from memoryhub.services.rerank import (
+    HttpRerankerService,
+    NoopRerankerService,
+    RerankerService,
+)
 from src.tools.auth import require_auth
 
 _embedding_service: EmbeddingService | None = None
+_reranker_service: RerankerService | None = None
 
 
 def get_embedding_service() -> EmbeddingService:
@@ -23,6 +29,24 @@ def get_embedding_service() -> EmbeddingService:
         else:
             _embedding_service = MockEmbeddingService()
     return _embedding_service
+
+
+def get_reranker_service() -> RerankerService:
+    """Return the cross-encoder reranker, or a Noop when MEMORYHUB_RERANKER_URL unset.
+
+    The Noop instance has is_configured=False so search_memories_with_focus
+    will skip the rerank stage and fall back to cosine ranks. The function
+    is still safe to call when no reranker is deployed -- callers don't
+    need to check for None.
+    """
+    global _reranker_service
+    if _reranker_service is None:
+        url = os.environ.get("MEMORYHUB_RERANKER_URL")
+        if url:
+            _reranker_service = HttpRerankerService(url)
+        else:
+            _reranker_service = NoopRerankerService()
+    return _reranker_service
 
 
 async def get_db_session():

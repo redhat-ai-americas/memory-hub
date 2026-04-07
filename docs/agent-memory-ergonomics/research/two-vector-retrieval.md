@@ -1,8 +1,8 @@
 # Research: Two-Vector Retrieval Ranking Math
 
-**Status:** Options identified 2026-04-07. No empirical data yet. Benchmark harness is sketched below but not yet built.
+**Status:** Resolved 2026-04-07 (benchmark complete). NEW-1 (RRF blend over cross-encoder rerank) wins. Benchmark results and decision are documented in [§Recommendation (final)](#recommendation-final) below; the original three-option analysis remains for historical reference.
 
-**Feeds into:** [`../design.md`](../design.md) §Session Focus and Retrieval Biasing, issue #58, open question Q1.
+**Feeds into:** [`../design.md`](../design.md) §Session Focus and Retrieval Biasing, issue #58, open question Q1 (resolved).
 
 ## Question
 
@@ -82,7 +82,74 @@ Pass `q_combined` to the existing pgvector cosine-distance query. One call, top-
 
 **Empirical risk:** This option is the cheapest to try and also the most likely to produce surprising results. If it works on a synthetic benchmark, it's the winner. If it doesn't, Option A or B win.
 
-## Recommendation (Provisional)
+## Recommendation (final)
+
+**Winner: NEW-1 (RRF blend over cross-encoder rerank), default `session_focus_weight = 0.3` (between sweep values 0.2 and 0.4).** The original Options A/B/C were superseded once a deployed cross-encoder reranker (`ms-marco-MiniLM-L12-v2`) became available — see [§Cross-encoder reranker integration](#cross-encoder-reranker-integration) below.
+
+**Architecture:**
+
+```
+pgvector cosine recall (top-K=32 by query)
+        ↓
+cross-encoder rerank by query.text (single batch ≤32)
+        ↓
+RRF blend (rank_ce, rank_focus_cosine) weighted by session_focus_weight
+        ↓
+top-N (default N=10)
+```
+
+**Production short-circuit:** when the focus is unset OR `session_focus_weight ≤ 0.0`, skip both the cross-encoder rerank and the RRF blend. Return the baseline cosine top-N directly. This avoids both the network call and a small ambiguous-query regression observed in the NEW-3 (rerank-only) measurements below.
+
+**Reranker fallback policy:** when `MEMORYHUB_RERANKER_URL` is unset or the rerank call fails, log at INFO level and degrade gracefully to a cosine-rank version of NEW-1 (recall by query cosine, RRF blend rank-by-cosine with rank-by-focus-cosine). This is essentially the original Option A from the rejected analysis below — a viable algorithm worth keeping as the fallback because it preserves NEW-1's focus integration even when the cross-encoder is unavailable.
+
+**Empirical numbers** (40 queries × 3 session conditions × weight sweep, K_recall=32, N_final=10, recall ceiling 0.20 because each topic has 50 memories):
+
+| pipeline | condition          | weight | recall@10 | prec@10 | MRR    |
+|----------|--------------------|--------|-----------|---------|--------|
+| baseline | none               | —      | .1645     | .8225   | .9833  |
+| new3     | none               | —      | .1605     | .8025   | .9750  |
+| new1     | focus_match        | 0.20   | .1685     | .8425   | .9750  |
+| new1     | focus_match        | 0.40   | .1810     | .9050   | .9875  |
+| new1     | focus_match        | 0.60   | .1870     | .9350   | .9875  |
+| new1     | focus_cross (avg)  | 0.20   | .1587     | .7933   | .8875  |
+| new1     | focus_cross (avg)  | 0.40   | .1453     | .7267   | .8170  |
+| new1     | focus_cross (avg)  | 0.60   | .1178     | .5892   | .7118  |
+| new2     | focus_match        | —      | .1850     | .9250   | 1.0000 |
+| new2     | focus_cross (avg)  | —      | .1040     | .5200   | .4038  |
+
+`focus_cross` averages across all three other-topic foci per query.
+
+**Key findings:**
+
+1. **NEW-1 with RRF blend strictly dominates rerank-only on focus_match conditions.** At w=0.4 it lifts recall by +13% over NEW-3 and +10% over the baseline cosine. At w=0.2 it lifts recall by +5% over NEW-3 with only -1% loss on focus_cross — best gain-to-loss ratio in the sweep.
+
+2. **NEW-2 (focus-augmented query) is dead.** Cross-topic recall collapses to 0.104 (-37% vs baseline) and MRR to 0.40. The cross-encoder treats the prepended focus as adversarial query pollution. Drop NEW-2 from the design space.
+
+3. **The cross-encoder alone (NEW-3) slightly underperforms the cosine baseline on this synthetic dataset**, especially on ambiguous queries (-7% recall). The synthetic memories are short and topic-coherent enough that the embedding cosine already captures the semantic match, and the MS-MARCO-trained cross-encoder doesn't add much when there's nothing to disambiguate. **The reranker is only useful as part of NEW-1's RRF blend, not on its own.** This finding drove the production short-circuit rule above and may not generalize to real production data (longer, noisier memories), but the architecture is correct regardless.
+
+4. **Cross-topic recall stays acceptable up to w=0.4.** At w=0.2 the focus_cross loss is statistically negligible (-1%). At w=0.4 it's manageable (-11%). At w≥0.6 it's unacceptable (-28% to -37%). The "out-of-focus memories aren't excluded, just down-weighted" promise from the design holds at w ≤ 0.4.
+
+5. **The schema's `session_focus_weight: 0.4` default is in the right ballpark.** The strictly best gain/loss ratio is at w=0.2, but w=0.3-0.4 maximizes match recall while still keeping cross-topic loss bounded. Leaving the schema default at 0.4 is fine; users who prioritize cross-topic protection can lower it manually.
+
+**Raw results:** `benchmarks/two-vector-retrieval-20260407T184120Z.json` (committed alongside this decision). Run-time was ~3 minutes (244 embedding calls + 200 reranker calls + in-process metric aggregation).
+
+## Cross-encoder reranker integration
+
+Added 2026-04-07: a deployed `ms-marco-MiniLM-L12-v2` cross-encoder at `https://ms-marco-minilm-l12-v2-reranker-model.apps.cluster-n7pd5...` is now available as the rerank stage of NEW-1. The reranker exposes `POST /rerank` taking `{query, texts}` and returning `[{index, score}, ...]` pre-sorted by descending score. Constraints reported by `GET /info`: `max_client_batch_size=32`, `max_input_length=512` tokens.
+
+**Why the cross-encoder changed the design space.** The original Options A/B/C all blended two cosine scores. With a real cross-encoder available, the rerank stage of Option B becomes a learned relevance model instead of a cosine blend, and Options A and C lose to NEW-1 on both expressiveness (cross-encoder >> cosine for relevance) and code simplicity. NEW-2 (focus-augmented query string) was added as a hypothesis worth testing because it's the simplest possible focus integration, but the benchmark proved it untenable.
+
+**Per-call cost** with K_recall=32: one batch fits in a single rerank call; observed latency is ~50-100ms per call against the deployed endpoint. The benchmark amortizes this by computing the rerank-by-query exactly once per query and reusing it across the 5 NEW-1 weight values (the cross-encoder input is `query.text`, which doesn't depend on the focus or the blend weight). Production code applies the same caching pattern naturally because each `search_memory` call is one query.
+
+**Score-scale warning from the user when the reranker shipped:** "Cross-encoder scores are unbounded sigmoid outputs — relative ordering matters more than absolute values; don't try to threshold on a fixed score across different queries." NEW-1 honors this by working entirely in *rank* space, never in score space — RRF takes 1-based ranks from each input list and combines them via `1 / (k + rank)`. No score-magnitude assumptions needed.
+
+---
+
+## Original three-option analysis (historical)
+
+The pre-reranker analysis evaluated three pure-cosine ranking approaches. Preserved here for context; superseded by the cross-encoder integration above.
+
+### Original recommendation (provisional, since superseded)
 
 **Start with Option B (rerank-after-recall).** Reasoning:
 

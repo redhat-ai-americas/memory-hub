@@ -4,7 +4,10 @@ This module sits between the MCP tools and the database. All methods are async
 and receive an explicit AsyncSession (no hidden global state).
 """
 
+import logging
+import math
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Integer, and_, func, or_, select, update
@@ -29,6 +32,22 @@ from memoryhub.services.exceptions import (
     MemoryNotCurrentError,
     MemoryNotFoundError,
 )
+from memoryhub.services.rerank import RERANK_MAX_BATCH, RerankerService
+
+logger = logging.getLogger(__name__)
+
+
+# Default RRF constant -- standard "k=60" from the original RRF paper.
+# Used by both the production search path and the benchmark harness so
+# the empirical and production behaviors stay aligned.
+RRF_K = 60
+
+# Default cosine distance threshold for the pivot signal. Cosine
+# distance ranges 0..2; the design's research file recommended 0.55
+# as a starting threshold. Surfaced as a parameter on
+# search_memories_with_focus so callers can tune empirically without
+# touching service code.
+DEFAULT_PIVOT_THRESHOLD = 0.55
 
 
 async def create_memory(
@@ -491,6 +510,326 @@ async def search_memories(
                 )
             )
     return results
+
+
+# ---- Two-vector retrieval (#58, NEW-1 RRF blend) -----------------------
+
+
+@dataclass
+class FocusedSearchResult:
+    """Output of search_memories_with_focus.
+
+    The `results` list has the same shape as search_memories' return
+    value (list of (item, relevance_score) tuples) so MCP tool code
+    can format both paths uniformly. The pivot_* fields surface the
+    embedding distance from the query to the focus vector and a
+    boolean threshold flag; only set when a focus was provided.
+    """
+
+    results: list[tuple[MemoryNodeRead | MemoryNodeStub, float]] = field(
+        default_factory=list
+    )
+    pivot_suggested: bool = False
+    pivot_distance: float | None = None
+    pivot_threshold: float | None = None
+    pivot_reason: str | None = None
+    used_reranker: bool = False
+    fallback_reason: str | None = None
+
+
+def _cosine_distance(a: list[float], b: list[float]) -> float:
+    """Cosine distance for two vectors. Range [0, 2]; 0 = identical."""
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b, strict=True):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na <= 0 or nb <= 0:
+        return 1.0
+    sim = dot / (math.sqrt(na) * math.sqrt(nb))
+    # Clamp to handle floating-point drift outside [-1, 1].
+    sim = max(-1.0, min(1.0, sim))
+    return 1.0 - sim
+
+
+async def search_memories_with_focus(
+    query: str,
+    session: AsyncSession,
+    embedding_service: EmbeddingService,
+    *,
+    focus_string: str,
+    session_focus_weight: float = 0.4,
+    reranker: RerankerService | None = None,
+    pivot_threshold: float = DEFAULT_PIVOT_THRESHOLD,
+    scope: str | None = None,
+    owner_id: str | None = None,
+    weight_threshold: float = 0.8,
+    max_results: int = 20,
+    current_only: bool = True,
+    authorized_scopes: dict[str, str | None] | None = None,
+) -> FocusedSearchResult:
+    """Two-vector retrieval with session focus bias.
+
+    Pipeline (NEW-1 from research/two-vector-retrieval.md):
+
+        pgvector cosine recall (top-K_recall by query)
+            ↓
+        cross-encoder rerank by query.text (when reranker available)
+            ↓
+        RRF blend (rerank ranks, focus cosine ranks)
+            ↓
+        top max_results
+
+    The focus string is embedded once per call and used both as the
+    bias vector for the RRF blend and as the basis for pivot detection.
+
+    When `session_focus_weight <= 0` or `focus_string` is empty, this
+    function falls through to the same code path as `search_memories`
+    -- it accepts the call shape for caller convenience but does no
+    additional work.
+
+    When the reranker is None, not configured, or fails at call time,
+    the rerank stage is skipped and the RRF blend operates on cosine
+    ranks instead. The fallback path is logged via the returned
+    ``fallback_reason`` so the MCP tool can surface it for debugging.
+
+    Returns a FocusedSearchResult dataclass; see its docstring for
+    field semantics.
+    """
+    if not focus_string or session_focus_weight <= 0.0:
+        # No-focus short-circuit. Skips both the focus embed and the
+        # rerank network call. Mirrors the production-tuning rule
+        # from the benchmark: when there's no focus signal, the
+        # cross-encoder doesn't help, so don't pay for it.
+        plain = await search_memories(
+            query=query,
+            session=session,
+            embedding_service=embedding_service,
+            scope=scope,
+            owner_id=owner_id,
+            weight_threshold=weight_threshold,
+            max_results=max_results,
+            current_only=current_only,
+            authorized_scopes=authorized_scopes,
+        )
+        return FocusedSearchResult(results=plain)
+
+    query_embedding = await embedding_service.embed(query)
+    focus_embedding = await embedding_service.embed(focus_string)
+
+    pivot_distance = _cosine_distance(query_embedding, focus_embedding)
+    pivot_suggested = pivot_distance > pivot_threshold
+    pivot_reason: str | None = None
+    if pivot_suggested:
+        pivot_reason = (
+            f"query vector distance from session focus is "
+            f"{pivot_distance:.3f} (threshold {pivot_threshold:.2f})"
+        )
+
+    filters = _build_search_filters(scope, owner_id, current_only, authorized_scopes)
+    if filters is None:
+        return FocusedSearchResult(
+            pivot_suggested=pivot_suggested,
+            pivot_distance=pivot_distance,
+            pivot_threshold=pivot_threshold,
+            pivot_reason=pivot_reason,
+        )
+
+    # Recall pool: at least RERANK_MAX_BATCH so the rerank stage has
+    # headroom over max_results, and at least max_results so the
+    # blend has the requested page worth of candidates even when
+    # max_results > RERANK_MAX_BATCH.
+    k_recall = max(RERANK_MAX_BATCH, max_results)
+
+    use_pgvector = True
+    try:
+        distance_expr = MemoryNode.embedding.cosine_distance(query_embedding)
+        stmt = (
+            select(MemoryNode, distance_expr.label("distance"))
+            .where(*filters)
+            .order_by(distance_expr)
+            .limit(k_recall)
+        )
+    except Exception:
+        use_pgvector = False
+        stmt = (
+            select(MemoryNode)
+            .where(*filters)
+            .order_by(MemoryNode.weight.desc())
+            .limit(k_recall)
+        )
+
+    db_result = await session.execute(stmt)
+
+    if use_pgvector:
+        rows = db_result.all()
+        candidate_nodes: list[MemoryNode] = [row[0] for row in rows]
+    else:
+        candidate_nodes = list(db_result.scalars().all())
+
+    if not candidate_nodes:
+        return FocusedSearchResult(
+            pivot_suggested=pivot_suggested,
+            pivot_distance=pivot_distance,
+            pivot_threshold=pivot_threshold,
+            pivot_reason=pivot_reason,
+        )
+
+    # Cosine ranks of the recall pool by query (already in this
+    # order from pgvector). 1-based ranks.
+    rank_query: dict[uuid.UUID, int] = {
+        node.id: idx + 1 for idx, node in enumerate(candidate_nodes)
+    }
+
+    # Cross-encoder rerank stage (top RERANK_MAX_BATCH only).
+    used_reranker = False
+    fallback_reason: str | None = None
+    if reranker is not None and getattr(reranker, "is_configured", True):
+        rerank_pool = candidate_nodes[:RERANK_MAX_BATCH]
+        try:
+            order = await reranker.rerank(
+                query, [n.content for n in rerank_pool]
+            )
+            # Replace the query-cosine ranks for the reranked subset
+            # with cross-encoder ranks. Items beyond RERANK_MAX_BATCH
+            # keep their cosine rank.
+            for new_rank, original_idx in enumerate(order, start=1):
+                node = rerank_pool[original_idx]
+                rank_query[node.id] = new_rank
+            # Items at positions [RERANK_MAX_BATCH..k_recall) need
+            # ranks shifted to live after the reranked block.
+            for idx in range(RERANK_MAX_BATCH, len(candidate_nodes)):
+                rank_query[candidate_nodes[idx].id] = idx + 1
+            used_reranker = True
+        except Exception as exc:  # pragma: no cover - network error
+            fallback_reason = (
+                f"reranker call failed ({type(exc).__name__}); "
+                "falling back to cosine rank"
+            )
+            logger.warning(
+                "search_memories_with_focus reranker fallback: %s", exc
+            )
+    elif reranker is None:
+        fallback_reason = (
+            "no reranker configured; using cosine rank for query stage"
+        )
+    else:
+        fallback_reason = (
+            "reranker not configured (is_configured=False); using cosine rank"
+        )
+
+    # Focus cosine ranks across the candidate pool. Distance from the
+    # focus vector ascending = best focus match first.
+    focus_scored = sorted(
+        candidate_nodes,
+        key=lambda n: _cosine_distance(focus_embedding, list(n.embedding))
+        if n.embedding is not None
+        else 1.0,
+    )
+    rank_focus: dict[uuid.UUID, int] = {
+        node.id: idx + 1 for idx, node in enumerate(focus_scored)
+    }
+
+    # RRF blend: rank_query carries the cross-encoder ranks (or
+    # cosine fallback ranks); rank_focus carries the focus-cosine
+    # ranks. weight_b = session_focus_weight pushes the result
+    # toward focus.
+    weight_q = 1.0 - session_focus_weight
+    blended_scores: list[tuple[MemoryNode, float]] = []
+    for node in candidate_nodes:
+        score_q = weight_q / (RRF_K + rank_query.get(node.id, k_recall + 1))
+        score_f = session_focus_weight / (
+            RRF_K + rank_focus.get(node.id, k_recall + 1)
+        )
+        blended_scores.append((node, score_q + score_f))
+    blended_scores.sort(key=lambda pair: pair[1], reverse=True)
+
+    top_nodes = [node for node, _ in blended_scores[:max_results]]
+    if not top_nodes:
+        return FocusedSearchResult(
+            pivot_suggested=pivot_suggested,
+            pivot_distance=pivot_distance,
+            pivot_threshold=pivot_threshold,
+            pivot_reason=pivot_reason,
+            used_reranker=used_reranker,
+            fallback_reason=fallback_reason,
+        )
+
+    # Bulk-query branch flags for the final result set.
+    branch_flags = await _bulk_branch_flags([n.id for n in top_nodes], session)
+
+    # Compute relevance_score from the original query cosine distance
+    # so existing MCP-tool formatting (which prints relevance_score
+    # rounded to 4 decimals) shows a meaningful number even when the
+    # rerank reordered the list. relevance_score reflects raw query
+    # affinity, not the RRF-blended rank.
+    if use_pgvector:
+        # Recompute query cosine distance per node for the relevance
+        # score. The values were available in the original SQL row
+        # tuples but we discarded them above; recomputing here keeps
+        # the data flow simple and the cost is negligible (top-N
+        # nodes only, in-process).
+        query_dist_by_id: dict[uuid.UUID, float] = {}
+        for node in top_nodes:
+            if node.embedding is not None:
+                query_dist_by_id[node.id] = _cosine_distance(
+                    query_embedding, list(node.embedding)
+                )
+            else:
+                query_dist_by_id[node.id] = 1.0
+    else:
+        # SQLite fallback: synthetic rank-based scores like search_memories.
+        query_dist_by_id = {
+            node.id: idx / max(1, len(top_nodes))
+            for idx, node in enumerate(top_nodes)
+        }
+
+    formatted: list[tuple[MemoryNodeRead | MemoryNodeStub, float]] = []
+    for node in top_nodes:
+        relevance_score = max(0.0, 1.0 - query_dist_by_id[node.id])
+        has_children, has_rationale, branch_count = branch_flags.get(
+            node.id, (False, False, 0)
+        )
+        if node.weight >= weight_threshold:
+            formatted.append(
+                (
+                    node_to_read(
+                        node,
+                        has_children=has_children,
+                        has_rationale=has_rationale,
+                        branch_count=branch_count,
+                    ),
+                    relevance_score,
+                )
+            )
+        else:
+            formatted.append(
+                (
+                    MemoryNodeStub(
+                        id=node.id,
+                        parent_id=node.parent_id,
+                        stub=node.stub,
+                        scope=node.scope,
+                        weight=node.weight,
+                        branch_type=node.branch_type,
+                        has_children=has_children,
+                        has_rationale=has_rationale,
+                    ),
+                    relevance_score,
+                )
+            )
+
+    return FocusedSearchResult(
+        results=formatted,
+        pivot_suggested=pivot_suggested,
+        pivot_distance=pivot_distance,
+        pivot_threshold=pivot_threshold,
+        pivot_reason=pivot_reason,
+        used_reranker=used_reranker,
+        fallback_reason=fallback_reason,
+    )
 
 
 async def get_memory_history(

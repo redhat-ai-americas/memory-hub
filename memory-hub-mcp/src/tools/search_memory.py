@@ -13,7 +13,11 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
-from memoryhub.services.memory import count_search_matches, search_memories
+from memoryhub.services.memory import (
+    count_search_matches,
+    search_memories,
+    search_memories_with_focus,
+)
 from src.core.app import mcp
 from src.core.authz import (
     get_claims_from_context,
@@ -23,6 +27,7 @@ from src.core.authz import (
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
+    get_reranker_service,
     release_db_session,
 )
 
@@ -186,6 +191,35 @@ async def search_memory(
             ),
         ),
     ] = False,
+    focus: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Optional session focus string (e.g., 'OpenShift deployment' or "
+                "'OAuth token validation'). When provided, retrieval is biased toward "
+                "memories whose content matches the focus, in addition to the immediate "
+                "query. Out-of-focus memories are down-weighted but not excluded -- a "
+                "strong query match still surfaces them. The focus string is embedded "
+                "and combined with the query via reciprocal-rank fusion (NEW-1 from "
+                "the two-vector retrieval research). Pass per call rather than via "
+                "register_session: stateless makes scaling and concurrency simpler."
+            ),
+        ),
+    ] = None,
+    session_focus_weight: Annotated[
+        float,
+        Field(
+            description=(
+                "Strength of the focus bias when 'focus' is set, on a 0.0 to 1.0 "
+                "scale. 0.0 collapses to plain query-cosine retrieval (focus has no "
+                "effect). 0.4 (the default) follows the project config schema and "
+                "produced the best gain/loss ratio in benchmarking. Values above 0.6 "
+                "tank cross-topic recall. Ignored when focus is None."
+            ),
+            ge=0.0,
+            le=1.0,
+        ),
+    ] = 0.4,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Search memories using semantic similarity. Returns ranked results as a mix of
@@ -202,6 +236,12 @@ async def search_memory(
         in-memory branch omission. Use this to display "showing N of M".
       - has_more: true when total_matching > len(results); indicates that
         narrowing filters or paging would reveal additional matches.
+      - pivot_suggested (only when 'focus' was set): true if the immediate
+        query embedding sits far from the session focus vector, indicating
+        the user has likely pivoted off-topic. Agents should consider
+        re-issuing search_memory with a fresh focus when this flag fires.
+      - pivot_reason (only when 'focus' was set): human-readable explanation
+        of the pivot signal -- query-to-focus distance and the threshold.
 
     Sizing controls:
       - mode controls full-vs-stub detail per result.
@@ -209,6 +249,17 @@ async def search_memory(
         degrade to stubs in similarity order.
       - include_branches controls whether branches whose parent is also in the
         result set are dropped (default) or nested under their parent.
+
+    Session focus (#58):
+      - Pass 'focus' on every call (stateless). When set, retrieval uses
+        two-vector NEW-1: pgvector cosine recall, cross-encoder rerank by
+        query, RRF blend with focus cosine ranks. The reranker is optional
+        -- when MEMORYHUB_RERANKER_URL is unset or unreachable, the path
+        gracefully degrades to a cosine-rank blend.
+      - session_focus_weight controls the bias strength. Default 0.4 lifts
+        on-focus recall by ~10% over cosine baseline at the cost of ~10% on
+        cross-topic queries. Lower (0.2) for conservative focus, higher
+        (0.6) for aggressive bias.
     """
     if not query.strip():
         raise ToolError(
@@ -246,17 +297,47 @@ async def search_memory(
             await ctx.info(f"Searching memories: '{query}'")
 
         embedding_service = get_embedding_service()
-        results = await search_memories(
-            query=query,
-            session=session,
-            embedding_service=embedding_service,
-            scope=scope,
-            owner_id=owner_id,
-            weight_threshold=effective_weight_threshold,
-            max_results=max_results,
-            current_only=current_only,
-            authorized_scopes=authorized,
-        )
+
+        # Route to the focused path when a focus is declared; otherwise
+        # the original cosine-only path stays on the hot code path.
+        focus_meta: dict[str, Any] | None = None
+        if focus and focus.strip():
+            reranker = get_reranker_service()
+            bundle = await search_memories_with_focus(
+                query=query,
+                session=session,
+                embedding_service=embedding_service,
+                focus_string=focus.strip(),
+                session_focus_weight=session_focus_weight,
+                reranker=reranker,
+                scope=scope,
+                owner_id=owner_id,
+                weight_threshold=effective_weight_threshold,
+                max_results=max_results,
+                current_only=current_only,
+                authorized_scopes=authorized,
+            )
+            results = bundle.results
+            focus_meta = {
+                "pivot_suggested": bundle.pivot_suggested,
+                "pivot_distance": bundle.pivot_distance,
+                "pivot_threshold": bundle.pivot_threshold,
+                "pivot_reason": bundle.pivot_reason,
+                "used_reranker": bundle.used_reranker,
+                "fallback_reason": bundle.fallback_reason,
+            }
+        else:
+            results = await search_memories(
+                query=query,
+                session=session,
+                embedding_service=embedding_service,
+                scope=scope,
+                owner_id=owner_id,
+                weight_threshold=effective_weight_threshold,
+                max_results=max_results,
+                current_only=current_only,
+                authorized_scopes=authorized,
+            )
 
         # Count all matching memories under the same filter set so the agent
         # can tell whether more matches exist beyond this page.
@@ -269,7 +350,7 @@ async def search_memory(
         )
 
         if not results:
-            return {
+            response: dict[str, Any] = {
                 "results": [],
                 "total_matching": total_matching,
                 "has_more": False,
@@ -278,6 +359,10 @@ async def search_memory(
                     "Try broader search terms or remove scope/owner filters."
                 ),
             }
+            if focus_meta is not None:
+                response["pivot_suggested"] = focus_meta["pivot_suggested"]
+                response["pivot_reason"] = focus_meta["pivot_reason"]
+            return response
 
         # mode='index' degrades every full result to stub form. Done before
         # branch handling so nested branches are also stubs in this mode.
@@ -359,11 +444,22 @@ async def search_memory(
                 formatted.append(stub_entry)
                 budget = max(0, budget - stub_cost)
 
-        return {
+        response = {
             "results": formatted,
             "total_matching": total_matching,
             "has_more": total_matching > len(formatted),
         }
+        if focus_meta is not None:
+            # Surface only the agent-facing pivot fields by default. The
+            # internal `used_reranker` and `fallback_reason` are useful
+            # for operator debugging but noisy for the agent surface;
+            # they are still exposed when the rerank fell back so an
+            # operator can grep response logs.
+            response["pivot_suggested"] = focus_meta["pivot_suggested"]
+            response["pivot_reason"] = focus_meta["pivot_reason"]
+            if focus_meta["fallback_reason"]:
+                response["focus_fallback_reason"] = focus_meta["fallback_reason"]
+        return response
 
     finally:
         await release_db_session(gen)

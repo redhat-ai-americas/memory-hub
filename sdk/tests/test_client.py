@@ -251,6 +251,142 @@ def test_from_env_can_opt_out_of_auto_discover(monkeypatch, tmp_path):
     assert c._project_config.retrieval_defaults.max_results == 10
 
 
+async def test_search_no_focus_omits_focus_params_from_payload(client):
+    """When focus is not passed, the SDK does NOT forward focus params.
+
+    Keeping the wire format minimal helps the server distinguish "no
+    focus declared" from "focus declared with default weight."
+    """
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("any query")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert "focus" not in forwarded
+    assert "session_focus_weight" not in forwarded
+
+
+async def test_search_focus_string_forwards_with_default_weight(client):
+    """Passing focus forwards both focus and session_focus_weight.
+
+    The default weight comes from the project config's
+    memory_loading.session_focus_weight (schema default 0.4).
+    """
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("any query", focus="OpenShift deployment")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["focus"] == "OpenShift deployment"
+    assert forwarded["session_focus_weight"] == 0.4
+
+
+async def test_search_explicit_session_focus_weight_overrides_default(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("query", focus="auth", session_focus_weight=0.2)
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["focus"] == "auth"
+    assert forwarded["session_focus_weight"] == 0.2
+
+
+async def test_search_session_focus_weight_from_project_config():
+    """Project config session_focus_weight is the default when caller omits."""
+    from memoryhub.config import MemoryLoadingConfig
+
+    pc = ProjectConfig(
+        memory_loading=MemoryLoadingConfig(session_focus_weight=0.6),
+    )
+    c = MemoryHubClient(
+        url="https://fake.example.com/mcp/",
+        auth_url="https://fake.example.com",
+        client_id="test",
+        client_secret="test-secret",
+        project_config=pc,
+    )
+    mock_mcp = AsyncMock()
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+    c._mcp = mock_mcp
+
+    await c.search("query", focus="auth")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["session_focus_weight"] == 0.6
+
+
+async def test_search_pivot_fields_round_trip_when_present(client):
+    """Server-side pivot signal parses into the SearchResult fields."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "results": [MINIMAL_MEMORY],
+            "total_matching": 1,
+            "has_more": False,
+            "pivot_suggested": True,
+            "pivot_reason": "query vector distance from session focus is 0.700 (threshold 0.55)",
+        }
+    )
+
+    result = await c.search("question", focus="OpenShift deployment")
+
+    assert result.pivot_suggested is True
+    assert result.pivot_reason is not None
+    assert "threshold" in result.pivot_reason
+    assert result.focus_fallback_reason is None
+
+
+async def test_search_pivot_fields_default_to_none_without_focus(client):
+    """When the server omits pivot fields (no focus path), they parse as None."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "results": [MINIMAL_MEMORY],
+            "total_matching": 1,
+            "has_more": False,
+        }
+    )
+
+    result = await c.search("question")
+
+    assert result.pivot_suggested is None
+    assert result.pivot_reason is None
+    assert result.focus_fallback_reason is None
+
+
+async def test_search_focus_fallback_reason_round_trips(client):
+    """When the server reports a reranker fallback, the SDK surfaces it."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "results": [MINIMAL_MEMORY],
+            "total_matching": 1,
+            "has_more": False,
+            "pivot_suggested": False,
+            "pivot_reason": None,
+            "focus_fallback_reason": (
+                "reranker call failed (TimeoutError); falling back to cosine rank"
+            ),
+        }
+    )
+
+    result = await c.search("question", focus="something")
+
+    assert result.focus_fallback_reason is not None
+    assert "TimeoutError" in result.focus_fallback_reason
+
+
 async def test_search_nested_branches_round_trip(client):
     """Nested branches in the response land on the Memory via extra='allow'."""
     c, mock_mcp = client
