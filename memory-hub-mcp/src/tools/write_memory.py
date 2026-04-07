@@ -120,13 +120,24 @@ async def write_memory(
             ),
         }
 
-    # Validate branch_type requirement
+    # Validate branch_type / parent_id pairing in both directions:
+    # - parent_id without branch_type: branch with no kind label
+    # - branch_type without parent_id: orphan branch with no parent to attach to
     if parent_id is not None and branch_type is None:
         return {
             "error": True,
             "message": (
                 "branch_type is required when parent_id is set. "
                 "Common types: rationale, provenance, description, evidence."
+            ),
+        }
+    if branch_type is not None and parent_id is None:
+        return {
+            "error": True,
+            "message": (
+                "parent_id is required when branch_type is set. "
+                "A branch must attach to a parent memory; omit branch_type "
+                "to create a root-level memory instead."
             ),
         }
 

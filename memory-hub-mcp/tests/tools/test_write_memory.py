@@ -2,6 +2,9 @@
 
 import inspect
 
+import pytest
+
+import src.tools.auth as auth_mod
 from src.tools.write_memory import write_memory
 
 
@@ -42,3 +45,54 @@ def test_write_memory_default_values():
     assert params["parent_id"].default is None
     assert params["branch_type"].default is None
     assert params["metadata"].default is None
+
+
+@pytest.mark.asyncio
+async def test_write_memory_rejects_orphan_branch():
+    """Regression for #48: branch_type without parent_id is invalid.
+
+    A branch must attach to a parent memory. The previous validation only
+    rejected the inverse (parent_id without branch_type), accepting orphans
+    silently and producing memory nodes that claimed to be branches but had
+    no parent.
+    """
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        result = await write_memory(
+            content="orphan branch attempt",
+            scope="user",
+            branch_type="rationale",
+        )
+    finally:
+        auth_mod._current_session = None
+
+    assert result["error"] is True
+    assert "parent_id is required" in result["message"]
+    assert "branch_type" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_write_memory_still_rejects_parent_without_branch_type():
+    """The inverse guard must still fire: parent_id without branch_type is invalid."""
+    import uuid as _uuid
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        result = await write_memory(
+            content="branch with no type",
+            scope="user",
+            parent_id=str(_uuid.uuid4()),
+        )
+    finally:
+        auth_mod._current_session = None
+
+    assert result["error"] is True
+    assert "branch_type is required" in result["message"]
