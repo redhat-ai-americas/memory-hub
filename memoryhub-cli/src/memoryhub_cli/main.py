@@ -133,13 +133,15 @@ def search(
         )
 
     console.print(table)
-    console.print(f"[dim]{len(result.results)} of {result.total_accessible} accessible[/dim]")
+    more = " (more available)" if result.has_more else ""
+    console.print(
+        f"[dim]{len(result.results)} of {result.total_matching} matching{more}[/dim]"
+    )
 
 
 @app.command()
 def read(
     memory_id: str = typer.Argument(..., help="Memory UUID"),
-    depth: int = typer.Option(0, "--depth", "-d", help="Branch depth to load"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Read a memory by ID."""
@@ -147,7 +149,7 @@ def read(
 
     async def _do():
         async with client:
-            return await client.read(memory_id, depth=depth)
+            return await client.read(memory_id)
 
     memory = _run(_do())
 
@@ -161,12 +163,11 @@ def read(
     console.print()
     console.print(memory.content)
 
-    if memory.branches:
-        console.print(f"\n[bold]Branches ({len(memory.branches)}):[/bold]")
-        for branch in memory.branches:
-            console.print(
-                f"  [{branch.branch_type or 'child'}] {branch.stub or branch.content[:60]}"
-            )
+    if memory.branch_count:
+        console.print(
+            f"\n[dim]{memory.branch_count} branch(es). "
+            f"Search or read by ID to inspect them.[/dim]"
+        )
 
 
 @app.command()

@@ -32,7 +32,7 @@ class Memory(BaseModel):
     expires_at: datetime | None = None
     has_children: bool = False
     has_rationale: bool = False
-    branches: list[Memory] | None = None
+    branch_count: int = 0
     relationships: list[dict[str, Any]] | None = None
     relevance_score: float | None = None
     result_type: str | None = None  # "full" or "stub"
@@ -76,7 +76,8 @@ class SearchResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     results: list[Memory]
-    total_accessible: int = 0
+    total_matching: int = 0
+    has_more: bool = False
 
 
 class VersionEntry(BaseModel):

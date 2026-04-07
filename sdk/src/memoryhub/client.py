@@ -181,13 +181,16 @@ class MemoryHubClient:
         self,
         memory_id: str,
         *,
-        depth: int = 0,
         include_versions: bool = False,
     ) -> Memory:
-        """Read a memory by ID, optionally with branches and versions."""
+        """Read a memory by ID, optionally with version history.
+
+        Branch contents are no longer expanded inline; the returned Memory
+        carries a branch_count summary. Inspect specific branches by issuing
+        follow-up search_memory or read_memory calls.
+        """
         data = await self._call("read_memory", {
             "memory_id": memory_id,
-            "depth": depth,
             "include_versions": include_versions,
         })
         return Memory.model_validate(data)

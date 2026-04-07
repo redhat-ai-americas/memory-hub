@@ -39,7 +39,7 @@ MEMORY_FULL = {
     "expires_at": None,
     "has_children": False,
     "has_rationale": True,
-    "branches": None,
+    "branch_count": 0,
     "relationships": None,
     "relevance_score": 0.94,
     "result_type": "full",
@@ -91,7 +91,7 @@ def test_memory_minimal_fields():
     assert mem.has_children is False
     assert mem.has_rationale is False
     assert mem.stub is None
-    assert mem.branches is None
+    assert mem.branch_count == 0
 
 
 def test_memory_extra_fields_allowed():
@@ -117,12 +117,14 @@ def test_search_result_parse():
             MEMORY_FULL,
             {**MEMORY_MINIMAL, "relevance_score": 0.75, "result_type": "stub"},
         ],
-        "total_accessible": 42,
+        "total_matching": 42,
+        "has_more": True,
     }
     result = SearchResult(**payload)
 
     assert len(result.results) == 2
-    assert result.total_accessible == 42
+    assert result.total_matching == 42
+    assert result.has_more is True
     assert result.results[0].id == "mem-abc123"
     assert result.results[1].relevance_score == 0.75
     assert result.results[1].result_type == "stub"
@@ -130,9 +132,10 @@ def test_search_result_parse():
 
 def test_search_result_empty():
     """SearchResult handles an empty results list."""
-    result = SearchResult(results=[], total_accessible=0)
+    result = SearchResult(results=[], total_matching=0, has_more=False)
     assert result.results == []
-    assert result.total_accessible == 0
+    assert result.total_matching == 0
+    assert result.has_more is False
 
 
 # ---------------------------------------------------------------------------

@@ -108,7 +108,8 @@ async def test_search(client):
     mock_mcp.call_tool.return_value = FakeCallToolResult(
         structured_content={
             "results": [MINIMAL_MEMORY],
-            "total_accessible": 1,
+            "total_matching": 1,
+            "has_more": False,
         }
     )
 
@@ -117,7 +118,8 @@ async def test_search(client):
     assert isinstance(result, SearchResult)
     assert len(result.results) == 1
     assert result.results[0].id == "mem-001"
-    assert result.total_accessible == 1
+    assert result.total_matching == 1
+    assert result.has_more is False
 
     mock_mcp.call_tool.assert_awaited_once()
     call_args = mock_mcp.call_tool.call_args
@@ -292,7 +294,8 @@ async def test_none_args_stripped(client):
     mock_mcp.call_tool.return_value = FakeCallToolResult(
         structured_content={
             "results": [],
-            "total_accessible": 0,
+            "total_matching": 0,
+            "has_more": False,
         }
     )
 
@@ -319,7 +322,11 @@ def test_search_sync():
     # (not the value returned by __aenter__).
     mock_mcp = AsyncMock()
     mock_mcp.call_tool.return_value = FakeCallToolResult(
-        structured_content={"results": [MINIMAL_MEMORY], "total_accessible": 1}
+        structured_content={
+            "results": [MINIMAL_MEMORY],
+            "total_matching": 1,
+            "has_more": False,
+        }
     )
     mock_mcp.__aenter__.return_value = mock_mcp
     mock_mcp.__aexit__.return_value = None
