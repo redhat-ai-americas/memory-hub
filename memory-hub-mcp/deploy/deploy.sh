@@ -127,6 +127,23 @@ echo ""
 echo "Starting build..."
 oc start-build "$DEPLOYMENT" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
 
+# Step 4.5: Re-resolve the :latest ImageStream tag.
+#
+# The Deployment uses `image: memory-hub-mcp:latest` and the
+# `alpha.image.policy.openshift.io/resolve-names` annotation. That annotation
+# resolves the tag to a concrete digest *at apply time*, not at pod creation
+# time. Step 3 applied the manifest before the build, so the Deployment is
+# currently pinned to whatever digest :latest pointed at *before* this build.
+# Re-applying after the build re-resolves :latest to the digest we just pushed.
+#
+# Without this step, `oc rollout restart` below will spin up a new pod from
+# the OLD digest, even though the build just pushed new code. We hit this
+# during the 2026-04-07 Wave 2 deploy (4th retro to flag a deploy/image-cache
+# failure family) — the fix is documented in the wave1-4-mcp-fixes retro.
+echo ""
+echo "Re-applying manifest to re-resolve image digest..."
+oc apply -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
+
 # Step 5: Force rollout restart so the new image digest is picked up
 echo ""
 echo "Restarting rollout..."
