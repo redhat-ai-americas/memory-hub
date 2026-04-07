@@ -71,18 +71,30 @@ echo ""
 echo "Waiting for rollout..."
 oc rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
 
-# Step 7: Verify exactly one ready pod (catch the "two deployments" bug early)
+# Step 7: Verify single Deployment + one available replica.
+# Counting Running pods directly is unreliable: terminating pods stay in
+# Running phase until they exit, so right after a rollout you briefly see
+# 2 Running pods (new + terminating old). Check the Deployment status
+# instead — that's the source of truth for "is the desired state met".
 echo ""
-echo "Verifying single ready pod..."
-READY_COUNT=$(oc get pods -n "$NAMESPACE" \
+echo "Verifying deployment state..."
+DEPLOY_COUNT=$(oc get deploy -n "$NAMESPACE" \
     -l "app.kubernetes.io/name=$DEPLOYMENT" \
-    --field-selector=status.phase=Running \
     -o name 2>/dev/null | wc -l | tr -d ' ')
-if [ "$READY_COUNT" != "1" ]; then
-    echo "WARNING: expected 1 ready pod, found $READY_COUNT"
-    oc get pods -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
+if [ "$DEPLOY_COUNT" != "1" ]; then
+    echo "WARNING: expected 1 Deployment named $DEPLOYMENT, found $DEPLOY_COUNT"
+    oc get deploy -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
+fi
+
+AVAILABLE=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
+    -o jsonpath='{.status.availableReplicas}' 2>/dev/null)
+DESIRED=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
+    -o jsonpath='{.spec.replicas}' 2>/dev/null)
+if [ "$AVAILABLE" = "$DESIRED" ] && [ "$AVAILABLE" = "1" ]; then
+    echo "OK: deployment at desired state (1 available replica)"
 else
-    echo "OK: exactly one ready pod"
+    echo "WARNING: deployment not at desired state (available=${AVAILABLE:-0}, desired=${DESIRED:-?})"
+    oc get pods -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
 fi
 
 # Step 8: Print route URL
