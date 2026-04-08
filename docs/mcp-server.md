@@ -80,7 +80,7 @@ Focus is fully optional. When `focus` is omitted (or `session_focus_weight ≤ 0
 
 The cross-encoder is graceful-fallback: if `MEMORYHUB_RERANKER_URL` is unset or unreachable, the response carries a `focus_fallback_reason` field documenting the fallback and ranking falls back to pure cosine. The system stays usable even when the reranker pod is unhealthy.
 
-Empirical benchmark methodology and the four-way comparison (NEW-1 RRF blend vs NEW-2 focus-augmented query vs NEW-3 rerank-only vs cosine baseline) live in [`agent-memory-ergonomics/research/two-vector-retrieval.md`](agent-memory-ergonomics/research/two-vector-retrieval.md). NEW-1 won; NEW-2 was eliminated for catastrophic cross-topic recall collapse; NEW-3 alone was neutral on the synthetic corpus.
+Empirical benchmark methodology and the four-way comparison (NEW-1 RRF blend vs NEW-2 focus-augmented query vs NEW-3 rerank-only vs cosine baseline) live in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../research/agent-memory-ergonomics/two-vector-retrieval.md). NEW-1 won; NEW-2 was eliminated for catastrophic cross-topic recall collapse; NEW-3 alone was neutral on the synthetic corpus.
 
 ## Authentication
 

@@ -48,7 +48,7 @@ The OdhApplication tile links to this Route.
 
 ### Authentication
 
-Authentication is handled by a separate OAuth 2.1 authorization service that issues short-lived JWTs. Agents exchange API keys for tokens via the `client_credentials` grant; the MCP server validates JWTs using FastMCP's `JWTVerifier`. See [governance.md](../governance.md) for the full architecture.
+Authentication is handled by a separate OAuth 2.1 authorization service that issues short-lived JWTs. Agents exchange API keys for tokens via the `client_credentials` grant; the MCP server validates JWTs using FastMCP's `JWTVerifier`. See [governance.md](../../docs/governance.md) for the full architecture.
 
 Authorino or Istio Service Mesh can optionally validate JWTs at the infrastructure layer as defense-in-depth, rejecting invalid tokens before they reach the application. This is recommended for production but not required — the MCP server validates tokens independently.
 
