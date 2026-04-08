@@ -1,0 +1,7 @@
+# Code Owners — all PRs require approval from @rdwj
+#
+# As collaborators join the redhat-ai-americas/memory-hub team,
+# add them here either globally or per-path. For now, @rdwj is the
+# single reviewer required on all changes.
+
+*       @rdwj
