@@ -1,0 +1,17 @@
+{
+  "_comment": "Template for local development. Copy to dev-users.json (gitignored) and replace with your own api_keys. For local dev against a port-forwarded PG, the api_key values can be any unique strings — they only identify sessions within this local process.",
+  "users": [
+    {
+      "user_id": "wjackson",
+      "name": "Your Name",
+      "api_key": "REPLACE-ME-local-dev-key",
+      "scopes": ["user", "project", "role", "organizational", "enterprise"]
+    },
+    {
+      "user_id": "dev-test",
+      "name": "Test User",
+      "api_key": "REPLACE-ME-local-test-key",
+      "scopes": ["user", "project"]
+    }
+  ]
+}

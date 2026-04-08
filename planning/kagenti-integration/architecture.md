@@ -100,7 +100,7 @@ async def my_agent(
             await session.initialize()
 
             # Register session — Phase 1 uses API key auth
-            await session.call_tool("register_session", {"api_key": "mh-dev-agent1-2026"})
+            await session.call_tool("register_session", {"api_key": "<agent1-api-key>"})
 
             # Load relevant context before processing the request
             results = await session.call_tool("search_memory", {

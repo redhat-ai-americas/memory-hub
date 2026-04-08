@@ -214,7 +214,7 @@ The identity model maps to the existing users ConfigMap:
 {
   "user_id": "curator-agent",
   "name": "Curator Agent",
-  "api_key": "mh-svc-curator-2026",
+  "api_key": "<curator-agent-api-key>",
   "scopes": ["memory:read", "memory:write:organizational", "memory:write:role"],
   "identity_type": "service"
 }
@@ -284,7 +284,7 @@ Content-Type: application/x-www-form-urlencoded
 
 grant_type=client_credentials
 &client_id=curator-agent
-&client_secret=mh-svc-curator-2026
+&client_secret=<curator-agent-client-secret>
 &scope=memory:read memory:write:organizational
 ```
 
@@ -384,7 +384,7 @@ from memoryhub import MemoryHubClient
 # API key auth (client_credentials grant)
 client = MemoryHubClient(
     url="https://memoryhub.apps.example.com",
-    api_key="mh-dev-wjackson-2026",
+    api_key="<your-api-key>",
 )
 
 # Platform auth (token exchange, auto-discovers K8s SA token)

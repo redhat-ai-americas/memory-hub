@@ -83,7 +83,7 @@ new optional field per user entry:
 users:
   - user_id: ed-triage-nurse-01
     name: ED Triage Nurse 01
-    api_key: mh-svc-ed-triage-nurse-01-2026
+    api_key: <ed-triage-nurse-01-api-key>
     identity_type: service
     scopes: ["user", "project"]
     project_memberships:

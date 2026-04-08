@@ -118,8 +118,35 @@ fi
 # Step 3: Apply manifests
 echo ""
 echo "Applying manifests..."
+# users-configmap.yaml is per-operator and gitignored; it holds real api_keys.
+# Refuse to proceed if the operator hasn't copied the example template yet or
+# if the copy still contains the placeholder strings.
+USERS_CM="$SCRIPT_DIR/users-configmap.yaml"
+if [[ ! -f "$USERS_CM" ]]; then
+  echo "ERROR: $USERS_CM not found."
+  echo "       Copy the template and replace the placeholder api_keys:"
+  echo "         cp $SCRIPT_DIR/users-configmap.example.yaml $USERS_CM"
+  echo "         \$EDITOR $USERS_CM"
+  exit 1
+fi
+if grep -q "REPLACE-ME-" "$USERS_CM"; then
+  echo "ERROR: $USERS_CM still contains REPLACE-ME placeholders."
+  echo "       Generate real api_keys (e.g. \`openssl rand -hex 16\`) and"
+  echo "       replace them before running deploy.sh."
+  exit 1
+fi
 # Apply configmap first — the Deployment mounts it as a volume.
-oc apply -f "$SCRIPT_DIR/users-configmap.yaml" -n "$NAMESPACE"
+oc apply -f "$USERS_CM" -n "$NAMESPACE"
+
+# openshift.yaml has a placeholder PG password. Refuse to apply it verbatim;
+# the operator must have replaced REPLACE-ME-match-the-postgres-secret with
+# the real PG password (or use a separate Secret and edit this file).
+if grep -q "REPLACE-ME-match-the-postgres-secret" "$SCRIPT_DIR/openshift.yaml"; then
+  echo "ERROR: $SCRIPT_DIR/openshift.yaml still contains the REPLACE-ME"
+  echo "       PG password placeholder. Replace it with the actual value"
+  echo "       from deploy/postgresql/secret.yaml before running deploy.sh."
+  exit 1
+fi
 oc apply -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
 
 # Step 4: Start binary build

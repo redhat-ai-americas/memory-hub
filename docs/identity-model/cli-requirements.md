@@ -98,7 +98,7 @@ data:
         {
           "user_id": "ed-triage-nurse-01",
           "name": "ED Triage Nurse 01",
-          "api_key": "mh-svc-ed-triage-nurse-01-2026",
+          "api_key": "<ed-triage-nurse-01-api-key>",
           "identity_type": "service",
           "scopes": ["user", "project"],
           "project_memberships": [
@@ -130,7 +130,7 @@ metadata:
     memoryhub.redhat.com/fleet: ed-discharge-demo
 type: Opaque
 stringData:
-  MEMORYHUB_API_KEY: mh-svc-ed-triage-nurse-01-2026
+  MEMORYHUB_API_KEY: <ed-triage-nurse-01-api-key>
   MEMORYHUB_AGENT_ID: ed-triage-nurse-01
   MEMORYHUB_ROLE: ed-triage-nurse
 ```

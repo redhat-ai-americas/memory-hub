@@ -18,20 +18,40 @@ import pytest
 from memoryhub import MemoryHubClient
 from memoryhub.exceptions import AuthenticationError, ToolError
 
-MCP_URL = os.environ.get(
-    "MEMORYHUB_URL",
-    "https://mcp-server-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/",
-)
-AUTH_URL = os.environ.get(
-    "MEMORYHUB_AUTH_URL",
-    "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com",
-)
+MCP_URL = os.environ.get("MEMORYHUB_URL")
+AUTH_URL = os.environ.get("MEMORYHUB_AUTH_URL")
+WJACKSON_CLIENT_SECRET = os.environ.get("MEMORYHUB_TEST_WJACKSON_SECRET")
+CURATOR_CLIENT_SECRET = os.environ.get("MEMORYHUB_TEST_CURATOR_SECRET")
+
+_missing = [
+    name
+    for name, value in (
+        ("MEMORYHUB_URL", MCP_URL),
+        ("MEMORYHUB_AUTH_URL", AUTH_URL),
+        ("MEMORYHUB_TEST_WJACKSON_SECRET", WJACKSON_CLIENT_SECRET),
+        ("MEMORYHUB_TEST_CURATOR_SECRET", CURATOR_CLIENT_SECRET),
+    )
+    if not value
+]
 
 pytestmark = pytest.mark.integration
+
+if _missing:
+    pytestmark = [
+        pytestmark,
+        pytest.mark.skip(
+            reason=(
+                "Live RBAC tests require env vars: "
+                + ", ".join(_missing)
+            ),
+        ),
+    ]
 
 
 def _check_deployment_reachable() -> bool:
     """Probe the auth server to see if the deployment is up."""
+    if not AUTH_URL:
+        return False
     try:
         resp = httpx.get(f"{AUTH_URL}/healthz", timeout=5)
         return resp.status_code == 200
@@ -39,7 +59,7 @@ def _check_deployment_reachable() -> bool:
         return False
 
 
-if not _check_deployment_reachable():
+if not _missing and not _check_deployment_reachable():
     pytestmark = [
         pytestmark,
         pytest.mark.skip(reason="MemoryHub deployment unreachable"),
@@ -63,7 +83,7 @@ def _test_content(label: str) -> str:
 @pytest.fixture
 async def wjackson_client():
     """SDK client authenticated as wjackson (user identity)."""
-    client = _make_client("wjackson", "mh-dev-wjackson-2026")
+    client = _make_client("wjackson", WJACKSON_CLIENT_SECRET)
     async with client:
         yield client
 
@@ -71,7 +91,7 @@ async def wjackson_client():
 @pytest.fixture
 async def curator_client():
     """SDK client authenticated as curator-agent (service identity)."""
-    client = _make_client("curator-agent", "mh-svc-curator-2026")
+    client = _make_client("curator-agent", CURATOR_CLIENT_SECRET)
     async with client:
         yield client
 

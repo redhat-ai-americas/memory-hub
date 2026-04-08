@@ -9,7 +9,11 @@ os.environ.setdefault("MEMORYHUB_DB_HOST", "localhost")
 os.environ.setdefault("MEMORYHUB_DB_PORT", "5432")
 os.environ.setdefault("MEMORYHUB_DB_NAME", "memoryhub")
 os.environ.setdefault("MEMORYHUB_DB_USER", "memoryhub")
-os.environ.setdefault("MEMORYHUB_DB_PASSWORD", "memoryhub-dev-password")
+if not os.environ.get("MEMORYHUB_DB_PASSWORD"):
+    sys.exit(
+        "ERROR: MEMORYHUB_DB_PASSWORD must be set (matching the POSTGRES_PASSWORD "
+        "in deploy/postgresql/secret.yaml)."
+    )
 
 # Auth: point to the local dev users file
 _script_dir = os.path.dirname(os.path.abspath(__file__))

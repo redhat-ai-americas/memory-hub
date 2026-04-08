@@ -73,7 +73,7 @@ schema regeneration.
 Gains an optional `default_driver_id` parameter:
 
 ```python
-register_session(api_key="mh-svc-cardio-triage-01-2026",
+register_session(api_key="<cardio-triage-agent-api-key>",
                  default_driver_id="claude-code-cli-test-run-14")
 ```
 

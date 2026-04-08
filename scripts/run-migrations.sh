@@ -78,10 +78,11 @@ echo "  Port-forward ready (waited ${WAITED}s)."
 echo "Running: alembic upgrade head"
 cd "$REPO_ROOT"
 
+: "${MEMORYHUB_DB_PASSWORD:?MEMORYHUB_DB_PASSWORD must be set (matching the POSTGRES_PASSWORD in deploy/postgresql/secret.yaml)}"
 MEMORYHUB_DB_HOST=localhost \
 MEMORYHUB_DB_PORT=$LOCAL_PORT \
 MEMORYHUB_DB_USER=memoryhub \
-MEMORYHUB_DB_PASSWORD=memoryhub-dev-password \
+MEMORYHUB_DB_PASSWORD="$MEMORYHUB_DB_PASSWORD" \
 MEMORYHUB_DB_NAME=memoryhub \
   "${VENV}/bin/alembic" upgrade head
 

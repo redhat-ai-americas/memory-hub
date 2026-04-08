@@ -54,14 +54,14 @@ Other pods in the cluster can connect using:
 host:     memoryhub-pg.memoryhub-db.svc.cluster.local
 port:     5432
 user:     memoryhub
-password: memoryhub-dev-password
+password: <the POSTGRES_PASSWORD you set in deploy/postgresql/secret.yaml>
 database: memoryhub
 ```
 
 Connection string:
 
 ```
-postgresql://memoryhub:memoryhub-dev-password@memoryhub-pg.memoryhub-db.svc.cluster.local:5432/memoryhub
+postgresql://memoryhub:<your-password>@memoryhub-pg.memoryhub-db.svc.cluster.local:5432/memoryhub
 ```
 
 ## Verify pgvector Works

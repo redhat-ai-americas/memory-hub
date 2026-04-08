@@ -18,6 +18,11 @@ htmlcov/
 credentials.json
 secrets.yaml
 secrets.yml
+
+# Per-operator files that must NOT be committed (contain real credentials)
+# Each has a sibling `*.example.*` template that IS committed.
+memory-hub-mcp/deploy/users-configmap.yaml
+memory-hub-mcp/dev-users.json
 .DS_Store
 node_modules/
 .build-context/

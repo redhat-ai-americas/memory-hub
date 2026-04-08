@@ -1,0 +1,39 @@
+---
+# WARNING: This is an EXAMPLE template. Copy this file to
+# `users-configmap.yaml` (which is gitignored) and replace the placeholder
+# api_keys with strong, randomly generated values BEFORE running deploy.sh.
+#
+#     cp users-configmap.example.yaml users-configmap.yaml
+#     # edit users-configmap.yaml with real api_keys
+#     ./deploy.sh
+#
+# The api_key is a bearer token for the MemoryHub `register_session` tool.
+# Anyone who has the key can authenticate as the corresponding user and
+# read/write memories with the listed scopes. Generate them with e.g.
+# `openssl rand -hex 16` and treat them like database passwords.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memoryhub-users
+  namespace: memory-hub-mcp
+  labels:
+    app.kubernetes.io/name: memory-hub-mcp
+    app.kubernetes.io/part-of: memoryhub
+data:
+  users.json: |
+    {
+      "users": [
+        {
+          "user_id": "wjackson",
+          "name": "Wes Jackson",
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "scopes": ["user", "project", "role", "organizational", "enterprise"]
+        },
+        {
+          "user_id": "dev-test",
+          "name": "Test User",
+          "api_key": "REPLACE-ME-GENERATE-A-SECOND-KEY",
+          "scopes": ["user", "project"]
+        }
+      ]
+    }

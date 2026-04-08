@@ -6,9 +6,10 @@ This project has a MemoryHub MCP server that provides persistent, centralized me
 
 At the START of every conversation, before doing any other work:
 
-1. Call `register_session(api_key="mh-dev-wjackson-2026")` to authenticate
-2. Call `search_memory` with a query relevant to the current task to load context
-3. Use the returned memories to inform your work
+1. Read your personal api key from `~/.config/memoryhub/api-key` (trim the trailing newline). This file is per-operator and lives outside the repo — it is not committed. If the file does not exist, ask the user to create it before continuing.
+2. Call `register_session(api_key="<the value you just read>")` to authenticate.
+3. Call `search_memory` with a query relevant to the current task to load context.
+4. Use the returned memories to inform your work.
 
 ### During Work
 
@@ -27,6 +28,9 @@ At the START of every conversation, before doing any other work:
 - DO write preferences, decisions, project architecture choices, tool configurations, workflow patterns
 - Set appropriate weights: 1.0 for critical policies, 0.8-0.9 for strong preferences, 0.5-0.7 for nice-to-know context
 
-### API Key
+### API Key Storage
 
-The API key is hardcoded above for the HTTP transport configuration. If the server moves to a different auth mechanism (e.g., Authorino), update the session setup instructions accordingly.
+The api key is stored at `~/.config/memoryhub/api-key` (mode 0600). This is intentional:
+- It MUST NOT be committed to the repository.
+- Each operator maintains their own key corresponding to a user in the deployed `memoryhub-users` ConfigMap on the cluster.
+- If the server moves to a different auth mechanism (e.g., OAuth 2.1 client_credentials only, no `register_session` shim), update this section accordingly.
