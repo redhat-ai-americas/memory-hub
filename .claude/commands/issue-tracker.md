@@ -12,7 +12,7 @@ You are managing issues for the MemoryHub project. This command enforces the pro
 
 ## Project Details
 
-- **GitHub repo**: `rdwj/memory-hub`
+- **GitHub repo**: `redhat-ai-americas/memory-hub`
 - **GitHub Project**: MemoryHub (number 7, ID `PVT_kwHOBewreM4BTouh`)
 - **Status field ID**: `PVTSSF_lAHOBewreM4BTouhzhA2YbQ`
 - **Status options**:
@@ -30,7 +30,7 @@ When the user wants to create a new issue:
 
 1. **Require a design doc reference.** The issue body must reference a document in `docs/`. If the user hasn't mentioned one, check if a relevant design doc exists. If none exists, ask the user whether to create a skeleton design doc first or proceed without one (noting this breaks convention).
 
-2. **Determine labels.** Discover available labels with `gh label list --repo rdwj/memory-hub`. Common ones:
+2. **Determine labels.** Discover available labels with `gh label list --repo redhat-ai-americas/memory-hub`. Common ones:
    - Type labels: `type:feature`, `type:bug`, `type:design`
    - Subsystem labels: `subsystem:memory-tree`, `subsystem:curator`, `subsystem:storage`, `subsystem:governance`, `subsystem:mcp-server`, `subsystem:observability`, `subsystem:operator`, `subsystem:org-ingestion`
    - Always apply one `type:` label and one `subsystem:` label if applicable.

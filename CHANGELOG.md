@@ -8,7 +8,7 @@ can be tracked independently. Packages that have not yet cut a tagged release
 are tracked under "Unreleased" until they do.
 
 For the full commit history, see `git log` or the
-[GitHub commit view](https://github.com/rdwj/memory-hub/commits/main).
+[GitHub commit view](https://github.com/redhat-ai-americas/memory-hub/commits/main).
 
 ## memoryhub (SDK)
 

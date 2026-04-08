@@ -23,7 +23,7 @@ STATUS_FIELD_ID=PVTSSF_lAHOBewreM4BTouhzhA2YbQ
 BACKLOG_OPTION_ID=a4665e16
 IN_PROGRESS_OPTION_ID=1dadea2f
 DONE_OPTION_ID=39420b68
-REPO=rdwj/memory-hub
+REPO=redhat-ai-americas/memory-hub
 OWNER=rdwj
 ```
 

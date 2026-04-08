@@ -383,14 +383,14 @@ These are *not* part of this work, even though they're tangentially related:
 Design draft. Implementation has not started. Issues filed against this
 document:
 
-- Tracker: [#74](https://github.com/rdwj/memory-hub/issues/74)
-- Children: [#75](https://github.com/rdwj/memory-hub/issues/75),
-  [#76](https://github.com/rdwj/memory-hub/issues/76),
-  [#77](https://github.com/rdwj/memory-hub/issues/77),
-  [#78](https://github.com/rdwj/memory-hub/issues/78),
-  [#79](https://github.com/rdwj/memory-hub/issues/79),
-  [#80](https://github.com/rdwj/memory-hub/issues/80),
-  [#81](https://github.com/rdwj/memory-hub/issues/81)
+- Tracker: [#74](https://github.com/redhat-ai-americas/memory-hub/issues/74)
+- Children: [#75](https://github.com/redhat-ai-americas/memory-hub/issues/75),
+  [#76](https://github.com/redhat-ai-americas/memory-hub/issues/76),
+  [#77](https://github.com/redhat-ai-americas/memory-hub/issues/77),
+  [#78](https://github.com/redhat-ai-americas/memory-hub/issues/78),
+  [#79](https://github.com/redhat-ai-americas/memory-hub/issues/79),
+  [#80](https://github.com/redhat-ai-americas/memory-hub/issues/80),
+  [#81](https://github.com/redhat-ai-americas/memory-hub/issues/81)
 
 See the [tracking section of the README](README.md#tracking-issues) for the
 canonical list.

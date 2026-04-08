@@ -135,5 +135,5 @@ echo "  1. Create GitHub Release"
 echo "  2. Build distribution packages"
 echo "  3. Publish to PyPI"
 echo
-echo "Monitor progress at: https://github.com/rdwj/memory-hub/actions"
-echo "View release at: https://github.com/rdwj/memory-hub/releases/tag/${TAG}"
+echo "Monitor progress at: https://github.com/redhat-ai-americas/memory-hub/actions"
+echo "View release at: https://github.com/redhat-ai-americas/memory-hub/releases/tag/${TAG}"

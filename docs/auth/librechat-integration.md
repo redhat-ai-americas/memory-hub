@@ -172,7 +172,7 @@ of them failing is the bug to fix before declaring done.
 
 Hard dependencies — none of this work can start until these land:
 
-- **[#74](https://github.com/rdwj/memory-hub/issues/74)** and all its
+- **[#74](https://github.com/redhat-ai-americas/memory-hub/issues/74)** and all its
   children. The broker has to exist for LibreChat's OAuth flow to work
   at all. Without `authorization_code + PKCE` in `memoryhub-auth`,
   LibreChat's auto-discovery sees no `authorization_endpoint` and gives
@@ -249,5 +249,5 @@ implementation.
 Design draft. Hard-blocked on the broker tracker (#74) — none of this
 work can begin until the broker exists.
 
-- Tracking issue: [#82](https://github.com/rdwj/memory-hub/issues/82)
+- Tracking issue: [#82](https://github.com/redhat-ai-americas/memory-hub/issues/82)
 - See also: [README.md](README.md#tracking-issues)

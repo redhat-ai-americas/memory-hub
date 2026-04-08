@@ -61,15 +61,15 @@ folder is a single navigable index.
 
 ### OpenShift OAuth broker ([openshift-broker.md](openshift-broker.md))
 
-- **[#74](https://github.com/rdwj/memory-hub/issues/74)** — Tracking issue (design)
-- [#75](https://github.com/rdwj/memory-hub/issues/75) — Add `auth_sessions` table and migration
-- [#76](https://github.com/rdwj/memory-hub/issues/76) — Implement `/authorize` endpoint with PKCE
-- [#77](https://github.com/rdwj/memory-hub/issues/77) — Implement `/oauth/openshift/callback` with user-info resolution
-- [#78](https://github.com/rdwj/memory-hub/issues/78) — Extend `/token` with `authorization_code` grant
-- [#79](https://github.com/rdwj/memory-hub/issues/79) — Register `memoryhub-auth` as OpenShift `OAuthClient` (infra)
-- [#80](https://github.com/rdwj/memory-hub/issues/80) — Advertise `authorization_endpoint` in well-known metadata
-- [#81](https://github.com/rdwj/memory-hub/issues/81) — End-to-end PKCE flow integration test
+- **[#74](https://github.com/redhat-ai-americas/memory-hub/issues/74)** — Tracking issue (design)
+- [#75](https://github.com/redhat-ai-americas/memory-hub/issues/75) — Add `auth_sessions` table and migration
+- [#76](https://github.com/redhat-ai-americas/memory-hub/issues/76) — Implement `/authorize` endpoint with PKCE
+- [#77](https://github.com/redhat-ai-americas/memory-hub/issues/77) — Implement `/oauth/openshift/callback` with user-info resolution
+- [#78](https://github.com/redhat-ai-americas/memory-hub/issues/78) — Extend `/token` with `authorization_code` grant
+- [#79](https://github.com/redhat-ai-americas/memory-hub/issues/79) — Register `memoryhub-auth` as OpenShift `OAuthClient` (infra)
+- [#80](https://github.com/redhat-ai-americas/memory-hub/issues/80) — Advertise `authorization_endpoint` in well-known metadata
+- [#81](https://github.com/redhat-ai-americas/memory-hub/issues/81) — End-to-end PKCE flow integration test
 
 ### LibreChat integration ([librechat-integration.md](librechat-integration.md))
 
-- [#82](https://github.com/rdwj/memory-hub/issues/82) — Integrate MemoryHub with LibreChat as second MCP client _(blocked on #74)_
+- [#82](https://github.com/redhat-ai-americas/memory-hub/issues/82) — Integrate MemoryHub with LibreChat as second MCP client _(blocked on #74)_

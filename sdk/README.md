@@ -88,7 +88,7 @@ To opt out of auto-discovery, pass `auto_discover_config=False`:
 client = MemoryHubClient.from_env(auto_discover_config=False)
 ```
 
-Or pass an explicit `ProjectConfig` to the constructor to use a fixed policy regardless of cwd. The recommended way to generate `.memoryhub.yaml` is the `memoryhub-cli` wizard (`memoryhub config init`); see the [repo root README](https://github.com/rdwj/memory-hub#project-configuration) for the split between project config (`.memoryhub.yaml`, committed) and connection config (`~/.config/memoryhub/config.json`, per-developer).
+Or pass an explicit `ProjectConfig` to the constructor to use a fixed policy regardless of cwd. The recommended way to generate `.memoryhub.yaml` is the `memoryhub-cli` wizard (`memoryhub config init`); see the [repo root README](https://github.com/redhat-ai-americas/memory-hub#project-configuration) for the split between project config (`.memoryhub.yaml`, committed) and connection config (`~/.config/memoryhub/config.json`, per-developer).
 
 ## Sync usage
 
@@ -141,18 +141,18 @@ The SDK uses OAuth 2.1 `client_credentials` grant under the hood. Token manageme
 
 ## Further documentation
 
-The SDK is one surface of the [memory-hub](https://github.com/rdwj/memory-hub) monorepo. For deeper context:
+The SDK is one surface of the [memory-hub](https://github.com/redhat-ai-americas/memory-hub) monorepo. For deeper context:
 
-- **[Architecture overview](https://github.com/rdwj/memory-hub/blob/main/docs/ARCHITECTURE.md)** — System design, deployment topology, data flow
-- **[MCP server tool reference](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md)** — The 15 tools the SDK wraps, with parameter reference
-- **[Memory tree data model](https://github.com/rdwj/memory-hub/blob/main/docs/memory-tree.md)** — How scopes, branches, and versioning work
-- **[Governance and authorization](https://github.com/rdwj/memory-hub/blob/main/docs/governance.md)** — RBAC, scope-based access, audit trail
-- **[Agent memory ergonomics design](https://github.com/rdwj/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md)** — Full `.memoryhub.yaml` schema, retrieval defaults, session focus, and loading patterns
-- **[Package layout](https://github.com/rdwj/memory-hub/blob/main/docs/package-layout.md)** — How `memoryhub` (this SDK) relates to `memoryhub-core` (server-side library) and `memoryhub-cli`
+- **[Architecture overview](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/ARCHITECTURE.md)** — System design, deployment topology, data flow
+- **[MCP server tool reference](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/mcp-server.md)** — The 15 tools the SDK wraps, with parameter reference
+- **[Memory tree data model](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/memory-tree.md)** — How scopes, branches, and versioning work
+- **[Governance and authorization](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/governance.md)** — RBAC, scope-based access, audit trail
+- **[Agent memory ergonomics design](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md)** — Full `.memoryhub.yaml` schema, retrieval defaults, session focus, and loading patterns
+- **[Package layout](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/package-layout.md)** — How `memoryhub` (this SDK) relates to `memoryhub-core` (server-side library) and `memoryhub-cli`
 
 ## Links
 
-- **[GitHub repository](https://github.com/rdwj/memory-hub)**
+- **[GitHub repository](https://github.com/redhat-ai-americas/memory-hub)**
 - **[CLI (`memoryhub-cli`)](https://pypi.org/project/memoryhub-cli/)** — companion CLI client
-- **[Issue tracker](https://github.com/rdwj/memory-hub/issues)**
-- **[License (Apache 2.0)](https://github.com/rdwj/memory-hub/blob/main/LICENSE)**
+- **[Issue tracker](https://github.com/redhat-ai-americas/memory-hub/issues)**
+- **[License (Apache 2.0)](https://github.com/redhat-ai-americas/memory-hub/blob/main/LICENSE)**

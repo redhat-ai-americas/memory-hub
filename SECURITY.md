@@ -11,7 +11,7 @@ vulnerability reports seriously is a first-class concern.
 Report vulnerabilities privately through GitHub's private vulnerability
 reporting:
 
-- Go to <https://github.com/rdwj/memory-hub/security/advisories/new>
+- Go to <https://github.com/redhat-ai-americas/memory-hub/security/advisories/new>
 - Or navigate to the repository **Security** tab → **Report a vulnerability**
 
 If for any reason you cannot use GitHub's reporting flow, open a minimal

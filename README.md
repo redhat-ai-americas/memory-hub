@@ -221,4 +221,4 @@ Apache 2.0 — see [`LICENSE`](LICENSE).
 - [Subsystems](docs/SYSTEMS.md)
 - [Agent memory ergonomics design](docs/agent-memory-ergonomics/)
 - [Python SDK on PyPI](https://pypi.org/project/memoryhub/)
-- [GitHub issues](https://github.com/rdwj/memory-hub/issues)
+- [GitHub issues](https://github.com/redhat-ai-americas/memory-hub/issues)
