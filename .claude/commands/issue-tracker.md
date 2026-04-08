@@ -13,12 +13,12 @@ You are managing issues for the MemoryHub project. This command enforces the pro
 ## Project Details
 
 - **GitHub repo**: `redhat-ai-americas/memory-hub`
-- **GitHub Project**: MemoryHub (number 7, ID `PVT_kwHOBewreM4BTouh`)
-- **Status field ID**: `PVTSSF_lAHOBewreM4BTouhzhA2YbQ`
+- **GitHub Project**: MemoryHub (number 1, ID `PVT_kwDODErzuc4BUFze`), owned by the `redhat-ai-americas` org
+- **Status field ID**: `PVTSSF_lADODErzuc4BUFzezhBQT0U`
 - **Status options**:
-  - Backlog: `a4665e16`
-  - In Progress: `1dadea2f`
-  - Done: `39420b68`
+  - Backlog: `5af61e02`
+  - In Progress: `97ae4b78`
+  - Done: `61db5447`
 
 ## Operations
 
@@ -58,12 +58,12 @@ When the user wants to create a new issue:
 
    Add the issue:
    ```bash
-   gh project item-add 7 --owner rdwj --url <issue-url>
+   gh project item-add 1 --owner redhat-ai-americas --url <issue-url>
    ```
 
    Find the project item ID by matching on the issue number (more reliable than title matching):
    ```bash
-   gh project item-list 7 --owner rdwj --format json | python3 -c "
+   gh project item-list 1 --owner redhat-ai-americas --format json | python3 -c "
    import json, sys
    data = json.load(sys.stdin)
    for item in data.get('items', []):
@@ -79,10 +79,10 @@ When the user wants to create a new issue:
 
    Set the status:
    ```bash
-   gh project item-edit --project-id PVT_kwHOBewreM4BTouh \
+   gh project item-edit --project-id PVT_kwDODErzuc4BUFze \
      --id <item-id> \
-     --field-id PVTSSF_lAHOBewreM4BTouhzhA2YbQ \
-     --single-select-option-id a4665e16
+     --field-id PVTSSF_lADODErzuc4BUFzezhBQT0U \
+     --single-select-option-id 5af61e02
    ```
 
 5. **Report** the issue URL and confirm it's in Backlog.
@@ -126,7 +126,7 @@ When the user wants to see issues (e.g., "what's in backlog?", "show me all issu
 
 1. List project items, optionally filtered by status:
    ```bash
-   gh project item-list 7 --owner rdwj --format json
+   gh project item-list 1 --owner redhat-ai-americas --format json
    ```
 2. Format as a readable table with: number, title, status, labels.
 3. If the user asked for a specific status (e.g., "what's in backlog?"), filter the output accordingly.
@@ -142,7 +142,7 @@ When the user wants to modify an existing issue's title, body, or labels:
 
 - **Always add to the project board.** An issue not on the board is invisible to our workflow.
 - **Always start in Backlog.** Never create an issue directly in "In Progress" unless the user explicitly asks.
-- **Issue authorship.** Issues show rdwj as the submitter. Do NOT add AI attribution — no "Assisted-by" lines, no "Generated with Claude" footers. This is intentional per CLAUDE.md.
+- **Issue authorship.** Issues show the human author (rdwj) as the submitter. Do NOT add AI attribution — no "Assisted-by" lines, no "Generated with Claude" footers. This is intentional per CLAUDE.md.
 - **Design doc enforcement.** This is the key convention. Push back (politely) if there's no design doc, but don't block the user if they insist.
 - **Subsystem labels.** If the issue clearly belongs to a subsystem, apply the label. If it spans multiple, pick the primary one or ask.
 - **Done = Closed.** Moving to Done and closing the issue are a single logical operation. Always do both.

@@ -17,14 +17,14 @@ Manages GitHub issue lifecycle for the MemoryHub project. Enforces conventions: 
 ## Configuration
 
 ```
-PROJECT_NUMBER=7
-PROJECT_ID=PVT_kwHOBewreM4BTouh
-STATUS_FIELD_ID=PVTSSF_lAHOBewreM4BTouhzhA2YbQ
-BACKLOG_OPTION_ID=a4665e16
-IN_PROGRESS_OPTION_ID=1dadea2f
-DONE_OPTION_ID=39420b68
+PROJECT_NUMBER=1
+PROJECT_ID=PVT_kwDODErzuc4BUFze
+STATUS_FIELD_ID=PVTSSF_lADODErzuc4BUFzezhBQT0U
+BACKLOG_OPTION_ID=5af61e02
+IN_PROGRESS_OPTION_ID=97ae4b78
+DONE_OPTION_ID=61db5447
 REPO=redhat-ai-americas/memory-hub
-OWNER=rdwj
+OWNER=redhat-ai-americas
 ```
 
 ---
@@ -105,7 +105,7 @@ ISSUE_NODE_ID=$(gh issue view <NUMBER> --repo "$REPO" --json id --jq '.id')
 
 # Add to project
 ITEM_ID=$(gh project item-add PROJECT_NUMBER \
-  --owner rdwj \
+  --owner "$OWNER" \
   --url "https://github.com/$REPO/issues/<NUMBER>" \
   --format json | jq -r '.id')
 
@@ -128,7 +128,7 @@ Move an issue from Backlog to In Progress.
 ```bash
 # Find the project item ID for this issue
 ITEM_ID=$(gh project item-list PROJECT_NUMBER \
-  --owner rdwj \
+  --owner "$OWNER" \
   --format json | jq -r '.items[] | select(.content.number == <NUMBER>) | .id')
 
 # Update status to In Progress
@@ -156,7 +156,7 @@ Only after confirmation:
 ```bash
 # Find the project item ID
 ITEM_ID=$(gh project item-list PROJECT_NUMBER \
-  --owner rdwj \
+  --owner "$OWNER" \
   --format json | jq -r '.items[] | select(.content.number == <NUMBER>) | .id')
 
 # Update status to Done
@@ -178,7 +178,7 @@ Show issues grouped by status column.
 
 ```bash
 gh project item-list PROJECT_NUMBER \
-  --owner rdwj \
+  --owner "$OWNER" \
   --format json | jq '
     .items
     | group_by(.status)
@@ -196,7 +196,7 @@ Show only Backlog items.
 
 ```bash
 gh project item-list PROJECT_NUMBER \
-  --owner rdwj \
+  --owner "$OWNER" \
   --format json | jq '
     [.items[] | select(.status == "Backlog") | {number: .content.number, title: .content.title}]
   '
@@ -212,4 +212,4 @@ Present as a numbered list with issue numbers and titles.
 - **Never skip the Backlog step.** Every issue starts in Backlog, even if work begins immediately (move to In Progress as a separate step).
 - **Never move to Done without user confirmation.**
 - **Always apply both a subsystem label and a type label.** If unsure which subsystem, ask the user.
-- **Follow the user's CLAUDE.md rules for issue attribution.** Issues show rdwj as submitter. No AI attribution on issues.
+- **Follow the user's CLAUDE.md rules for issue attribution.** Issues show the human author (rdwj) as submitter. No AI attribution on issues.
