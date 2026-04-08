@@ -16,7 +16,7 @@ Things to explore in future ideation sessions, roughly in order of how much they
 
 ## Validation needed
 
-**FIPS storage decisions — decided.** PostgreSQL (OOTB) + pgvector for vector search, PostgreSQL for graph queries (AGE or adjacency lists), MinIO for S3/object storage. Milvus, Neo4j, Crunchy Data, and ODF are all ruled out. See [`docs/research/fips-storage.md`](../../docs/research/fips-storage.md) for the full analysis. The remaining validation items are below.
+**FIPS storage decisions — decided.** PostgreSQL (OOTB) + pgvector for vector search, PostgreSQL for graph queries (AGE or adjacency lists), MinIO for S3/object storage. Milvus, Neo4j, Crunchy Data, and ODF are all ruled out. See [`research/fips-storage.md`](../../research/fips-storage.md) for the full analysis. The remaining validation items are below.
 
 **Validate OOTB PostgreSQL extension support.** Confirm that the OOTB operator (not Crunchy) supports installing the pgvector extension and either Apache AGE or the adjacency list approach we choose for graph queries. This is a hands-on cluster check, not a documentation review.
 

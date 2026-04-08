@@ -12,7 +12,7 @@ show the cross-encoder is roughly neutral on short topic-coherent
 project memories but the architecture handles longer noisier inputs
 correctly when they appear in production.
 
-See `docs/agent-memory-ergonomics/research/two-vector-retrieval.md`
+See `research/agent-memory-ergonomics/two-vector-retrieval.md`
 for the benchmark that drove this design.
 """
 

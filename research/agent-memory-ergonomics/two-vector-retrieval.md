@@ -2,7 +2,7 @@
 
 **Status:** Resolved 2026-04-07 (benchmark complete). NEW-1 (RRF blend over cross-encoder rerank) wins. Benchmark results and decision are documented in [§Recommendation (final)](#recommendation-final) below; the original three-option analysis remains for historical reference.
 
-**Feeds into:** [`../design.md`](../design.md) §Session Focus and Retrieval Biasing, issue #58, open question Q1 (resolved).
+**Feeds into:** [`../../docs/agent-memory-ergonomics/design.md`](../../docs/agent-memory-ergonomics/design.md) §Session Focus and Retrieval Biasing, issue #58, open question Q1 (resolved).
 
 ## Question
 
@@ -227,7 +227,7 @@ Place under `tests/perf/test_two_vector_retrieval.py` with the synthetic dataset
 
 ## References
 
-- `../design.md` §Two-Vector Retrieval — the design this research supports
-- `../open-questions.md` Q1, Q2 — related unresolved items
-- `../../storage-layer.md` — pgvector capabilities this research builds on
+- `../../docs/agent-memory-ergonomics/design.md` §Two-Vector Retrieval — the design this research supports
+- `../../docs/agent-memory-ergonomics/open-questions.md` Q1, Q2 — related unresolved items
+- `../../docs/storage-layer.md` — pgvector capabilities this research builds on
 - Issue #58 — implementation tracking

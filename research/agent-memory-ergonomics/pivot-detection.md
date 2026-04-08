@@ -2,7 +2,7 @@
 
 **Status:** Options identified 2026-04-07. No empirical data yet. Recommendation is a hybrid but needs validation against real agents.
 
-**Feeds into:** [`../design.md`](../design.md) §Loading Patterns (Pattern C), issue #58 (adjacent), open question Q2.
+**Feeds into:** [`../../docs/agent-memory-ergonomics/design.md`](../../docs/agent-memory-ergonomics/design.md) §Loading Patterns (Pattern C), issue #58 (adjacent), open question Q2.
 
 ## Question
 
@@ -158,9 +158,9 @@ Only meaningful once both component validations pass. At that point, run the age
 
 ## References
 
-- `../design.md` §Loading Patterns (Pattern C) — the design this research supports
-- `../open-questions.md` Q2 — the question this research tracks
+- `../../docs/agent-memory-ergonomics/design.md` §Loading Patterns (Pattern C) — the design this research supports
+- `../../docs/agent-memory-ergonomics/open-questions.md` Q2 — the question this research tracks
 - `two-vector-retrieval.md` — the session focus vector this detection reuses
-- `../../../.claude/rules/memoryhub-integration.md` — current hand-written loading rule with an ad-hoc version of pivot detection
+- `../../.claude/rules/memoryhub-integration.md` — current hand-written loading rule with an ad-hoc version of pivot detection
 - Issue #58 — implementation tracking (the rule template, not the session vector itself)
 - Issue #60 — where the rule file generation lives

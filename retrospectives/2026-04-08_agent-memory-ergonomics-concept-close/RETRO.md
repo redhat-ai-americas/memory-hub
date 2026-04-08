@@ -147,7 +147,7 @@ This is the first retro in the project to span a multi-session, multi-day **desi
 - [x] Save concept-close memories before deploy (#62 ship summary, FastMCP method whitelist, full-content limitation, broadcast self-exclusion invariant)
 - [x] Update `docs/agent-memory-ergonomics/design.md` Candidate 7 with SHIPPED marker
 - [x] Resolve open questions Q6, Q7, Q8 in `docs/agent-memory-ergonomics/open-questions.md`
-- [x] Update `docs/agent-memory-ergonomics/research/fastmcp-3-push-notifications.md` with Implementation Notes section
+- [x] Update `research/agent-memory-ergonomics/fastmcp-3-push-notifications.md` with Implementation Notes section
 - [x] Deploy #62 to OpenShift and verify end-to-end via `mcp-test-mcp`
 - [x] Close #62 with detailed close-out comment matching #61 style
 - [x] File [#84](https://github.com/rdwj/memory-hub/issues/84), [#85](https://github.com/rdwj/memory-hub/issues/85), [#86](https://github.com/rdwj/memory-hub/issues/86), [#87](https://github.com/rdwj/memory-hub/issues/87) for follow-up work

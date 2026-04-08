@@ -2,13 +2,13 @@
 
 **Status:** Investigated 2026-04-07 against the FastMCP 3 source at `/Users/wjackson/Developer/MCP/fastmcp`. Core findings confirmed against code; the two in-cluster verification items were resolved during the #62 implementation session on 2026-04-08 (see [Implementation Notes](#implementation-notes-2026-04-08) at the end of this file). #62 shipped in a different shape than this research originally proposed — memory-hub built its own subscriber pipeline rather than reusing FastMCP's `push_notification` + `notification_subscriber_loop`. Read the implementation notes section before relying on any of the "What memory-hub needs to add" sketches below; they are preserved for historical context but parts of them are wrong.
 
-**Feeds into:** [`../design.md`](../design.md) §Real-Time Push (Pattern E), issue #62.
+**Feeds into:** [`../../docs/agent-memory-ergonomics/design.md`](../../docs/agent-memory-ergonomics/design.md) §Real-Time Push (Pattern E), issue #62.
 
 ## Question
 
 Can memory-hub implement server-initiated push notifications on top of FastMCP 3 so that when one agent writes a memory, other connected agents receive a notification without polling? And if so, what does the implementation need to add on top of FastMCP's primitives?
 
-The use case is the active-swarm scenario where one agent's write is immediately relevant to other connected agents (the "needle-in-haystack" project shape described in `../design.md` §Session Focus and Retrieval Biasing). Pull-only patterns have a latency floor — the next-pull interval — which is too slow for active coordination.
+The use case is the active-swarm scenario where one agent's write is immediately relevant to other connected agents (the "needle-in-haystack" project shape described in `../../docs/agent-memory-ergonomics/design.md` §Session Focus and Retrieval Biasing). Pull-only patterns have a latency floor — the next-pull interval — which is too slow for active coordination.
 
 ## Findings
 
@@ -34,7 +34,7 @@ await ctx.send_notification(
 
 Per the MCP spec, the notification carries only the resource URI. Clients are expected to refetch via `resources/read` (or memory-hub's `read_memory` tool) to get the actual content.
 
-**This is spec-compliant but adds a round-trip** on every notification — the subscriber gets the URI, then has to call back in. Whether that round-trip is acceptable is tracked as Q6 in `../open-questions.md`.
+**This is spec-compliant but adds a round-trip** on every notification — the subscriber gets the URI, then has to call back in. Whether that round-trip is acceptable is tracked as Q6 in `../../docs/agent-memory-ergonomics/open-questions.md`.
 
 ### 3. `ctx.send_notification` only reaches the calling session by default
 
@@ -133,7 +133,7 @@ This is the most important open item. FastMCP 3 currently starts notification su
 - `fastmcp/server/tasks/notifications.py` — push_notification implementation
 - `fastmcp/server/session.py` or equivalent — session lifecycle hooks
 
-This is tracked as Q7 in `../open-questions.md`.
+This is tracked as Q7 in `../../docs/agent-memory-ergonomics/open-questions.md`.
 
 ## Spec Compliance vs. Latency
 
@@ -149,7 +149,7 @@ carrying the full memory record inline. Non-spec but valid. Trade-off: spec comp
 
 **Recommendation:** Ship URI-only as the default (`push_payload: uri_only`). Add `push_payload: full_content` as a YAML opt-in that switches to the custom notification method. Let real usage decide the default at scale.
 
-This is tracked as Q6 in `../open-questions.md`.
+This is tracked as Q6 in `../../docs/agent-memory-ergonomics/open-questions.md`.
 
 ## Reliable Queue vs. Pub/Sub
 
@@ -161,7 +161,7 @@ For memory-hub's use case:
 
 Memory-hub's first real use case is memory writes, which mostly fall into the first category. **Default to reliable queue.** The `push_transport` YAML knob lets individual deployments switch to pub/sub if their use case warrants it.
 
-This is tracked as Q8 in `../open-questions.md`.
+This is tracked as Q8 in `../../docs/agent-memory-ergonomics/open-questions.md`.
 
 ## Coupling with Session Focus (Layer 2)
 
@@ -172,7 +172,7 @@ Concretely: when `write_memory` computes the new memory's embedding, it also com
 This means:
 
 1. The session focus vector must be **stored in a place the broadcast code can read** (not just in the retrieval code path). Valkey is the natural choice — same lifecycle as the session registry.
-2. The embedding model used for session vectors must match the embedding model used for memory vectors. Document the contract in `../../mcp-server.md`.
+2. The embedding model used for session vectors must match the embedding model used for memory vectors. Document the contract in `../../docs/mcp-server.md`.
 3. The push-side filter knob (`push_filter_weight`) and the pull-side bias knob (`session_focus_weight`) are conceptually the same dial but should be **separately configurable**, since users may want strong push filtering with looser pull biasing or vice versa.
 
 **This is a hard prerequisite coupling: #62 cannot ship without #58 having established the session vector mechanism.** Design and review the two issues together.
@@ -235,6 +235,6 @@ The original research recommended reliable queue (LPUSH/BRPOP) over pub/sub as t
 
 - FastMCP 3 source: `/Users/wjackson/Developer/MCP/fastmcp` (reference) and `memory-hub-mcp/.venv/lib/python3.11/site-packages/fastmcp/` (installed 3.2.0; what actually runs)
 - MCP spec on notifications: https://spec.modelcontextprotocol.io/specification/basic/notifications/
-- `../design.md` §Real-Time Push (Pattern E) — the design this research supports
-- `../open-questions.md` Q6, Q7, Q8, Q9 — Q6/Q7/Q8 resolved 2026-04-08 with #62; Q9 still open
+- `../../docs/agent-memory-ergonomics/design.md` §Real-Time Push (Pattern E) — the design this research supports
+- `../../docs/agent-memory-ergonomics/open-questions.md` Q6, Q7, Q8, Q9 — Q6/Q7/Q8 resolved 2026-04-08 with #62; Q9 still open
 - Issue #62 — implementation tracking
