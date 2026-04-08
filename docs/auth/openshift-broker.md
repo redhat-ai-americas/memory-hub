@@ -364,7 +364,7 @@ issues.
 These are *not* part of this work, even though they're tangentially related:
 
 - **kagenti SPIFFE-based token exchange (RFC 8693).** Tracked separately in
-  `docs/kagenti-integration/`. That work concerns service identities being
+  `../../planning/kagenti-integration/`. That work concerns service identities being
   exchanged across trust boundaries, not human users in browsers.
 - **Per-user RBAC grants.** The broker mints JWTs with default scopes. A
   separate mechanism for granting elevated scopes to specific users (admin

@@ -76,7 +76,7 @@ Kagenti uses SPIFFE/SPIRE for workload identity and Keycloak for OAuth2. The tok
 
 ### Dependencies
 
-The OAuth 2.1 auth service design is already complete; see the auth architecture docs in `docs/` for the decisions and wire format. This phase also depends on the kagenti extension system API being stable enough to target.
+The OAuth 2.1 auth service design is already complete; see the auth architecture docs in `../../docs/auth/` for the decisions and wire format. This phase also depends on the kagenti extension system API being stable enough to target.
 
 ### Success Criteria
 

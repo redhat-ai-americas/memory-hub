@@ -228,6 +228,6 @@ Place under `tests/perf/test_two_vector_retrieval.py` with the synthetic dataset
 ## References
 
 - `../../docs/agent-memory-ergonomics/design.md` §Two-Vector Retrieval — the design this research supports
-- `../../docs/agent-memory-ergonomics/open-questions.md` Q1, Q2 — related unresolved items
+- `../../planning/agent-memory-ergonomics-open-questions.md` Q1, Q2 — related unresolved items
 - `../../docs/storage-layer.md` — pgvector capabilities this research builds on
 - Issue #58 — implementation tracking

@@ -137,7 +137,7 @@ This is the first retro in the project to span a multi-session, multi-day **desi
 | **Integration test coverage for `search_memories_with_focus` (carry-forward from #58 retro) extended to push broadcast paths from #62.** Both code paths are unit-test-only today. The numpy.float32 bug shipped despite 100% line coverage; the same class of bug could surface in the push pipeline. | Process | **Filed as [#85](https://github.com/rdwj/memory-hub/issues/85)** — pgvector + Valkey integration tests, no infrastructure work needed. |
 | **`session_id = sub` interim model.** Inherited from #61, exposed in #62's broadcast filter. Single-user-multi-instance is desirable noise reduction; multi-agent-same-user swarm is a correctness gap. | Inherited | **Filed as [#86](https://github.com/rdwj/memory-hub/issues/86)** — local change to two tool files when the swarm use case becomes real. |
 | **Full-content notification receive-side.** Server-side ships in #62 but the typed Python SDK can't receive custom-method notifications because `mcp.types.ServerNotification` is a closed Pydantic union. URI-only is spec-compliant and works. | Deferred | **Filed as [#87](https://github.com/rdwj/memory-hub/issues/87)** — upstream `mcp` library issue or downstream raw transport subscriber. |
-| **Q9 (push fanout cost at scale).** Not actionable until a real swarm deployment exists to benchmark against. The `open-questions.md` entry is the right home for this; no GitHub issue needed. | Watch | Stays as a note in `docs/agent-memory-ergonomics/open-questions.md` Q9. Revisit when a real swarm lands. |
+| **Q9 (push fanout cost at scale).** Not actionable until a real swarm deployment exists to benchmark against. The `open-questions.md` entry is the right home for this; no GitHub issue needed. | Watch | Stays as a note in `planning/agent-memory-ergonomics-open-questions.md` Q9. Revisit when a real swarm lands. |
 | **Demo scenarios retro carry-overs from 2026-04-07** (4 domain curation pattern issues, synthetic-name cross-check, SME validation outreach, "data ownership" framing lift). | Carry-forward | Not concept work — separate effort. Documented in `retrospectives/2026-04-07_demo-scenarios-and-identity-model/RETRO.md`. Pick up when the concept-close hangover settles. |
 | **`#83` memoryhub-ui deploy script gotcha** (no `oc rollout restart`, image digest pinning). | Carry-forward | Already filed in 2026-04-07 evening retro as #83. Not a concept item. |
 | **Pre-existing untracked `docs/auth/`, `docs/identity-model/`, `demos/scenarios/` directories** + dirty `.claude/skills/issue-tracker.md`. | Process | Carry-forward from 2026-04-07 evening retro. Not concept work but clutters every `git status`. Worth resolving in a housekeeping pass. |
@@ -146,7 +146,7 @@ This is the first retro in the project to span a multi-session, multi-day **desi
 
 - [x] Save concept-close memories before deploy (#62 ship summary, FastMCP method whitelist, full-content limitation, broadcast self-exclusion invariant)
 - [x] Update `docs/agent-memory-ergonomics/design.md` Candidate 7 with SHIPPED marker
-- [x] Resolve open questions Q6, Q7, Q8 in `docs/agent-memory-ergonomics/open-questions.md`
+- [x] Resolve open questions Q6, Q7, Q8 in `planning/agent-memory-ergonomics-open-questions.md`
 - [x] Update `research/agent-memory-ergonomics/fastmcp-3-push-notifications.md` with Implementation Notes section
 - [x] Deploy #62 to OpenShift and verify end-to-end via `mcp-test-mcp`
 - [x] Close #62 with detailed close-out comment matching #61 style

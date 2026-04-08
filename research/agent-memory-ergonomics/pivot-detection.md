@@ -159,7 +159,7 @@ Only meaningful once both component validations pass. At that point, run the age
 ## References
 
 - `../../docs/agent-memory-ergonomics/design.md` §Loading Patterns (Pattern C) — the design this research supports
-- `../../docs/agent-memory-ergonomics/open-questions.md` Q2 — the question this research tracks
+- `../../planning/agent-memory-ergonomics-open-questions.md` Q2 — the question this research tracks
 - `two-vector-retrieval.md` — the session focus vector this detection reuses
 - `../../.claude/rules/memoryhub-integration.md` — current hand-written loading rule with an ad-hoc version of pivot detection
 - Issue #58 — implementation tracking (the rule template, not the session vector itself)

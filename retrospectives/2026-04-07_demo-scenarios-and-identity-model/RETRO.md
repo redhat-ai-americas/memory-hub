@@ -8,7 +8,7 @@
 ## What We Set Out To Do
 
 Original ask: discuss how to maintain unique identity for ~50 agents in
-a planned healthcare demo. Look at `docs/kagenti-integration/` and
+a planned healthcare demo. Look at `planning/kagenti-integration/` and
 `docs/agent-memory-ergonomics.md` as starting points.
 
 Implicit expectation: scoped discussion about agent identity, possibly

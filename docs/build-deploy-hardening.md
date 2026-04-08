@@ -135,4 +135,4 @@ Audit completed 2026-04-08 as part of #88 Phase 1; Phase 2 fixes shipped and val
 - Retro #12 (`retrospectives/2026-04-07_rbac-enforcement/`) -- manifestation 2
 - Retro #14 (`retrospectives/2026-04-07_wave1-4-mcp-fixes/`) -- manifestation 3
 - Retro #18 (`retrospectives/2026-04-07_concept-close-doc-refresh-and-55/`) -- manifestation 4
-- `docs/operator.md` -- the future operator will adopt this contract
+- `../planning/operator.md` -- the future operator will adopt this contract

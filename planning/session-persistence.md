@@ -72,7 +72,7 @@ The umbrella issue should resolve which combination ships first and which gets d
 - **#61 / #62** Valkey infrastructure (`memoryhub:sessions:<session_id>`, `memoryhub:active_sessions`) is the substrate this work builds on. The new `memoryhub:app_sessions:<session_id>` key prefix from Fork A should fit alongside.
 - **#34** (OAuth 2.1 token exchange) and **#74-#81** (OpenShift OAuth broker) widen the JWT story -- the more JWT-driven everything is, the smaller Layer 2 gets.
 - **#82** (LibreChat as second MCP client) is one of the third-party clients this is meant to protect. Worth coordinating the client retry contract with whatever LibreChat needs.
-- **`docs/agent-memory-ergonomics/design.md`** is concept-closed; this is genuinely a new concept, not an extension.
+- **`../docs/agent-memory-ergonomics/design.md`** is concept-closed; this is genuinely a new concept, not an extension.
 
 ## Out of scope for this doc
 
@@ -83,5 +83,5 @@ The umbrella issue should resolve which combination ships first and which gets d
 ## Related
 
 - Retro `2026-04-08_agent-memory-ergonomics-concept-close/RETRO.md` -- the experience of losing the MCP session mid-conversation when deploying mcp-server during the #88 work was the trigger for this issue.
-- `docs/agent-memory-ergonomics/design.md` -- precedent for "stateless where possible" composition (Layer 2 of the agent-memory-ergonomics concept made focus stateless per-call exactly to avoid this class of problem).
+- `../docs/agent-memory-ergonomics/design.md` -- precedent for "stateless where possible" composition (Layer 2 of the agent-memory-ergonomics concept made focus stateless per-call exactly to avoid this class of problem).
 - Issue #86 -- session_id model upgrade that this work must compose with.

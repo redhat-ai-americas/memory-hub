@@ -1,6 +1,6 @@
 # Open Questions
 
-Unresolved design questions surfaced while drafting [`design.md`](design.md). Each has a status, a "what would resolve it" note, and a dependency pointer to either an issue or a research file.
+Unresolved design questions surfaced while drafting [`../docs/agent-memory-ergonomics/design.md`](../docs/agent-memory-ergonomics/design.md). Each has a status, a "what would resolve it" note, and a dependency pointer to either an issue or a research file.
 
 **Status legend:**
 - **Open** — not yet investigated
@@ -12,7 +12,7 @@ Unresolved design questions surfaced while drafting [`design.md`](design.md). Ea
 
 **Status:** Resolved 2026-04-07
 **Affects:** #58 (shipped)
-**Research:** [`../../research/agent-memory-ergonomics/two-vector-retrieval.md`](../../research/agent-memory-ergonomics/two-vector-retrieval.md)
+**Research:** [`../research/agent-memory-ergonomics/two-vector-retrieval.md`](../research/agent-memory-ergonomics/two-vector-retrieval.md)
 
 Given a query vector `q` and a session focus vector `f`, how should `search_memory` combine them into a single ranking?
 
@@ -24,7 +24,7 @@ Empirical benchmark (40 queries × 3 session conditions, 200 memories × 4 topic
 
 **Status:** Resolved 2026-04-07
 **Affects:** #58 (shipped), #60 (already shipped agent-side half)
-**Research:** [`../../research/agent-memory-ergonomics/pivot-detection.md`](../../research/agent-memory-ergonomics/pivot-detection.md)
+**Research:** [`../research/agent-memory-ergonomics/pivot-detection.md`](../research/agent-memory-ergonomics/pivot-detection.md)
 
 Pattern C (lazy load + rebias on pivot) needs a concrete trigger for "a pivot just happened."
 
@@ -68,7 +68,7 @@ Snippets are more useful for the agent but cost more tokens. Bare IDs force a ro
 
 **Status:** Resolved 2026-04-08 (URI-only ships fully; full-content ships server-side only and is deferred client-side)
 **Affects:** #62 (shipped)
-**Research:** [`../../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md`](../../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md) §"Spec compliance vs latency"
+**Research:** [`../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md`](../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md) §"Spec compliance vs latency"
 
 **Resolution:** URI-only is the default (`push_payload: uri_only`) and the only payload the typed Python SDK can currently *receive*. The build helper `build_full_content_notification` exists in `memoryhub_core/services/push_broadcast.py` and the server can broadcast custom `notifications/memoryhub/memory_written` messages over the Valkey queue without issue, but the SDK's `MemoryHubClient.on_memory_updated` callback never sees them because the underlying `mcp` Python library deserializes incoming notifications against `ServerNotification` — a closed Pydantic union with nine pre-defined notification types and no slot for vendor-prefixed methods. Custom-method notifications drop at the JSON-RPC deserialization layer before reaching `MessageHandler.dispatch`. Lifting this requires either an `mcp` SDK upgrade with an extensible notification union, or a raw transport-level subscriber that bypasses the typed deserializer; both are tracked as #62 follow-ups rather than blockers. Memory-hub's first real consumer is single-developer scale where the round-trip cost of URI-only is negligible, so the default decision is well-defended even without benchmarking.
 
@@ -76,7 +76,7 @@ Snippets are more useful for the agent but cost more tokens. Bare IDs force a ro
 
 **Status:** Resolved 2026-04-08 (no upstream work required, but FastMCP's built-in pipeline turned out to be unusable for an unrelated reason — see Q6 discussion and the research file)
 **Affects:** #62 (shipped)
-**Research:** [`../../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md`](../../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md) §"Subscriber lifecycle"
+**Research:** [`../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md`](../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md) §"Subscriber lifecycle"
 
 **Resolution:** The Phase 0 spike against FastMCP 3.2.0 found that `ensure_subscriber_running(session_id, session, docket, fastmcp)` at `fastmcp/server/tasks/notifications.py:238-275` is **idempotent** and decoupled from task submission — the research file's concern that the subscriber loop was tied to task-submission was based on `ensure_subscriber_running`'s only existing caller (task submission) rather than the function itself. Cleanup uses `ctx.session._exit_stack.push_async_callback(...)` calling `stop_subscriber(session_id)`, the same pattern FastMCP uses internally in `handlers.py:199-208`. **However**, the spike also surfaced a separate blocker: `_send_mcp_notification` (the helper the built-in subscriber loop calls before forwarding to `session.send_notification`) hard-codes a method whitelist — it raises `ValueError("Unsupported notification method for subscriber")` if `method != "notifications/tasks/status"`. So while FastMCP's lifecycle primitives ARE reusable for memory-hub's session-attached subscribers, FastMCP's *delivery* primitives are not. Memory-hub now ships its own `memoryhub_subscriber_loop` (in `memoryhub_core/services/push_subscriber.py`) that clones the FastMCP reference implementation's structure but is method-agnostic. The lifecycle pattern (task-per-session, weakref-tracked registry, `_exit_stack` cleanup) is identical; the wire protocol and key prefix (`memoryhub:broadcast:*` instead of `fastmcp:notifications:*`) are memoryhub-owned. No upstream work is needed.
 
@@ -106,4 +106,4 @@ If a new question surfaces while working in this area:
 2. Set its **Status** to "Open."
 3. Populate **Affects** (issue number) and **Research** (file path, if one exists).
 4. Write a short "what would resolve it" note — the bar is "someone picking this up in three months should know what they need to produce."
-5. If the question needs deep investigation (>1 page), create a new file under `research/` and link to it.
+5. If the question needs deep investigation (>1 page), create a new file under `../research/agent-memory-ergonomics/` and link to it.

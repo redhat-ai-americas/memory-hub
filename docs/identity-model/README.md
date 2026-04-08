@@ -51,7 +51,7 @@ demo-harness driver injection, the data model that lets all of those work.
 
 Out of scope for the demo (tracked as future work, see linked issues):
 
-- Phase 2 OAuth 2.0 token exchange / SPIFFE-based identity (`docs/kagenti-integration/`)
+- Phase 2 OAuth 2.0 token exchange / SPIFFE-based identity (`../../planning/kagenti-integration/`)
 - Tenant isolation (the demo runs in a single tenant)
 - Full audit log persistence (stub interface only; persistence is future work)
 - Intersection authorization enforcement (data model supports it; demo runs
