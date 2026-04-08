@@ -136,6 +136,24 @@ Every memory operation flows through the MCP server, which delegates to the serv
 
 For the full design and the deployment topology, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). For the per-subsystem map, see [`docs/SYSTEMS.md`](docs/SYSTEMS.md).
 
+## Documentation
+
+Full documentation lives in four top-level directories. Start with [`docs/README.md`](docs/README.md) for a guided tour, or jump straight to whichever area matches your need:
+
+- **[`docs/`](docs/README.md)** — Shipped architecture and reference material. Subsystem designs (memory tree, storage layer, governance, curator, MCP server), agent memory ergonomics, auth, identity model, admin operations.
+- **[`planning/`](planning/)** — In-flight designs, open questions, and integration roadmaps (Kubernetes operator, observability, session persistence, kagenti and LlamaStack integrations).
+- **[`research/`](research/)** — Investigations and benchmarks that informed shipped decisions (FIPS storage evaluation, two-vector retrieval ranking, pivot detection, FastMCP push notifications, Claude Code JWT limitations).
+- **[`demos/`](demos/)** — Conference demo scripts and scenario material (HIMSS, RSA, IACP, IAEM, World AgriTech, and the RHOAI dashboard tile demo).
+
+Package-specific docs live in each package's own README:
+
+- **[Python SDK](sdk/README.md)** — quickstart, API reference, project config, authentication
+- **[CLI](memoryhub-cli/README.md)** — commands, project config, credential setup
+- **[MCP server](memory-hub-mcp/README.md)** — tool list, deployment, testing
+- **[Auth service](memoryhub-auth/)** — standalone OAuth 2.1 authorization server
+
+For LLM agents crawling this repo: [`llms.txt`](llms.txt) at the repo root follows the [llmstxt.org](https://llmstxt.org/) convention and is the most direct entry point.
+
 ## Project layout
 
 ```

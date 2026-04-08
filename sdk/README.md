@@ -139,8 +139,20 @@ results = client.search_sync("deployment patterns")
 
 The SDK uses OAuth 2.1 `client_credentials` grant under the hood. Token management is fully automatic — the SDK fetches, caches, and refreshes JWT access tokens transparently. You never need to handle tokens directly.
 
+## Further documentation
+
+The SDK is one surface of the [memory-hub](https://github.com/rdwj/memory-hub) monorepo. For deeper context:
+
+- **[Architecture overview](https://github.com/rdwj/memory-hub/blob/main/docs/ARCHITECTURE.md)** — System design, deployment topology, data flow
+- **[MCP server tool reference](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md)** — The 13 tools the SDK wraps, with parameter reference
+- **[Memory tree data model](https://github.com/rdwj/memory-hub/blob/main/docs/memory-tree.md)** — How scopes, branches, and versioning work
+- **[Governance and authorization](https://github.com/rdwj/memory-hub/blob/main/docs/governance.md)** — RBAC, scope-based access, audit trail
+- **[Agent memory ergonomics design](https://github.com/rdwj/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md)** — Full `.memoryhub.yaml` schema, retrieval defaults, session focus, and loading patterns
+- **[Package layout](https://github.com/rdwj/memory-hub/blob/main/docs/package-layout.md)** — How `memoryhub` (this SDK) relates to `memoryhub-core` (server-side library) and `memoryhub-cli`
+
 ## Links
 
-- [GitHub](https://github.com/rdwj/memory-hub)
-- [Architecture](https://github.com/rdwj/memory-hub/blob/main/docs/ARCHITECTURE.md)
-- [License](https://github.com/rdwj/memory-hub/blob/main/LICENSE)
+- **[GitHub repository](https://github.com/rdwj/memory-hub)**
+- **[CLI (`memoryhub-cli`)](https://pypi.org/project/memoryhub-cli/)** — companion CLI client
+- **[Issue tracker](https://github.com/rdwj/memory-hub/issues)**
+- **[License (Apache 2.0)](https://github.com/rdwj/memory-hub/blob/main/LICENSE)**

@@ -1,0 +1,44 @@
+# MemoryHub
+
+> Kubernetes-native agent memory component for OpenShift AI. Provides a centralized, governed memory layer for AI agents with multi-tier scoping (user / project / role / organizational / enterprise), version history, semantic search via pgvector, an immutable audit trail, and an OAuth 2.1 authorization story. Works with any agent framework that speaks MCP.
+
+MemoryHub is a monorepo. The primary agent surface is an MCP server exposing 13 tools over streamable-HTTP. It ships a typed Python SDK and a CLI for direct use, plus a React dashboard and a standalone OAuth 2.1 authorization server. Documentation is organized into four top-level directories: `docs/` (shipped architecture), `planning/` (in-flight designs), `research/` (investigations that informed shipped decisions), and `demos/` (presentation and scenario material).
+
+## Start here
+
+- [README](https://github.com/rdwj/memory-hub/blob/main/README.md): Project overview, the three ways to use it (MCP, SDK, CLI), and the architecture at a glance.
+- [Documentation index](https://github.com/rdwj/memory-hub/blob/main/docs/README.md): Landing page for shipped architecture docs, grouped by purpose with cross-links to planning, research, and demos.
+- [Architecture](https://github.com/rdwj/memory-hub/blob/main/docs/ARCHITECTURE.md): System design, deployment topology, data flow, and the "why" behind the major design choices.
+- [Subsystem inventory](https://github.com/rdwj/memory-hub/blob/main/docs/SYSTEMS.md): Per-subsystem status table (Implemented / Design / Skeleton / TBD) with dependency graph.
+
+## Architecture and data model
+
+- [Memory tree](https://github.com/rdwj/memory-hub/blob/main/docs/memory-tree.md): Core data model — tree/branch structure, versioning with `isCurrent`, rationale and provenance branches.
+- [Storage layer](https://github.com/rdwj/memory-hub/blob/main/docs/storage-layer.md): PostgreSQL + pgvector schema, row-level security, migration conventions.
+- [Governance](https://github.com/rdwj/memory-hub/blob/main/docs/governance.md): Memory governance model — scopes, visibility, ownership, tenant isolation, audit.
+- [MCP server](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md): FastMCP 3 server design, 13-tool catalog, streamable-http transport, session handling.
+- [Curator agent](https://github.com/rdwj/memory-hub/blob/main/docs/curator-agent.md): Curation pipeline for duplicate detection, merge suggestions, and rule-driven curation.
+- [Agent memory ergonomics](https://github.com/rdwj/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md): Full design — search shape, session focus vector, cross-encoder reranking, loading patterns, real-time push.
+
+## Auth and identity
+
+- [Auth overview](https://github.com/rdwj/memory-hub/blob/main/docs/auth/README.md): OAuth 2.1 auth service and JWT verification architecture.
+- [Identity model](https://github.com/rdwj/memory-hub/blob/main/docs/identity-model/README.md): Owner/actor/driver triple, project-scope membership, audit logging, agent-generation CLI.
+- [Authorization](https://github.com/rdwj/memory-hub/blob/main/docs/identity-model/authorization.md): RBAC enforcement and project-membership authorization.
+
+## Packages
+
+- [Python SDK](https://github.com/rdwj/memory-hub/blob/main/sdk/README.md): `pip install memoryhub` — typed async client wrapping the MCP tools. OAuth 2.1 token management is automatic; `.memoryhub.yaml` auto-discovery applies project-level retrieval defaults.
+- [CLI](https://github.com/rdwj/memory-hub/blob/main/memoryhub-cli/README.md): `pip install memoryhub-cli` — terminal client for search/read/write/delete plus `memoryhub config init` for generating project-level `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`.
+- [MCP server](https://github.com/rdwj/memory-hub/blob/main/memory-hub-mcp/README.md): FastMCP 3 server exposing the 13 tools — the primary agent surface.
+
+## Optional
+
+- [Package layout](https://github.com/rdwj/memory-hub/blob/main/docs/package-layout.md): How `memoryhub-core` (server-side library), `memoryhub` (SDK on PyPI), and `memoryhub-cli` fit together.
+- [Build and deploy hardening](https://github.com/rdwj/memory-hub/blob/main/docs/build-deploy-hardening.md): Build and deploy invariants shared across all MemoryHub components.
+- [Planning directory](https://github.com/rdwj/memory-hub/tree/main/planning): In-flight designs for unimplemented features (Kubernetes operator, observability, session persistence, kagenti and LlamaStack integration).
+- [Research directory](https://github.com/rdwj/memory-hub/tree/main/research): Investigations and benchmarks — FIPS storage evaluation, two-vector retrieval ranking, pivot detection, FastMCP push notifications, Claude Code JWT limitations.
+- [Demos directory](https://github.com/rdwj/memory-hub/tree/main/demos): Conference demo scripts (HIMSS, RSA, IACP, IAEM, World AgriTech) and the RHOAI dashboard tile demo material.
+- [Retrospectives](https://github.com/rdwj/memory-hub/tree/main/retrospectives): Per-session retros documenting decisions, gaps, and patterns — read for the "why" behind major design choices.
+- [Issue tracker](https://github.com/rdwj/memory-hub/issues): Open issues and feature requests.
+- [License (Apache 2.0)](https://github.com/rdwj/memory-hub/blob/main/LICENSE)

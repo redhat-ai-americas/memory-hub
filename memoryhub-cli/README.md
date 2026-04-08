@@ -38,5 +38,17 @@ memoryhub config regenerate
 
 Per-developer connection params (`url`, `auth_url`, `client_id`, `client_secret`) live separately at `~/.config/memoryhub/config.json` and are managed by `memoryhub login`. They are not stored in `.memoryhub.yaml` and are not committed.
 
-See [the MemoryHub project docs](https://github.com/rdwj/memory-hub) for the
-architecture, rule file templates, and the `.memoryhub.yaml` schema.
+## Further documentation
+
+The CLI is one surface of the [memory-hub](https://github.com/rdwj/memory-hub) monorepo. For deeper context:
+
+- **[Architecture overview](https://github.com/rdwj/memory-hub/blob/main/docs/ARCHITECTURE.md)** — System design, deployment topology
+- **[MCP server tool reference](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md)** — The 13 tools the CLI wraps
+- **[Agent memory ergonomics design](https://github.com/rdwj/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md)** — Full `.memoryhub.yaml` schema, rule file templates, and session-loading patterns
+- **[Python SDK](https://pypi.org/project/memoryhub/)** — if you'd rather call the tools from Python
+
+## Links
+
+- **[GitHub repository](https://github.com/rdwj/memory-hub)**
+- **[Issue tracker](https://github.com/rdwj/memory-hub/issues)**
+- **[License (Apache 2.0)](https://github.com/rdwj/memory-hub/blob/main/LICENSE)**
