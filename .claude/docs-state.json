@@ -1,0 +1,33 @@
+{
+  "reorg": {
+    "completed_at": "2026-04-08T17:35:29Z",
+    "completed_commit": "5f298ab",
+    "skill_version": "1.0",
+    "structure": {
+      "docs": "docs/",
+      "planning": "planning/",
+      "research": "research/",
+      "demos": "demos/"
+    },
+    "artifacts": {
+      "docs_index": "docs/README.md",
+      "llms_txt": "llms.txt",
+      "llms_full_txt": null
+    }
+  },
+  "refreshes": [
+    {
+      "refreshed_at": "2026-04-08T18:00:00Z",
+      "skill_version": "1.0",
+      "findings": {
+        "broken_links": 2,
+        "stale_paths": 0,
+        "placement_drift": 0,
+        "package_drift": 0,
+        "llms_txt_issues": 0,
+        "posture_gaps": 6
+      },
+      "auto_fixed": 0
+    }
+  ]
+}
