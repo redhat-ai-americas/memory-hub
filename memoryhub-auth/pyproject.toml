@@ -2,6 +2,8 @@
 name = "memoryhub-auth"
 version = "0.1.0"
 description = "OAuth 2.1 Authorization Server for MemoryHub"
+license = "Apache-2.0"
+authors = [{ name = "Wes Jackson" }]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

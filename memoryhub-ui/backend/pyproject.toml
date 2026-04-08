@@ -1,6 +1,9 @@
 [project]
 name = "memoryhub-ui-backend"
 version = "0.1.0"
+description = "Backend service for the MemoryHub dashboard UI"
+license = "Apache-2.0"
+authors = [{ name = "Wes Jackson" }]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

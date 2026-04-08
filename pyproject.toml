@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "memoryhub-core"
 version = "0.3.0"
 description = "Kubernetes-native agent memory for OpenShift AI -- server-side library (models, services, storage, RBAC). Distinct from the `memoryhub` SDK on PyPI; see docs/package-layout.md."
+license = "Apache-2.0"
+authors = [{ name = "Wes Jackson" }]
 requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0",
