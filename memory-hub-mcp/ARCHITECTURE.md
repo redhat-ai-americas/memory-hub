@@ -166,8 +166,6 @@ Key features:
 - Follows FastMCP best practices
 - Templates use Jinja2 syntax for flexibility
 
-See [GENERATOR_PLAN.md](GENERATOR_PLAN.md) for comprehensive generator documentation.
-
 ## Configuration
 
 Environment variables (selected):

@@ -622,7 +622,7 @@ The server uses FastMCP 2.x with:
 - Generator system with Jinja2 templates for scaffolding
 - Support for both STDIO (local) and HTTP (OpenShift) transports
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture information and [GENERATOR_PLAN.md](GENERATOR_PLAN.md) for generator system documentation.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture information.
 
 ## Requirements
 
@@ -630,10 +630,6 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture information and
 - OpenShift CLI (`oc`) for deployment
 - cmcp for local testing: `pip install cmcp`
 
-## Contributing
+## Contributing and license
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on how to get started, development setup, and submission guidelines.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This server is part of the [memory-hub](https://github.com/rdwj/memory-hub) monorepo. See the [root README](../README.md) for contribution guidelines and the repository-level [LICENSE](../LICENSE) (Apache 2.0).

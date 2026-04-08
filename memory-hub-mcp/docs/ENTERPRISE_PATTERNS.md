@@ -400,6 +400,4 @@ async def test_permission_check():
 - [FastMCP Documentation](https://github.com/jlowin/fastmcp)
 - [Tools Development Guide](./TOOLS_GUIDE.md)
 - [Authentication Utilities](../src/core/auth.py)
-- [State Management Middleware](../src/middleware/examples/state_middleware.py)
-- [Enterprise Patterns Examples](../src/tools/examples/enterprise_patterns.py)
 - [Runtime Dependencies](./TOOLS_GUIDE.md#runtime-dependencies)
