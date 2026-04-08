@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/redhat-ai-americas/memory-hub/security/advisories/new
+    about: Please report security issues privately via GitHub Security Advisories.
+      Do NOT open a public issue.
+  - name: Design discussion
+    url: https://github.com/redhat-ai-americas/memory-hub/discussions
+    about: For open-ended design questions that aren't ready for an issue yet,
+      start a discussion instead.

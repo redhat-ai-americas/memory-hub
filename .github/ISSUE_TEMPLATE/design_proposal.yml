@@ -1,0 +1,73 @@
+name: Design proposal
+description: Propose a new design doc or significant architectural change.
+title: "<subsystem>: <design topic>"
+labels: ["type:design"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for significant design work that needs discussion before implementation — a new subsystem, a major refactor, a cross-cutting concern. The outcome of a design issue is typically a committed doc under `docs/` or `planning/` and a set of follow-up `type:feature` issues for the implementation.
+
+        Apply the matching `subsystem:*` label after you submit.
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      description: Primary subsystem this design affects (pick one even if it's cross-cutting).
+      options:
+        - memory-tree
+        - storage
+        - curator
+        - governance
+        - mcp-server
+        - operator
+        - observability
+        - org-ingestion
+        - auth
+        - ui
+        - llamastack
+        - cross-cutting
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What's driving this? Customer need, scaling issue, compliance requirement, recurring pain in retros, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What's in and out of scope for this design?
+    validations:
+      required: true
+
+  - type: textarea
+    id: sketch
+    attributes:
+      label: Sketch
+      description: A rough outline of the proposed approach. Details can wait for the design doc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: open_questions
+    attributes:
+      label: Open questions
+      description: What's unresolved? What decisions need input from the team?
+    validations:
+      required: false
+
+  - type: textarea
+    id: doc_location
+    attributes:
+      label: Target doc location
+      description: Where will the design doc live once it's written?
+      placeholder: planning/<my-design>.md
+    validations:
+      required: true

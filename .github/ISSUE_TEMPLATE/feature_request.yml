@@ -1,0 +1,75 @@
+name: Feature request
+description: Propose a new capability or enhancement.
+title: "<subsystem>: <brief description>"
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a new feature! A few things to keep in mind:
+
+        - Title format: `subsystem: Brief description` (e.g. `curator: Add configurable similarity threshold`)
+        - Every feature references a design document under `docs/` or `planning/`. If the design doesn't exist yet, consider opening a Design proposal issue first.
+        - Apply the matching `subsystem:*` label after you submit.
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      description: Which subsystem does this belong to?
+      options:
+        - memory-tree
+        - storage
+        - curator
+        - governance
+        - mcp-server
+        - operator
+        - observability
+        - org-ingestion
+        - auth
+        - ui
+        - llamastack
+        - other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What's the user or operator pain that this feature addresses?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should we build? High-level is fine; deep design belongs in a design doc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_doc
+    attributes:
+      label: Design reference
+      description: Point at the design doc under `docs/` or `planning/`. Create or update one if needed.
+      placeholder: planning/my-new-feature.md
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you evaluated and why you rejected them.
+    validations:
+      required: false
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Other issues or prereqs that need to land first.
+    validations:
+      required: false

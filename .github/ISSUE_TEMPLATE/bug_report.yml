@@ -1,0 +1,85 @@
+name: Bug report
+description: Report something that is broken or behaving incorrectly.
+title: "<subsystem>: <brief description>"
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! Before you submit, a few things to keep in mind:
+
+        - Title format: `subsystem: Brief description` (e.g. `mcp-server: register_session returns 500 on empty api_key`)
+        - Apply the matching `subsystem:*` label after you submit.
+        - If this is a security issue, use the private security advisory flow instead.
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      description: Which subsystem is affected?
+      options:
+        - memory-tree
+        - storage
+        - curator
+        - governance
+        - mcp-server
+        - operator
+        - observability
+        - org-ingestion
+        - auth
+        - ui
+        - llamastack
+        - other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What's wrong? One or two sentences.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to trigger the bug. Paste commands, tool calls, or code.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What did happen? Include error messages, logs, stack traces.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Package version, image tag, or git SHA.
+    validations:
+      required: false
+
+  - type: textarea
+    id: design_doc
+    attributes:
+      label: Design reference
+      description: Point at the relevant doc under `docs/` or `planning/` if one exists.
+      placeholder: docs/mcp-server.md
+    validations:
+      required: false
