@@ -143,6 +143,4 @@ Templates can be:
 
 ## See Also
 
-- [GENERATOR_PLAN.md](../GENERATOR_PLAN.md) - Comprehensive generator system documentation
 - [ARCHITECTURE.md](../ARCHITECTURE.md) - Project architecture overview
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contributing guidelines
