@@ -1,0 +1,77 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+This is a monorepo — each published package has its own section so releases
+can be tracked independently. Packages that have not yet cut a tagged release
+are tracked under "Unreleased" until they do.
+
+For the full commit history, see `git log` or the
+[GitHub commit view](https://github.com/rdwj/memory-hub/commits/main).
+
+## memoryhub (SDK)
+
+Published to PyPI as [`memoryhub`](https://pypi.org/project/memoryhub/). Lives in [`sdk/`](sdk/).
+
+### [Unreleased]
+
+### [0.1.0] — 2026-04-05
+
+- Initial SDK release. Typed async client wrapping the MCP tool catalog,
+  OAuth 2.1 token management, `.memoryhub.yaml` auto-discovery for
+  project-level retrieval defaults.
+- Tag: `sdk/v0.1.0`
+
+### [0.0.1] — 2026-04-05
+
+- Release pipeline bring-up. Added `LICENSE`, published scaffold package.
+- Tag: `sdk/v0.0.1`
+
+## memoryhub-cli
+
+Lives in [`memoryhub-cli/`](memoryhub-cli/). Not yet published.
+
+### [Unreleased]
+
+- Terminal client for search/read/write/delete plus `memoryhub config init`
+  for generating `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`.
+
+## memory-hub-mcp
+
+MCP server. Lives in [`memory-hub-mcp/`](memory-hub-mcp/). Deployed to
+OpenShift; not published as a package.
+
+### [Unreleased]
+
+- FastMCP 3 server exposing the 13 MemoryHub tools over streamable-HTTP.
+
+## memoryhub-core (server-side library)
+
+Lives at the repo root in [`src/memoryhub/`](src/memoryhub/). Consumed by
+memory-hub-mcp and memoryhub-auth; not published as a standalone package.
+
+### [Unreleased]
+
+- Models, services, storage, and RBAC. See
+  [docs/package-layout.md](docs/package-layout.md) for the split between
+  `memoryhub-core` (server) and `memoryhub` (SDK on PyPI).
+
+## memoryhub-auth
+
+OAuth 2.1 authorization server. Lives in [`memoryhub-auth/`](memoryhub-auth/).
+Not yet published.
+
+### [Unreleased]
+
+- OAuth 2.1 authorization server with PKCE, JWT issuance, LibreChat-compatible
+  metadata endpoints.
+
+## memoryhub-ui
+
+Dashboard UI (React frontend + FastAPI backend). Lives in
+[`memoryhub-ui/`](memoryhub-ui/). Not yet published.
+
+### [Unreleased]
+
+- BFF walker, dashboard views, memory inspector.
