@@ -16,7 +16,7 @@ graph TB
     end
 
     subgraph "memory-hub-mcp namespace"
-        MCP[MCP Server<br/>FastMCP 3<br/>13 tools]
+        MCP[MCP Server<br/>FastMCP 3<br/>15 tools]
         UI_BE[Dashboard BFF<br/>FastAPI]
         OAP[oauth-proxy<br/>sidecar]
     end

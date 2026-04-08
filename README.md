@@ -10,7 +10,7 @@ It works with any agent framework that speaks MCP — Claude Code, kagenti-deplo
 
 | Component | Path | What it is |
 |---|---|---|
-| **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing 13 tools (search, read, write, update, delete, history, similarity, relationships, curation, contradiction, session) over streamable-HTTP. The primary agent surface. |
+| **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing 15 tools (search, read, write, update, delete, history, similarity, relationships, curation, contradiction, session registration, session focus) over streamable-HTTP. The primary agent surface. |
 | **Server-side library** | [`src/memoryhub_core/`](src/memoryhub_core/) | SQLAlchemy models, service layer, embedding integration, RBAC enforcement (`core/authz.py`). Distribution name `memoryhub-core`; import name `memoryhub_core`. The MCP server, BFF, alembic migrations, and the seed-OAuth-clients script all import from here. |
 | **Python SDK** | [`sdk/`](sdk/) | `pip install memoryhub` — typed async client wrapping the MCP tools. OAuth 2.1 token management is automatic. See [`sdk/README.md`](sdk/README.md). |
 | **CLI** | [`memoryhub-cli/`](memoryhub-cli/) | `pip install memoryhub-cli` — terminal client for search/read/write/delete plus `memoryhub config init` for generating project-level `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md` rule files. |
@@ -115,7 +115,7 @@ See [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/desi
                           ┌──────────▼──────────┐
                           │   memory-hub-mcp    │
                           │   (FastMCP 3)       │
-                          │   13 tools          │
+                          │   15 tools          │
                           └──────────┬──────────┘
                                      │
               ┌──────────────────────┼──────────────────────┐

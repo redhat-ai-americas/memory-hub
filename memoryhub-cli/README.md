@@ -43,7 +43,7 @@ Per-developer connection params (`url`, `auth_url`, `client_id`, `client_secret`
 The CLI is one surface of the [memory-hub](https://github.com/rdwj/memory-hub) monorepo. For deeper context:
 
 - **[Architecture overview](https://github.com/rdwj/memory-hub/blob/main/docs/ARCHITECTURE.md)** — System design, deployment topology
-- **[MCP server tool reference](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md)** — The 13 tools the CLI wraps
+- **[MCP server tool reference](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md)** — The 15 tools the CLI wraps
 - **[Agent memory ergonomics design](https://github.com/rdwj/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md)** — Full `.memoryhub.yaml` schema, rule file templates, and session-loading patterns
 - **[Python SDK](https://pypi.org/project/memoryhub/)** — if you'd rather call the tools from Python
 

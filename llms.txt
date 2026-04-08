@@ -2,7 +2,7 @@
 
 > Kubernetes-native agent memory component for OpenShift AI. Provides a centralized, governed memory layer for AI agents with multi-tier scoping (user / project / role / organizational / enterprise), version history, semantic search via pgvector, an immutable audit trail, and an OAuth 2.1 authorization story. Works with any agent framework that speaks MCP.
 
-MemoryHub is a monorepo. The primary agent surface is an MCP server exposing 13 tools over streamable-HTTP. It ships a typed Python SDK and a CLI for direct use, plus a React dashboard and a standalone OAuth 2.1 authorization server. Documentation is organized into four top-level directories: `docs/` (shipped architecture), `planning/` (in-flight designs), `research/` (investigations that informed shipped decisions), and `demos/` (presentation and scenario material).
+MemoryHub is a monorepo. The primary agent surface is an MCP server exposing 15 tools over streamable-HTTP. It ships a typed Python SDK and a CLI for direct use, plus a React dashboard and a standalone OAuth 2.1 authorization server. Documentation is organized into four top-level directories: `docs/` (shipped architecture), `planning/` (in-flight designs), `research/` (investigations that informed shipped decisions), and `demos/` (presentation and scenario material).
 
 ## Start here
 
@@ -16,7 +16,7 @@ MemoryHub is a monorepo. The primary agent surface is an MCP server exposing 13 
 - [Memory tree](https://github.com/rdwj/memory-hub/blob/main/docs/memory-tree.md): Core data model — tree/branch structure, versioning with `isCurrent`, rationale and provenance branches.
 - [Storage layer](https://github.com/rdwj/memory-hub/blob/main/docs/storage-layer.md): PostgreSQL + pgvector schema, row-level security, migration conventions.
 - [Governance](https://github.com/rdwj/memory-hub/blob/main/docs/governance.md): Memory governance model — scopes, visibility, ownership, tenant isolation, audit.
-- [MCP server](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md): FastMCP 3 server design, 13-tool catalog, streamable-http transport, session handling.
+- [MCP server](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md): FastMCP 3 server design, 15-tool catalog, streamable-http transport, session handling.
 - [Curator agent](https://github.com/rdwj/memory-hub/blob/main/docs/curator-agent.md): Curation pipeline for duplicate detection, merge suggestions, and rule-driven curation.
 - [Agent memory ergonomics](https://github.com/rdwj/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md): Full design — search shape, session focus vector, cross-encoder reranking, loading patterns, real-time push.
 
@@ -30,7 +30,7 @@ MemoryHub is a monorepo. The primary agent surface is an MCP server exposing 13 
 
 - [Python SDK](https://github.com/rdwj/memory-hub/blob/main/sdk/README.md): `pip install memoryhub` — typed async client wrapping the MCP tools. OAuth 2.1 token management is automatic; `.memoryhub.yaml` auto-discovery applies project-level retrieval defaults.
 - [CLI](https://github.com/rdwj/memory-hub/blob/main/memoryhub-cli/README.md): `pip install memoryhub-cli` — terminal client for search/read/write/delete plus `memoryhub config init` for generating project-level `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`.
-- [MCP server](https://github.com/rdwj/memory-hub/blob/main/memory-hub-mcp/README.md): FastMCP 3 server exposing the 13 tools — the primary agent surface.
+- [MCP server](https://github.com/rdwj/memory-hub/blob/main/memory-hub-mcp/README.md): FastMCP 3 server exposing the 15 tools — the primary agent surface.
 
 ## Optional
 

@@ -144,7 +144,7 @@ The SDK uses OAuth 2.1 `client_credentials` grant under the hood. Token manageme
 The SDK is one surface of the [memory-hub](https://github.com/rdwj/memory-hub) monorepo. For deeper context:
 
 - **[Architecture overview](https://github.com/rdwj/memory-hub/blob/main/docs/ARCHITECTURE.md)** — System design, deployment topology, data flow
-- **[MCP server tool reference](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md)** — The 13 tools the SDK wraps, with parameter reference
+- **[MCP server tool reference](https://github.com/rdwj/memory-hub/blob/main/docs/mcp-server.md)** — The 15 tools the SDK wraps, with parameter reference
 - **[Memory tree data model](https://github.com/rdwj/memory-hub/blob/main/docs/memory-tree.md)** — How scopes, branches, and versioning work
 - **[Governance and authorization](https://github.com/rdwj/memory-hub/blob/main/docs/governance.md)** — RBAC, scope-based access, audit trail
 - **[Agent memory ergonomics design](https://github.com/rdwj/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md)** — Full `.memoryhub.yaml` schema, retrieval defaults, session focus, and loading patterns
