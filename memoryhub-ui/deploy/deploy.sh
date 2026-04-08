@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
 # Deploy the MemoryHub UI to OpenShift.
 #
+# Conforms to docs/build-deploy-hardening.md (#88).
+#
 # Steps:
 #   1. Prepare build context (frontend + backend + memoryhub_core)
 #   2. Ensure namespace exists
 #   3. Apply manifests (imagestream, buildconfig, deployment, service, route)
 #   4. Run binary build from the staged context
-#   5. Wait for deployment rollout
-#   6. Print the route URL
+#   5. Re-apply manifest to re-resolve the imagestream tag against the
+#      just-pushed digest (resolve-names rewrites at apply time, not pod
+#      creation time -- see retro #18)
+#   6. Force rollout restart so the new digest takes effect even when the
+#      manifest is byte-identical
+#   7. Wait for rollout
+#   8. Verify the running pod is on the just-pushed digest (fail if not)
+#   9. Print the route URL
 set -euo pipefail
 
 NAMESPACE="memory-hub-mcp"
+DEPLOYMENT="memoryhub-ui"
+IMAGESTREAM="memoryhub-ui"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -44,15 +54,59 @@ oc apply -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
 # Step 4: Start binary build
 echo ""
 echo "Starting build..."
-oc start-build memoryhub-ui --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
+oc start-build "$IMAGESTREAM" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
 
-# Step 5: Wait for deployment rollout
+# Step 5: Re-apply manifest to re-resolve the :latest imagestream tag
+# against the digest the build just pushed. The Deployment carries
+# `alpha.image.policy.openshift.io/resolve-names: '*'`, which rewrites the
+# tag to a concrete digest at apply time and never re-resolves on its own.
+# Without this re-apply, the next rollout restart would spin up a pod on
+# the digest :latest pointed at *before* the build (retro #18 / #83 / #88).
+echo ""
+echo "Re-applying manifest to re-resolve image digest..."
+oc apply -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
+
+# Step 6: Force rollout restart so the new image digest is picked up.
+echo ""
+echo "Restarting rollout..."
+oc rollout restart "deployment/$DEPLOYMENT" -n "$NAMESPACE"
+
+# Step 7: Wait for rollout
 echo ""
 echo "Waiting for rollout..."
-oc rollout status deployment/memoryhub-ui -n "$NAMESPACE" --timeout=180s
+oc rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
 
-# Step 6: Print route URL
-ROUTE=$(oc get route memoryhub-ui -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+# Step 8: Verify the running pod is on the just-pushed digest.
+# The Deployment spec carries the resolved digest after re-apply; the
+# imagestream's :latest tag carries the canonical "what was just pushed"
+# digest. They MUST match. If they don't, the build pushed but the
+# Deployment is still pinned to an older digest, which is exactly the
+# failure family #88 closes.
+echo ""
+echo "Verifying running digest matches imagestream :latest..."
+RUNNING=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="memoryhub-ui")].image}' 2>/dev/null || echo "")
+LATEST_DIGEST=$(oc get is "$IMAGESTREAM" -n "$NAMESPACE" \
+    -o jsonpath='{.status.tags[?(@.tag=="latest")].items[0].image}' 2>/dev/null || echo "")
+echo "  Running: $RUNNING"
+echo "  Latest:  $LATEST_DIGEST"
+if [ -z "$RUNNING" ] || [ -z "$LATEST_DIGEST" ]; then
+    echo "ERROR: could not resolve running image or imagestream :latest digest"
+    exit 1
+fi
+# RUNNING is `<registry>/<ns>/<is>@sha256:...` after resolve-names; extract
+# the sha256 and compare to LATEST_DIGEST (which is the bare sha256:... id).
+RUNNING_DIGEST="${RUNNING##*@}"
+if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ]; then
+    echo "ERROR: running digest does not match imagestream :latest"
+    echo "  This is the #88 failure family -- the build pushed but the"
+    echo "  Deployment is on an older digest. Investigate before retrying."
+    exit 1
+fi
+echo "  OK: running digest matches imagestream :latest"
+
+# Step 9: Print route URL
+ROUTE=$(oc get route "$DEPLOYMENT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 echo ""
 echo "=== Deployment Complete ==="
 if [ -n "$ROUTE" ]; then

@@ -5,6 +5,7 @@ metadata:
   name: memoryhub-ui
   namespace: memory-hub-mcp
 spec:
+  runPolicy: Serial
   output:
     to:
       kind: ImageStreamTag

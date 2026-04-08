@@ -2,7 +2,7 @@
 
 How MemoryHub components build, push, and roll out container images on OpenShift -- and the failure modes that have repeatedly bitten the project.
 
-**Status: skeleton.** Captures the failure family identified across retros #9, #12, #14, and #18 (2026-04-06 through 2026-04-07). Concrete remediation lives in the umbrella issue this doc references.
+**Status: shipped (#88 closed 2026-04-08).** Captures the failure family identified across retros #9, #12, #14, and #18 (2026-04-06 through 2026-04-07) and the project-wide template every component now satisfies. The Phase 2 fixes landed in the same session that landed this doc; the Component status table at the bottom shows the post-fix state.
 
 ## Why this exists
 
@@ -36,13 +36,15 @@ This doc establishes the project-wide pattern that all MemoryHub components (mcp
 
 **Fix proposed:** Re-apply the Deployment manifest (`oc apply -f openshift.yaml`) after `--follow` returns, before `oc rollout restart`. This forces the cluster to re-resolve the imagestream tag.
 
-### Manifestation 4 -- Pinned digest in spec (Retro #18, concept-close-doc-refresh-and-55)
+### Manifestation 4 -- Stale digest in live spec via resolve-names (Retro #18, concept-close-doc-refresh-and-55)
 
 **Symptom:** UI deploy script runs cleanly. `oc rollout restart` runs. New pod comes up on a 23-hour-old image. `oc get deploy -o yaml` reveals the image is pinned to a specific `@sha256:...` digest, not the imagestream tag.
 
-**Cause:** `memoryhub-ui` Deployment spec hard-codes a digest instead of `imagestream:latest`. `rollout restart` re-creates the pod on the same pinned digest.
+**Cause:** The *manifest* uses `image: memoryhub-ui:latest`, but the Deployment carries the `alpha.image.policy.openshift.io/resolve-names: '*'` annotation. OpenShift rewrites the tag to a concrete digest at apply time, then never re-resolves on its own. When `oc apply -f openshift.yaml` runs *before* `oc start-build`, the live spec gets pinned to whatever `:latest` pointed at *before* the build. `rollout restart` then re-creates the pod on that stale digest.
 
-**Fix proposed:** Use `imagestream:latest` with `imagePullPolicy: Always` in all Deployment specs. Tracked as **#83**.
+This is the same root mechanism as Manifestation 3 -- the resolve-names annotation, not a hard-coded digest in source. The two manifestations differ only in how the staleness becomes visible: #3 was caught mid-session because the new digest was minutes old; #4 went unnoticed for 23 hours.
+
+**Fix proposed:** Use `imagestream:latest` with `imagePullPolicy: Always` in all Deployment specs (already true across components -- this is a discipline to preserve, not a fix to apply), and **re-apply the manifest after `oc start-build --follow` returns** so the resolve-names annotation re-resolves to the just-pushed digest. Originally tracked as **#83**; now subsumed by this issue.
 
 ## The project-wide template
 
@@ -87,11 +89,10 @@ After `oc start-build --follow` returns:
    echo "Latest:  $LATEST_DIGEST"
    ```
    If the script can resolve `RUNNING` to a digest, assert it matches `LATEST_DIGEST`. Fail the script otherwise.
-5. **Tool-count regression check** (MCP servers only) -- query the running server's tool list and assert the expected count:
-   ```bash
-   # Pseudo: mcp-test-mcp list-tools | wc -l == EXPECTED_TOOL_COUNT
-   ```
-   Originally proposed in retro #11, finally landed in `65bca6c`. Must remain in every MCP deploy script.
+5. **Tool-count regression check** (MCP servers only) -- two halves, both required:
+
+   - **Static preflight, in the deploy script.** Before the build runs, parse `src/main.py` and the `src/tools/` directory to assert that every tool file is imported AND added to `mcp.add_tool(...)`. Catches the registration silent-failure class (file ships but is not registered, no error in pod logs). Landed in `65bca6c`. Lives in `deploy.sh` because it's pure source-side static analysis. Must remain in every MCP deploy script.
+   - **Runtime check, operator-side.** After the deploy script completes, the operator runs `mcp-test-mcp` against the deployed route to assert the expected tool count and spot-check at least one tool. This catches runtime issues the static check can't see: build context missing files, runtime decoration errors, dependency import failures, JWT auth misconfiguration. The deploy script can't shell out to `mcp-test-mcp` because `mcp-test-mcp` is itself an MCP server (not a CLI), so the runtime check lives in the operator's slash-command workflow rather than the bash script. The `/deploy-mcp` slash command's Step 4 ("Verify deployed tools with mcp-test-mcp") is the canonical operator-side equivalent and MUST be run after every memory-hub-mcp deploy.
 6. **Healthz check** -- existing pattern, keep it.
 
 ## Audit checklist
@@ -105,18 +106,21 @@ Apply this to every existing component (mcp-server, ui, auth, future operator, f
 - [ ] Deploy script re-applies manifest after `--follow`
 - [ ] Deploy script does `rollout restart` + `rollout status`
 - [ ] Deploy script verifies running digest == imagestream `:latest` digest
-- [ ] (MCP only) Deploy script asserts tool-count post-deploy
+- [ ] (MCP only) Deploy script runs static-preflight tool-count check (registration silent-failure)
+- [ ] (MCP only) Operator runs `mcp-test-mcp` post-deploy (runtime registration check)
 - [ ] Deploy script returns non-zero on any verification failure
 
 ## Component status
 
-| Component | BuildConfig OK | Deployment OK | Deploy script OK |
-|---|---|---|---|
-| memory-hub-mcp | TBD (audit) | TBD (audit) | TBD (audit) |
-| memoryhub-ui | TBD (audit -- #83 partially covers) | NO (digest pinned, #83) | NO (no rollout step, #83) |
-| memoryhub-auth | TBD (audit) | TBD (audit) | TBD (audit) |
+Audit completed 2026-04-08 as part of #88 Phase 1; Phase 2 fixes shipped and validated by real deploys the same day. Per-cell status:
 
-The umbrella issue this doc references will fill in the audit results and produce per-component fixes.
+| Component | BuildConfig | Deployment | Deploy script |
+|---|---|---|---|
+| memory-hub-mcp | OK — `noCache: true` and `runPolicy: Serial` set | OK — imagestream tag, `imagePullPolicy: Always`, `resolve-names` annotation, `app.kubernetes.io/name` label on Deployment metadata | OK — re-apply, `rollout restart`, `rollout status`, hardened deploy-state checks (fail non-zero), running-digest verification, static-preflight tool-count check; runtime tool-count check is operator-side via `mcp-test-mcp` per `/deploy-mcp` Step 4 |
+| memoryhub-ui | OK — `noCache: true` and `runPolicy: Serial` set | OK — imagestream tag in manifest, `imagePullPolicy: Always`, `resolve-names` annotation; oauth-proxy sidecar uses an external image with `IfNotPresent` (intentional, not under #88 scope) | OK — re-apply after `--follow`, `rollout restart`, `rollout status`, running-digest verification |
+| memoryhub-auth | OK — `noCache: true` and `runPolicy: Serial` set | OK — imagestream tag (sed-rewritten to fully-qualified registry path by deploy script), `imagePullPolicy: Always`, `resolve-names` annotation; placeholder Secret stanzas removed and now managed entirely out-of-band by deploy script | OK — re-apply after `--follow`, `rollout restart`, `rollout status`, running-digest verification AFTER both rollouts (initial restart + AUTH_ISSUER env-set); the broken `grep | awk` filter that was silently producing malformed Deployment manifests was removed during Phase 2 |
+
+#88 closed 2026-04-08. The umbrella issue subsumed #83 (`memoryhub-ui` deploy script gotcha), which closed as part of the same Phase 2 ship.
 
 ## Out of scope for this doc
 

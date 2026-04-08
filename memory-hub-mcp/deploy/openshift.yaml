@@ -4,6 +4,7 @@ kind: BuildConfig
 metadata:
   name: memory-hub-mcp
 spec:
+  runPolicy: Serial
   output:
     to:
       kind: ImageStreamTag
@@ -48,6 +49,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: memory-hub-mcp
+  labels:
+    app.kubernetes.io/name: memory-hub-mcp
 spec:
   replicas: 1
   selector:

@@ -1,10 +1,22 @@
 #!/bin/bash
 # Deployment script for MemoryHub Auth Service to OpenShift
 # Usage: ./deploy.sh [project-name]
+#
+# Conforms to docs/build-deploy-hardening.md (#88).
 
 set -euo pipefail
 
 PROJECT="${1:-memoryhub-auth}"
+
+# Manifest is rewritten through sed to embed the project-qualified registry
+# path. Secrets (auth-rsa-keys, auth-admin-key) are managed out-of-band --
+# they're documented in openshift.yaml comments and created by this script
+# before the apply -- so the manifest itself contains no Secret stanzas and
+# the apply pipeline is just sed + oc apply.
+apply_manifest() {
+    sed "s|image: auth-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/auth-server:latest|g" openshift.yaml | \
+        oc apply -f - -n "$PROJECT"
+}
 
 echo "========================================="
 echo "MemoryHub Auth — Deployment to OpenShift"
@@ -49,10 +61,7 @@ fi
 
 # Apply OpenShift resources (skip the RSA secret since we handle it above)
 echo "→ Applying OpenShift resources..."
-sed "s|image: auth-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/auth-server:latest|g" openshift.yaml | \
-    grep -v "kind: Secret" | \
-    awk 'BEGIN{skip=0} /^---/{skip=0} /name: auth-rsa-keys/{skip=1} skip{next} {print}' | \
-    oc apply -f - -n "$PROJECT"
+apply_manifest
 
 # Build
 echo "→ Building container image..."
@@ -73,6 +82,15 @@ fi
 
 oc start-build auth-server --from-dir="$BUILD_DIR" --follow -n "$PROJECT"
 
+# Re-apply manifest to re-resolve the :latest imagestream tag against the
+# digest the build just pushed. The Deployment carries
+# `alpha.image.policy.openshift.io/resolve-names: '*'`, which rewrites the
+# tag to a concrete digest at apply time and never re-resolves on its own.
+# Without this re-apply, the next rollout would spin up a pod on the digest
+# :latest pointed at *before* the build (#88, manifestation 3/4).
+echo "→ Re-applying manifest to re-resolve image digest..."
+apply_manifest
+
 # Wait for rollout
 echo "→ Deploying application..."
 oc rollout restart deployment/auth-server -n "$PROJECT" 2>/dev/null || true
@@ -85,9 +103,36 @@ if [ -n "$ROUTE_HOST" ]; then
     ISSUER_URL="https://${ROUTE_HOST}"
     echo "→ Setting AUTH_ISSUER to $ISSUER_URL..."
     oc set env deployment/auth-server AUTH_ISSUER="$ISSUER_URL" -n "$PROJECT"
-    # Wait for the rollout triggered by the env change
+    # Wait for the rollout triggered by the env change. Both this rollout
+    # and the previous one resolve against the post-re-apply digest, so the
+    # final running image must equal the imagestream :latest digest.
     oc rollout status deployment/auth-server -n "$PROJECT" --timeout=120s
 fi
+
+# Verify the running pod is on the just-pushed digest. This must come AFTER
+# both rollouts complete (the initial restart and the env-triggered second
+# rollout) so the final running spec is what we compare against. If the
+# digests don't match, the build pushed but the Deployment is on an older
+# digest -- exactly the failure family #88 closes.
+echo "→ Verifying running digest matches imagestream :latest..."
+RUNNING=$(oc get deploy auth-server -n "$PROJECT" \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="auth-server")].image}' 2>/dev/null || echo "")
+LATEST_DIGEST=$(oc get is auth-server -n "$PROJECT" \
+    -o jsonpath='{.status.tags[?(@.tag=="latest")].items[0].image}' 2>/dev/null || echo "")
+echo "  Running: $RUNNING"
+echo "  Latest:  $LATEST_DIGEST"
+if [ -z "$RUNNING" ] || [ -z "$LATEST_DIGEST" ]; then
+    echo "ERROR: could not resolve running image or imagestream :latest digest"
+    exit 1
+fi
+RUNNING_DIGEST="${RUNNING##*@}"
+if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ]; then
+    echo "ERROR: running digest does not match imagestream :latest"
+    echo "  This is the #88 failure family -- the build pushed but the"
+    echo "  Deployment is on an older digest. Investigate before retrying."
+    exit 1
+fi
+echo "  OK: running digest matches imagestream :latest"
 
 echo ""
 echo "========================================="

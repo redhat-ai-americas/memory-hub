@@ -159,14 +159,19 @@ oc rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
 # Running phase until they exit, so right after a rollout you briefly see
 # 2 Running pods (new + terminating old). Check the Deployment status
 # instead — that's the source of truth for "is the desired state met".
+#
+# These are HARD failures, not warnings (#88). A deploy script that exits
+# 0 with a degraded deployment is exactly the failure family this issue
+# closes.
 echo ""
 echo "Verifying deployment state..."
 DEPLOY_COUNT=$(oc get deploy -n "$NAMESPACE" \
     -l "app.kubernetes.io/name=$DEPLOYMENT" \
     -o name 2>/dev/null | wc -l | tr -d ' ')
 if [ "$DEPLOY_COUNT" != "1" ]; then
-    echo "WARNING: expected 1 Deployment named $DEPLOYMENT, found $DEPLOY_COUNT"
+    echo "ERROR: expected 1 Deployment named $DEPLOYMENT, found $DEPLOY_COUNT"
     oc get deploy -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
+    exit 1
 fi
 
 AVAILABLE=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
@@ -176,21 +181,67 @@ DESIRED=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
 if [ "$AVAILABLE" = "$DESIRED" ] && [ "$AVAILABLE" = "1" ]; then
     echo "OK: deployment at desired state (1 available replica)"
 else
-    echo "WARNING: deployment not at desired state (available=${AVAILABLE:-0}, desired=${DESIRED:-?})"
+    echo "ERROR: deployment not at desired state (available=${AVAILABLE:-0}, desired=${DESIRED:-?})"
     oc get pods -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
+    exit 1
 fi
 
-# Step 8: Print route URL
+# Step 7.5: Verify the running pod is on the just-pushed digest (#88).
+# The Deployment spec carries the resolved digest after re-apply; the
+# imagestream's :latest tag carries the canonical "what was just pushed"
+# digest. They MUST match. If they don't, the build pushed but the
+# Deployment is still pinned to an older digest, which is exactly the
+# failure family this verification closes.
+echo ""
+echo "Verifying running digest matches imagestream :latest..."
+RUNNING=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="mcp-server")].image}' 2>/dev/null || echo "")
+LATEST_DIGEST=$(oc get is "$DEPLOYMENT" -n "$NAMESPACE" \
+    -o jsonpath='{.status.tags[?(@.tag=="latest")].items[0].image}' 2>/dev/null || echo "")
+echo "  Running: $RUNNING"
+echo "  Latest:  $LATEST_DIGEST"
+if [ -z "$RUNNING" ] || [ -z "$LATEST_DIGEST" ]; then
+    echo "ERROR: could not resolve running image or imagestream :latest digest"
+    exit 1
+fi
+RUNNING_DIGEST="${RUNNING##*@}"
+if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ]; then
+    echo "ERROR: running digest does not match imagestream :latest"
+    echo "  This is the #88 failure family -- the build pushed but the"
+    echo "  Deployment is on an older digest. Investigate before retrying."
+    exit 1
+fi
+echo "  OK: running digest matches imagestream :latest"
+
+# Step 8: Print route URL.
+#
+# Tool-count regression check is performed OUT-OF-BAND by the operator
+# via mcp-test-mcp after this script completes. mcp-test-mcp is itself an
+# MCP server (not a CLI), so the deploy script can't shell out to it.
+# The /deploy-mcp slash command's Step 4 ("Verify deployed tools with
+# mcp-test-mcp") is the operator-side equivalent and MUST be run after
+# every memory-hub-mcp deploy.
+#
+# The static preflight at Step 0 above catches the registration silent-
+# failure class (file present but not imported / not in mcp.add_tool list)
+# before the build runs. Runtime issues that the static check can't see
+# (build context missing files, runtime decoration errors, dependency
+# import failures) are what the post-deploy mcp-test-mcp check catches.
 ROUTE=$(oc get route "$DEPLOYMENT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 echo ""
 echo "=== Deployment Complete ==="
 if [ -n "$ROUTE" ]; then
     echo "MCP endpoint: https://$ROUTE/mcp/"
     echo ""
-    echo "Verify with mcp-test-mcp:"
+    echo "REQUIRED next step -- verify deployed tools with mcp-test-mcp:"
     echo "  connect_to_server name=memory-hub-mcp url=https://$ROUTE/mcp/"
+    echo "  list_tools server_name=memory-hub-mcp"
+    echo ""
+    echo "Without this check, runtime tool-registration failures (build"
+    echo "context missing files, decoration errors, etc.) will not be caught."
 else
-    echo "Warning: Could not retrieve route URL"
+    echo "ERROR: Could not retrieve route URL"
+    exit 1
 fi
 
 # Cleanup build context

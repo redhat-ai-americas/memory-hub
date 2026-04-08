@@ -4,6 +4,7 @@ kind: BuildConfig
 metadata:
   name: auth-server
 spec:
+  runPolicy: Serial
   output:
     to:
       kind: ImageStreamTag
@@ -23,19 +24,25 @@ kind: ImageStream
 metadata:
   name: auth-server
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: auth-rsa-keys
-type: Opaque
-stringData:
-  # PLACEHOLDER: Replace with actual RSA keys before first deployment.
-  # Generate with: openssl genrsa 2048 > private.pem && openssl rsa -in private.pem -pubout > public.pem
-  AUTH_RSA_PRIVATE_KEY_PEM: ""
-  AUTH_RSA_PUBLIC_KEY_PEM: ""
-# The auth-admin-key Secret must be created separately (not in this manifest to avoid clobbering):
-#   openssl rand -base64 32 | tr -d '\n' > /tmp/ak.txt
-#   oc create secret generic auth-admin-key --from-literal=AUTH_ADMIN_KEY="$(cat /tmp/ak.txt)" -n memoryhub-auth
+# Secrets are managed out-of-band by deploy.sh, NOT defined in this manifest.
+# This is intentional: the manifest must be safe to `oc apply -f openshift.yaml`
+# repeatedly without clobbering generated values.
+#
+# - auth-rsa-keys (RSA-2048 keypair for JWT signing): generated and applied
+#   by deploy.sh on first run; reused on subsequent runs. To regenerate
+#   manually:
+#     openssl genrsa 2048 > /tmp/private.pem
+#     openssl rsa -in /tmp/private.pem -pubout > /tmp/public.pem
+#     oc create secret generic auth-rsa-keys \
+#         --from-file=AUTH_RSA_PRIVATE_KEY_PEM=/tmp/private.pem \
+#         --from-file=AUTH_RSA_PUBLIC_KEY_PEM=/tmp/public.pem \
+#         -n memoryhub-auth
+#
+# - auth-admin-key (admin API key): create separately:
+#     openssl rand -base64 32 | tr -d '\n' > /tmp/ak.txt
+#     oc create secret generic auth-admin-key \
+#         --from-literal=AUTH_ADMIN_KEY="$(cat /tmp/ak.txt)" \
+#         -n memoryhub-auth
 ---
 apiVersion: apps/v1
 kind: Deployment
