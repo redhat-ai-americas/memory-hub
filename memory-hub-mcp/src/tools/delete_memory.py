@@ -23,6 +23,7 @@ from memoryhub_core.services.exceptions import (
 )
 from memoryhub_core.services.memory import delete_memory as svc_delete_memory
 from memoryhub_core.services.memory import read_memory as _read_memory
+from memoryhub_core.services.push_broadcast import build_uri_only_notification
 
 from src.core.app import mcp
 from src.core.authz import (
@@ -31,6 +32,7 @@ from src.core.authz import (
     get_claims_from_context,
 )
 from src.tools._deps import get_db_session, release_db_session
+from src.tools._push_helpers import broadcast_after_write
 
 
 @mcp.tool(
@@ -123,6 +125,21 @@ async def delete_memory(
             memory_id=parsed_id,
             session=session,
         )
+
+        # Pattern E (#62): broadcast to other connected agents post-commit.
+        # Deletes don't carry an embedding — pass None to skip the focus
+        # filter so every active session learns the memory is gone, even
+        # subscribers whose declared focus was unrelated to the deleted
+        # memory's topic. Deletion is rare enough that the cross-topic
+        # spam tradeoff is acceptable.
+        await broadcast_after_write(
+            memory_id=memory_id,
+            notification=build_uri_only_notification(memory_id),
+            claims=claims,
+            content_for_filter=None,
+            embedding_service=None,
+        )
+
         return result
 
     except MemoryNotFoundError:

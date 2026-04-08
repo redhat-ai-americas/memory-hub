@@ -13,10 +13,12 @@ from src.tools._deps import (
     get_embedding_service,
     release_db_session,
 )
+from src.tools._push_helpers import broadcast_after_write
 
 from memoryhub_core.models.schemas import MemoryNodeCreate
 from memoryhub_core.services.exceptions import MemoryAccessDeniedError, MemoryNotFoundError
 from memoryhub_core.services.memory import create_memory
+from memoryhub_core.services.push_broadcast import build_uri_only_notification
 
 
 @mcp.tool(
@@ -180,6 +182,8 @@ async def write_memory(
         memory, curation_result = await create_memory(node_create, session, embedding_service)
 
         if curation_result["blocked"]:
+            # No broadcast on a blocked write — the memory wasn't persisted,
+            # so subscribers should not be told about it.
             return {
                 "error": True,
                 "message": f"Write blocked by curation rule: {curation_result['reason']}",
@@ -192,6 +196,16 @@ async def write_memory(
                     "nearest_score": curation_result.get("nearest_score"),
                 },
             }
+
+        # Pattern E (#62): broadcast to other connected agents post-commit.
+        # Non-fatal — broadcast failures never roll back the write.
+        await broadcast_after_write(
+            memory_id=str(memory.id),
+            notification=build_uri_only_notification(str(memory.id)),
+            claims=claims,
+            content_for_filter=memory.content,
+            embedding_service=embedding_service,
+        )
 
         return {
             "memory": memory.model_dump(mode="json"),

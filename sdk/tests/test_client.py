@@ -714,3 +714,240 @@ def test_search_sync():
 
     assert isinstance(result, SearchResult)
     assert result.results[0].id == "mem-001"
+
+
+# ── Pattern E (#62) push notification SDK wiring ─────────────────────────────
+
+
+def _make_push_enabled_config() -> ProjectConfig:
+    """ProjectConfig with live_subscription enabled for #62 tests."""
+    from memoryhub.config import MemoryLoadingConfig
+
+    return ProjectConfig(
+        memory_loading=MemoryLoadingConfig(live_subscription=True),
+    )
+
+
+def _make_push_client() -> MemoryHubClient:
+    """Construct a client whose project config opts into Pattern E push."""
+    return MemoryHubClient(
+        url="https://fake.example.com/mcp/",
+        auth_url="https://fake.example.com",
+        client_id="test",
+        client_secret="test-secret",
+        project_config=_make_push_enabled_config(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_message_handler_constructed_when_live_subscription_enabled():
+    """When the project config opts into Pattern E, __aenter__ should pass
+    a memoryhub message handler to the underlying FastMCP Client so that
+    incoming ResourceUpdatedNotification messages reach our callback path."""
+    c = _make_push_client()
+
+    mock_mcp = AsyncMock()
+    mock_mcp.__aenter__.return_value = mock_mcp
+    mock_mcp.__aexit__.return_value = None
+
+    with patch("memoryhub.client.Client", return_value=mock_mcp) as client_ctor:
+        async with c:
+            pass
+
+    # The Client constructor should have been called with a non-None
+    # message_handler keyword argument.
+    _, kwargs = client_ctor.call_args
+    assert kwargs.get("message_handler") is not None
+
+
+@pytest.mark.asyncio
+async def test_message_handler_omitted_when_live_subscription_disabled():
+    """Default project config has live_subscription=False; in that case the
+    SDK must NOT install a notification handler so projects that haven't
+    opted into Pattern E pay zero overhead."""
+    c = _make_client()  # default config = live_subscription False
+
+    mock_mcp = AsyncMock()
+    mock_mcp.__aenter__.return_value = mock_mcp
+    mock_mcp.__aexit__.return_value = None
+
+    with patch("memoryhub.client.Client", return_value=mock_mcp) as client_ctor:
+        async with c:
+            pass
+
+    _, kwargs = client_ctor.call_args
+    assert kwargs.get("message_handler") is None
+
+
+@pytest.mark.asyncio
+async def test_on_memory_updated_callback_fires_for_memoryhub_uri():
+    """The handler should route ResourceUpdatedNotification with a
+    memoryhub:// URI to every registered callback. Verifies the URI is
+    coerced to str (not Pydantic AnyUrl) before being passed."""
+    import mcp.types as mt
+
+    c = _make_push_client()
+    received_uris: list[str] = []
+
+    async def callback(uri: str) -> None:
+        received_uris.append(uri)
+
+    c.on_memory_updated(callback)
+
+    mock_mcp = AsyncMock()
+    mock_mcp.__aenter__.return_value = mock_mcp
+    mock_mcp.__aexit__.return_value = None
+
+    with patch("memoryhub.client.Client", return_value=mock_mcp):
+        async with c:
+            assert c._message_handler is not None
+            await c._message_handler.on_resource_updated(
+                mt.ResourceUpdatedNotification(
+                    method="notifications/resources/updated",
+                    params=mt.ResourceUpdatedNotificationParams(
+                        uri="memoryhub://memory/abc-123"
+                    ),
+                )
+            )
+
+    assert received_uris == ["memoryhub://memory/abc-123"]
+
+
+@pytest.mark.asyncio
+async def test_callback_ignores_non_memoryhub_uris():
+    """If another MCP source emits ResourceUpdatedNotification for a
+    different URI scheme (e.g., file://), our handler should ignore it
+    rather than calling the user's callback with foreign URIs."""
+    import mcp.types as mt
+
+    c = _make_push_client()
+    received_uris: list[str] = []
+
+    async def callback(uri: str) -> None:
+        received_uris.append(uri)
+
+    c.on_memory_updated(callback)
+
+    mock_mcp = AsyncMock()
+    mock_mcp.__aenter__.return_value = mock_mcp
+    mock_mcp.__aexit__.return_value = None
+
+    with patch("memoryhub.client.Client", return_value=mock_mcp):
+        async with c:
+            await c._message_handler.on_resource_updated(
+                mt.ResourceUpdatedNotification(
+                    method="notifications/resources/updated",
+                    params=mt.ResourceUpdatedNotificationParams(
+                        uri="file:///etc/passwd"
+                    ),
+                )
+            )
+
+    assert received_uris == []
+
+
+@pytest.mark.asyncio
+async def test_multiple_callbacks_all_fire_in_registration_order():
+    import mcp.types as mt
+
+    c = _make_push_client()
+    order: list[str] = []
+
+    async def cb1(uri: str) -> None:
+        order.append(f"cb1:{uri}")
+
+    async def cb2(uri: str) -> None:
+        order.append(f"cb2:{uri}")
+
+    c.on_memory_updated(cb1)
+    c.on_memory_updated(cb2)
+
+    mock_mcp = AsyncMock()
+    mock_mcp.__aenter__.return_value = mock_mcp
+    mock_mcp.__aexit__.return_value = None
+
+    with patch("memoryhub.client.Client", return_value=mock_mcp):
+        async with c:
+            await c._message_handler.on_resource_updated(
+                mt.ResourceUpdatedNotification(
+                    method="notifications/resources/updated",
+                    params=mt.ResourceUpdatedNotificationParams(
+                        uri="memoryhub://memory/x"
+                    ),
+                )
+            )
+
+    assert order == ["cb1:memoryhub://memory/x", "cb2:memoryhub://memory/x"]
+
+
+@pytest.mark.asyncio
+async def test_callback_exception_does_not_block_others():
+    """If one callback raises, the handler should log and continue dispatching
+    to subsequent callbacks rather than aborting the chain."""
+    import mcp.types as mt
+
+    c = _make_push_client()
+    received: list[str] = []
+
+    async def bad(uri: str) -> None:
+        raise RuntimeError("simulated callback failure")
+
+    async def good(uri: str) -> None:
+        received.append(uri)
+
+    c.on_memory_updated(bad)
+    c.on_memory_updated(good)
+
+    mock_mcp = AsyncMock()
+    mock_mcp.__aenter__.return_value = mock_mcp
+    mock_mcp.__aexit__.return_value = None
+
+    with patch("memoryhub.client.Client", return_value=mock_mcp):
+        async with c:
+            await c._message_handler.on_resource_updated(
+                mt.ResourceUpdatedNotification(
+                    method="notifications/resources/updated",
+                    params=mt.ResourceUpdatedNotificationParams(
+                        uri="memoryhub://memory/x"
+                    ),
+                )
+            )
+
+    assert received == ["memoryhub://memory/x"]
+
+
+@pytest.mark.asyncio
+async def test_pre_connect_callback_replays_into_handler():
+    """Callbacks registered before __aenter__ should be replayed onto the
+    handler when the connection opens. Otherwise users have to register
+    callbacks after entering the context manager, which is awkward."""
+    import mcp.types as mt
+
+    c = _make_push_client()
+    received: list[str] = []
+
+    async def callback(uri: str) -> None:
+        received.append(uri)
+
+    # Register BEFORE __aenter__ — handler doesn't exist yet.
+    c.on_memory_updated(callback)
+    assert c._message_handler is None
+    assert len(c._pending_callbacks) == 1
+
+    mock_mcp = AsyncMock()
+    mock_mcp.__aenter__.return_value = mock_mcp
+    mock_mcp.__aexit__.return_value = None
+
+    with patch("memoryhub.client.Client", return_value=mock_mcp):
+        async with c:
+            assert c._message_handler is not None
+            await c._message_handler.on_resource_updated(
+                mt.ResourceUpdatedNotification(
+                    method="notifications/resources/updated",
+                    params=mt.ResourceUpdatedNotificationParams(
+                        uri="memoryhub://memory/x"
+                    ),
+                )
+            )
+
+    assert received == ["memoryhub://memory/x"]

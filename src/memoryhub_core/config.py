@@ -57,6 +57,8 @@ class ValkeySettings(BaseSettings):
     url: str = "redis://localhost:6379/0"
     session_ttl_seconds: int = 900  # 15 minutes, matches default JWT lifetime
     history_retention_days: int = 30  # per-day list keys auto-expire after this
+    broadcast_ttl_seconds: int = 300  # 5 min TTL on per-session broadcast queue (#62)
+    broadcast_pop_timeout_seconds: int = 30  # BRPOP timeout = subscriber heartbeat
 
 
 class AppSettings(BaseSettings):

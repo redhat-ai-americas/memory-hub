@@ -1,20 +1,27 @@
-"""Valkey (Redis-compatible) client for session focus state and history.
+"""Valkey (Redis-compatible) client for session focus state and broadcasts.
 
-Two key prefixes back #61 (session focus history as a usage signal) and
-#62 (Pattern E broadcast pre-filtering, when it lands):
+Four key prefixes back #61 (session focus history as a usage signal) and
+#62 (Pattern E real-time push broadcast):
 
 - ``memoryhub:sessions:<session_id>`` — hash containing the active-session
   state: ``focus``, ``focus_vector`` (base64-encoded float32 array),
   ``user_id``, ``project``, ``created_at``, ``expires_at``. Carries a TTL
-  matching the JWT lifetime so stale sessions clear automatically.
+  matching the JWT lifetime so stale sessions clear automatically. Written
+  by #61's ``set_session_focus``; read by #62's broadcast filter.
 - ``memoryhub:session_focus_history:<project>:<yyyy-mm-dd>`` — list of
   append-only JSON entries capturing focus declarations per project per day.
   Each daily list auto-expires after ``history_retention_days``.
-
-Only a small set of operations are needed by the MCP tools in this layer:
-writing the pair of records, reading the history log across a date range,
-and a health check. Session focus *reads* (used by the #62 broadcast filter)
-are deferred until #62 lands.
+- ``memoryhub:active_sessions`` — set of session_ids with live subscribers.
+  Populated when an agent calls ``register_session``; depopulated on session
+  close. Enumerated by the #62 broadcast helper to decide who to push to.
+- ``memoryhub:broadcast:<session_id>`` — per-session reliable queue.
+  ``broadcast_to_sessions`` LPUSHes JSON-serialized notifications here; the
+  memoryhub subscriber loop BRPOPs from it and forwards to the client via
+  ``session.send_notification``. 5-minute TTL so disconnected sessions'
+  queues clear automatically. Mirrors FastMCP's own ``fastmcp:notifications``
+  pattern but is namespaced separately because FastMCP's built-in subscriber
+  hard-codes a ``notifications/tasks/status`` method whitelist (see
+  ``fastmcp/server/tasks/notifications.py::_send_mcp_notification``).
 
 Uses ``redis.asyncio`` because Valkey is protocol-compatible with Redis and
 the ``redis`` Python client works unchanged. This matches the team-wide
@@ -60,12 +67,19 @@ def decode_vector(encoded: str) -> list[float]:
     return list(struct.unpack(f"{count}f", packed))
 
 
+ACTIVE_SESSIONS_KEY = "memoryhub:active_sessions"
+
+
 def _session_key(session_id: str) -> str:
     return f"memoryhub:sessions:{session_id}"
 
 
 def _history_key(project: str, day: date) -> str:
     return f"memoryhub:session_focus_history:{project}:{day.isoformat()}"
+
+
+def _broadcast_key(session_id: str) -> str:
+    return f"memoryhub:broadcast:{session_id}"
 
 
 class ValkeyClient:
@@ -203,6 +217,161 @@ class ValkeyClient:
             raise ValkeyUnavailableError(f"Failed to read focus history: {exc}") from exc
 
         return entries
+
+    # ---------------------------------------------------------------- #62 #
+    # Active session registry and per-session broadcast queue for Pattern E #
+    # ---------------------------------------------------------------------- #
+
+    async def register_active_session(self, session_id: str) -> None:
+        """Add ``session_id`` to the active-sessions set.
+
+        Called from ``register_session`` when an agent connects. The set is
+        enumerated by ``broadcast_to_sessions`` to decide who to push to.
+        Idempotent — SADD on an existing member is a no-op.
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable.
+        """
+        try:
+            client = await self._get_client()
+            await client.sadd(ACTIVE_SESSIONS_KEY, session_id)
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to register active session {session_id}: {exc}"
+            ) from exc
+
+    async def deregister_active_session(self, session_id: str) -> None:
+        """Remove ``session_id`` from the active-sessions set.
+
+        Called from the session-close cleanup hook. Idempotent — SREM on a
+        non-member is a no-op. Also deletes the session's broadcast queue
+        so orphan messages don't linger past the session lifetime.
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable.
+        """
+        try:
+            client = await self._get_client()
+            async with client.pipeline(transaction=True) as pipe:
+                pipe.srem(ACTIVE_SESSIONS_KEY, session_id)
+                pipe.delete(_broadcast_key(session_id))
+                await pipe.execute()
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to deregister active session {session_id}: {exc}"
+            ) from exc
+
+    async def read_active_sessions(self) -> list[str]:
+        """Return the list of session_ids currently in the active-sessions set.
+
+        Order is unspecified. Callers should treat the result as a set.
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable.
+        """
+        try:
+            client = await self._get_client()
+            members = await client.smembers(ACTIVE_SESSIONS_KEY)
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to read active sessions: {exc}"
+            ) from exc
+        return list(members)
+
+    async def read_session_focus_vector(
+        self, session_id: str
+    ) -> list[float] | None:
+        """Read the stored focus vector for a session, decoded from base64.
+
+        Returns ``None`` if the session hash does not exist or has no
+        ``focus_vector`` field (which is the case when an agent has
+        connected but never called ``set_session_focus``). The broadcast
+        filter treats a None vector as "no focus declared" and delivers
+        the notification unconditionally — consistent with the pull-side
+        convention that focus is optional.
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable or the
+                stored vector is malformed (not base64 or wrong length).
+        """
+        try:
+            client = await self._get_client()
+            encoded = await client.hget(_session_key(session_id), "focus_vector")
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to read session focus vector for {session_id}: {exc}"
+            ) from exc
+
+        if encoded is None:
+            return None
+
+        try:
+            return decode_vector(encoded)
+        except (ValueError, struct.error) as exc:
+            raise ValkeyUnavailableError(
+                f"Malformed focus_vector for session {session_id}: {exc}"
+            ) from exc
+
+    async def push_broadcast_message(
+        self,
+        session_id: str,
+        payload: str,
+    ) -> None:
+        """LPUSH a serialized notification onto ``session_id``'s broadcast queue.
+
+        The queue key carries a TTL from ``broadcast_ttl_seconds`` so that
+        disconnected sessions' queues clear automatically instead of growing
+        unbounded. Callers pre-serialize to a string (typically JSON) so
+        this layer stays agnostic about notification shape.
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable.
+        """
+        key = _broadcast_key(session_id)
+        try:
+            client = await self._get_client()
+            async with client.pipeline(transaction=True) as pipe:
+                pipe.lpush(key, payload)
+                pipe.expire(key, self._settings.broadcast_ttl_seconds)
+                await pipe.execute()
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to push broadcast message for {session_id}: {exc}"
+            ) from exc
+
+    async def pop_broadcast_message(
+        self,
+        session_id: str,
+        timeout_seconds: int | None = None,
+    ) -> str | None:
+        """BRPOP one message from ``session_id``'s broadcast queue.
+
+        Blocks up to ``timeout_seconds`` (default: ``broadcast_pop_timeout_seconds``
+        from settings) waiting for a message. Returns ``None`` on timeout — the
+        caller's subscriber loop uses the return to refresh its heartbeat and
+        retry rather than treating it as an error.
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable.
+        """
+        timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else self._settings.broadcast_pop_timeout_seconds
+        )
+        key = _broadcast_key(session_id)
+        try:
+            client = await self._get_client()
+            result = await client.brpop([key], timeout=timeout)
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to pop broadcast message for {session_id}: {exc}"
+            ) from exc
+
+        if result is None:
+            return None
+        _key, message = result
+        return message
 
     async def close(self) -> None:
         """Close the underlying client, if any."""

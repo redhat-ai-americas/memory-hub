@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal
 
+import mcp.types as mt
 from fastmcp import Client
+from fastmcp.client.messages import MessageHandler
 
 from memoryhub.auth import MemoryHubAuth
 from memoryhub.config import ProjectConfig, load_project_config
@@ -28,6 +31,53 @@ from memoryhub.models import (
     SearchResult,
     WriteResult,
 )
+
+logger = logging.getLogger(__name__)
+
+
+# Type alias for memory-update callbacks. Receives the URI string of the
+# updated memory; the callback is responsible for any follow-up read.
+MemoryUpdatedCallback = Callable[[str], Awaitable[None]]
+
+
+class _MemoryHubMessageHandler(MessageHandler):
+    """FastMCP MessageHandler routing ``ResourceUpdatedNotification`` to SDK callbacks.
+
+    The MCP spec's ``notifications/resources/updated`` carries only the
+    resource URI; this handler filters for the ``memoryhub://memory/<id>``
+    URI scheme and forwards matching notifications to every registered
+    :data:`MemoryUpdatedCallback`. Notifications for other URI schemes
+    (e.g., ``file://`` from another MCP server in the same process) are
+    ignored.
+
+    Custom ``notifications/memoryhub/memory_written`` (full-content) is
+    intentionally not handled here: the underlying MCP Python SDK
+    deserializes incoming notifications against the closed
+    ``ServerNotification`` union, which has no slot for vendor-prefixed
+    methods. Receiving full-content notifications will require either an
+    SDK upgrade or a transport-level subscriber and is tracked as a
+    follow-up to #62.
+    """
+
+    def __init__(self) -> None:
+        self._callbacks: list[MemoryUpdatedCallback] = []
+
+    def register(self, callback: MemoryUpdatedCallback) -> None:
+        self._callbacks.append(callback)
+
+    async def on_resource_updated(
+        self, message: mt.ResourceUpdatedNotification
+    ) -> None:
+        uri = str(message.params.uri)
+        if not uri.startswith("memoryhub://memory/"):
+            return
+        for callback in self._callbacks:
+            try:
+                await callback(uri)
+            except Exception as exc:
+                logger.warning(
+                    "memory-update callback raised; continuing: %s", exc
+                )
 
 
 class MemoryHubClient:
@@ -81,6 +131,13 @@ class MemoryHubClient:
         )
         self._mcp: Client | None = None
         self._project_config = project_config or ProjectConfig()
+        # #62 push pipeline state. The handler is constructed lazily in
+        # __aenter__ when live_subscription is enabled, so the SDK adds zero
+        # overhead for projects that haven't opted into push. Callbacks
+        # registered before connect are buffered here and replayed onto the
+        # handler at __aenter__ time.
+        self._message_handler: _MemoryHubMessageHandler | None = None
+        self._pending_callbacks: list[MemoryUpdatedCallback] = []
 
     @classmethod
     def from_env(
@@ -138,7 +195,22 @@ class MemoryHubClient:
         )
 
     async def __aenter__(self) -> MemoryHubClient:
-        self._mcp = Client(self._url, auth=self._auth)
+        # Construct the FastMCP client with an optional notification message
+        # handler when the project config opts into Pattern E live subscription.
+        # The server-side push pipeline (#62) only delivers notifications to
+        # sessions whose subscriber loop is running, which is started by
+        # ``register_session``; the client-side handler here is what actually
+        # routes the inbound notification to user-registered callbacks.
+        message_handler: MessageHandler | None = None
+        if self._project_config.memory_loading.live_subscription:
+            self._message_handler = _MemoryHubMessageHandler()
+            for cb in self._pending_callbacks:
+                self._message_handler.register(cb)
+            message_handler = self._message_handler
+
+        self._mcp = Client(
+            self._url, auth=self._auth, message_handler=message_handler
+        )
         await self._mcp.__aenter__()
         return self
 
@@ -146,6 +218,7 @@ class MemoryHubClient:
         if self._mcp is not None:
             await self._mcp.__aexit__(exc_type, exc_val, exc_tb)
             self._mcp = None
+        self._message_handler = None
 
     async def _call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call an MCP tool and return the parsed response dict.
@@ -541,6 +614,67 @@ class MemoryHubClient:
             "start_date": start_date,
             "end_date": end_date,
         })
+
+    # ── Push notifications (#62, Pattern E) ─────────────────────────
+
+    def on_memory_updated(self, callback: MemoryUpdatedCallback) -> None:
+        """Register a callback fired when another agent writes a memory.
+
+        Pattern E composes with the pull-based loading patterns described in
+        ``docs/agent-memory-ergonomics``. When a different connected agent
+        calls ``write_memory``, ``update_memory``, or ``delete_memory``,
+        MemoryHub broadcasts a ``ResourceUpdatedNotification`` and the SDK
+        invokes every registered callback with the memory's URI. The
+        callback is responsible for any follow-up :meth:`read` to fetch
+        content; the URI alone is the spec-compliant payload.
+
+        Multiple callbacks can be registered. Each is invoked in
+        registration order; an exception in one callback is logged and does
+        not prevent the others from running. Registration is cumulative — there
+        is no unregister API in v1; create a fresh client to reset.
+
+        Pattern E only fires for sessions whose project config sets
+        ``memory_loading.live_subscription: true``. With the default
+        (``false``), this method is a no-op: the callback is recorded but
+        no subscriber pipeline is wired up so it will never be invoked.
+        Enable live subscription explicitly in ``.memoryhub.yaml`` or via
+        a ``ProjectConfig`` constructor argument before connecting.
+
+        The current SDK delivers only spec-compliant URI-only notifications.
+        The custom full-content notification path
+        (``push_payload: full_content``) ships server-side with #62 but is
+        not yet receivable by the typed Python SDK because the underlying
+        MCP client deserializes against a closed notification union. A
+        follow-up will lift this restriction.
+
+        Args:
+            callback: Async callable taking a single ``str`` URI argument
+                (e.g., ``"memoryhub://memory/abc-123"``).
+
+        Example::
+
+            async def on_update(uri: str) -> None:
+                memory_id = uri.removeprefix("memoryhub://memory/")
+                memory = await client.read(memory_id)
+                print(f"Another agent wrote: {memory.content}")
+
+            client.on_memory_updated(on_update)
+        """
+        if not self._project_config.memory_loading.live_subscription:
+            logger.debug(
+                "on_memory_updated callback registered but live_subscription "
+                "is False in project config; callback will never fire. Set "
+                "memory_loading.live_subscription=true in .memoryhub.yaml to "
+                "enable Pattern E push delivery."
+            )
+
+        if self._message_handler is None:
+            # Buffer the callback so it gets registered when __aenter__ runs.
+            # If live_subscription is False the buffered callback is silently
+            # dropped on __aenter__ — the user opted out.
+            self._pending_callbacks.append(callback)
+        else:
+            self._message_handler.register(callback)
 
     # ── Sync wrappers ───────────────────────────────────────────────
 

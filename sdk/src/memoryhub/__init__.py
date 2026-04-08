@@ -1,6 +1,6 @@
 """MemoryHub — Centralized, governed memory for AI agents."""
 
-from memoryhub.client import MemoryHubClient
+from memoryhub.client import MemoryHubClient, MemoryUpdatedCallback
 from memoryhub.config import (
     CONFIG_FILENAME,
     ConfigError,
@@ -22,6 +22,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "MemoryHubClient",
+    "MemoryUpdatedCallback",
     "MemoryHubError",
     "AuthenticationError",
     "NotFoundError",

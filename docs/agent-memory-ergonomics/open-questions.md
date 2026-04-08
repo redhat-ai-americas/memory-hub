@@ -66,36 +66,26 @@ Snippets are more useful for the agent but cost more tokens. Bare IDs force a ro
 
 ## Q6. Push payload: URI-only or full content?
 
-**Status:** Open
-**Affects:** #62
+**Status:** Resolved 2026-04-08 (URI-only ships fully; full-content ships server-side only and is deferred client-side)
+**Affects:** #62 (shipped)
 **Research:** [`research/fastmcp-3-push-notifications.md`](research/fastmcp-3-push-notifications.md) §"Spec compliance vs latency"
 
-MCP spec says `ResourceUpdatedNotification` carries only the resource URI — clients are expected to refetch via `resources/read` (or `read_memory`) to get content. This is spec-compliant and keeps notifications small, but adds a round-trip.
-
-Memory-hub could define a custom notification method (`notifications/memoryhub/memory_written`) carrying the full record. This is non-spec but valid since MCP allows custom methods under the `notifications/$vendor/$method` pattern. Trade-off: spec compliance and small notifications vs. latency and round-trip count.
-
-**What would resolve it:** Benchmark both under realistic swarm load. If the extra round-trip from URI-only is <50ms median and the notification fanout is <100 agents, spec-compliant URI-only is fine. If either exceeds those thresholds, ship the custom full-content notification as a `push_payload: full_content` YAML option.
+**Resolution:** URI-only is the default (`push_payload: uri_only`) and the only payload the typed Python SDK can currently *receive*. The build helper `build_full_content_notification` exists in `memoryhub_core/services/push_broadcast.py` and the server can broadcast custom `notifications/memoryhub/memory_written` messages over the Valkey queue without issue, but the SDK's `MemoryHubClient.on_memory_updated` callback never sees them because the underlying `mcp` Python library deserializes incoming notifications against `ServerNotification` — a closed Pydantic union with nine pre-defined notification types and no slot for vendor-prefixed methods. Custom-method notifications drop at the JSON-RPC deserialization layer before reaching `MessageHandler.dispatch`. Lifting this requires either an `mcp` SDK upgrade with an extensible notification union, or a raw transport-level subscriber that bypasses the typed deserializer; both are tracked as #62 follow-ups rather than blockers. Memory-hub's first real consumer is single-developer scale where the round-trip cost of URI-only is negligible, so the default decision is well-defended even without benchmarking.
 
 ## Q7. Subscriber lifecycle for pure-listener agents
 
-**Status:** Open
-**Affects:** #62 (hard blocker for implementation)
+**Status:** Resolved 2026-04-08 (no upstream work required, but FastMCP's built-in pipeline turned out to be unusable for an unrelated reason — see Q6 discussion and the research file)
+**Affects:** #62 (shipped)
 **Research:** [`research/fastmcp-3-push-notifications.md`](research/fastmcp-3-push-notifications.md) §"Subscriber lifecycle"
 
-FastMCP 3 starts notification subscribers when a task is submitted. Agents that don't submit tasks but want to listen for broadcasts need a subscriber loop started at session-registration time. This hook may not exist in FastMCP 3 today.
-
-**What would resolve it:** A small spike against the FastMCP 3 source at `/Users/wjackson/Developer/MCP/fastmcp`: find the task-submission code path, trace where the subscriber loop starts, and determine whether it can be hoisted to session-registration or whether it requires an upstream FastMCP change. If upstream work is needed, file an issue against FastMCP 3 before committing to #62's implementation.
+**Resolution:** The Phase 0 spike against FastMCP 3.2.0 found that `ensure_subscriber_running(session_id, session, docket, fastmcp)` at `fastmcp/server/tasks/notifications.py:238-275` is **idempotent** and decoupled from task submission — the research file's concern that the subscriber loop was tied to task-submission was based on `ensure_subscriber_running`'s only existing caller (task submission) rather than the function itself. Cleanup uses `ctx.session._exit_stack.push_async_callback(...)` calling `stop_subscriber(session_id)`, the same pattern FastMCP uses internally in `handlers.py:199-208`. **However**, the spike also surfaced a separate blocker: `_send_mcp_notification` (the helper the built-in subscriber loop calls before forwarding to `session.send_notification`) hard-codes a method whitelist — it raises `ValueError("Unsupported notification method for subscriber")` if `method != "notifications/tasks/status"`. So while FastMCP's lifecycle primitives ARE reusable for memory-hub's session-attached subscribers, FastMCP's *delivery* primitives are not. Memory-hub now ships its own `memoryhub_subscriber_loop` (in `memoryhub_core/services/push_subscriber.py`) that clones the FastMCP reference implementation's structure but is method-agnostic. The lifecycle pattern (task-per-session, weakref-tracked registry, `_exit_stack` cleanup) is identical; the wire protocol and key prefix (`memoryhub:broadcast:*` instead of `fastmcp:notifications:*`) are memoryhub-owned. No upstream work is needed.
 
 ## Q8. Reliable queue vs pub/sub for fanout
 
-**Status:** Open
-**Affects:** #62
+**Status:** Resolved 2026-04-08 (reliable queue is the only transport memory-hub ships in v1; the YAML knob is preserved for future expansion)
+**Affects:** #62 (shipped)
 
-FastMCP 3's notification queueing is Valkey LPUSH/BRPOP with retry — reliable but O(N) per write. Valkey pub/sub is fire-and-forget and scales better via Valkey-side fanout, but disconnected agents miss notifications and have to catch up via a search-on-reconnect.
-
-The right answer is probably per-deployment, chosen by the `push_transport` YAML knob. But we need a decision on what the *default* is.
-
-**What would resolve it:** Decide the default by looking at the expected first real use case. If the first consumer is memory-hub itself (single developer, low fanout), the default doesn't matter much. If the first consumer is a kagenti swarm deployment, the default should be reliable queue until the swarm grows enough to care about fanout cost.
+**Resolution:** Memory-hub's #62 implementation uses Valkey LPUSH/BRPOP exclusively — the same pattern FastMCP's own `notifications.py` uses, confirmed by reading the installed source at lines 72 and 112 with explicit "reliable ordered delivery" code comments. The `push_transport: queue | pubsub` YAML knob is accepted by the schema but only `queue` has an implementation in v1. Pub/sub is reserved for a future scale-out where transient updates (e.g., "another agent is typing") matter more than guaranteed delivery; for the first real consumer (memory-hub itself, single developer, low fanout) the default doesn't matter much, and the reliable queue is the safer default. The fanout helper (`broadcast_to_sessions`) is O(N) per write where N is the number of active sessions matching the focus filter; this is fine up to ~100 agents. See Q9 for the scale story.
 
 ## Q9. Push fanout cost at scale
 

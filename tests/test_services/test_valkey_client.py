@@ -14,6 +14,7 @@ import pytest
 
 from memoryhub_core.config import ValkeySettings
 from memoryhub_core.services.valkey_client import (
+    ACTIVE_SESSIONS_KEY,
     ValkeyClient,
     ValkeyUnavailableError,
     decode_vector,
@@ -312,3 +313,162 @@ class TestErrorMapping:
                 user_id="u",
                 project="p",
             )
+
+
+# ---------------------------------------------------------------------- #62 #
+# Active session registry + broadcast queue tests for Pattern E             #
+# ---------------------------------------------------------------------- #62 #
+
+
+class TestActiveSessionRegistry:
+    """SADD/SREM/SMEMBERS against ``memoryhub:active_sessions``."""
+
+    async def test_register_adds_session_to_set(self, valkey_client):
+        await valkey_client.register_active_session("sess-1")
+        fake = valkey_client._client
+        members = await fake.smembers(ACTIVE_SESSIONS_KEY)
+        assert members == {"sess-1"}
+
+    async def test_register_is_idempotent(self, valkey_client):
+        await valkey_client.register_active_session("sess-1")
+        await valkey_client.register_active_session("sess-1")
+        fake = valkey_client._client
+        members = await fake.smembers(ACTIVE_SESSIONS_KEY)
+        assert members == {"sess-1"}
+
+    async def test_register_multiple_sessions(self, valkey_client):
+        for sid in ["a", "b", "c"]:
+            await valkey_client.register_active_session(sid)
+        members = await valkey_client.read_active_sessions()
+        assert set(members) == {"a", "b", "c"}
+
+    async def test_deregister_removes_session_from_set(self, valkey_client):
+        await valkey_client.register_active_session("sess-1")
+        await valkey_client.register_active_session("sess-2")
+        await valkey_client.deregister_active_session("sess-1")
+        members = await valkey_client.read_active_sessions()
+        assert set(members) == {"sess-2"}
+
+    async def test_deregister_is_idempotent(self, valkey_client):
+        """SREM on a non-member is a no-op, not an error."""
+        await valkey_client.deregister_active_session("never-existed")
+        members = await valkey_client.read_active_sessions()
+        assert members == []
+
+    async def test_deregister_also_deletes_broadcast_queue(self, valkey_client):
+        """Orphan messages in a deregistered session's queue should not
+        linger past the session lifetime — cleanup deletes the queue key."""
+        await valkey_client.register_active_session("sess-1")
+        await valkey_client.push_broadcast_message("sess-1", '{"m": 1}')
+        await valkey_client.push_broadcast_message("sess-1", '{"m": 2}')
+
+        fake = valkey_client._client
+        assert await fake.llen("memoryhub:broadcast:sess-1") == 2
+
+        await valkey_client.deregister_active_session("sess-1")
+        assert await fake.exists("memoryhub:broadcast:sess-1") == 0
+
+    async def test_read_active_sessions_empty_by_default(self, valkey_client):
+        assert await valkey_client.read_active_sessions() == []
+
+
+class TestReadSessionFocusVector:
+    """Read the stored focus vector written by #61's set_session_focus."""
+
+    async def test_returns_none_when_session_missing(self, valkey_client):
+        assert await valkey_client.read_session_focus_vector("nobody") is None
+
+    async def test_returns_vector_when_session_has_focus(self, valkey_client):
+        """Round-trip through write_session_focus + read_session_focus_vector
+        — verifies the stored base64 vector decodes to the original values."""
+        original = [0.1, 0.2, 0.3, -0.4, 0.0]
+        await valkey_client.write_session_focus(
+            session_id="sess-1",
+            focus="deployment",
+            focus_vector=original,
+            user_id="wjackson",
+            project="memory-hub",
+        )
+
+        decoded = await valkey_client.read_session_focus_vector("sess-1")
+        assert decoded is not None
+        assert len(decoded) == len(original)
+        for a, b in zip(original, decoded, strict=True):
+            assert abs(a - b) < 1e-6
+
+    async def test_returns_none_when_session_has_no_focus_vector_field(
+        self, valkey_client
+    ):
+        """An agent that called register_session but not set_session_focus has
+        a session registered but no stored focus vector — broadcast filter
+        should treat this as 'no focus declared' and deliver unconditionally."""
+        fake = valkey_client._client
+        # Manually create a session hash without a focus_vector field
+        await fake.hset(
+            "memoryhub:sessions:bare",
+            mapping={"user_id": "wjackson", "project": "memory-hub"},
+        )
+        assert await valkey_client.read_session_focus_vector("bare") is None
+
+
+class TestBroadcastQueue:
+    """LPUSH/BRPOP against ``memoryhub:broadcast:<session_id>``."""
+
+    async def test_push_and_pop_roundtrip(self, valkey_client):
+        payload = '{"method":"notifications/resources/updated","params":{"uri":"x"}}'
+        await valkey_client.push_broadcast_message("sess-1", payload)
+
+        message = await valkey_client.pop_broadcast_message(
+            "sess-1", timeout_seconds=1
+        )
+        assert message == payload
+
+    async def test_push_carries_ttl(self, valkey_client):
+        await valkey_client.push_broadcast_message("sess-ttl", '{"m":1}')
+        fake = valkey_client._client
+        ttl = await fake.ttl("memoryhub:broadcast:sess-ttl")
+        # Default broadcast_ttl_seconds = 300
+        assert 290 < ttl <= 300
+
+    async def test_pop_returns_none_on_timeout(self, valkey_client):
+        """Empty queue with a short BRPOP timeout should return None, not
+        raise — the subscriber loop uses None to refresh its heartbeat."""
+        message = await valkey_client.pop_broadcast_message(
+            "empty", timeout_seconds=1
+        )
+        assert message is None
+
+    async def test_pop_preserves_fifo_order(self, valkey_client):
+        """LPUSH + BRPOP (left push / right pop) yields FIFO delivery.
+        This is the same pattern FastMCP uses for task status notifications."""
+        for i in range(3):
+            await valkey_client.push_broadcast_message(
+                "sess-fifo", f'{{"seq":{i}}}'
+            )
+
+        received = []
+        for _ in range(3):
+            msg = await valkey_client.pop_broadcast_message(
+                "sess-fifo", timeout_seconds=1
+            )
+            received.append(msg)
+
+        assert received == ['{"seq":0}', '{"seq":1}', '{"seq":2}']
+
+    async def test_push_error_raises_valkey_unavailable(self):
+        """Errors from the backing client should map to ValkeyUnavailableError."""
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        class BrokenClient:
+            def pipeline(self, transaction=True):
+                raise RedisConnectionError("simulated")
+
+            async def aclose(self):
+                pass
+
+        client = ValkeyClient(
+            settings=ValkeySettings(session_ttl_seconds=900),
+            client=BrokenClient(),
+        )
+        with pytest.raises(ValkeyUnavailableError, match="Failed to push broadcast"):
+            await client.push_broadcast_message("s1", '{"m":1}')

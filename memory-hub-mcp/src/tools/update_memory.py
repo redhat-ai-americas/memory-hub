@@ -20,9 +20,11 @@ from memoryhub_core.services.exceptions import (
 )
 from memoryhub_core.services.memory import read_memory as _read_memory
 from memoryhub_core.services.memory import update_memory as svc_update_memory
+from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from src.core.app import mcp
 from src.core.authz import get_claims_from_context, authorize_write, AuthenticationError
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+from src.tools._push_helpers import broadcast_after_write
 
 
 @mcp.tool(
@@ -107,6 +109,15 @@ async def update_memory(
             memory_id=parsed_id,
             data=update_data,
             session=session,
+            embedding_service=embedding_service,
+        )
+
+        # Pattern E (#62): broadcast to other connected agents post-commit.
+        await broadcast_after_write(
+            memory_id=str(new_version.id),
+            notification=build_uri_only_notification(str(new_version.id)),
+            claims=claims,
+            content_for_filter=new_version.content,
             embedding_service=embedding_service,
         )
 
