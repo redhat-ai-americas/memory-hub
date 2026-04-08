@@ -72,6 +72,32 @@ memoryhub write "Use Podman, not Docker" --scope user --weight 0.9
 memoryhub config init                    # set up .memoryhub.yaml + agent rule file
 ```
 
+## Project configuration
+
+MemoryHub splits configuration into two files with different lifecycles: project-level policy lives in `.memoryhub.yaml` at the repo root (committed, shared across all contributors), while per-developer connection params and secrets live in `~/.config/memoryhub/config.json` (not committed, managed by `memoryhub login`).
+
+`memoryhub config init` is an interactive wizard that asks about session shape, loading pattern, focus source, and retrieval defaults, then writes `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`. Both files are meant to be committed so every contributor's agent inherits the same loading pattern. On first run, any legacy `.claude/rules/memoryhub-integration.md` is backed up to `.bak` before the new rule file is written.
+
+After hand-editing `.memoryhub.yaml`, run `memoryhub config regenerate` to re-render the rule file from the YAML without touching the YAML itself.
+
+The YAML has two top-level keys — `memory_loading` (when and how agents load memory) and `retrieval_defaults` (defaults applied to SDK/agent search calls):
+
+```yaml
+memory_loading:
+  mode: focused                   # focused | broad
+  pattern: lazy_with_rebias       # eager | lazy | lazy_with_rebias | jit
+  focus_source: auto              # auto | declared | directory | first_turn
+  session_focus_weight: 0.4
+  on_topic_shift: rebias          # rebias | warn | ignore
+
+retrieval_defaults:
+  max_results: 20
+  max_response_tokens: 4000
+  default_mode: full              # full | index | full_only
+```
+
+See [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md) for the full schema, field reference, and rule file templates.
+
 ## Architecture at a glance
 
 ```

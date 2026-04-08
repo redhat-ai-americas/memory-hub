@@ -68,6 +68,28 @@ export MEMORYHUB_CLIENT_SECRET="my-secret"
 client = MemoryHubClient.from_env()
 ```
 
+## Project configuration
+
+`MemoryHubClient.from_env()` (and construction without an explicit `project_config` argument) auto-discovers `.memoryhub.yaml` by walking up from the current working directory. If found, the file's `retrieval_defaults` are applied to outbound calls whenever the caller omits the corresponding argument, and `memory_loading.live_subscription` controls whether the client subscribes to push updates on connect.
+
+In practice that means a caller can write a plain search and inherit the project's retrieval policy:
+
+```python
+client = MemoryHubClient.from_env()
+async with client:
+    # .memoryhub.yaml sets retrieval_defaults.max_results: 20
+    # so this call transparently uses max_results=20
+    results = await client.search("deployment patterns")
+```
+
+To opt out of auto-discovery, pass `auto_discover_config=False`:
+
+```python
+client = MemoryHubClient.from_env(auto_discover_config=False)
+```
+
+Or pass an explicit `ProjectConfig` to the constructor to use a fixed policy regardless of cwd. The recommended way to generate `.memoryhub.yaml` is the `memoryhub-cli` wizard (`memoryhub config init`); see the [repo root README](https://github.com/rdwj/memory-hub#project-configuration) for the split between project config (`.memoryhub.yaml`, committed) and connection config (`~/.config/memoryhub/config.json`, per-developer).
+
 ## Sync usage
 
 For non-async contexts, use the `_sync` variants:
