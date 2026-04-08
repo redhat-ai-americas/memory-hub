@@ -241,5 +241,5 @@ The architecture is designed to let these open questions be resolved incremental
 - [`storage-layer.md`](storage-layer.md) — pgvector usage and schema
 - [`governance.md`](governance.md) — RBAC, JWT verification, audit (planned)
 - [`package-layout.md`](package-layout.md) — the #55 server/SDK naming collision and proposed rename
-- [`kagenti-integration/`](kagenti-integration/) — Kagenti platform integration design
-- [`llamastack-integration/`](llamastack-integration/) — LlamaStack platform integration design
+- [`planning/kagenti-integration/`](../planning/kagenti-integration/) — Kagenti platform integration design
+- [`planning/llamastack-integration/`](../planning/llamastack-integration/) — LlamaStack platform integration design

@@ -81,7 +81,7 @@ False positives are inevitable. A memory about "how to configure API key rotatio
 
 ## Policy Enforcement
 
-Enterprise policies about what can and cannot be stored in memory are expressed as MemoryPolicy CRDs (see [operator.md](operator.md)) and enforced by the governance engine.
+Enterprise policies about what can and cannot be stored in memory are expressed as MemoryPolicy CRDs (see [planning/operator.md](../planning/operator.md)) and enforced by the governance engine.
 
 Example policies:
 - "No source code in memories" -- content scanning for code patterns

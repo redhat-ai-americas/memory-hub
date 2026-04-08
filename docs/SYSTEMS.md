@@ -14,11 +14,11 @@ MemoryHub is composed of fourteen subsystems. This document is the map -- each s
 | memoryhub-cli | Terminal client (`pip install memoryhub-cli`). `memoryhub search/read/write/delete/history` for memory operations; `memoryhub config init` for generating project-level `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md` rule files | _embedded in `memoryhub-cli/`_ | Implemented |
 | memoryhub-ui | Dashboard: React + PatternFly 6 frontend behind a FastAPI BFF, shipped as a single container with an OAuth-proxy sidecar. Six panels: Memory Graph, Status Overview, Users & Agents, Client Management, Curation Rules, Contradiction Log | _embedded in `memoryhub-ui/`_ | Implemented |
 | agent-memory-ergonomics | Cross-cutting design effort that defined search-response shape, session focus / two-vector retrieval with cross-encoder reranking, and the project-config + rule-generation surface. Layer 1 (#56/#57), Layer 2 (#58), and Layer 3 (#59/#60/#73) all shipped 2026-04-07. Phase 2 follow-ups: #61 (focus history), #62 (Pattern E push) | [agent-memory-ergonomics/](agent-memory-ergonomics/) | Implemented (Layers 1-3); Phase 2 open |
-| operator | Kubernetes Operator with CRDs for lifecycle management | [operator.md](operator.md) | Skeleton |
-| observability | Grafana dashboards and Prometheus metrics for memory operations | [observability.md](observability.md) | TBD |
-| org-ingestion | Pipeline for scanning external sources and ingesting organizational knowledge | [org-ingestion.md](org-ingestion.md) | TBD |
-| kagenti-integration | Integration with Kagenti (K8s-native agent platform): MCP connector, extension package, ContextStore | [kagenti-integration/](kagenti-integration/) | Design |
-| llamastack-integration | Integration with LlamaStack (Meta's agentic API server on RHOAI): MCP tool group, Vector IO provider, distribution template | [llamastack-integration/](llamastack-integration/) | Design |
+| operator | Kubernetes Operator with CRDs for lifecycle management | [planning/operator.md](../planning/operator.md) | Skeleton |
+| observability | Grafana dashboards and Prometheus metrics for memory operations | [planning/observability.md](../planning/observability.md) | TBD |
+| org-ingestion | Pipeline for scanning external sources and ingesting organizational knowledge | [planning/org-ingestion.md](../planning/org-ingestion.md) | TBD |
+| kagenti-integration | Integration with Kagenti (K8s-native agent platform): MCP connector, extension package, ContextStore | [planning/kagenti-integration/](../planning/kagenti-integration/) | Design |
+| llamastack-integration | Integration with LlamaStack (Meta's agentic API server on RHOAI): MCP tool group, Vector IO provider, distribution template | [planning/llamastack-integration/](../planning/llamastack-integration/) | Design |
 
 ## Status definitions
 

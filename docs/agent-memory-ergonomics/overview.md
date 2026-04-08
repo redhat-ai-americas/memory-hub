@@ -40,10 +40,10 @@ Two Phase 2 items sit on top of the above:
 ## Where to Read Next
 
 - **[`design.md`](design.md)** — The full design document. If you only read one file, read this one. Covers all three layers in narrative order, with code sketches and config examples.
-- **[`open-questions.md`](open-questions.md)** — Nine unresolved questions, each with "what would resolve it" and dependency pointers. Pick a question and read its linked research file if one exists.
-- **[`research/fastmcp-3-push-notifications.md`](research/fastmcp-3-push-notifications.md)** — Evidence for the Pattern E feasibility claims. Read this before implementing #62.
-- **[`research/two-vector-retrieval.md`](research/two-vector-retrieval.md)** — Three options for the ranking math behind session-focus biasing. Read this before implementing #58.
-- **[`research/pivot-detection.md`](research/pivot-detection.md)** — Server-side vs agent-side options for Pattern C's pivot detection trigger.
+- **[`agent-memory-ergonomics-open-questions.md`](../../planning/agent-memory-ergonomics-open-questions.md)** — Nine unresolved questions, each with "what would resolve it" and dependency pointers. Pick a question and read its linked research file if one exists.
+- **[`fastmcp-3-push-notifications.md`](../../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md)** — Evidence for the Pattern E feasibility claims. Read this before implementing #62.
+- **[`two-vector-retrieval.md`](../../research/agent-memory-ergonomics/two-vector-retrieval.md)** — Three options for the ranking math behind session-focus biasing. Read this before implementing #58.
+- **[`pivot-detection.md`](../../research/agent-memory-ergonomics/pivot-detection.md)** — Server-side vs agent-side options for Pattern C's pivot detection trigger.
 
 ## Implementation Status
 
