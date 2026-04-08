@@ -41,7 +41,7 @@ When working in the MCP server, read `memory-hub-mcp/CLAUDE.md` for import conve
 **Never create MCP tools by hand or via sub-agents.** Always use the slash command workflow: `/plan-tools` → `/create-tools` → `/exercise-tools`. Sub-agents cannot run slash commands and will skip the scaffold step, producing tools that lack the template's test structure, permission handling, and registration patterns. This was learned the hard way in Phase 2 — tools created by sub-agents had to be entirely redone. The fips-agents scaffold produces materially better tools with proper test coverage and consistent patterns. When adding tools in future sessions, follow this workflow in the main conversation context, not delegated to sub-agents.
 
 ## Design Documents
-All design docs live in docs/. When implementing a feature, always read the relevant design doc first. If the design doc is a skeleton or has TBD sections, flesh it out before implementing.
+Shipped architecture and subsystem designs live in docs/. In-flight designs for unimplemented or skeleton-stage features live in planning/. Research investigations live in research/. Demo scripts live in demos/. When implementing a feature, always read the relevant design doc first. If the design doc is a skeleton or has TBD sections, flesh it out before implementing.
 
 ## Commit Messages
 Use conventional commit format: `subsystem: Description in imperative mood`

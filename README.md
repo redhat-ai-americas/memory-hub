@@ -17,7 +17,10 @@ It works with any agent framework that speaks MCP — Claude Code, kagenti-deplo
 | **Dashboard UI** | [`memoryhub-ui/`](memoryhub-ui/) | React + PatternFly 6 frontend behind a FastAPI BFF, deployed as a single container. Six panels: Memory Graph, Status Overview, Users & Agents, Client Management, Curation Rules, Contradiction Log. OAuth-proxy sidecar in front of OpenShift login. |
 | **Auth service** | [`memoryhub-auth/`](memoryhub-auth/) | Standalone OAuth 2.1 authorization server. FastAPI with `client_credentials` and `refresh_token` grants, RSA-2048 JWT signing, JWKS endpoint, admin client management API. |
 | **Database migrations** | [`alembic/`](alembic/) | Schema migrations for the server-side library. PostgreSQL with the pgvector extension. |
-| **Design docs** | [`docs/`](docs/) | Subsystem designs, the agent-memory-ergonomics design cluster, package layout, RHOAI demo materials, kagenti and LlamaStack integration plans. Start at [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). |
+| **Design docs** | [`docs/`](docs/) | Subsystem designs, the agent-memory-ergonomics design cluster, package layout, auth and identity model. Start at [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). |
+| **Planning** | [`planning/`](planning/) | In-flight designs for unimplemented features (operator, observability, org-ingestion, session-persistence) and the kagenti/LlamaStack integration plans. |
+| **Research** | [`research/`](research/) | Investigations and explorations — FIPS storage analysis, agent-memory-ergonomics research notes. |
+| **Demos** | [`demos/`](demos/) | Conference demo scripts (HIMSS, RSA, IACP, IAEM, World AgriTech) and the RHOAI dashboard demo material. |
 | **Retrospectives** | [`retrospectives/`](retrospectives/) | Per-session retros documenting decisions, gaps, and patterns. Read these for the "why" behind major design choices. |
 
 ## Three ways to use it
@@ -147,7 +150,10 @@ memory-hub/
 ├── memoryhub-cli/              # CLI client (`pip install memoryhub-cli`)
 ├── alembic/                    # Database migrations
 ├── tests/                      # Server-side library tests
-├── docs/                       # Architecture, subsystem designs, agent-memory-ergonomics
+├── docs/                       # Shipped architecture and subsystem designs
+├── planning/                   # In-flight designs for unimplemented features
+├── research/                   # Investigations and explorations
+├── demos/                      # Conference demo scripts and dashboard demo material
 ├── retrospectives/             # Session retros — read for design context
 ├── deploy/                     # Top-level deploy assets (PostgreSQL manifests)
 └── benchmarks/                 # Empirical benchmark results (e.g. two-vector-retrieval/)
