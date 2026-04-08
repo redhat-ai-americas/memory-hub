@@ -19,16 +19,84 @@ from memoryhub_core.models.schemas import (
 from memoryhub_core.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
 from memoryhub_core.services.memory import (
     DEFAULT_PIVOT_THRESHOLD,
-    create_memory,
-    get_memory_history,
-    read_memory,
+    count_search_matches as _svc_count_search_matches,
+    create_memory as _svc_create_memory,
+    get_memory_history as _svc_get_memory_history,
+    read_memory as _svc_read_memory,
     report_contradiction,
     resolve_contradiction,
-    search_memories,
-    search_memories_with_focus,
-    update_memory,
+    search_memories as _svc_search_memories,
+    search_memories_with_focus as _svc_search_memories_with_focus,
+    update_memory as _svc_update_memory,
 )
 from memoryhub_core.services.rerank import NoopRerankerService, RerankerService
+
+
+# Default tenant used by tests that don't care which tenant writes occur in.
+# Phase 3 made tenant_id a required kwarg on create_memory; Phase 4 adds
+# tenant_id kwargs to every read path. These wrappers keep existing
+# happy-path tests terse by defaulting tenant_id to "default". Tests that
+# exercise cross-tenant behavior call the underlying _svc_* functions
+# directly with explicit tenant_id.
+_TEST_TENANT_ID = "default"
+
+
+async def create_memory(data, session, embedding_service, skip_curation=False, *, tenant_id=_TEST_TENANT_ID):
+    """Test wrapper around the service create_memory with a default tenant."""
+    return await _svc_create_memory(
+        data,
+        session,
+        embedding_service,
+        tenant_id=tenant_id,
+        skip_curation=skip_curation,
+    )
+
+
+async def read_memory(memory_id, session, *, tenant_id=_TEST_TENANT_ID):
+    """Test wrapper around read_memory with a default tenant."""
+    return await _svc_read_memory(memory_id, session, tenant_id=tenant_id)
+
+
+async def update_memory(memory_id, data, session, embedding_service):
+    """Test wrapper around update_memory (tenant inherited from existing row)."""
+    return await _svc_update_memory(memory_id, data, session, embedding_service)
+
+
+async def get_memory_history(memory_id, session, *, tenant_id=_TEST_TENANT_ID, **kwargs):
+    """Test wrapper around get_memory_history with a default tenant."""
+    return await _svc_get_memory_history(memory_id, session, tenant_id=tenant_id, **kwargs)
+
+
+async def search_memories(
+    query, session, embedding_service, *, tenant_id=_TEST_TENANT_ID, **kwargs
+):
+    """Test wrapper around search_memories with a default tenant."""
+    return await _svc_search_memories(
+        query, session, embedding_service, tenant_id=tenant_id, **kwargs
+    )
+
+
+async def count_search_matches(session, *, tenant_id=_TEST_TENANT_ID, **kwargs):
+    """Test wrapper around count_search_matches with a default tenant."""
+    return await _svc_count_search_matches(session, tenant_id=tenant_id, **kwargs)
+
+
+async def search_memories_with_focus(
+    query,
+    session,
+    embedding_service,
+    *,
+    tenant_id=_TEST_TENANT_ID,
+    **kwargs,
+):
+    """Test wrapper around search_memories_with_focus with a default tenant."""
+    return await _svc_search_memories_with_focus(
+        query,
+        session,
+        embedding_service,
+        tenant_id=tenant_id,
+        **kwargs,
+    )
 
 
 def _make_create_data(**overrides) -> MemoryNodeCreate:
@@ -895,3 +963,384 @@ def test_cosine_distance_returns_python_float_for_numpy_inputs():
         "relevance_score": max(0.0, 1.0 - distance),
     }
     pydantic_core.to_jsonable_python(payload)  # must not raise
+
+
+# -- Phase 3 (#46) tenant plumbing tests --
+
+
+async def test_create_memory_populates_tenant_from_param(async_session, embedding_service):
+    """create_memory must stamp the passed tenant_id onto the persisted row."""
+    from sqlalchemy import select
+    from memoryhub_core.models.memory import MemoryNode
+
+    data = _make_create_data(content="tenant-a content")
+    created, curation = await _svc_create_memory(
+        data, async_session, embedding_service, tenant_id="tenant_a"
+    )
+    assert curation["blocked"] is False
+    assert created.tenant_id == "tenant_a"
+
+    # And the ORM row must also carry tenant_a, not the column server default.
+    stmt = select(MemoryNode).where(MemoryNode.id == created.id)
+    row = (await async_session.execute(stmt)).scalar_one()
+    assert row.tenant_id == "tenant_a"
+
+
+async def test_create_memory_tenant_id_is_keyword_only(async_session, embedding_service):
+    """tenant_id must be a required keyword arg — positional calls should not
+    accidentally reach the old signature and silently fall back to 'default'."""
+    import inspect
+
+    sig = inspect.signature(_svc_create_memory)
+    tenant_param = sig.parameters["tenant_id"]
+    assert tenant_param.kind == inspect.Parameter.KEYWORD_ONLY
+    assert tenant_param.default is inspect.Parameter.empty
+
+
+async def test_update_memory_inherits_tenant_from_existing(async_session, embedding_service):
+    """The new version must inherit tenant_id from the existing row, not
+    from claims or a parameter. Tenant is a property of the memory."""
+    from sqlalchemy import select
+    from memoryhub_core.models.memory import MemoryNode
+
+    original, _ = await _svc_create_memory(
+        _make_create_data(content="original"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    assert original.tenant_id == "tenant_a"
+
+    updated = await update_memory(
+        original.id,
+        MemoryNodeUpdate(content="updated"),
+        async_session,
+        embedding_service,
+    )
+    assert updated.tenant_id == "tenant_a"
+
+    # The retired old version must also still carry its tenant (for
+    # get_memory_history integrity -- historical versions are
+    # tenant-bound).
+    old_stmt = select(MemoryNode).where(MemoryNode.id == original.id)
+    old_row = (await async_session.execute(old_stmt)).scalar_one()
+    assert old_row.tenant_id == "tenant_a"
+
+
+async def test_update_memory_deep_copied_children_inherit_tenant(async_session, embedding_service):
+    """Deep-copied child branches from update_memory must inherit the
+    parent's tenant so the whole subtree stays tenant-consistent."""
+    from sqlalchemy import select
+    from memoryhub_core.models.memory import MemoryNode
+
+    parent, _ = await _svc_create_memory(
+        _make_create_data(content="parent"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    await _svc_create_memory(
+        _make_create_data(
+            content="child rationale",
+            parent_id=parent.id,
+            branch_type="rationale",
+        ),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+
+    new_parent = await update_memory(
+        parent.id,
+        MemoryNodeUpdate(content="parent v2"),
+        async_session,
+        embedding_service,
+    )
+
+    stmt = select(MemoryNode).where(MemoryNode.parent_id == new_parent.id)
+    copied_children = (await async_session.execute(stmt)).scalars().all()
+    assert len(copied_children) == 1
+    assert copied_children[0].tenant_id == "tenant_a"
+
+
+async def test_report_contradiction_inherits_tenant_from_memory(async_session, embedding_service):
+    """The contradiction report row must carry the contradicted memory's
+    tenant_id, inherited from the loaded memory — callers don't pass it."""
+    from sqlalchemy import select
+    from memoryhub_core.models.contradiction import ContradictionReport
+
+    node, _ = await _svc_create_memory(
+        _make_create_data(),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+
+    await report_contradiction(
+        node.id,
+        observed_behavior="observed contradicting thing",
+        confidence=0.8,
+        reporter="test-agent",
+        session=async_session,
+    )
+
+    stmt = select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
+    report = (await async_session.execute(stmt)).scalar_one()
+    assert report.tenant_id == "tenant_a"
+
+
+# -- Phase 4 (#46) read-path tenant isolation tests --
+
+
+async def test_read_memory_returns_not_found_for_cross_tenant(
+    async_session, embedding_service
+):
+    """A read_memory call from tenant B targeting a tenant-A row must raise
+    MemoryNotFoundError -- the same exception type as a nonexistent row,
+    so the caller can never distinguish "does not exist" from "exists in
+    another tenant."
+    """
+    created, _ = await _svc_create_memory(
+        _make_create_data(content="tenant A secret"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+
+    # Same-tenant read works.
+    same_tenant = await _svc_read_memory(
+        created.id, async_session, tenant_id="tenant_a"
+    )
+    assert same_tenant.id == created.id
+
+    # Cross-tenant read raises MemoryNotFoundError (indistinguishable from
+    # a nonexistent row).
+    with pytest.raises(MemoryNotFoundError) as exc_info:
+        await _svc_read_memory(created.id, async_session, tenant_id="tenant_b")
+    assert exc_info.value.memory_id == created.id
+
+
+async def test_search_memories_excludes_cross_tenant_results(
+    async_session, embedding_service
+):
+    """search_memories must only surface memories from the caller's tenant.
+    A search that would match a tenant-B memory from tenant A simply
+    returns fewer results; the cross-tenant row is invisible at the SQL
+    level, not merely dropped by a post-filter."""
+    # Two memories with identical content in two tenants.
+    await _svc_create_memory(
+        _make_create_data(content="python preference in tenant A", weight=0.9),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    await _svc_create_memory(
+        _make_create_data(content="python preference in tenant B", weight=0.9),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_b",
+    )
+
+    # Tenant A search sees only its own memory.
+    tenant_a_results = await _svc_search_memories(
+        "python preference",
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+        owner_id="user-123",
+    )
+    assert len(tenant_a_results) == 1
+    item_a, _ = tenant_a_results[0]
+    assert item_a.tenant_id == "tenant_a"
+    assert "tenant A" in item_a.content
+
+    # Tenant B sees only its own.
+    tenant_b_results = await _svc_search_memories(
+        "python preference",
+        async_session,
+        embedding_service,
+        tenant_id="tenant_b",
+        owner_id="user-123",
+    )
+    assert len(tenant_b_results) == 1
+    item_b, _ = tenant_b_results[0]
+    assert item_b.tenant_id == "tenant_b"
+
+    # A tenant that has no memories gets zero results, not a leak.
+    none_results = await _svc_search_memories(
+        "python preference",
+        async_session,
+        embedding_service,
+        tenant_id="tenant_c",
+        owner_id="user-123",
+    )
+    assert none_results == []
+
+
+async def test_count_search_matches_excludes_cross_tenant_rows(
+    async_session, embedding_service
+):
+    """count_search_matches contributes to has_more; cross-tenant rows
+    must not inflate the count."""
+    # Tenant A gets 2 memories; tenant B gets 3.
+    for i in range(2):
+        await _svc_create_memory(
+            _make_create_data(content=f"tenant A memory {i}", weight=0.9),
+            async_session,
+            embedding_service,
+            tenant_id="tenant_a",
+        )
+    for i in range(3):
+        await _svc_create_memory(
+            _make_create_data(content=f"tenant B memory {i}", weight=0.9),
+            async_session,
+            embedding_service,
+            tenant_id="tenant_b",
+        )
+
+    count_a = await _svc_count_search_matches(
+        async_session, tenant_id="tenant_a", owner_id="user-123"
+    )
+    count_b = await _svc_count_search_matches(
+        async_session, tenant_id="tenant_b", owner_id="user-123"
+    )
+    assert count_a == 2
+    assert count_b == 3
+
+
+async def test_search_memories_with_focus_excludes_cross_tenant_results(
+    async_session, embedding_service
+):
+    """Two-vector retrieval (focused search) must also honor tenant filter."""
+    await _svc_create_memory(
+        _make_create_data(content="OpenShift deployment in tenant A", weight=0.9),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    await _svc_create_memory(
+        _make_create_data(content="OpenShift deployment in tenant B", weight=0.9),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_b",
+    )
+
+    # Tenant A focused search sees only its own.
+    bundle_a = await _svc_search_memories_with_focus(
+        query="OpenShift deployment",
+        session=async_session,
+        embedding_service=embedding_service,
+        tenant_id="tenant_a",
+        focus_string="OpenShift",
+        session_focus_weight=0.4,
+        owner_id="user-123",
+    )
+    assert len(bundle_a.results) == 1
+    assert bundle_a.results[0][0].tenant_id == "tenant_a"
+
+    # Tenant B sees only its own.
+    bundle_b = await _svc_search_memories_with_focus(
+        query="OpenShift deployment",
+        session=async_session,
+        embedding_service=embedding_service,
+        tenant_id="tenant_b",
+        focus_string="OpenShift",
+        session_focus_weight=0.4,
+        owner_id="user-123",
+    )
+    assert len(bundle_b.results) == 1
+    assert bundle_b.results[0][0].tenant_id == "tenant_b"
+
+
+async def test_search_memories_with_focus_no_focus_path_honors_tenant(
+    async_session, embedding_service
+):
+    """The short-circuit "no focus" path delegates to search_memories and
+    must forward tenant_id, not fall through to the default."""
+    await _svc_create_memory(
+        _make_create_data(content="tenant A fallback content", weight=0.9),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    await _svc_create_memory(
+        _make_create_data(content="tenant B fallback content", weight=0.9),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_b",
+    )
+
+    # Empty focus forces the no-focus short-circuit.
+    bundle = await _svc_search_memories_with_focus(
+        query="fallback content",
+        session=async_session,
+        embedding_service=embedding_service,
+        tenant_id="tenant_a",
+        focus_string="",
+        owner_id="user-123",
+    )
+    assert len(bundle.results) == 1
+    assert bundle.results[0][0].tenant_id == "tenant_a"
+
+
+async def test_get_memory_history_returns_not_found_for_cross_tenant(
+    async_session, embedding_service
+):
+    """get_memory_history must refuse cross-tenant history walks.
+    The version chain is tenant-bound by create/update, but the
+    entry-point lookup also filters by tenant so an attacker cannot
+    discover a chain they should not see."""
+    v1, _ = await _svc_create_memory(
+        _make_create_data(content="tenant A v1"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    await _svc_update_memory(
+        v1.id,
+        MemoryNodeUpdate(content="tenant A v2"),
+        async_session,
+        embedding_service,
+    )
+
+    # Same-tenant history works.
+    history = await _svc_get_memory_history(
+        v1.id, async_session, tenant_id="tenant_a"
+    )
+    assert history["total_versions"] == 2
+
+    # Cross-tenant history raises MemoryNotFoundError.
+    with pytest.raises(MemoryNotFoundError):
+        await _svc_get_memory_history(v1.id, async_session, tenant_id="tenant_b")
+
+
+async def test_read_memory_tenant_id_is_keyword_only():
+    """tenant_id must be a required keyword arg on read_memory so any
+    caller that forgets to thread it gets a loud TypeError rather than
+    silently falling back to the default tenant."""
+    import inspect
+
+    sig = inspect.signature(_svc_read_memory)
+    tenant_param = sig.parameters["tenant_id"]
+    assert tenant_param.kind == inspect.Parameter.KEYWORD_ONLY
+    assert tenant_param.default is inspect.Parameter.empty
+
+
+async def test_search_memories_tenant_id_is_keyword_only():
+    """Same invariant for search_memories: tenant_id is keyword-only and required."""
+    import inspect
+
+    sig = inspect.signature(_svc_search_memories)
+    tenant_param = sig.parameters["tenant_id"]
+    assert tenant_param.kind == inspect.Parameter.KEYWORD_ONLY
+    assert tenant_param.default is inspect.Parameter.empty
+
+
+async def test_get_memory_history_tenant_id_is_keyword_only():
+    """Same invariant for get_memory_history: tenant_id is keyword-only and required."""
+    import inspect
+
+    sig = inspect.signature(_svc_get_memory_history)
+    tenant_param = sig.parameters["tenant_id"]
+    assert tenant_param.kind == inspect.Parameter.KEYWORD_ONLY
+    assert tenant_param.default is inspect.Parameter.empty

@@ -20,9 +20,10 @@ from memoryhub_core.services.memory import (
 )
 from src.core.app import mcp
 from src.core.authz import (
-    get_claims_from_context,
-    build_authorized_scopes,
     AuthenticationError,
+    build_authorized_scopes,
+    get_claims_from_context,
+    get_tenant_filter,
 )
 from src.tools._deps import (
     get_db_session,
@@ -272,8 +273,10 @@ async def search_memory(
     except AuthenticationError as exc:
         raise ToolError(str(exc))
 
-    # Build RBAC visibility filter
+    # Build RBAC visibility filter + resolve caller tenant for SQL-level
+    # isolation. Tenant filter is ALWAYS applied, independent of scopes.
     authorized = build_authorized_scopes(claims)
+    tenant = get_tenant_filter(claims)
 
     # Resolve owner_id: default to authenticated user when not explicitly set.
     # An empty string signals "no filter" (search all accessible owners).
@@ -307,6 +310,7 @@ async def search_memory(
                 query=query,
                 session=session,
                 embedding_service=embedding_service,
+                tenant_id=tenant,
                 focus_string=focus.strip(),
                 session_focus_weight=session_focus_weight,
                 reranker=reranker,
@@ -331,6 +335,7 @@ async def search_memory(
                 query=query,
                 session=session,
                 embedding_service=embedding_service,
+                tenant_id=tenant,
                 scope=scope,
                 owner_id=owner_id,
                 weight_threshold=effective_weight_threshold,
@@ -343,6 +348,7 @@ async def search_memory(
         # can tell whether more matches exist beyond this page.
         total_matching = await count_search_matches(
             session=session,
+            tenant_id=tenant,
             scope=scope,
             owner_id=owner_id,
             current_only=current_only,

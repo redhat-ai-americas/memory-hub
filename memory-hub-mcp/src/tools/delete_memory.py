@@ -30,6 +30,7 @@ from src.core.authz import (
     AuthenticationError,
     authorize_write,
     get_claims_from_context,
+    get_tenant_filter,
 )
 from src.tools._deps import get_db_session, release_db_session
 from src.tools._push_helpers import broadcast_after_write
@@ -94,23 +95,26 @@ async def delete_memory(
             f"Invalid memory_id format: '{memory_id}'. Expected a UUID string."
         )
 
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc))
+    tenant = get_tenant_filter(claims)
+
     session, gen = await get_db_session()
     try:
-        try:
-            claims = get_claims_from_context()
-        except AuthenticationError as exc:
-            raise ToolError(str(exc))
-
         # Read the existing memory to check authorization. read_memory
         # already filters deleted_at IS NULL, so an already-deleted memory
         # will surface as "not found" here — that's the right behavior:
         # we don't want to leak existence of deleted memories to callers
-        # who couldn't see them. The MemoryAlreadyDeletedError path below
-        # is reached only if the row's deleted_at gets set between this
-        # read and the service call (race condition).
-        existing = await _read_memory(parsed_id, session)
+        # who couldn't see them. The tenant filter also makes a
+        # cross-tenant ID indistinguishable from a nonexistent row.
+        # The MemoryAlreadyDeletedError path below is reached only if
+        # the row's deleted_at gets set between this read and the
+        # service call (race condition).
+        existing = await _read_memory(parsed_id, session, tenant_id=tenant)
 
-        is_owner = authorize_write(claims, existing.scope, existing.owner_id)
+        is_owner = authorize_write(claims, existing.scope, existing.owner_id, existing.tenant_id)
         is_admin = "memory:admin" in claims.get("scopes", [])
         if not (is_owner or is_admin):
             raise ToolError(

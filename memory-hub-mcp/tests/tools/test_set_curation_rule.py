@@ -111,6 +111,7 @@ async def test_set_curation_rule_create_success():
     mock_rule.priority = 10
     mock_rule.trigger = "on_write"
     mock_rule.description = None
+    mock_rule.tenant_id = "default"
     mock_rule.created_at = "2026-04-04T00:00:00Z"
     mock_rule.updated_at = "2026-04-04T00:00:00Z"
 
@@ -126,8 +127,13 @@ async def test_set_curation_rule_create_success():
     with (
         patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.set_curation_rule.create_rule", new_callable=AsyncMock, return_value=mock_rule),
+        patch("src.tools.set_curation_rule.create_rule", new_callable=AsyncMock, return_value=mock_rule) as mock_create,
     ):
         result = await set_curation_rule(name="my_threshold", config={"threshold": 0.98})
     assert result["created"] is True
     assert result["updated"] is False
+    # Phase 3 (#46): the tool must forward tenant_id from claims to
+    # create_rule. No JWT is set in this test so the auth path falls back
+    # to session identity, which maps tenant_id to "default".
+    _, kwargs = mock_create.call_args
+    assert kwargs.get("tenant_id") == "default"

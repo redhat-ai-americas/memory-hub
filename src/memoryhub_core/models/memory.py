@@ -54,6 +54,11 @@ class MemoryNode(TimestampMixin, Base):
     scope: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     branch_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     owner_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        server_default=text("'default'"),
+    )
 
     # Versioning
     is_current: Mapped[bool] = mapped_column(nullable=False, default=True, index=True)
@@ -108,7 +113,10 @@ class MemoryNode(TimestampMixin, Base):
 
     # -- Table-level indexes --
 
-    __table_args__ = (Index("ix_memory_nodes_owner_scope_current", "owner_id", "scope", "is_current"),)
+    __table_args__ = (
+        Index("ix_memory_nodes_owner_scope_current", "owner_id", "scope", "is_current"),
+        Index("ix_memory_nodes_tenant_scope", "tenant_id", "scope"),
+    )
 
     def __repr__(self) -> str:
         return (
@@ -155,6 +163,11 @@ class MemoryRelationship(Base):
         nullable=False,
     )
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        server_default=text("'default'"),
+    )
 
     source: Mapped["MemoryNode"] = relationship(
         "MemoryNode",
@@ -173,6 +186,7 @@ class MemoryRelationship(Base):
         Index("ix_memory_relationships_source_type", "source_id", "relationship_type"),
         Index("ix_memory_relationships_target_type", "target_id", "relationship_type"),
         Index("ix_memory_relationships_type", "relationship_type"),
+        Index("ix_memory_relationships_tenant", "tenant_id"),
     )
 
     def __repr__(self) -> str:

@@ -99,7 +99,7 @@ async def test_suggest_merge_success():
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
 
-    mock_memory = SimpleNamespace(scope="user", owner_id="test-user")
+    mock_memory = SimpleNamespace(scope="user", owner_id="test-user", tenant_id="default")
 
     with (
         patch("src.tools.suggest_merge.get_db_session", return_value=(mock_session, mock_gen)),

@@ -104,3 +104,45 @@ async def test_get_relationships_success():
         result = await get_relationships(node_id=str(uuid.uuid4()))
     assert result["count"] == 1
     assert len(result["relationships"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_relationships_forwards_tenant_id_to_service():
+    """Phase 4 (#46): the tool must forward claims.tenant_id into the
+    get_relationships_service call so the SQL-level filter runs in the
+    caller's tenant."""
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:read:user", "memory:write:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.get_relationships.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.get_relationships.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.get_relationships.release_db_session",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.tools.get_relationships.get_relationships_service",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as mock_service,
+    ):
+        await get_relationships(node_id=str(uuid.uuid4()))
+
+    _, kwargs = mock_service.call_args
+    assert kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' forwarded into get_relationships_service, "
+        f"got kwargs={kwargs}"
+    )

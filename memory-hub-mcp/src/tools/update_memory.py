@@ -22,7 +22,12 @@ from memoryhub_core.services.memory import read_memory as _read_memory
 from memoryhub_core.services.memory import update_memory as svc_update_memory
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_write, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_write,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session
 from src.tools._push_helpers import broadcast_after_write
 
@@ -87,16 +92,20 @@ async def update_memory(
         metadata=metadata,
     )
 
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc))
+    tenant = get_tenant_filter(claims)
+
     session, gen = await get_db_session()
     try:
-        try:
-            claims = get_claims_from_context()
-        except AuthenticationError as exc:
-            raise ToolError(str(exc))
-
-        # Fetch existing memory to check authorization
-        existing = await _read_memory(parsed_id, session)
-        if not authorize_write(claims, existing.scope, existing.owner_id):
+        # Fetch existing memory to check authorization. The tenant filter
+        # on read_memory makes a cross-tenant ID indistinguishable from
+        # a nonexistent row; the follow-up authorize_write (which also
+        # checks tenant) is defense in depth.
+        existing = await _read_memory(parsed_id, session, tenant_id=tenant)
+        if not authorize_write(claims, existing.scope, existing.owner_id, existing.tenant_id):
             raise ToolError(
                 f"Not authorized to update this {existing.scope}-scope memory."
             )

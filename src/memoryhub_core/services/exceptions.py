@@ -50,3 +50,32 @@ class RelationshipNotFoundError(Exception):
     def __init__(self, relationship_id: uuid.UUID) -> None:
         self.relationship_id = relationship_id
         super().__init__(f"Relationship {relationship_id} not found")
+
+
+class CrossTenantRelationshipError(Exception):
+    """Raised when a relationship would span two different tenants.
+
+    Defense in depth: under normal operation the tool-layer authorize_read
+    check already prevents a caller from loading memories from two different
+    tenants in the same session, so this error should never reach users.
+    It exists to catch bugs in higher layers (e.g., an internal service
+    path that bypasses authorize_read) before they poison the graph with
+    cross-tenant edges.
+    """
+
+    def __init__(
+        self,
+        source_id: uuid.UUID,
+        source_tenant: str,
+        target_id: uuid.UUID,
+        target_tenant: str,
+    ) -> None:
+        self.source_id = source_id
+        self.source_tenant = source_tenant
+        self.target_id = target_id
+        self.target_tenant = target_tenant
+        super().__init__(
+            f"Cross-tenant relationship rejected: source {source_id} "
+            f"(tenant={source_tenant!r}) and target {target_id} "
+            f"(tenant={target_tenant!r}) must share a tenant."
+        )

@@ -29,8 +29,49 @@ from memoryhub_core.models.schemas import (
     RelationshipType,
 )
 from memoryhub_core.services.embeddings import EMBEDDING_DIM, MockEmbeddingService
-from memoryhub_core.services.graph import create_relationship, get_relationships, trace_provenance
-from memoryhub_core.services.memory import create_memory, search_memories, update_memory
+from memoryhub_core.services.graph import (
+    create_relationship,
+    get_relationships as _svc_get_relationships,
+    trace_provenance,
+)
+from memoryhub_core.services.memory import (
+    create_memory as _svc_create_memory,
+    search_memories as _svc_search_memories,
+    update_memory,
+)
+
+
+# Phase 3 (#46) made create_memory require a tenant_id kwarg. Phase 4
+# adds tenant_id kwargs to every read path. Integration tests here all
+# operate in the default tenant; cross-tenant integration coverage is
+# Phase 5 scope. The wrappers below supply the default tenant to keep
+# these tests collectable without repeating the kwarg on every call.
+_TEST_TENANT_ID = "default"
+
+
+async def create_memory(data, session, embedding_service, skip_curation=False, *, tenant_id=_TEST_TENANT_ID):
+    """Test wrapper around the service create_memory with a default tenant."""
+    return await _svc_create_memory(
+        data,
+        session,
+        embedding_service,
+        tenant_id=tenant_id,
+        skip_curation=skip_curation,
+    )
+
+
+async def search_memories(
+    query, session, embedding_service, *, tenant_id=_TEST_TENANT_ID, **kwargs
+):
+    """Test wrapper around search_memories with a default tenant."""
+    return await _svc_search_memories(
+        query, session, embedding_service, tenant_id=tenant_id, **kwargs
+    )
+
+
+async def get_relationships(node_id, session, *, tenant_id=_TEST_TENANT_ID, **kwargs):
+    """Test wrapper around get_relationships with a default tenant."""
+    return await _svc_get_relationships(node_id, session, tenant_id=tenant_id, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -60,11 +101,15 @@ def _make(
 
 @pytest.fixture
 def reset_rules_seeded():
-    """Ensure _rules_seeded is False before and restored after the test."""
-    original = pipeline_module._rules_seeded
-    pipeline_module._rules_seeded = False
+    """Ensure _seeded_tenants is empty before and restored after the test.
+
+    Phase 4 (#46) replaced the Phase-0 boolean ``_rules_seeded`` with a
+    per-tenant set so lazy-seeding happens once per tenant.
+    """
+    original = set(pipeline_module._seeded_tenants)
+    pipeline_module._seeded_tenants = set()
     yield
-    pipeline_module._rules_seeded = original
+    pipeline_module._seeded_tenants = original
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +309,7 @@ async def test_curation_nearest_score_close_to_one_for_identical_content(
         owner_id=owner_id,
         scope=MemoryScope.USER,
         session=async_session,
+        tenant_id=_TEST_TENANT_ID,
     )
 
     assert result["nearest_score"] is not None, "nearest_score must not be None on PostgreSQL"
@@ -337,6 +383,7 @@ async def test_check_similarity_returns_score_not_none(
         owner_id=owner_id,
         scope=MemoryScope.USER,
         session=async_session,
+        tenant_id=_TEST_TENANT_ID,
         flag_threshold=0.5,
         exclude_id=memory.id,
     )
@@ -360,13 +407,13 @@ async def test_pipeline_seeds_default_rules_on_first_call(
     embedding_service: MockEmbeddingService,
     reset_rules_seeded,
 ) -> None:
-    """Running the pipeline with _rules_seeded=False seeds the 5 default system rules."""
+    """Running the pipeline for a fresh tenant seeds the 5 default system rules."""
     # Verify the DB is empty before we start (conftest truncates between tests).
     count_before = (await async_session.execute(select(CuratorRule))).scalars().all()
     assert len(count_before) == 0, (
         f"Expected no rules before pipeline runs, found {len(count_before)}"
     )
-    assert not pipeline_module._rules_seeded
+    assert _TEST_TENANT_ID not in pipeline_module._seeded_tenants
 
     from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 
@@ -376,6 +423,7 @@ async def test_pipeline_seeds_default_rules_on_first_call(
         owner_id="seed-test-user",
         scope=MemoryScope.USER,
         session=async_session,
+        tenant_id=_TEST_TENANT_ID,
     )
 
     rules_after = (await async_session.execute(select(CuratorRule))).scalars().all()
@@ -390,8 +438,8 @@ async def test_pipeline_seeds_default_rules_on_first_call(
         f"Unexpected rule names. Got: {rule_names}"
     )
 
-    assert pipeline_module._rules_seeded is True, (
-        "_rules_seeded should be True after first pipeline invocation"
+    assert _TEST_TENANT_ID in pipeline_module._seeded_tenants, (
+        "default tenant should be in _seeded_tenants after first pipeline invocation"
     )
 
 
@@ -400,7 +448,7 @@ async def test_pipeline_skips_seeding_on_subsequent_calls(
     embedding_service: MockEmbeddingService,
     reset_rules_seeded,
 ) -> None:
-    """After _rules_seeded=True, the pipeline does not re-seed rules."""
+    """After the tenant is in _seeded_tenants, the pipeline does not re-seed rules."""
     from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 
     # First call seeds the rules.
@@ -411,8 +459,9 @@ async def test_pipeline_skips_seeding_on_subsequent_calls(
         owner_id="seed-idempotency-user",
         scope=MemoryScope.USER,
         session=async_session,
+        tenant_id=_TEST_TENANT_ID,
     )
-    assert pipeline_module._rules_seeded is True
+    assert _TEST_TENANT_ID in pipeline_module._seeded_tenants
     rules_after_first = (await async_session.execute(select(CuratorRule))).scalars().all()
 
     # Second call must not duplicate rules.
@@ -423,6 +472,7 @@ async def test_pipeline_skips_seeding_on_subsequent_calls(
         owner_id="seed-idempotency-user",
         scope=MemoryScope.USER,
         session=async_session,
+        tenant_id=_TEST_TENANT_ID,
     )
     rules_after_second = (await async_session.execute(select(CuratorRule))).scalars().all()
 

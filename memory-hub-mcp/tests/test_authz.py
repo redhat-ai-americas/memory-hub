@@ -9,6 +9,7 @@ from src.core.authz import (
     authorize_write,
     build_authorized_scopes,
     get_claims_from_context,
+    get_tenant_filter,
     AuthenticationError,
 )
 
@@ -30,7 +31,11 @@ from src.core.authz import (
     ({"sub": "alice", "scopes": ["memory:write"]}, "user", "alice", False),
 ])
 def test_authorize_read(claims, memory_scope, memory_owner, expected):
-    memory = SimpleNamespace(scope=memory_scope, owner_id=memory_owner)
+    # Existing pre-tenant tests assume default-tenant memories and
+    # default-tenant claims (claims without tenant_id fall back to "default").
+    memory = SimpleNamespace(
+        scope=memory_scope, owner_id=memory_owner, tenant_id="default"
+    )
     assert authorize_read(claims, memory) == expected
 
 
@@ -38,7 +43,9 @@ def test_authorize_read_with_enum_scope():
     """authorize_read should handle MemoryScope enum values."""
     from memoryhub_core.models.schemas import MemoryScope
 
-    memory = SimpleNamespace(scope=MemoryScope.USER, owner_id="alice")
+    memory = SimpleNamespace(
+        scope=MemoryScope.USER, owner_id="alice", tenant_id="default"
+    )
     claims = {"sub": "alice", "scopes": ["memory:read"]}
     assert authorize_read(claims, memory) is True
 
@@ -59,7 +66,8 @@ def test_authorize_read_with_enum_scope():
     ({"sub": "curator", "identity_type": "service", "scopes": ["memory:write:user"]}, "organizational", "org-1", False),
 ])
 def test_authorize_write(claims, scope, owner_id, expected):
-    assert authorize_write(claims, scope, owner_id) == expected
+    # Existing pre-tenant tests assume the default tenant on both sides.
+    assert authorize_write(claims, scope, owner_id, "default") == expected
 
 
 def test_authorize_write_with_enum_scope():
@@ -67,7 +75,102 @@ def test_authorize_write_with_enum_scope():
     from memoryhub_core.models.schemas import MemoryScope
 
     claims = {"sub": "alice", "scopes": ["memory:write:user"]}
-    assert authorize_write(claims, MemoryScope.USER, "alice") is True
+    assert authorize_write(claims, MemoryScope.USER, "alice", "default") is True
+
+
+# -- Tenant isolation (issue #46, Phase 2) -----------------------------------
+
+def test_authorize_read_rejects_cross_tenant():
+    """A caller in tenant_b cannot read a memory in tenant_a, even if scope
+    and owner would otherwise allow it."""
+    memory = SimpleNamespace(
+        scope="user", owner_id="alice", tenant_id="tenant_a"
+    )
+    claims = {
+        "sub": "alice",
+        "tenant_id": "tenant_b",
+        "scopes": ["memory:read:user"],
+    }
+    assert authorize_read(claims, memory) is False
+
+
+def test_authorize_read_allows_same_tenant():
+    """Matching tenant_id plus a valid scope/owner combo passes."""
+    memory = SimpleNamespace(
+        scope="user", owner_id="alice", tenant_id="tenant_a"
+    )
+    claims = {
+        "sub": "alice",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:read:user"],
+    }
+    assert authorize_read(claims, memory) is True
+
+
+def test_authorize_read_rejects_cross_tenant_even_with_blanket_scope():
+    """The tenant check runs BEFORE the scope check, so a blanket
+    'memory:read' scope cannot bypass tenant isolation."""
+    memory = SimpleNamespace(
+        scope="organizational", owner_id="org-1", tenant_id="tenant_a"
+    )
+    claims = {
+        "sub": "service-bot",
+        "tenant_id": "tenant_b",
+        "identity_type": "service",
+        "scopes": ["memory:read"],
+    }
+    assert authorize_read(claims, memory) is False
+
+
+def test_authorize_write_rejects_cross_tenant():
+    """Writing to a tenant other than the caller's is rejected even when
+    scope/owner are otherwise valid."""
+    claims = {
+        "sub": "alice",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:write:user"],
+    }
+    assert (
+        authorize_write(claims, "user", "alice", "tenant_b") is False
+    )
+
+
+def test_authorize_write_allows_same_tenant():
+    """Matching tenant plus valid scope/owner passes."""
+    claims = {
+        "sub": "alice",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:write:user"],
+    }
+    assert (
+        authorize_write(claims, "user", "alice", "tenant_a") is True
+    )
+
+
+def test_authorize_write_rejects_cross_tenant_even_with_blanket_scope():
+    """A blanket 'memory:write' scope cannot bypass tenant isolation, even
+    for service identities writing to organizational scope."""
+    claims = {
+        "sub": "curator",
+        "tenant_id": "tenant_a",
+        "identity_type": "service",
+        "scopes": ["memory:write"],
+    }
+    assert (
+        authorize_write(claims, "organizational", "org-1", "tenant_b") is False
+    )
+
+
+def test_get_tenant_filter_reads_from_claims():
+    """get_tenant_filter returns the caller's tenant_id when present."""
+    claims = {"sub": "alice", "tenant_id": "tenant_a", "scopes": []}
+    assert get_tenant_filter(claims) == "tenant_a"
+
+
+def test_get_tenant_filter_falls_back_to_default():
+    """Claims without tenant_id (legacy session callers) get the default tenant."""
+    claims = {"sub": "alice", "scopes": []}
+    assert get_tenant_filter(claims) == "default"
 
 
 # -- build_authorized_scopes -------------------------------------------------

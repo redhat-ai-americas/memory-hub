@@ -21,6 +21,8 @@ async def check_similarity(
     owner_id: str,
     scope: str,
     session: AsyncSession,
+    *,
+    tenant_id: str,
     flag_threshold: float = 0.80,
     max_results: int = 50,
     exclude_id: uuid.UUID | None = None,
@@ -37,10 +39,18 @@ async def check_similarity(
 
     Uses pgvector's cosine distance operator (<=>).
     cosine_similarity = 1 - cosine_distance, so we filter on distance <= (1 - flag_threshold).
+
+    Tenant isolation: ``tenant_id`` is a required keyword argument. The
+    candidate pool is scoped to the caller's tenant so a write in
+    tenant A can never match a near-duplicate in tenant B. This is a
+    critical tenant boundary -- without it, the curation pipeline would
+    leak cross-tenant row existence via ``similar_count`` on the write
+    response.
     """
     filters = [
         MemoryNode.owner_id == owner_id,
         MemoryNode.scope == scope,
+        MemoryNode.tenant_id == tenant_id,
         MemoryNode.is_current.is_(True),
         MemoryNode.deleted_at.is_(None),
         MemoryNode.embedding.isnot(None),
@@ -82,6 +92,8 @@ async def check_similarity(
 async def get_similar_memories(
     memory_id: uuid.UUID,
     session: AsyncSession,
+    *,
+    tenant_id: str,
     threshold: float = 0.80,
     max_results: int = 10,
     offset: int = 0,
@@ -92,10 +104,19 @@ async def get_similar_memories(
 
     Returns:
       {"results": [{"id": uuid, "stub": str, "score": float}], "total": int, "has_more": bool}
+
+    Tenant isolation: ``tenant_id`` is a required keyword argument. Both
+    the source lookup and the similarity scan are scoped to the caller's
+    tenant. A cross-tenant source ID raises ``MemoryNotFoundError`` --
+    the same semantics as a nonexistent row. Candidate matches live
+    only in the same tenant as the source, so ``get_similar_memories``
+    never leaks cross-tenant row existence via the returned list,
+    ``total``, or ``has_more``.
     """
     source_stmt = select(MemoryNode).where(
         MemoryNode.id == memory_id,
         MemoryNode.deleted_at.is_(None),
+        MemoryNode.tenant_id == tenant_id,
     )
     source_result = await session.execute(source_stmt)
     source = source_result.scalar_one_or_none()
@@ -114,6 +135,7 @@ async def get_similar_memories(
     base_filters = and_(
         MemoryNode.owner_id == source.owner_id,
         MemoryNode.scope == source.scope,
+        MemoryNode.tenant_id == tenant_id,
         MemoryNode.is_current.is_(True),
         MemoryNode.deleted_at.is_(None),
         MemoryNode.embedding.isnot(None),

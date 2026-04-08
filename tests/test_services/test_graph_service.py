@@ -21,11 +21,35 @@ from memoryhub_core.services.graph import (
     create_relationship,
     delete_relationship,
     find_related,
-    get_relationships,
+    get_relationships as _svc_get_relationships,
     get_subtree,
     trace_provenance,
 )
-from memoryhub_core.services.memory import create_memory
+from memoryhub_core.services.memory import create_memory as _svc_create_memory
+
+
+# Phase 3 (#46): create_memory now requires a tenant_id kwarg. Most graph
+# tests don't care which tenant the memories live in, so this wrapper
+# supplies a default. Phase 4 adds tenant_id to get_relationships; the
+# read-side wrapper below supplies the same default. Cross-tenant tests
+# call the underlying _svc_* functions directly with explicit tenants.
+_TEST_TENANT_ID = "default"
+
+
+async def create_memory(data, session, embedding_service, skip_curation=False, *, tenant_id=_TEST_TENANT_ID):
+    """Test wrapper around the service create_memory with a default tenant."""
+    return await _svc_create_memory(
+        data,
+        session,
+        embedding_service,
+        tenant_id=tenant_id,
+        skip_curation=skip_curation,
+    )
+
+
+async def get_relationships(node_id, session, *, tenant_id=_TEST_TENANT_ID, **kwargs):
+    """Test wrapper around get_relationships with a default tenant."""
+    return await _svc_get_relationships(node_id, session, tenant_id=tenant_id, **kwargs)
 
 
 def _make_create_data(**overrides) -> MemoryNodeCreate:
@@ -417,3 +441,147 @@ async def test_find_related_no_relationships(async_session, embedding_service):
     results = await find_related(node.id, async_session)
 
     assert results == []
+
+
+# -- Phase 3 (#46) tenant plumbing tests --
+
+
+@pytest.mark.asyncio
+async def test_create_relationship_derives_tenant_from_source(async_session, embedding_service):
+    """Relationships must inherit tenant_id from the source memory node."""
+    from sqlalchemy import select
+    from memoryhub_core.models.memory import MemoryRelationship
+
+    source, _ = await _svc_create_memory(
+        _make_create_data(content="source in tenant_a"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    target, _ = await _svc_create_memory(
+        _make_create_data(content="target in tenant_a"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+
+    rel = await create_relationship(
+        _make_relationship_data(source_id=source.id, target_id=target.id),
+        async_session,
+    )
+    assert rel.tenant_id == "tenant_a"
+
+    stmt = select(MemoryRelationship).where(MemoryRelationship.id == rel.id)
+    row = (await async_session.execute(stmt)).scalar_one()
+    assert row.tenant_id == "tenant_a"
+
+
+@pytest.mark.asyncio
+async def test_create_relationship_rejects_cross_tenant(async_session, embedding_service):
+    """Defense in depth: creating a relationship between memories in
+    different tenants must raise CrossTenantRelationshipError. Under
+    normal operation authorize_read blocks this before it reaches the
+    service, but the service enforces it as a safety net."""
+    from memoryhub_core.services.exceptions import CrossTenantRelationshipError
+
+    source, _ = await _svc_create_memory(
+        _make_create_data(content="source in tenant_a"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    target, _ = await _svc_create_memory(
+        _make_create_data(content="target in tenant_b"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_b",
+    )
+
+    with pytest.raises(CrossTenantRelationshipError) as exc_info:
+        await create_relationship(
+            _make_relationship_data(source_id=source.id, target_id=target.id),
+            async_session,
+        )
+    assert exc_info.value.source_tenant == "tenant_a"
+    assert exc_info.value.target_tenant == "tenant_b"
+
+
+# -- Phase 4 (#46) read-path tenant isolation tests --
+
+
+@pytest.mark.asyncio
+async def test_get_relationships_excludes_cross_tenant_edges(
+    async_session, embedding_service
+):
+    """get_relationships must only return edges in the caller's tenant.
+    A cross-tenant call on a tenant-A node ID raises MemoryNotFoundError
+    (the tenant filter on the node lookup makes a cross-tenant ID
+    indistinguishable from a nonexistent row)."""
+    # Two isolated pairs in separate tenants, each with a relationship.
+    src_a, _ = await _svc_create_memory(
+        _make_create_data(content="src in tenant A"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    tgt_a, _ = await _svc_create_memory(
+        _make_create_data(content="tgt in tenant A"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_a",
+    )
+    src_b, _ = await _svc_create_memory(
+        _make_create_data(content="src in tenant B"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_b",
+    )
+    tgt_b, _ = await _svc_create_memory(
+        _make_create_data(content="tgt in tenant B"),
+        async_session,
+        embedding_service,
+        tenant_id="tenant_b",
+    )
+
+    rel_a = await create_relationship(
+        _make_relationship_data(source_id=src_a.id, target_id=tgt_a.id),
+        async_session,
+    )
+    rel_b = await create_relationship(
+        _make_relationship_data(source_id=src_b.id, target_id=tgt_b.id),
+        async_session,
+    )
+
+    # Tenant A sees its own edge.
+    a_rels = await _svc_get_relationships(
+        src_a.id, async_session, tenant_id="tenant_a"
+    )
+    assert len(a_rels) == 1
+    assert a_rels[0].id == rel_a.id
+    assert a_rels[0].tenant_id == "tenant_a"
+
+    # Tenant B sees its own edge.
+    b_rels = await _svc_get_relationships(
+        src_b.id, async_session, tenant_id="tenant_b"
+    )
+    assert len(b_rels) == 1
+    assert b_rels[0].id == rel_b.id
+
+    # Tenant B calling with a tenant-A node ID gets MemoryNotFoundError
+    # -- the node lookup is tenant-scoped, so the cross-tenant ID is
+    # indistinguishable from a nonexistent row.
+    with pytest.raises(MemoryNotFoundError):
+        await _svc_get_relationships(src_a.id, async_session, tenant_id="tenant_b")
+
+
+@pytest.mark.asyncio
+async def test_get_relationships_tenant_id_is_keyword_only():
+    """tenant_id must be a keyword-only required arg on get_relationships
+    so forgotten callers get a loud TypeError, not silent default-tenant
+    fall-through."""
+    import inspect
+
+    sig = inspect.signature(_svc_get_relationships)
+    tenant_param = sig.parameters["tenant_id"]
+    assert tenant_param.kind == inspect.Parameter.KEYWORD_ONLY
+    assert tenant_param.default is inspect.Parameter.empty

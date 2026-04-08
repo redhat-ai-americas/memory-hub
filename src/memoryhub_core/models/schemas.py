@@ -89,6 +89,11 @@ class MemoryNodeRead(BaseModel):
     scope: MemoryScope
     branch_type: str | None
     owner_id: str
+    # Required field. Phase 3 (#46) wires tenant_id through every
+    # service-layer write path, so every MemoryNodeRead constructed from an
+    # ORM row now carries the real tenant. A missing tenant_id here is a
+    # bug in the service layer and must fail loudly at validation time.
+    tenant_id: str
     is_current: bool
     version: int
     previous_version_id: uuid.UUID | None
@@ -150,6 +155,9 @@ class RelationshipRead(BaseModel):
     metadata: dict[str, Any] | None = Field(default=None, validation_alias="metadata_")
     created_at: datetime
     created_by: str
+    # Required field — populated by the service layer from the ORM row.
+    # Relationships inherit tenant from their source memory; see Phase 3 of #46.
+    tenant_id: str
     # Optionally populated by the service layer from the linked node stubs
     source_stub: str | None = None
     target_stub: str | None = None
@@ -248,6 +256,9 @@ class CuratorRuleRead(BaseModel):
     scope_filter: str | None = None
     layer: RuleLayer
     owner_id: str | None = None
+    # Required field — populated by the service layer from the ORM row.
+    # Rules are per-tenant (Phase 3 of #46).
+    tenant_id: str
     override: bool
     enabled: bool
     priority: int

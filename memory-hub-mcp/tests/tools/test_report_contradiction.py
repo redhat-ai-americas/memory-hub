@@ -50,7 +50,7 @@ async def test_report_contradiction_passes_reporter_from_session():
     mock_gen = AsyncMock()
     mock_gen.__anext__ = AsyncMock(side_effect=StopAsyncIteration)
 
-    mock_memory = SimpleNamespace(scope="user", owner_id="test-user")
+    mock_memory = SimpleNamespace(scope="user", owner_id="test-user", tenant_id="default")
 
     with (
         patch(

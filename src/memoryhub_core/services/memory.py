@@ -54,6 +54,8 @@ async def create_memory(
     data: MemoryNodeCreate,
     session: AsyncSession,
     embedding_service: EmbeddingService,
+    *,
+    tenant_id: str,
     skip_curation: bool = False,
 ) -> tuple[MemoryNodeRead | None, dict]:
     """Create a new memory node.
@@ -68,6 +70,12 @@ async def create_memory(
 
     Set ``skip_curation=True`` to bypass the pipeline entirely (used for
     downstream writes from merge operations).
+
+    ``tenant_id`` is a required keyword argument -- tool-layer callers must
+    pass the caller's tenant (from JWT claims) explicitly so every insert is
+    stamped with the correct tenant. Phase 2's authorize_write already
+    verified the caller is allowed to write into this tenant; this function
+    just persists that decision onto the row.
     """
     embedding = await embedding_service.embed(data.content)
     stub = generate_stub(
@@ -85,6 +93,7 @@ async def create_memory(
             owner_id=data.owner_id,
             scope=data.scope,
             session=session,
+            tenant_id=tenant_id,
         )
         if curation_result["blocked"]:
             return None, curation_result
@@ -107,6 +116,7 @@ async def create_memory(
         scope=data.scope,
         weight=data.weight,
         owner_id=data.owner_id,
+        tenant_id=tenant_id,
         parent_id=data.parent_id,
         branch_type=data.branch_type,
         metadata_=data.metadata,
@@ -129,6 +139,8 @@ async def create_memory(
 async def read_memory(
     memory_id: uuid.UUID,
     session: AsyncSession,
+    *,
+    tenant_id: str,
 ) -> MemoryNodeRead:
     """Read a memory node by ID.
 
@@ -139,14 +151,25 @@ async def read_memory(
     populates current_version_id by walking the version chain forward, so
     callers can pivot to the live version in a single round-trip.
     Raises MemoryNotFoundError if the node does not exist.
+
+    Tenant isolation: ``tenant_id`` is a required keyword argument. The
+    query filters on it at the SQL level, and a cross-tenant lookup
+    returns the same ``MemoryNotFoundError`` as a nonexistent row so
+    callers can never distinguish "does not exist" from "exists in
+    another tenant." This mirrors the authz layer's per-row behavior.
     """
     stmt = select(MemoryNode).where(
-        MemoryNode.id == memory_id, MemoryNode.deleted_at.is_(None)
+        MemoryNode.id == memory_id,
+        MemoryNode.deleted_at.is_(None),
+        MemoryNode.tenant_id == tenant_id,
     )
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
 
     if node is None:
+        # Cross-tenant hits land here indistinguishably from nonexistent
+        # rows. Do NOT log the mismatch at WARNING or higher -- anything
+        # above debug leaks existence through log aggregation.
         raise MemoryNotFoundError(memory_id)
 
     has_children, has_rationale, branch_count = await _compute_branch_flags(node, session)
@@ -185,6 +208,13 @@ async def update_memory(
     Marks the old version as not-current and creates a new node with
     incremented version and previous_version_id pointing to the old.
     Raises MemoryNotFoundError or MemoryNotCurrentError as appropriate.
+
+    Tenant isolation: the new version inherits ``tenant_id`` from the
+    existing row. Tenant is a property of the memory, not of the update
+    call -- the tool layer's authorize_write has already verified that the
+    caller shares the memory's tenant before we get here (it passes
+    ``existing.tenant_id``). Deep-copied child branches also inherit their
+    parent's tenant.
     """
     stmt = select(MemoryNode).where(MemoryNode.id == memory_id)
     result = await session.execute(stmt)
@@ -235,6 +265,7 @@ async def update_memory(
         scope=old_node.scope,
         weight=new_weight,
         owner_id=old_node.owner_id,
+        tenant_id=old_node.tenant_id,
         parent_id=old_node.parent_id,
         branch_type=old_node.branch_type,
         metadata_=new_metadata,
@@ -269,6 +300,7 @@ async def update_memory(
             scope=child.scope,
             weight=child.weight,
             owner_id=child.owner_id,
+            tenant_id=child.tenant_id,
             parent_id=new_node.id,
             branch_type=child.branch_type,
             metadata_=child.metadata_,
@@ -357,14 +389,22 @@ def _build_search_filters(
     owner_id: str | None,
     current_only: bool,
     authorized_scopes: dict[str, str | None] | None,
+    tenant_id: str,
 ) -> list | None:
     """Build the SQL filter list shared by search_memories and count_search_matches.
 
     Returns None if authorized_scopes was provided but empty (callers should
     short-circuit to "no results"). This avoids duplicating the filter logic
     between the search query and the count query that backs has_more.
+
+    ``tenant_id`` is required and applied unconditionally -- tenant
+    filtering is always-on at the SQL level. Cross-tenant rows are
+    invisible to the query, mirroring the authz layer's per-row behavior.
     """
-    filters = [MemoryNode.deleted_at.is_(None)]
+    filters = [
+        MemoryNode.deleted_at.is_(None),
+        MemoryNode.tenant_id == tenant_id,
+    ]
     if current_only:
         filters.append(MemoryNode.is_current.is_(True))
     if scope is not None:
@@ -393,6 +433,8 @@ def _build_search_filters(
 
 async def count_search_matches(
     session: AsyncSession,
+    *,
+    tenant_id: str,
     scope: str | None = None,
     owner_id: str | None = None,
     current_only: bool = True,
@@ -404,8 +446,14 @@ async def count_search_matches(
     search_memories itself only returns a single page of results. The query
     parameter and weight_threshold are intentionally absent: total_matching
     is independent of the embedding similarity ranking.
+
+    ``tenant_id`` is required -- every count is scoped to a single tenant
+    so cross-tenant rows never contribute to ``total_matching`` or
+    ``has_more``.
     """
-    filters = _build_search_filters(scope, owner_id, current_only, authorized_scopes)
+    filters = _build_search_filters(
+        scope, owner_id, current_only, authorized_scopes, tenant_id
+    )
     if filters is None:
         return 0
     stmt = select(func.count()).select_from(MemoryNode).where(*filters)
@@ -416,6 +464,8 @@ async def search_memories(
     query: str,
     session: AsyncSession,
     embedding_service: EmbeddingService,
+    *,
+    tenant_id: str,
     scope: str | None = None,
     owner_id: str | None = None,
     weight_threshold: float = 0.8,
@@ -435,10 +485,16 @@ async def search_memories(
     When authorized_scopes is provided, results are filtered to only include
     memories the caller is authorized to read. The dict maps scope names to
     required owner_id values (None means no owner filter for that scope).
+
+    ``tenant_id`` is a required keyword argument -- the query is unconditionally
+    filtered to that tenant at the SQL level. Cross-tenant rows are invisible;
+    a search that would otherwise match them simply returns fewer results.
     """
     query_embedding = await embedding_service.embed(query)
 
-    filters = _build_search_filters(scope, owner_id, current_only, authorized_scopes)
+    filters = _build_search_filters(
+        scope, owner_id, current_only, authorized_scopes, tenant_id
+    )
     if filters is None:
         return []
 
@@ -567,6 +623,7 @@ async def search_memories_with_focus(
     session: AsyncSession,
     embedding_service: EmbeddingService,
     *,
+    tenant_id: str,
     focus_string: str,
     session_focus_weight: float = 0.4,
     reranker: RerankerService | None = None,
@@ -615,6 +672,7 @@ async def search_memories_with_focus(
             query=query,
             session=session,
             embedding_service=embedding_service,
+            tenant_id=tenant_id,
             scope=scope,
             owner_id=owner_id,
             weight_threshold=weight_threshold,
@@ -636,7 +694,9 @@ async def search_memories_with_focus(
             f"{pivot_distance:.3f} (threshold {pivot_threshold:.2f})"
         )
 
-    filters = _build_search_filters(scope, owner_id, current_only, authorized_scopes)
+    filters = _build_search_filters(
+        scope, owner_id, current_only, authorized_scopes, tenant_id
+    )
     if filters is None:
         return FocusedSearchResult(
             pivot_suggested=pivot_suggested,
@@ -843,6 +903,8 @@ async def search_memories_with_focus(
 async def get_memory_history(
     memory_id: uuid.UUID,
     session: AsyncSession,
+    *,
+    tenant_id: str,
     max_versions: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -855,8 +917,19 @@ async def get_memory_history(
       - total_versions: int (total count in the chain)
       - has_more: bool (whether more versions exist beyond this page)
       - offset: int (the offset used)
+
+    Tenant isolation: ``tenant_id`` is required. The version chain is
+    tenant-bound (Phase 3 inherits tenant from the existing row on
+    update, so all versions share the same tenant), but the entry-point
+    lookup still filters by tenant so a cross-tenant caller cannot
+    discover a history chain they have no business seeing. Cross-tenant
+    requests raise ``MemoryNotFoundError`` -- the same semantics as a
+    nonexistent row.
     """
-    stmt = select(MemoryNode).where(MemoryNode.id == memory_id)
+    stmt = select(MemoryNode).where(
+        MemoryNode.id == memory_id,
+        MemoryNode.tenant_id == tenant_id,
+    )
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
 
@@ -903,17 +976,27 @@ async def report_contradiction(
 
     Inserts a row into contradiction_reports and returns the count of
     unresolved contradictions for this memory.
+
+    Tenant isolation: the report inherits ``tenant_id`` from the
+    contradicted memory. Cross-tenant contradiction reports are impossible
+    by construction -- the tool layer calls ``authorize_read`` on the
+    target memory before invoking this service, and ``authorize_read``
+    rejects cross-tenant callers before they can load the memory. If the
+    memory exists and is reachable, its tenant is the caller's tenant.
     """
     # Verify the memory exists and is not deleted. Reporting a contradiction
     # against a deleted memory is meaningless — there's no current version
-    # for the curator to revise.
-    stmt = select(MemoryNode.id).where(
+    # for the curator to revise. Load the tenant_id off the row so we can
+    # stamp it onto the contradiction report.
+    stmt = select(MemoryNode.id, MemoryNode.tenant_id).where(
         MemoryNode.id == memory_id,
         MemoryNode.deleted_at.is_(None),
     )
     result = await session.execute(stmt)
-    if result.scalar_one_or_none() is None:
+    row = result.one_or_none()
+    if row is None:
         raise MemoryNotFoundError(memory_id)
+    memory_tenant_id = row.tenant_id
 
     # Insert the contradiction report
     report = ContradictionReport(
@@ -921,6 +1004,7 @@ async def report_contradiction(
         observed_behavior=observed_behavior,
         confidence=confidence,
         reporter=reporter,
+        tenant_id=memory_tenant_id,
     )
     session.add(report)
     await session.flush()
@@ -1091,6 +1175,7 @@ def node_to_read(
         scope=node.scope,
         branch_type=node.branch_type,
         owner_id=node.owner_id,
+        tenant_id=node.tenant_id,
         is_current=node.is_current,
         version=node.version,
         previous_version_id=node.previous_version_id,

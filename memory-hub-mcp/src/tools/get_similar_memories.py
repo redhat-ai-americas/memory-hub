@@ -11,6 +11,7 @@ from src.core.authz import (
     AuthenticationError,
     authorize_read,
     get_claims_from_context,
+    get_tenant_filter,
 )
 from src.tools._deps import get_db_session, release_db_session
 
@@ -66,6 +67,7 @@ async def get_similar_memories(
         claims = get_claims_from_context()
     except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
+    tenant = get_tenant_filter(claims)
 
     try:
         parsed_memory_id = uuid.UUID(memory_id)
@@ -80,10 +82,14 @@ async def get_similar_memories(
         session, gen = await get_db_session()
 
         # Authorize the caller against the source memory. The similarity
-        # service restricts results to (owner_id, scope) of the source, so once
-        # the caller is allowed to read the source, every returned item is in
-        # the same authorization domain and no post-fetch filter is needed.
-        source = await read_memory_service(parsed_memory_id, session)
+        # service restricts results to (owner_id, scope, tenant_id) of the
+        # source, so once the caller is allowed to read the source, every
+        # returned item is in the same authorization domain. The tenant_id
+        # filter in both calls makes a cross-tenant source ID indistinguishable
+        # from a nonexistent row.
+        source = await read_memory_service(
+            parsed_memory_id, session, tenant_id=tenant
+        )
         if not authorize_read(claims, source):
             return {
                 "error": True,
@@ -93,6 +99,7 @@ async def get_similar_memories(
         result = await get_similar_memories_service(
             parsed_memory_id,
             session,
+            tenant_id=tenant,
             threshold=threshold,
             max_results=max_results,
             offset=offset,

@@ -8,7 +8,12 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_read,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.services.exceptions import MemoryNotFoundError
@@ -91,11 +96,14 @@ async def report_contradiction(
     except AuthenticationError as exc:
         raise ToolError(str(exc))
     reporter = claims["sub"]
+    tenant = get_tenant_filter(claims)
 
     session, gen = await get_db_session()
     try:
-        # Verify caller can see the memory being contradicted
-        target_memory = await _read_memory(parsed_id, session)
+        # Verify caller can see the memory being contradicted. The tenant
+        # filter makes a cross-tenant ID indistinguishable from a
+        # nonexistent row.
+        target_memory = await _read_memory(parsed_id, session, tenant_id=tenant)
         if not authorize_read(claims, target_memory):
             raise ToolError(f"Not authorized to access memory {memory_id}.")
 

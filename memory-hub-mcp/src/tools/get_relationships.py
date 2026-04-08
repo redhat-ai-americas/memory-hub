@@ -8,7 +8,12 @@ from fastmcp import Context
 from pydantic import Field
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_read,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.models.schemas import RelationshipType
@@ -81,6 +86,7 @@ async def get_relationships(
         claims = get_claims_from_context()
     except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
+    tenant = get_tenant_filter(claims)
 
     try:
         parsed_node_id = uuid.UUID(node_id)
@@ -115,6 +121,7 @@ async def get_relationships(
         rels = await get_relationships_service(
             parsed_node_id,
             session,
+            tenant_id=tenant,
             relationship_type=relationship_type,
             direction=direction,
         )
@@ -134,6 +141,7 @@ async def get_relationships(
                     proxy = SimpleNamespace(
                         scope=node_data.get("scope", "user"),
                         owner_id=node_data.get("owner_id", ""),
+                        tenant_id=node_data.get("tenant_id", "default"),
                     )
                     if not authorize_read(claims, proxy):
                         break
@@ -153,6 +161,7 @@ async def get_relationships(
                 proxy = SimpleNamespace(
                     scope=node_dump.get("scope", "user"),
                     owner_id=node_dump.get("owner_id", ""),
+                    tenant_id=node_dump.get("tenant_id", "default"),
                 )
                 if authorize_read(claims, proxy):
                     accessible_steps.append({

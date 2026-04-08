@@ -52,7 +52,12 @@ def test_read_memory_default_values():
     assert params["include_versions"].default is False
 
 
-def _fake_node(scope: str = "user", owner_id: str = "wjackson", branch_count: int = 0):
+def _fake_node(
+    scope: str = "user",
+    owner_id: str = "wjackson",
+    branch_count: int = 0,
+    tenant_id: str = "default",
+):
     """Build a stand-in for the read_memory service return value."""
     import datetime as _dt
 
@@ -69,6 +74,7 @@ def _fake_node(scope: str = "user", owner_id: str = "wjackson", branch_count: in
         scope=MemoryScope(scope),
         branch_type=None,
         owner_id=owner_id,
+        tenant_id=tenant_id,
         is_current=True,
         version=1,
         previous_version_id=None,
@@ -197,3 +203,97 @@ async def test_read_memory_unauthorized_for_other_owner():
 
     assert result["error"] is True
     assert "Not authorized" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_read_memory_forwards_tenant_id_to_service():
+    """Phase 4 (#46): the tool must forward the caller's tenant_id from
+    claims into the read_memory service call so the SQL-level filter
+    matches the caller's tenant."""
+    from unittest.mock import MagicMock
+
+    fake_node = _fake_node(tenant_id="tenant_a")
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:read:user", "memory:write:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.read_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch("src.tools.read_memory.get_db_session", return_value=(mock_session, mock_gen)),
+        patch("src.tools.read_memory.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.read_memory._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ) as mock_read,
+    ):
+        result = await read_memory(memory_id=str(fake_node.id))
+
+    assert result.get("error") is not True
+    _, kwargs = mock_read.call_args
+    assert kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' forwarded from claims into the read_memory "
+        f"service call, got kwargs={kwargs}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_read_memory_include_versions_forwards_tenant_id():
+    """include_versions=True also routes through get_memory_history; the
+    tenant_id kwarg must be forwarded there too."""
+    from unittest.mock import MagicMock
+
+    fake_node = _fake_node(tenant_id="tenant_a")
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:read:user", "memory:write:user"],
+    }
+
+    class _DumpableHistory:
+        def model_dump(self, mode="json"):
+            return {"id": "v1", "version": 1}
+
+    with (
+        patch(
+            "src.tools.read_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch("src.tools.read_memory.get_db_session", return_value=(mock_session, mock_gen)),
+        patch("src.tools.read_memory.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.read_memory._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
+        patch(
+            "src.tools.read_memory.get_memory_history",
+            new_callable=AsyncMock,
+            return_value={
+                "versions": [_DumpableHistory()],
+                "total_versions": 1,
+                "has_more": False,
+                "offset": 0,
+            },
+        ) as mock_history,
+    ):
+        await read_memory(
+            memory_id=str(fake_node.id), include_versions=True
+        )
+
+    _, kwargs = mock_history.call_args
+    assert kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected include_versions=True to forward tenant_id to get_memory_history, "
+        f"got kwargs={kwargs}"
+    )

@@ -16,10 +16,15 @@ from memoryhub_core.services.curation.similarity import check_similarity
 # Actions that immediately halt the pipeline and block the write.
 _TERMINAL_ACTIONS = {"block", "quarantine", "reject_with_pointer"}
 
-# Set to True after the first successful seed so subsequent calls skip the DB check.
-# Concurrent first-writes may both call seed_default_rules — that's fine because
-# the function is idempotent (checks for existing system rules before inserting).
-_rules_seeded = False
+# Set of tenant_ids that have had their default rules seeded in this
+# process. Phase 4 made rules tenant-scoped, so each tenant gets its own
+# lazy-seed on first write. Pre-Phase-4 this was a single boolean flag;
+# the set form preserves the idempotency guarantee (each tenant seeds at
+# most once in-process) while supporting an arbitrary number of tenants.
+# Concurrent first-writes in the same tenant may both call
+# seed_default_rules -- that's fine because the function is idempotent
+# (it checks for existing system rules in the tenant before inserting).
+_seeded_tenants: set[str] = set()
 
 
 async def run_curation_pipeline(
@@ -28,6 +33,8 @@ async def run_curation_pipeline(
     owner_id: str,
     scope: str,
     session: AsyncSession,
+    *,
+    tenant_id: str,
     reject_threshold: float = 0.95,
     flag_threshold: float = 0.80,
 ) -> dict:
@@ -45,11 +52,16 @@ async def run_curation_pipeline(
     }
 
     When blocked=True, the caller must not persist the memory.
+
+    Tenant isolation: ``tenant_id`` is a required keyword argument.
+    Curation rules, the seed step, and the similarity scan are all
+    scoped to the caller's tenant -- a tenant-A write can never be
+    blocked by a tenant-B rule, nor can it see a tenant-B near-duplicate
+    in ``similar_count``/``nearest_id``. Phase 4 (#46).
     """
-    global _rules_seeded
-    if not _rules_seeded:
-        await seed_default_rules(session)
-        _rules_seeded = True
+    if tenant_id not in _seeded_tenants:
+        await seed_default_rules(session, tenant_id=tenant_id)
+        _seeded_tenants.add(tenant_id)
 
     flags: list[str] = []
     rules = await load_rules(
@@ -57,6 +69,7 @@ async def run_curation_pipeline(
         owner_id=owner_id,
         scope=scope,
         session=session,
+        tenant_id=tenant_id,
     )
 
     # --- Tier 1: Regex scanning ---
@@ -88,6 +101,7 @@ async def run_curation_pipeline(
             owner_id=owner_id,
             scope=scope,
             session=session,
+            tenant_id=tenant_id,
             flag_threshold=flag_threshold,
         )
 

@@ -110,6 +110,7 @@ def _fake_full_result(
             scope=MemoryScope.USER,
             branch_type=branch_type,
             owner_id="wjackson",
+            tenant_id="default",
             is_current=True,
             version=1,
             previous_version_id=None,
@@ -824,3 +825,129 @@ async def test_search_memory_whitespace_only_focus_routes_to_plain_path():
     ).run()
 
     assert "pivot_suggested" not in result
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 (#46) — tenant_id is forwarded from claims into service calls
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_memory_forwards_tenant_id_to_service():
+    """The tool must forward the caller's tenant_id (from JWT claims)
+    into search_memories AND count_search_matches so the SQL-level
+    filter runs in the correct tenant."""
+    from unittest.mock import MagicMock
+
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:read:user", "memory:write:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.search_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.search_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.search_memory.release_db_session",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.tools.search_memory.get_embedding_service",
+            return_value=fake_embedding_service,
+        ),
+        patch(
+            "src.tools.search_memory.search_memories",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as mock_search,
+        patch(
+            "src.tools.search_memory.count_search_matches",
+            new_callable=AsyncMock,
+            return_value=0,
+        ) as mock_count,
+    ):
+        await search_memory(query="anything")
+
+    _, search_kwargs = mock_search.call_args
+    assert search_kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' in search_memories kwargs, got {search_kwargs}"
+    )
+    _, count_kwargs = mock_count.call_args
+    assert count_kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' in count_search_matches kwargs, got {count_kwargs}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_memory_focused_path_forwards_tenant_id():
+    """When focus is set, the tool routes to search_memories_with_focus;
+    tenant_id must be forwarded there too."""
+    from unittest.mock import MagicMock
+
+    from memoryhub_core.services.memory import FocusedSearchResult
+
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    fake_reranker = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:read:user", "memory:write:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.search_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.search_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.search_memory.release_db_session",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.tools.search_memory.get_embedding_service",
+            return_value=fake_embedding_service,
+        ),
+        patch(
+            "src.tools.search_memory.get_reranker_service",
+            return_value=fake_reranker,
+        ),
+        patch(
+            "src.tools.search_memory.search_memories_with_focus",
+            new_callable=AsyncMock,
+            return_value=FocusedSearchResult(results=[]),
+        ) as mock_focused,
+        patch(
+            "src.tools.search_memory.count_search_matches",
+            new_callable=AsyncMock,
+            return_value=0,
+        ) as mock_count,
+    ):
+        await search_memory(query="anything", focus="some focus")
+
+    _, focused_kwargs = mock_focused.call_args
+    assert focused_kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' in search_memories_with_focus kwargs, "
+        f"got {focused_kwargs}"
+    )
+    _, count_kwargs = mock_count.call_args
+    assert count_kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' in count_search_matches kwargs, got {count_kwargs}"
+    )

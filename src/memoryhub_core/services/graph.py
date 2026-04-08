@@ -17,7 +17,11 @@ from memoryhub_core.models.schemas import (
     RelationshipCreate,
     RelationshipRead,
 )
-from memoryhub_core.services.exceptions import MemoryNotFoundError, RelationshipNotFoundError
+from memoryhub_core.services.exceptions import (
+    CrossTenantRelationshipError,
+    MemoryNotFoundError,
+    RelationshipNotFoundError,
+)
 from memoryhub_core.services.memory import node_to_read
 
 _MAX_DEPTH_CAP = 10
@@ -32,8 +36,24 @@ async def create_relationship(
 
     Raises MemoryNotFoundError if either node is missing or not current.
     Raises ValueError on duplicate edges (unique constraint violation).
+
+    Tenant isolation: source and target must share a tenant. The edge
+    inherits ``tenant_id`` from the source (which equals target tenant by
+    the precondition check). Under normal operation this check is
+    redundant with the tool-layer authorize_read calls, which already
+    reject cross-tenant memory loads; it exists as defense in depth and
+    will fire loudly if a caller bypasses authorize_read and hands the
+    service two memories from different tenants.
     """
     source, target = await _fetch_both_nodes(data.source_id, data.target_id, session)
+
+    if source.tenant_id != target.tenant_id:
+        raise CrossTenantRelationshipError(
+            source_id=source.id,
+            source_tenant=source.tenant_id,
+            target_id=target.id,
+            target_tenant=target.tenant_id,
+        )
 
     rel = MemoryRelationship(
         id=uuid.uuid4(),
@@ -41,6 +61,7 @@ async def create_relationship(
         target_id=data.target_id,
         relationship_type=data.relationship_type,
         created_by=data.created_by,
+        tenant_id=source.tenant_id,
         metadata_=data.metadata,
     )
     session.add(rel)
@@ -80,14 +101,27 @@ async def delete_relationship(
 async def get_relationships(
     node_id: uuid.UUID,
     session: AsyncSession,
+    *,
+    tenant_id: str,
     relationship_type: str | None = None,
     direction: str = "both",
 ) -> list[RelationshipRead]:
     """Return all relationships for a node, with optional type and direction filters.
 
     direction: "outgoing" (source=node), "incoming" (target=node), or "both".
+
+    Tenant isolation: ``tenant_id`` is a required keyword argument. The
+    starting node lookup, the edge query, and the neighbor hydrations
+    are all filtered by tenant at the SQL level. Cross-tenant callers
+    see ``MemoryNotFoundError`` for the starting node (indistinguishable
+    from nonexistent). Edge-level filtering is belt-and-suspenders:
+    because both endpoints of a relationship live in the same tenant
+    (enforced by ``create_relationship``), filtering on either the edge
+    or the node is equivalent, but applying both keeps the guarantee
+    robust against any future write path that might bypass the create
+    check.
     """
-    await _fetch_current_node(node_id, session)
+    await _fetch_current_node(node_id, session, tenant_id=tenant_id)
 
     if direction == "outgoing":
         direction_filter = MemoryRelationship.source_id == node_id
@@ -99,7 +133,10 @@ async def get_relationships(
             MemoryRelationship.target_id == node_id,
         )
 
-    filters = [direction_filter]
+    filters = [
+        direction_filter,
+        MemoryRelationship.tenant_id == tenant_id,
+    ]
     if relationship_type is not None:
         filters.append(MemoryRelationship.relationship_type == relationship_type)
 
@@ -112,15 +149,17 @@ async def get_relationships(
 
     # Drop edges where either endpoint references a deleted memory.
     # The starting node was already verified live by _fetch_current_node above,
-    # so this filter only excludes edges to dangling deleted neighbors.
+    # so this filter only excludes edges to dangling deleted neighbors. Both
+    # the alive-check and the stub hydration are tenant-scoped so cross-tenant
+    # nodes are invisible as neighbors even in the belt-and-suspenders case.
     referenced_ids = {r.source_id for r in rels} | {r.target_id for r in rels}
-    alive_ids = await _alive_node_ids(referenced_ids, session)
+    alive_ids = await _alive_node_ids(referenced_ids, session, tenant_id=tenant_id)
     rels = [r for r in rels if r.source_id in alive_ids and r.target_id in alive_ids]
 
     if not rels:
         return []
 
-    stubs = await _load_stubs(referenced_ids, session)
+    stubs = await _load_stubs(referenced_ids, session, tenant_id=tenant_id)
 
     return [
         _relationship_to_read(r, source_stub=stubs.get(r.source_id), target_stub=stubs.get(r.target_id))
@@ -338,23 +377,34 @@ def _relationship_to_read(
         metadata_=rel.metadata_,
         created_at=rel.created_at,
         created_by=rel.created_by,
+        tenant_id=rel.tenant_id,
         source_stub=source_stub,
         target_stub=target_stub,
     )
 
 
-async def _fetch_current_node(node_id: uuid.UUID, session: AsyncSession) -> MemoryNode:
+async def _fetch_current_node(
+    node_id: uuid.UUID,
+    session: AsyncSession,
+    *,
+    tenant_id: str | None = None,
+) -> MemoryNode:
     """Load a memory node by ID, requiring it to be current and not deleted.
 
     Raises MemoryNotFoundError if missing, superseded, or soft-deleted.
+    When ``tenant_id`` is provided, the lookup is also scoped to that
+    tenant -- a cross-tenant match is indistinguishable from a missing
+    row. Pass ``None`` (the default) to skip the tenant check in
+    callers that have not yet been wired for tenant isolation.
     """
-    stmt = select(MemoryNode).where(
-        and_(
-            MemoryNode.id == node_id,
-            MemoryNode.is_current.is_(True),
-            MemoryNode.deleted_at.is_(None),
-        )
-    )
+    conditions = [
+        MemoryNode.id == node_id,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
+    ]
+    if tenant_id is not None:
+        conditions.append(MemoryNode.tenant_id == tenant_id)
+    stmt = select(MemoryNode).where(and_(*conditions))
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
     if node is None:
@@ -404,14 +454,24 @@ async def _fetch_both_nodes(
 async def _load_stubs(
     node_ids: set[uuid.UUID],
     session: AsyncSession,
+    *,
+    tenant_id: str | None = None,
 ) -> dict[uuid.UUID, str]:
-    """Return a mapping of node_id -> stub for the given IDs (excluding deleted)."""
+    """Return a mapping of node_id -> stub for the given IDs (excluding deleted).
+
+    When ``tenant_id`` is provided, rows outside that tenant are filtered
+    out -- a cross-tenant neighbor is invisible. Pass ``None`` (default)
+    in callers that have not yet been tenant-wired.
+    """
     if not node_ids:
         return {}
-    stmt = select(MemoryNode.id, MemoryNode.stub).where(
+    conditions = [
         MemoryNode.id.in_(node_ids),
         MemoryNode.deleted_at.is_(None),
-    )
+    ]
+    if tenant_id is not None:
+        conditions.append(MemoryNode.tenant_id == tenant_id)
+    stmt = select(MemoryNode.id, MemoryNode.stub).where(*conditions)
     result = await session.execute(stmt)
     return {row.id: row.stub for row in result.all()}
 
@@ -419,18 +479,25 @@ async def _load_stubs(
 async def _alive_node_ids(
     node_ids: set[uuid.UUID],
     session: AsyncSession,
+    *,
+    tenant_id: str | None = None,
 ) -> set[uuid.UUID]:
     """Return the subset of node_ids that exist and are not deleted.
 
     Used by graph queries to drop edges that reference deleted memories.
     Edges to deleted memories are filtered out of relationship results so
-    callers don't see broken pointers.
+    callers don't see broken pointers. When ``tenant_id`` is provided,
+    nodes outside that tenant are also excluded so cross-tenant neighbors
+    don't slip through the alive-check.
     """
     if not node_ids:
         return set()
-    stmt = select(MemoryNode.id).where(
+    conditions = [
         MemoryNode.id.in_(node_ids),
         MemoryNode.deleted_at.is_(None),
-    )
+    ]
+    if tenant_id is not None:
+        conditions.append(MemoryNode.tenant_id == tenant_id)
+    stmt = select(MemoryNode.id).where(*conditions)
     result = await session.execute(stmt)
     return {row[0] for row in result.all()}

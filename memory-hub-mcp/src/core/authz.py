@@ -119,6 +119,14 @@ def get_claims_from_context() -> dict:
 
 def authorize_read(claims: dict, memory) -> bool:
     """Can this identity read this memory?"""
+    # Tenant isolation: reject cross-tenant reads before any other check.
+    # This is the most fundamental boundary -- a cross-tenant caller should
+    # not even learn that the memory exists. Run BEFORE scope/owner checks
+    # so a tenant mismatch short-circuits everything else, including blanket
+    # "memory:read" scopes.
+    if memory.tenant_id != claims.get("tenant_id", "default"):
+        return False
+
     scopes = claims.get("scopes", [])
     tier = memory.scope
     if hasattr(tier, "value"):
@@ -138,8 +146,15 @@ def authorize_read(claims: dict, memory) -> bool:
     return False
 
 
-def authorize_write(claims: dict, scope: str, owner_id: str) -> bool:
-    """Can this identity write a memory at this scope for this owner?"""
+def authorize_write(claims: dict, scope: str, owner_id: str, tenant_id: str) -> bool:
+    """Can this identity write a memory at this scope for this owner in this tenant?"""
+    # Tenant isolation: reject cross-tenant writes before any other check.
+    # The tenant_id passed in is the tenant of the memory being written; the
+    # caller's tenant comes from claims. Mismatch is a hard reject regardless
+    # of scope/identity_type.
+    if tenant_id != claims.get("tenant_id", "default"):
+        return False
+
     scopes = claims.get("scopes", [])
     if hasattr(scope, "value"):
         scope = scope.value
@@ -162,6 +177,10 @@ def build_authorized_scopes(claims: dict) -> dict[str, str | None]:
 
     Returns a dict mapping scope names to required owner_id values.
     None means no owner filter (open read for that tier).
+
+    NOTE: This function does NOT include the tenant_id filter. Service-layer
+    callers must combine the result of this function with `get_tenant_filter`
+    to apply tenant isolation as a separate SQL predicate.
     """
     scopes = claims.get("scopes", [])
     caller_id = claims["sub"]
@@ -177,3 +196,21 @@ def build_authorized_scopes(claims: dict) -> dict[str, str | None]:
                 result[tier] = None
 
     return result
+
+
+def get_tenant_filter(claims: dict) -> str:
+    """Return the tenant_id that search/read queries must filter on.
+
+    Returns the caller's tenant from claims, falling back to "default" for
+    legacy session-based callers and tokens that predate the tenant_id claim.
+    Service-layer callers should apply this as a SQL predicate alongside the
+    scope filters from `build_authorized_scopes`:
+
+        scope_filters = build_authorized_scopes(claims)
+        tenant = get_tenant_filter(claims)
+        # WHERE tenant_id = :tenant AND (<scope predicates>)
+
+    Phase 2 introduces this helper; Phase 4 wires it into the read/search
+    service paths.
+    """
+    return claims.get("tenant_id", "default")

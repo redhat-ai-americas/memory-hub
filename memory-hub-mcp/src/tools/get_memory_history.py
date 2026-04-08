@@ -8,7 +8,12 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_read,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.services.exceptions import MemoryNotFoundError
@@ -71,20 +76,28 @@ async def get_memory_history(
             "Provide a valid UUID (e.g., '550e8400-e29b-41d4-a716-446655440000')."
         )
 
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc))
+    tenant = get_tenant_filter(claims)
+
     session, gen = await get_db_session()
     try:
-        try:
-            claims = get_claims_from_context()
-        except AuthenticationError as exc:
-            raise ToolError(str(exc))
-
-        # Authorize against the memory itself before revealing history
-        memory_node = await _read_memory(parsed_id, session)
+        # Authorize against the memory itself before revealing history.
+        # Both the node load and the history walk are scoped to the
+        # caller's tenant so a cross-tenant ID is indistinguishable from
+        # a nonexistent row.
+        memory_node = await _read_memory(parsed_id, session, tenant_id=tenant)
         if not authorize_read(claims, memory_node):
             raise ToolError(f"Not authorized to view history for memory {memory_id}.")
 
         history_result = await _get_memory_history(
-            parsed_id, session, max_versions=max_versions, offset=offset
+            parsed_id,
+            session,
+            tenant_id=tenant,
+            max_versions=max_versions,
+            offset=offset,
         )
 
         page = history_result["versions"]

@@ -7,7 +7,12 @@ from fastmcp import Context
 from pydantic import Field
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_read,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.models.schemas import RelationshipCreate
@@ -54,6 +59,7 @@ async def suggest_merge(
         claims = get_claims_from_context()
     except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
+    tenant = get_tenant_filter(claims)
 
     try:
         parsed_a = uuid.UUID(memory_a_id)
@@ -87,10 +93,12 @@ async def suggest_merge(
     try:
         session, gen = await get_db_session()
 
-        # Verify read access to both memories
+        # Verify read access to both memories. The tenant filter on
+        # read_memory makes a cross-tenant ID indistinguishable from a
+        # nonexistent row.
         for mid, label in [(parsed_a, "memory_a_id"), (parsed_b, "memory_b_id")]:
             try:
-                mem = await _read_memory(mid, session)
+                mem = await _read_memory(mid, session, tenant_id=tenant)
             except MemoryNotFoundError:
                 return {"error": True, "message": f"Memory {mid} not found."}
             if not authorize_read(claims, mem):

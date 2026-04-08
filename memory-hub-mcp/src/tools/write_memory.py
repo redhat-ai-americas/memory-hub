@@ -7,7 +7,12 @@ from fastmcp import Context
 from pydantic import Field, ValidationError
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_write, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_write,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
@@ -114,7 +119,13 @@ async def write_memory(
     if owner_id is None:
         owner_id = claims["sub"]
 
-    if not authorize_write(claims, scope, owner_id):
+    # Tool-layer writes always create new memories in the caller's own
+    # tenant. Phase 2 wired this into authorize_write; Phase 3 plumbs the
+    # same tenant_id through the service-layer insert so every row is
+    # stamped explicitly (rather than relying on the column's
+    # server_default of "default").
+    write_tenant_id = get_tenant_filter(claims)
+    if not authorize_write(claims, scope, owner_id, write_tenant_id):
         return {
             "error": True,
             "message": (
@@ -179,7 +190,12 @@ async def write_memory(
         session, gen = await get_db_session()
         embedding_service = get_embedding_service()
 
-        memory, curation_result = await create_memory(node_create, session, embedding_service)
+        memory, curation_result = await create_memory(
+            node_create,
+            session,
+            embedding_service,
+            tenant_id=write_tenant_id,
+        )
 
         if curation_result["blocked"]:
             # No broadcast on a blocked write — the memory wasn't persisted,

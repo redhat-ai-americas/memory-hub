@@ -7,7 +7,11 @@ from pydantic import Field
 from sqlalchemy import and_, select
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.models.curation import CuratorRule
@@ -114,18 +118,22 @@ async def set_curation_rule(
         return {"error": True, "message": "name cannot be empty."}
 
     owner_id = claims["sub"]
+    tenant_id = get_tenant_filter(claims)
     resolved_config = config or {}
 
     gen = None
     try:
         session, gen = await get_db_session()
 
-        # Check for protected system/org rule with this name
+        # Check for protected system/org rule with this name in the caller's
+        # tenant. System/org rules are still per-tenant -- a protected rule in
+        # tenant A does not block user rules in tenant B.
         protected_stmt = select(CuratorRule).where(
             and_(
                 CuratorRule.name == name,
                 CuratorRule.layer.in_(["system", "organizational"]),
                 CuratorRule.override.is_(True),
+                CuratorRule.tenant_id == tenant_id,
             )
         )
         protected_result = await session.execute(protected_stmt)
@@ -139,12 +147,15 @@ async def set_curation_rule(
                 ),
             }
 
-        # Check for existing user rule with this name (upsert)
+        # Check for existing user rule with this name (upsert). Scope by
+        # tenant so tenant A's rule doesn't collide with tenant B's rule of
+        # the same name.
         existing_stmt = select(CuratorRule).where(
             and_(
                 CuratorRule.name == name,
                 CuratorRule.layer == "user",
                 CuratorRule.owner_id == owner_id,
+                CuratorRule.tenant_id == tenant_id,
             )
         )
         existing_result = await session.execute(existing_stmt)
@@ -181,7 +192,7 @@ async def set_curation_rule(
             priority=priority,
         )
 
-        new_rule = await create_rule(rule_data, session)
+        new_rule = await create_rule(rule_data, session, tenant_id=tenant_id)
         rule_read = CuratorRuleRead.model_validate(new_rule)
         return {
             "created": True,

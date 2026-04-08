@@ -96,3 +96,97 @@ async def test_write_memory_still_rejects_parent_without_branch_type():
 
     assert result["error"] is True
     assert "branch_type is required" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_write_memory_forwards_tenant_id_to_service():
+    """Phase 3 (#46): the tool must forward the caller's tenant_id from
+    claims into create_memory so the persisted row carries the correct
+    tenant rather than falling through to the column server_default."""
+    import datetime as _dt
+    import uuid as _uuid
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, StorageType
+
+    fake_node = MemoryNodeRead(
+        id=_uuid.uuid4(),
+        parent_id=None,
+        content="hello",
+        stub="hello",
+        storage_type=StorageType.INLINE,
+        content_ref=None,
+        weight=0.7,
+        scope=MemoryScope.USER,
+        branch_type=None,
+        owner_id="wjackson",
+        tenant_id="tenant_a",
+        is_current=True,
+        version=1,
+        previous_version_id=None,
+        metadata=None,
+        created_at=_dt.datetime.now(_dt.UTC),
+        updated_at=_dt.datetime.now(_dt.UTC),
+        expires_at=None,
+        has_children=False,
+        has_rationale=False,
+        branch_count=0,
+    )
+    fake_curation = {
+        "blocked": False,
+        "reason": None,
+        "detail": None,
+        "similar_count": 0,
+        "nearest_id": None,
+        "nearest_score": None,
+        "flags": [],
+    }
+
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:write:user", "memory:read:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.write_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.write_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.write_memory.release_db_session",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.tools.write_memory.get_embedding_service",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "src.tools.write_memory.create_memory",
+            new_callable=AsyncMock,
+            return_value=(fake_node, fake_curation),
+        ) as mock_create_memory,
+        patch(
+            "src.tools.write_memory.broadcast_after_write",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await write_memory(
+            content="hello",
+            scope="user",
+            owner_id="wjackson",
+        )
+
+    assert "error" not in result or result.get("error") is not True
+    _, kwargs = mock_create_memory.call_args
+    assert kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' forwarded from claims into create_memory, "
+        f"got kwargs={kwargs}"
+    )

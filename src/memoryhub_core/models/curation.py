@@ -57,6 +57,13 @@ class CuratorRule(TimestampMixin, Base):
     # null for system and organizational rules; set to owner identifier for user rules
     owner_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # Multi-tenant isolation — populated from JWT claims on the server side
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        server_default=text("'default'"),
+    )
+
     # When true, this rule can override rules from a higher layer
     override: Mapped[bool] = mapped_column(
         Boolean,
@@ -82,6 +89,7 @@ class CuratorRule(TimestampMixin, Base):
             "enabled",
             postgresql_where=text("enabled = true"),
         ),
+        Index("ix_curator_rules_tenant", "tenant_id"),
     )
 
     def __repr__(self) -> str:

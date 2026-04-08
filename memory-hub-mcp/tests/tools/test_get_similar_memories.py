@@ -69,7 +69,7 @@ async def test_get_similar_memories_success():
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
-    fake_source = SimpleNamespace(scope="user", owner_id="wjackson")
+    fake_source = SimpleNamespace(scope="user", owner_id="wjackson", tenant_id="default")
 
     with (
         patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
@@ -113,7 +113,7 @@ async def test_get_similar_memories_returns_results_for_owner():
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
-    fake_source = SimpleNamespace(scope="user", owner_id="wjackson")
+    fake_source = SimpleNamespace(scope="user", owner_id="wjackson", tenant_id="default")
     sim_id = uuid.uuid4()
     service_results = {
         "results": [
@@ -167,7 +167,7 @@ async def test_get_similar_memories_unauthorized_for_other_owner():
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
-    other_owner_source = SimpleNamespace(scope="user", owner_id="someone-else")
+    other_owner_source = SimpleNamespace(scope="user", owner_id="someone-else", tenant_id="default")
 
     with (
         patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
@@ -190,3 +190,60 @@ async def test_get_similar_memories_unauthorized_for_other_owner():
 
     assert result["error"] is True
     assert "Not authorized" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_get_similar_memories_forwards_tenant_id_to_service():
+    """Phase 4 (#46): the tool must forward claims.tenant_id into both
+    the read_memory_service (auth check) and the get_similar_memories
+    service calls so the SQL-level tenant filter runs in the correct
+    tenant."""
+    from types import SimpleNamespace
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_source = SimpleNamespace(
+        scope="user", owner_id="wjackson", tenant_id="tenant_a"
+    )
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:read:user", "memory:write:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.get_similar_memories.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.get_similar_memories.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.get_similar_memories.release_db_session",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.tools.get_similar_memories.read_memory_service",
+            new_callable=AsyncMock,
+            return_value=fake_source,
+        ) as mock_read,
+        patch(
+            "src.tools.get_similar_memories.get_similar_memories_service",
+            new_callable=AsyncMock,
+            return_value={"results": [], "total": 0, "has_more": False},
+        ) as mock_similar,
+    ):
+        await get_similar_memories(memory_id=str(uuid.uuid4()))
+
+    _, read_kwargs = mock_read.call_args
+    assert read_kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' in read_memory_service kwargs, got {read_kwargs}"
+    )
+    _, similar_kwargs = mock_similar.call_args
+    assert similar_kwargs.get("tenant_id") == "tenant_a", (
+        f"Expected tenant_id='tenant_a' in get_similar_memories_service kwargs, "
+        f"got {similar_kwargs}"
+    )

@@ -7,7 +7,12 @@ from fastmcp import Context
 from pydantic import Field, ValidationError
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_read,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.models.schemas import RelationshipCreate, RelationshipType
@@ -67,6 +72,7 @@ async def create_relationship(
         claims = get_claims_from_context()
     except AuthenticationError as exc:
         return {"error": True, "message": str(exc)}
+    tenant = get_tenant_filter(claims)
 
     if relationship_type not in _VALID_TYPES:
         return {
@@ -103,10 +109,14 @@ async def create_relationship(
     try:
         session, gen = await get_db_session()
 
-        # Verify read access to both nodes
+        # Verify read access to both nodes. The tenant filter on
+        # read_memory makes a cross-tenant ID indistinguishable from a
+        # nonexistent row, so a cross-tenant relationship attempt is
+        # rejected here as "not found" rather than surfacing tenant
+        # details in the error message.
         for node_id, label in [(parsed_source_id, "source_id"), (parsed_target_id, "target_id")]:
             try:
-                node = await _read_memory(node_id, session)
+                node = await _read_memory(node_id, session, tenant_id=tenant)
             except MemoryNotFoundError:
                 return {"error": True, "message": f"Memory node {node_id} not found."}
             if not authorize_read(claims, node):

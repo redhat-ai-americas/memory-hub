@@ -7,7 +7,12 @@ from fastmcp import Context
 from pydantic import Field
 
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context, authorize_read, AuthenticationError
+from src.core.authz import (
+    AuthenticationError,
+    authorize_read,
+    get_claims_from_context,
+    get_tenant_filter,
+)
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.services.exceptions import MemoryNotFoundError
@@ -59,14 +64,17 @@ async def read_memory(
     session = None
     gen = None
     try:
-        session, gen = await get_db_session()
-
-        node = await _read_memory(parsed_id, session)
-
+        # Resolve caller identity BEFORE touching the DB so a cross-tenant
+        # call filters at the SQL level rather than raising after a load.
         try:
             claims = get_claims_from_context()
         except AuthenticationError as exc:
             return {"error": True, "message": str(exc)}
+        tenant = get_tenant_filter(claims)
+
+        session, gen = await get_db_session()
+
+        node = await _read_memory(parsed_id, session, tenant_id=tenant)
 
         if not authorize_read(claims, node):
             return {
@@ -80,7 +88,7 @@ async def read_memory(
             # get_memory_history returns a dict with a "versions" list plus
             # pagination metadata; embed both so callers see total_versions
             # and has_more without a follow-up call.
-            history = await get_memory_history(parsed_id, session)
+            history = await get_memory_history(parsed_id, session, tenant_id=tenant)
             result["version_history"] = {
                 "versions": [v.model_dump(mode="json") for v in history["versions"]],
                 "total_versions": history["total_versions"],

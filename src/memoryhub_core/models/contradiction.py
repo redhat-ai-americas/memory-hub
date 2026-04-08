@@ -51,6 +51,11 @@ class ContradictionReport(Base):
         nullable=True,
         default=None,
     )
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        server_default=text("'default'"),
+    )
 
     # Relationship to the contradicted memory
     memory: Mapped["MemoryNode"] = relationship(
@@ -61,6 +66,7 @@ class ContradictionReport(Base):
     __table_args__ = (
         Index("ix_contradiction_reports_memory_resolved", "memory_id", "resolved"),
         Index("ix_contradiction_reports_resolved_created", "resolved", "created_at"),
+        Index("ix_contradiction_reports_tenant", "tenant_id"),
     )
 
     def __repr__(self) -> str:

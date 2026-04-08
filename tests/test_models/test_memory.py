@@ -146,6 +146,7 @@ def _make_read_data(**overrides) -> dict:
         "scope": "user",
         "branch_type": None,
         "owner_id": "user-1",
+        "tenant_id": "default",
         "is_current": True,
         "version": 1,
         "previous_version_id": None,

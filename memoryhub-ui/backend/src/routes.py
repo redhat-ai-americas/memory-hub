@@ -134,11 +134,24 @@ async def healthz():
 @router.get("/api/graph", response_model=GraphResponse)
 async def get_graph(
     db: DbDep,
+    settings: SettingsDep,
     scope: str | None = Query(default=None),
     owner_id: str | None = Query(default=None),
 ):
-    """Return all current memory nodes and their edges for graph visualization."""
-    stmt = select(MemoryNode).where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None))
+    """Return all current memory nodes and their edges for graph visualization.
+
+    Filters strictly by ``settings.ui_tenant_id`` (Phase 6 / issue #46).
+    Cross-tenant rows are invisible at the SQL level, not merely hidden in
+    the response, so the join below naturally excludes edges that would
+    straddle tenants even though we defensively filter the relationship
+    table too.
+    """
+    tenant_id = settings.ui_tenant_id
+    stmt = select(MemoryNode).where(
+        MemoryNode.tenant_id == tenant_id,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
+    )
     if scope:
         stmt = stmt.where(MemoryNode.scope == scope)
     if owner_id:
@@ -164,10 +177,15 @@ async def get_graph(
                 )
             )
 
-    # Explicit relationships where both endpoints are in our current node set
+    # Explicit relationships where both endpoints are in our current node set.
+    # We already scoped node_ids to this tenant above, so the IN() clause
+    # alone would suffice; the explicit tenant_id predicate is belt-and-
+    # suspenders for defence-in-depth and to keep this query readable
+    # without cross-referencing upstream filters.
     if node_ids:
         node_id_list = list(node_ids)
         rel_stmt = select(MemoryRelationship).where(
+            MemoryRelationship.tenant_id == tenant_id,
             MemoryRelationship.source_id.in_(node_id_list),
             MemoryRelationship.target_id.in_(node_id_list),
         )
@@ -189,7 +207,11 @@ async def search_graph(
     settings: SettingsDep,
     q: str = Query(min_length=1),
 ):
-    """Search current memories by semantic similarity or text fallback."""
+    """Search current memories by semantic similarity or text fallback.
+
+    Filters strictly by ``settings.ui_tenant_id`` (Phase 6 / issue #46).
+    """
+    tenant_id = settings.ui_tenant_id
     embedding = await _get_embedding(q, settings.embedding_url)
 
     if embedding is not None:
@@ -197,12 +219,16 @@ async def search_graph(
             """
             SELECT id::text, 1 - (embedding <=> CAST(:query_vec AS vector)) AS score
             FROM memory_nodes
-            WHERE is_current = true AND deleted_at IS NULL
+            WHERE tenant_id = :tenant_id
+              AND is_current = true
+              AND deleted_at IS NULL
             ORDER BY embedding <=> CAST(:query_vec AS vector)
             LIMIT 20
             """
         )
-        result = await db.execute(sql, {"query_vec": str(embedding)})
+        result = await db.execute(
+            sql, {"query_vec": str(embedding), "tenant_id": tenant_id}
+        )
         rows = result.fetchall()
         return [SearchMatch(id=row[0], score=float(row[1])) for row in rows]
 
@@ -211,6 +237,7 @@ async def search_graph(
     stmt = (
         select(MemoryNode)
         .where(
+            MemoryNode.tenant_id == tenant_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
             (MemoryNode.content.ilike(pattern) | MemoryNode.stub.ilike(pattern)),
@@ -229,22 +256,48 @@ async def search_graph(
 
 @router.get("/api/stats", response_model=StatsResponse)
 async def get_stats(db: DbDep, settings: SettingsDep):
-    """Return dashboard statistics."""
+    """Return dashboard statistics.
+
+    All memory counts are scoped to ``settings.ui_tenant_id`` (Phase 6 /
+    issue #46) -- the dashboard never surfaces totals or recent activity
+    from other tenants.
+    """
+    tenant_id = settings.ui_tenant_id
+
     # Total current memories
-    total_result = await db.execute(select(func.count()).select_from(MemoryNode).where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None)))
+    total_result = await db.execute(
+        select(func.count())
+        .select_from(MemoryNode)
+        .where(
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.is_current.is_(True),
+            MemoryNode.deleted_at.is_(None),
+        )
+    )
     total = total_result.scalar_one()
 
     # Count by scope
     scope_result = await db.execute(
         select(MemoryNode.scope, func.count().label("cnt"))
-        .where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None))
+        .where(
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.is_current.is_(True),
+            MemoryNode.deleted_at.is_(None),
+        )
         .group_by(MemoryNode.scope)
     )
     scope_counts = [ScopeCount(scope=row[0], count=row[1]) for row in scope_result.fetchall()]
 
     # 10 most recently touched nodes
     recent_result = await db.execute(
-        select(MemoryNode).where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None)).order_by(MemoryNode.updated_at.desc()).limit(10)
+        select(MemoryNode)
+        .where(
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.is_current.is_(True),
+            MemoryNode.deleted_at.is_(None),
+        )
+        .order_by(MemoryNode.updated_at.desc())
+        .limit(10)
     )
     recent_nodes = recent_result.scalars().all()
     recent_activity = [
@@ -282,15 +335,25 @@ async def get_stats(db: DbDep, settings: SettingsDep):
 
 
 @router.get("/api/memory/{memory_id}", response_model=MemoryDetail)
-async def get_memory(memory_id: str, db: DbDep):
-    """Return full detail for a single memory node."""
+async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
+    """Return full detail for a single memory node.
+
+    Filters by ``settings.ui_tenant_id`` (Phase 6 / issue #46). Cross-
+    tenant lookups return 404 to avoid leaking existence across tenant
+    boundaries -- same semantics as the service layer in Phase 4.
+    """
+    tenant_id = settings.ui_tenant_id
     try:
         parsed_id = uuid.UUID(memory_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}")
 
     result = await db.execute(
-        select(MemoryNode).where(MemoryNode.id == parsed_id, MemoryNode.deleted_at.is_(None))
+        select(MemoryNode).where(
+            MemoryNode.id == parsed_id,
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.deleted_at.is_(None),
+        )
     )
     node = result.scalar_one_or_none()
     if node is None:
@@ -298,8 +361,12 @@ async def get_memory(memory_id: str, db: DbDep):
 
     # Children count (exclude deleted)
     count_result = await db.execute(
-        select(func.count()).select_from(MemoryNode).where(
-            MemoryNode.parent_id == parsed_id, MemoryNode.deleted_at.is_(None)
+        select(func.count())
+        .select_from(MemoryNode)
+        .where(
+            MemoryNode.parent_id == parsed_id,
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.deleted_at.is_(None),
         )
     )
     children_count = count_result.scalar_one()
@@ -307,7 +374,11 @@ async def get_memory(memory_id: str, db: DbDep):
     # Relationships (both incoming and outgoing)
     rel_result = await db.execute(
         select(MemoryRelationship).where(
-            (MemoryRelationship.source_id == parsed_id) | (MemoryRelationship.target_id == parsed_id)
+            MemoryRelationship.tenant_id == tenant_id,
+            (
+                (MemoryRelationship.source_id == parsed_id)
+                | (MemoryRelationship.target_id == parsed_id)
+            ),
         )
     )
     relationships = rel_result.scalars().all()
@@ -339,7 +410,7 @@ async def get_memory(memory_id: str, db: DbDep):
 
 
 @router.get("/api/memory/{memory_id}/history", response_model=list[VersionEntry])
-async def get_memory_history(memory_id: str, db: DbDep):
+async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep):
     """Return the full version chain for a memory, newest first.
 
     Delegates to ``memoryhub.services.memory.get_memory_history`` so the
@@ -347,6 +418,11 @@ async def get_memory_history(memory_id: str, db: DbDep):
     entire chain. Previously this endpoint hand-rolled a backward-only
     walker that was a parallel copy of the bug fixed in #49 at the
     service layer. See #63.
+
+    Phase 6 (#46): forwards ``settings.ui_tenant_id`` to the service so
+    cross-tenant history lookups raise ``MemoryNotFoundError`` (which the
+    BFF translates to a 404), matching the service-layer semantics and
+    avoiding existence leaks across tenants.
     """
     try:
         parsed_id = uuid.UUID(memory_id)
@@ -358,7 +434,10 @@ async def get_memory_history(memory_id: str, db: DbDep):
         # Version chains are realistically 10s of entries; pagination at
         # the BFF layer is future work and not part of the #63 walker fix.
         result = await get_memory_history_service(
-            memory_id=parsed_id, session=db, max_versions=10_000
+            memory_id=parsed_id,
+            session=db,
+            tenant_id=settings.ui_tenant_id,
+            max_versions=10_000,
         )
     except MemoryNotFoundError:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
@@ -382,16 +461,31 @@ async def get_memory_history(memory_id: str, db: DbDep):
 
 
 @router.delete("/api/memory/{memory_id}", status_code=204)
-async def delete_memory(memory_id: str, db: DbDep):
-    """Soft-delete a memory and its entire version chain."""
+async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
+    """Soft-delete a memory and its entire version chain.
+
+    Phase 6 (#46): every SELECT and the final bulk UPDATE filter by
+    ``settings.ui_tenant_id``. Because the version chain and child
+    branches inherit tenant from their parent row (Phase 3), adding a
+    tenant filter on the walker queries is defensive but also prevents a
+    pathological cross-tenant reparenting from escalating into a cross-
+    tenant delete. Cross-tenant delete attempts 404.
+    """
     from sqlalchemy import update as sa_update
+
+    tenant_id = settings.ui_tenant_id
 
     try:
         parsed_id = uuid.UUID(memory_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}")
 
-    result = await db.execute(select(MemoryNode).where(MemoryNode.id == parsed_id))
+    result = await db.execute(
+        select(MemoryNode).where(
+            MemoryNode.id == parsed_id,
+            MemoryNode.tenant_id == tenant_id,
+        )
+    )
     node = result.scalar_one_or_none()
     if node is None:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
@@ -405,7 +499,12 @@ async def delete_memory(memory_id: str, db: DbDep):
     current = node
     while current.previous_version_id and current.previous_version_id not in version_ids:
         version_ids.add(current.previous_version_id)
-        prev_result = await db.execute(select(MemoryNode).where(MemoryNode.id == current.previous_version_id))
+        prev_result = await db.execute(
+            select(MemoryNode).where(
+                MemoryNode.id == current.previous_version_id,
+                MemoryNode.tenant_id == tenant_id,
+            )
+        )
         current = prev_result.scalar_one_or_none()
         if current is None:
             break
@@ -416,6 +515,7 @@ async def delete_memory(memory_id: str, db: DbDep):
         changed = False
         fwd_result = await db.execute(
             select(MemoryNode).where(
+                MemoryNode.tenant_id == tenant_id,
                 MemoryNode.previous_version_id.in_(list(version_ids)),
                 ~MemoryNode.id.in_(list(version_ids)),
             )
@@ -425,14 +525,22 @@ async def delete_memory(memory_id: str, db: DbDep):
             changed = True
 
     # Child branches
-    child_result = await db.execute(select(MemoryNode).where(MemoryNode.parent_id.in_(list(version_ids))))
+    child_result = await db.execute(
+        select(MemoryNode).where(
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.parent_id.in_(list(version_ids)),
+        )
+    )
     child_ids = {child.id for child in child_result.scalars().all()}
     all_ids = version_ids | child_ids
 
     # Bulk soft-delete
     await db.execute(
         sa_update(MemoryNode)
-        .where(MemoryNode.id.in_(list(all_ids)))
+        .where(
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.id.in_(list(all_ids)),
+        )
         .values(deleted_at=now, is_current=False)
     )
     await db.commit()
@@ -440,6 +548,15 @@ async def delete_memory(memory_id: str, db: DbDep):
 
 # ---------------------------------------------------------------------------
 # Client management (proxy to auth service admin API)
+#
+# Phase 6 (#46) note: the /api/clients/* routes deliberately remain
+# unscoped by tenant because they proxy verbatim to the auth service's
+# /admin/clients API, which is itself not yet tenant-scoped. The auth
+# admin API is a separate design concern (tracked as Phase 6 follow-up)
+# and tenant scoping it there is out of scope for the BFF work. If/when
+# the auth service grows a tenant filter, the BFF's ui_tenant_id should
+# be forwarded in the _admin_request call so operators only see their
+# own tenant's clients.
 # ---------------------------------------------------------------------------
 
 
@@ -478,7 +595,16 @@ async def list_users(db: DbDep, settings: SettingsDep):
     """List all identities with memory counts and last active times.
 
     Merges OAuth client data from auth service with memory stats from DB.
+
+    Phase 6 (#46): the local memory_nodes aggregation is tenant-scoped by
+    ``settings.ui_tenant_id`` so owners only appear with the memory
+    counts from their own tenant. The auth service /admin/clients proxy
+    portion is NOT tenant-scoped yet -- same caveat as /api/clients --
+    so the merged roster may still show clients that have not written
+    anything in this tenant (they'll appear with memory_count=0).
     """
+    tenant_id = settings.ui_tenant_id
+
     # Get memory stats per owner from DB
     stats_query = (
         select(
@@ -486,7 +612,11 @@ async def list_users(db: DbDep, settings: SettingsDep):
             func.count().label("memory_count"),
             func.max(MemoryNode.updated_at).label("last_active"),
         )
-        .where(MemoryNode.is_current.is_(True), MemoryNode.deleted_at.is_(None))
+        .where(
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.is_current.is_(True),
+            MemoryNode.deleted_at.is_(None),
+        )
         .group_by(MemoryNode.owner_id)
     )
     result = await db.execute(stats_query)
@@ -571,12 +701,23 @@ def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
 @router.get("/api/rules", response_model=list[CurationRuleResponse])
 async def list_rules(
     db: DbDep,
+    settings: SettingsDep,
     tier: str | None = Query(default=None),
     enabled: bool | None = Query(default=None),
     layer: str | None = Query(default=None),
 ):
-    """List all curation rules with optional filters."""
-    stmt = select(CuratorRule).order_by(CuratorRule.priority)
+    """List all curation rules with optional filters.
+
+    Tenant-scoped to ``settings.ui_tenant_id`` (Phase 6 / #46). Each
+    tenant maintains its own rule set -- default rules are seeded per
+    tenant at the service layer.
+    """
+    tenant_id = settings.ui_tenant_id
+    stmt = (
+        select(CuratorRule)
+        .where(CuratorRule.tenant_id == tenant_id)
+        .order_by(CuratorRule.priority)
+    )
     if tier:
         stmt = stmt.where(CuratorRule.tier == tier)
     if enabled is not None:
@@ -589,9 +730,15 @@ async def list_rules(
 
 
 @router.post("/api/rules", response_model=CurationRuleResponse, status_code=201)
-async def create_rule(body: CreateRuleRequest, db: DbDep):
-    """Create a new curation rule."""
+async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep):
+    """Create a new curation rule.
+
+    Phase 6 (#46): stamps ``settings.ui_tenant_id`` on the new rule so it
+    is owned by this UI deployment's tenant. The BFF never writes rules
+    into other tenants' namespaces.
+    """
     rule = CuratorRule(
+        tenant_id=settings.ui_tenant_id,
         name=body.name,
         description=body.description,
         trigger=body.trigger,
@@ -612,13 +759,22 @@ async def create_rule(body: CreateRuleRequest, db: DbDep):
 
 
 @router.get("/api/rules/{rule_id}", response_model=CurationRuleResponse)
-async def get_rule(rule_id: str, db: DbDep):
-    """Get a single curation rule by ID."""
+async def get_rule(rule_id: str, db: DbDep, settings: SettingsDep):
+    """Get a single curation rule by ID.
+
+    Phase 6 (#46): cross-tenant rule lookups return 404.
+    """
+    tenant_id = settings.ui_tenant_id
     try:
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}")
-    result = await db.execute(select(CuratorRule).where(CuratorRule.id == parsed_id))
+    result = await db.execute(
+        select(CuratorRule).where(
+            CuratorRule.id == parsed_id,
+            CuratorRule.tenant_id == tenant_id,
+        )
+    )
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
@@ -626,13 +782,28 @@ async def get_rule(rule_id: str, db: DbDep):
 
 
 @router.patch("/api/rules/{rule_id}", response_model=CurationRuleResponse)
-async def update_rule(rule_id: str, body: UpdateRuleRequest, db: DbDep):
-    """Update a curation rule (toggle enabled, change priority, etc.)."""
+async def update_rule(
+    rule_id: str,
+    body: UpdateRuleRequest,
+    db: DbDep,
+    settings: SettingsDep,
+):
+    """Update a curation rule (toggle enabled, change priority, etc.).
+
+    Phase 6 (#46): cross-tenant updates return 404 -- an operator cannot
+    mutate another tenant's rule via this BFF even by guessing the UUID.
+    """
+    tenant_id = settings.ui_tenant_id
     try:
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}")
-    result = await db.execute(select(CuratorRule).where(CuratorRule.id == parsed_id))
+    result = await db.execute(
+        select(CuratorRule).where(
+            CuratorRule.id == parsed_id,
+            CuratorRule.tenant_id == tenant_id,
+        )
+    )
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
@@ -645,13 +816,22 @@ async def update_rule(rule_id: str, body: UpdateRuleRequest, db: DbDep):
 
 
 @router.delete("/api/rules/{rule_id}", status_code=204)
-async def delete_rule(rule_id: str, db: DbDep):
-    """Delete a curation rule."""
+async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep):
+    """Delete a curation rule.
+
+    Phase 6 (#46): cross-tenant deletes return 404.
+    """
+    tenant_id = settings.ui_tenant_id
     try:
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}")
-    result = await db.execute(select(CuratorRule).where(CuratorRule.id == parsed_id))
+    result = await db.execute(
+        select(CuratorRule).where(
+            CuratorRule.id == parsed_id,
+            CuratorRule.tenant_id == tenant_id,
+        )
+    )
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
@@ -664,7 +844,7 @@ async def delete_rule(rule_id: str, db: DbDep):
 # ---------------------------------------------------------------------------
 
 
-def _live_contradictions():
+def _live_contradictions(tenant_id: str):
     """Build a base SELECT for ContradictionReport joined to non-deleted memories.
 
     Reports whose target memory has been soft-deleted are excluded from
@@ -672,19 +852,40 @@ def _live_contradictions():
     already prevents new reports from being created against deleted
     memories, but historical reports against memories that were later
     deleted still exist in the table and need to be filtered out here.
+
+    Phase 6 (#46): filters both the report table and the joined memory
+    table by ``tenant_id``. Tenant consistency across report and memory
+    is already enforced at report creation time (Phase 3's
+    report_contradiction inherits tenant from the memory), so filtering
+    the report table alone would be sufficient -- filtering both is
+    belt-and-suspenders defence-in-depth.
     """
-    return select(ContradictionReport).join(
-        MemoryNode, ContradictionReport.memory_id == MemoryNode.id
-    ).where(MemoryNode.deleted_at.is_(None))
+    return (
+        select(ContradictionReport)
+        .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
+        .where(
+            ContradictionReport.tenant_id == tenant_id,
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.deleted_at.is_(None),
+        )
+    )
 
 
-def _live_contradiction_count():
-    """Count of contradictions whose target memory still exists."""
+def _live_contradiction_count(tenant_id: str):
+    """Count of contradictions whose target memory still exists.
+
+    Phase 6 (#46): tenant-scoped via both the report and memory joined
+    rows, matching _live_contradictions above.
+    """
     return (
         select(func.count())
         .select_from(ContradictionReport)
         .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
-        .where(MemoryNode.deleted_at.is_(None))
+        .where(
+            ContradictionReport.tenant_id == tenant_id,
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.deleted_at.is_(None),
+        )
     )
 
 
@@ -704,6 +905,7 @@ def _contradiction_to_response(report: ContradictionReport) -> ContradictionResp
 @router.get("/api/contradictions", response_model=list[ContradictionResponse])
 async def list_contradictions(
     db: DbDep,
+    settings: SettingsDep,
     resolved: bool | None = Query(default=None),
     min_confidence: float | None = Query(default=None),
     max_confidence: float | None = Query(default=None),
@@ -711,8 +913,10 @@ async def list_contradictions(
     """List contradiction reports with optional filters.
 
     Reports whose target memory has been soft-deleted are excluded.
+    Phase 6 (#46): tenant-scoped to ``settings.ui_tenant_id``.
     """
-    stmt = _live_contradictions().order_by(ContradictionReport.created_at.desc())
+    tenant_id = settings.ui_tenant_id
+    stmt = _live_contradictions(tenant_id).order_by(ContradictionReport.created_at.desc())
     if resolved is not None:
         stmt = stmt.where(ContradictionReport.resolved == resolved)
     if min_confidence is not None:
@@ -725,31 +929,36 @@ async def list_contradictions(
 
 
 @router.get("/api/contradictions/stats", response_model=ContradictionStatsResponse)
-async def contradiction_stats(db: DbDep):
+async def contradiction_stats(db: DbDep, settings: SettingsDep):
     """Summary counts for the contradiction log dashboard.
 
     All counts exclude reports whose target memory has been soft-deleted.
+    Phase 6 (#46): tenant-scoped to ``settings.ui_tenant_id``.
     """
-    total_result = await db.execute(_live_contradiction_count())
+    tenant_id = settings.ui_tenant_id
+
+    total_result = await db.execute(_live_contradiction_count(tenant_id))
     total = total_result.scalar_one()
 
     unresolved_result = await db.execute(
-        _live_contradiction_count().where(ContradictionReport.resolved.is_(False))
+        _live_contradiction_count(tenant_id).where(ContradictionReport.resolved.is_(False))
     )
     unresolved = unresolved_result.scalar_one()
 
     high_result = await db.execute(
-        _live_contradiction_count().where(ContradictionReport.confidence > 0.8)
+        _live_contradiction_count(tenant_id).where(ContradictionReport.confidence > 0.8)
     )
     high = high_result.scalar_one()
 
     medium_result = await db.execute(
-        _live_contradiction_count().where(ContradictionReport.confidence.between(0.5, 0.8))
+        _live_contradiction_count(tenant_id).where(
+            ContradictionReport.confidence.between(0.5, 0.8)
+        )
     )
     medium = medium_result.scalar_one()
 
     low_result = await db.execute(
-        _live_contradiction_count().where(ContradictionReport.confidence < 0.5)
+        _live_contradiction_count(tenant_id).where(ContradictionReport.confidence < 0.5)
     )
     low = low_result.scalar_one()
 
@@ -763,13 +972,32 @@ async def contradiction_stats(db: DbDep):
 
 
 @router.patch("/api/contradictions/{report_id}", response_model=ContradictionResponse)
-async def update_contradiction(report_id: str, body: UpdateContradictionRequest, db: DbDep):
-    """Mark a contradiction report as resolved or unresolved."""
+async def update_contradiction(
+    report_id: str,
+    body: UpdateContradictionRequest,
+    db: DbDep,
+    settings: SettingsDep,
+):
+    """Mark a contradiction report as resolved or unresolved.
+
+    Phase 6 (#46): cross-tenant updates return 404. We belt-and-suspenders
+    filter the joined memory row too, even though tenant consistency
+    between report and target memory is already enforced at creation.
+    """
+    tenant_id = settings.ui_tenant_id
     try:
         parsed_id = uuid.UUID(report_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {report_id!r}")
-    result = await db.execute(select(ContradictionReport).where(ContradictionReport.id == parsed_id))
+    result = await db.execute(
+        select(ContradictionReport)
+        .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
+        .where(
+            ContradictionReport.id == parsed_id,
+            ContradictionReport.tenant_id == tenant_id,
+            MemoryNode.tenant_id == tenant_id,
+        )
+    )
     report = result.scalar_one_or_none()
     if report is None:
         raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")

@@ -69,14 +69,61 @@ def _scalars_result(items):
 
 
 def _make_db_session(execute_side_effects: list):
-    """Build an async DB session mock with a queue of execute() return values."""
+    """Build an async DB session mock with a queue of execute() return values.
+
+    Each execute() call also records the statement passed in, so tests that
+    care about the compiled SQL can inspect the full list in
+    ``session.executed_statements`` after the route runs. See
+    ``_statement_mentions_tenant_filter`` for the #46 Phase 6 cross-tenant
+    test helper.
+    """
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=execute_side_effects)
+    session.executed_statements = []
+
+    results = list(execute_side_effects)
+
+    async def _execute(stmt, *args, **kwargs):
+        session.executed_statements.append(stmt)
+        if not results:
+            raise AssertionError(
+                "execute() called more times than _make_db_session was "
+                f"given results for (statement={stmt!r})"
+            )
+        return results.pop(0)
+
+    session.execute = _execute
     return session
 
 
-@pytest.fixture
-def test_settings():
+def _statement_mentions_tenant_filter(stmt, tenant_id: str) -> bool:
+    """Return True if the compiled SQL for ``stmt`` references the tenant.
+
+    Works for both SQLAlchemy Core/ORM Select/Update statements (which we
+    compile with ``literal_binds=True`` so the tenant string shows up
+    inline) and for ``sqlalchemy.text()`` statements (whose ``text`` attr
+    is a raw string and whose parameters we can't reach here; those are
+    checked by call-site assertions on the execute() args instead).
+
+    The BFF's tenant predicate is always a column equality on
+    ``tenant_id``, so checking that the compiled SQL contains both the
+    string ``tenant_id`` and the tenant value is a sound -- if slightly
+    crude -- way of proving the filter is wired up.
+    """
+    try:
+        compiled = stmt.compile(compile_kwargs={"literal_binds": True})
+    except Exception:
+        return False
+    sql = str(compiled)
+    return "tenant_id" in sql and f"'{tenant_id}'" in sql
+
+
+def _make_settings(tenant_id: str = "default") -> Settings:
+    """Build a Settings instance with a specific tenant_id for tests.
+
+    Explicitly passing every required field avoids picking up whatever
+    MEMORYHUB_* env vars happen to be set in the test runner's shell, so
+    tests are reproducible across dev machines.
+    """
     return Settings(
         db_host="localhost",
         db_port=5432,
@@ -85,7 +132,13 @@ def test_settings():
         db_password="",
         embedding_url="",
         mcp_server_url="http://mcp-server:8080/mcp/",
+        ui_tenant_id=tenant_id,
     )
+
+
+@pytest.fixture
+def test_settings():
+    return _make_settings(tenant_id="default")
 
 
 # ---------------------------------------------------------------------------
@@ -1130,3 +1183,600 @@ class TestContradictionsEndpoints:
             assert response.status_code == 422
         finally:
             app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 (#46): BFF tenant filtering
+#
+# These tests pin the contract that every BFF SQL query on a tenant-scoped
+# table (memory_nodes, memory_relationships, contradiction_reports,
+# curator_rules) is filtered by ``settings.ui_tenant_id``. They do not
+# exercise real SQLite/Postgres: the DB is still mocked session-level, but
+# every statement passed to execute() is captured and its compiled SQL is
+# inspected for the expected tenant_id literal.
+#
+# For "cross-tenant returns 404" behaviour the DB mock simply returns None
+# as if the row did not exist -- this is exactly what the real DB would
+# return once the WHERE clause is applied -- and the route handler's
+# existing 404 branch fires.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestTenantFiltering:
+    """Phase 6 cross-tenant route tests (#46).
+
+    Conventions:
+    - ``tenant_b`` is the "other" tenant the operator should never see.
+    - Same-tenant positive tests use the default ``test_settings`` fixture
+      so they also serve as regression coverage for the happy path.
+    - Cross-tenant tests build a fresh Settings with ``ui_tenant_id="tenant_b"``
+      to simulate a UI deployment configured for a different tenant.
+    """
+
+    # ---- memory detail ---------------------------------------------------
+
+    async def test_get_memory_cross_tenant_returns_404(self):
+        """A memory that exists only in tenant_a is invisible to tenant_b.
+
+        We simulate this by returning None from the mocked session (which
+        is exactly what the tenant-scoped SELECT would do if the row is in
+        a different tenant), then confirm the route returns 404 and that
+        the SELECT it issued was scoped to tenant_b.
+        """
+        settings = _make_settings(tenant_id="tenant_b")
+        memory_id = str(uuid.uuid4())
+        db_session = _make_db_session([_scalar_result(None)])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get(f"/api/memory/{memory_id}")
+
+            assert response.status_code == 404
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_get_memory_same_tenant_returns_data(self, test_settings):
+        """Sanity check: when tenant matches, the existing happy path works."""
+        node = _make_node()
+        db_session = _make_db_session(
+            [_scalar_result(node), _scalar_result(0), _scalars_result([])]
+        )
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get(f"/api/memory/{node.id}")
+
+            assert response.status_code == 200
+            assert response.json()["id"] == str(node.id)
+            # Every ORM SELECT in the handler should carry the default tenant.
+            for stmt in db_session.executed_statements:
+                assert _statement_mentions_tenant_filter(stmt, "default")
+        finally:
+            app.dependency_overrides.clear()
+
+    # ---- memory history --------------------------------------------------
+
+    async def test_get_memory_history_forwards_tenant_to_service(self, test_settings):
+        """The BFF passes ``settings.ui_tenant_id`` to the service function.
+
+        Phase 4 made ``tenant_id`` a required keyword-only arg on
+        get_memory_history(); this test pins the BFF wire-up so a future
+        refactor can't silently drop it.
+        """
+        memory_id = uuid.uuid4()
+        service_result = {
+            "versions": [],
+            "total_versions": 0,
+            "has_more": False,
+            "offset": 0,
+        }
+        db_session = _make_db_session([])
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        with patch(
+            "src.routes.get_memory_history_service",
+            new=AsyncMock(return_value=service_result),
+        ) as mock_service:
+            try:
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as ac:
+                    response = await ac.get(f"/api/memory/{memory_id}/history")
+
+                assert response.status_code == 200
+                mock_service.assert_awaited_once()
+                kwargs = mock_service.await_args.kwargs
+                assert kwargs["tenant_id"] == "default"
+                assert kwargs["memory_id"] == memory_id
+            finally:
+                app.dependency_overrides.clear()
+
+    async def test_get_memory_history_cross_tenant_returns_404(self):
+        """Cross-tenant history lookups propagate MemoryNotFoundError -> 404."""
+        from memoryhub_core.services.exceptions import MemoryNotFoundError
+
+        settings = _make_settings(tenant_id="tenant_b")
+        memory_id = uuid.uuid4()
+        db_session = _make_db_session([])
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        with patch(
+            "src.routes.get_memory_history_service",
+            new=AsyncMock(side_effect=MemoryNotFoundError(memory_id)),
+        ) as mock_service:
+            try:
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as ac:
+                    response = await ac.get(f"/api/memory/{memory_id}/history")
+
+                assert response.status_code == 404
+                # Most important assertion: the service was called with
+                # tenant_b so the service-layer filter has something to
+                # bite on. This is the line that would catch a regression
+                # where the BFF forgot to forward the tenant.
+                assert mock_service.await_args.kwargs["tenant_id"] == "tenant_b"
+            finally:
+                app.dependency_overrides.clear()
+
+    # ---- memory delete ---------------------------------------------------
+
+    async def test_delete_memory_cross_tenant_returns_404(self):
+        settings = _make_settings(tenant_id="tenant_b")
+        memory_id = str(uuid.uuid4())
+        db_session = _make_db_session([_scalar_result(None)])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.delete(f"/api/memory/{memory_id}")
+
+            assert response.status_code == 404
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    # ---- graph -----------------------------------------------------------
+
+    async def test_graph_cross_tenant_excludes_nodes_and_edges(self):
+        """Every SELECT in /api/graph (nodes + relationships) carries tenant_b.
+
+        A cross-tenant deployment sees an empty graph for this test because
+        the mocked DB returns no nodes, which short-circuits the relationship
+        query. But the node SELECT itself must still be tenant-scoped -- we
+        assert that via the compiled SQL so a future refactor that drops
+        the WHERE clause gets caught.
+        """
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session([_scalars_result([])])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/api/graph")
+
+            assert response.status_code == 200
+            body = response.json()
+            assert body == {"nodes": [], "edges": []}
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_graph_cross_tenant_relationship_query_is_tenant_scoped(self):
+        """When nodes exist, the relationship SELECT must also carry tenant_b.
+
+        This is the belt-and-suspenders check on MemoryRelationship filtering
+        -- we force the relationship path to run by returning a node and
+        then inspect both captured statements.
+        """
+        settings = _make_settings(tenant_id="tenant_b")
+        node = _make_node()
+        db_session = _make_db_session(
+            [
+                _scalars_result([node]),  # MemoryNode select
+                _scalars_result([]),  # MemoryRelationship select
+            ]
+        )
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/api/graph")
+
+            assert response.status_code == 200
+            assert len(db_session.executed_statements) == 2
+            for stmt in db_session.executed_statements:
+                assert _statement_mentions_tenant_filter(stmt, "tenant_b"), (
+                    f"Statement not tenant-scoped: {stmt}"
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+    # ---- graph search ----------------------------------------------------
+
+    async def test_graph_search_cross_tenant_excludes_results(self):
+        """The text-fallback ilike SELECT is tenant-scoped.
+
+        embedding_url is empty so the route takes the ORM ilike branch,
+        which is easy to inspect via _statement_mentions_tenant_filter.
+        The raw-SQL vector branch is covered by the bind-params check in
+        the companion test below.
+        """
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session([_scalars_result([])])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/api/graph/search", params={"q": "hello"})
+
+            assert response.status_code == 200
+            assert response.json() == []
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_graph_search_vector_path_passes_tenant_bind(self):
+        """The raw-SQL pgvector branch binds tenant_id as a parameter.
+
+        text() statements don't render literal bind params by default, so
+        we assert at the execute() call level by capturing the kwargs the
+        route passed to db.execute().
+        """
+        settings = _make_settings(tenant_id="tenant_b")
+
+        # Custom session mock that captures both statement and params.
+        session = AsyncMock()
+        session.captured_calls = []
+
+        async def _execute(stmt, params=None, *args, **kwargs):
+            session.captured_calls.append((stmt, params))
+            r = MagicMock()
+            r.fetchall.return_value = []
+            return r
+
+        session.execute = _execute
+
+        app.dependency_overrides[get_db] = lambda: session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        with patch(
+            "src.routes._get_embedding", new=AsyncMock(return_value=[0.1, 0.2, 0.3])
+        ):
+            try:
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as ac:
+                    response = await ac.get("/api/graph/search", params={"q": "hello"})
+
+                assert response.status_code == 200
+                assert len(session.captured_calls) == 1
+                stmt, params = session.captured_calls[0]
+                # tenant_id must appear in the raw SQL AND as a bind param.
+                assert "tenant_id" in str(stmt)
+                assert params is not None
+                assert params.get("tenant_id") == "tenant_b"
+            finally:
+                app.dependency_overrides.clear()
+
+    # ---- stats -----------------------------------------------------------
+
+    async def test_stats_cross_tenant_counts_exclude_other_tenant(self):
+        """All three memory_nodes queries in /api/stats must be tenant-scoped.
+
+        The route runs: total count, scope breakdown, recent activity.
+        Zero counts from a cross-tenant mock prove the DB path short-
+        circuits on empty but the SQL inspection proves the filter was
+        actually in the WHERE clause.
+        """
+        settings = _make_settings(tenant_id="tenant_b")
+
+        total_result = _scalar_result(0)
+        scope_result = MagicMock()
+        scope_result.fetchall.return_value = []
+        recent_result = _scalars_result([])
+
+        db_session = _make_db_session([total_result, scope_result, recent_result])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        # Patch MCP health probe (same pattern as TestStatsEndpoint).
+        with patch("src.routes.httpx.AsyncClient") as mock_client_cls:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_http = AsyncMock()
+            mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+            mock_http.__aexit__ = AsyncMock(return_value=None)
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_http
+
+            try:
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as ac:
+                    response = await ac.get("/api/stats")
+
+                assert response.status_code == 200
+                body = response.json()
+                assert body["total_memories"] == 0
+                assert body["scope_counts"] == []
+                assert body["recent_activity"] == []
+                assert len(db_session.executed_statements) == 3
+                for stmt in db_session.executed_statements:
+                    assert _statement_mentions_tenant_filter(stmt, "tenant_b"), (
+                        f"Stats statement missed tenant filter: {stmt}"
+                    )
+            finally:
+                app.dependency_overrides.clear()
+
+    # ---- curation rules --------------------------------------------------
+
+    async def test_list_rules_cross_tenant_excludes_other_tenant(self):
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session([_scalars_result([])])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/api/rules")
+
+            assert response.status_code == 200
+            assert response.json() == []
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_create_rule_stamps_configured_tenant_id(self):
+        """POST /api/rules populates tenant_id from settings.ui_tenant_id.
+
+        We capture the CuratorRule instance passed to db.add() and assert
+        its tenant_id matches the configured UI tenant. This pins the
+        write path so the BFF never leaks a rule into another tenant's
+        namespace by omission.
+        """
+        settings = _make_settings(tenant_id="tenant_b")
+
+        captured: dict = {}
+
+        def _capture_add(obj):
+            captured["rule"] = obj
+
+        async def _fake_refresh(obj):
+            obj.id = uuid.uuid4()
+            obj.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+            obj.updated_at = datetime(2026, 1, 1, tzinfo=UTC)
+
+        db_session = AsyncMock()
+        db_session.add = MagicMock(side_effect=_capture_add)
+        db_session.commit = AsyncMock()
+        db_session.refresh = AsyncMock(side_effect=_fake_refresh)
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.post(
+                    "/api/rules",
+                    json={
+                        "name": "Tenant-B rule",
+                        "tier": "regex",
+                        "action": "block",
+                        "config": {"pattern": "secret"},
+                    },
+                )
+
+            assert response.status_code == 201
+            assert "rule" in captured, "db.add() was not called"
+            assert captured["rule"].tenant_id == "tenant_b"
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_get_rule_cross_tenant_returns_404(self):
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session([_scalar_result(None)])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get(f"/api/rules/{uuid.uuid4()}")
+
+            assert response.status_code == 404
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_update_rule_cross_tenant_returns_404(self):
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session([_scalar_result(None)])
+        db_session.commit = AsyncMock()
+        db_session.refresh = AsyncMock()
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    f"/api/rules/{uuid.uuid4()}", json={"enabled": False}
+                )
+
+            assert response.status_code == 404
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_delete_rule_cross_tenant_returns_404(self):
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session([_scalar_result(None)])
+        db_session.delete = AsyncMock()
+        db_session.commit = AsyncMock()
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.delete(f"/api/rules/{uuid.uuid4()}")
+
+            assert response.status_code == 404
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+            db_session.delete.assert_not_called()
+        finally:
+            app.dependency_overrides.clear()
+
+    # ---- contradictions --------------------------------------------------
+
+    async def test_list_contradictions_cross_tenant_excludes_other_tenant(self):
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session([_scalars_result([])])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/api/contradictions")
+
+            assert response.status_code == 200
+            assert response.json() == []
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_contradiction_stats_cross_tenant(self):
+        """All five aggregation queries must be tenant-scoped."""
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session(
+            [
+                _scalar_result(0),  # total
+                _scalar_result(0),  # unresolved
+                _scalar_result(0),  # high
+                _scalar_result(0),  # medium
+                _scalar_result(0),  # low
+            ]
+        )
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/api/contradictions/stats")
+
+            assert response.status_code == 200
+            assert response.json() == {
+                "total": 0,
+                "unresolved": 0,
+                "high_confidence": 0,
+                "medium_confidence": 0,
+                "low_confidence": 0,
+            }
+            assert len(db_session.executed_statements) == 5
+            for stmt in db_session.executed_statements:
+                assert _statement_mentions_tenant_filter(stmt, "tenant_b"), (
+                    f"Contradiction-stats statement missed tenant filter: {stmt}"
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_update_contradiction_cross_tenant_returns_404(self):
+        settings = _make_settings(tenant_id="tenant_b")
+        db_session = _make_db_session([_scalar_result(None)])
+        db_session.commit = AsyncMock()
+        db_session.refresh = AsyncMock()
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    f"/api/contradictions/{uuid.uuid4()}", json={"resolved": True}
+                )
+
+            assert response.status_code == 404
+            assert _statement_mentions_tenant_filter(
+                db_session.executed_statements[0], "tenant_b"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    # ---- users roster ----------------------------------------------------
+
+    async def test_list_users_local_db_query_is_tenant_scoped(self):
+        """The memory_nodes aggregation in /api/users is tenant-scoped.
+
+        The auth /admin/clients proxy is intentionally not tenant-scoped
+        yet (see the comment block on /api/clients), but the local DB
+        query absolutely must be, or cross-tenant owner_ids would leak
+        into the users roster.
+        """
+        settings = _make_settings(tenant_id="tenant_b")
+
+        stats_result = MagicMock()
+        stats_result.fetchall.return_value = []
+        db_session = _make_db_session([stats_result])
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+
+        # Make the auth proxy call raise so we exercise the DB-only fallback.
+        with patch(
+            "src.routes._admin_request",
+            new=AsyncMock(side_effect=RuntimeError("auth down")),
+        ):
+            try:
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as ac:
+                    response = await ac.get("/api/users")
+
+                assert response.status_code == 200
+                assert response.json() == []
+                assert _statement_mentions_tenant_filter(
+                    db_session.executed_statements[0], "tenant_b"
+                )
+            finally:
+                app.dependency_overrides.clear()
