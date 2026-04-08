@@ -79,7 +79,7 @@ Public safety doesn't have a single dominant decision-support
 paradigm the way healthcare has CDS. Instead, LEO operations use a
 fragmented set of tools — CAD, RMS, GIS/mapping, LPR databases,
 real-time crime centers, fusion centers — each doing one thing.
-The boundary section in `docs/scenarios/public-safety/README.md`
+The boundary section in `README.md`
 walks through what each of those does. The short version: **CAD
 dispatches the unit, GIS plots its location, RMS holds the
 case file. MemoryHub doesn't try to be any of those.**

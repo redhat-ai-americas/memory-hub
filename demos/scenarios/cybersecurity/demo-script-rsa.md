@@ -1106,7 +1106,7 @@ GitHub issue (if any) tracking the implementation.
     the same shape as the clinical version with one word changed
     ("clinical" → "security"), demonstrating platform messaging
     consistency across domains.
-    *Defined in*: `docs/scenarios/cybersecurity/README.md` ("The
+    *Defined in*: `README.md` ("The
     value proposition in one sentence" section).
     *Visible in the demo*: title slide (Segment 1), explicit
     callout in Segment 3 after the killer moment, recap slide in
@@ -1119,9 +1119,9 @@ GitHub issue (if any) tracking the implementation.
     detection stack does detection, alerting, response
     automation, and structured threat data; MemoryHub holds the
     surrounding experience layer.
-    *Defined in*: `docs/scenarios/cybersecurity/README.md` ("The
+    *Defined in*: `README.md` ("The
     detection-paradigm boundary" section); reinforced in
-    `docs/scenarios/cybersecurity/threat-hunting-incident-response.md`
+    `threat-hunting-incident-response.md`
     ("MemoryHub vs. Detection and Response Tooling" section).
     *Visible in the demo*: framing block in Segment 1, closing
     pitch in Segment 8.
@@ -1135,11 +1135,11 @@ GitHub issue (if any) tracking the implementation.
     includes the explicit no-auto-containment disclaimer — SOC
     audiences are particularly sensitive to vendors implying AI
     will execute response actions unattended.
-    *Defined in*: `docs/scenarios/README.md` ("AI supports
+    *Defined in*: `../README.md` ("AI supports
     humans, it doesn't replace them" section);
-    `docs/scenarios/cybersecurity/README.md` ("The 'humans in
+    `README.md` ("The 'humans in
     production' framing" section); each role description in
-    `docs/scenarios/cybersecurity/threat-hunting-incident-response.md`
+    `threat-hunting-incident-response.md`
     has an "In production" sidebar.
     *Visible in the demo*: agent disclaimer in Segment 1; "what
     you cannot say" section is the verbal discipline that keeps
@@ -1152,7 +1152,7 @@ GitHub issue (if any) tracking the implementation.
     `actor_id` (which agent performed the operation, always
     derived from authenticated identity), `driver_id` (on whose
     behalf, may equal actor_id for autonomous operation).
-    *Defined in*: `docs/identity-model/data-model.md` ("The
+    *Defined in*: `../../../docs/identity-model/data-model.md` ("The
     triple: owner, actor, driver" section). Maps to RFC 8693
     token exchange semantics and FHIR Provenance (the FHIR
     mapping is healthcare-specific but the underlying model
@@ -1171,7 +1171,7 @@ GitHub issue (if any) tracking the implementation.
     another agent) on that human's behalf. Captured per-session
     (via `register_session(default_driver_id=...)`) or
     per-request (override parameter).
-    *Defined in*: `docs/identity-model/data-model.md` ("Tool API
+    *Defined in*: `../../../docs/identity-model/data-model.md` ("Tool API
     changes" section).
     *Tracked in*: GitHub issues #65, #66.
     *Visible in the demo*: on-call rotation moment in Segment 4
@@ -1188,7 +1188,7 @@ GitHub issue (if any) tracking the implementation.
     handoff, and the audit trail captures both "what did the
     role know about this incident?" and "who was driving the
     role at time T?" as separately answerable questions.
-    *Defined in*: `docs/identity-model/data-model.md`
+    *Defined in*: `../../../docs/identity-model/data-model.md`
     (implicitly, via the actor/driver split); the on-call
     rotation pattern is the cybersec parallel to the
     clinical-scenario shift change pattern.
@@ -1207,7 +1207,7 @@ GitHub issue (if any) tracking the implementation.
     own project, and an analyst working on Customer A's
     incident cannot accidentally read memories from Customer
     B's environment.
-    *Defined in*: `docs/identity-model/authorization.md`
+    *Defined in*: `../../../docs/identity-model/authorization.md`
     ("Project membership enforcement (critical path)" section).
     *Tracked in*: GitHub issue #64 (the critical-path
     implementation work).
@@ -1229,10 +1229,10 @@ GitHub issue (if any) tracking the implementation.
     Both are forms of "what we learned from past incidents
     that's relevant now," and both live in the same memory
     category.
-    *Defined in*: `docs/scenarios/cybersecurity/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — first and third
     bullets);
-    `docs/scenarios/cybersecurity/threat-hunting-incident-response.md`
+    `threat-hunting-incident-response.md`
     (touchpoints 1, 3, 6).
     *Tracked in*: emerges from project-scope membership (#64),
     schema (#65), tool plumbing (#66). No dedicated issue —
@@ -1250,10 +1250,10 @@ GitHub issue (if any) tracking the implementation.
     the team's working interpretation of an attacker's
     behavior, the context around why a particular response
     decision was made.
-    *Defined in*: `docs/scenarios/cybersecurity/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — fourth bullet,
     "Per-customer context");
-    `docs/scenarios/cybersecurity/threat-hunting-incident-response.md`
+    `threat-hunting-incident-response.md`
     (touchpoint 4).
     *Tracked in*: not a discrete feature — emerges from generic
     `write_memory` + project-scope. The *category* is a
@@ -1270,7 +1270,7 @@ GitHub issue (if any) tracking the implementation.
     future readers understand the basis of a memory without
     re-deriving it. The "from IR-2024-117" linkage in the
     cross-incident memories is a provenance reference.
-    *Defined in*: `docs/memory-tree.md` (the underlying tree
+    *Defined in*: `../../../docs/memory-tree.md` (the underlying tree
     branch model).
     *Tracked in*: existing functionality, no new issue. The
     branch model is already implemented.
@@ -1290,9 +1290,9 @@ GitHub issue (if any) tracking the implementation.
     patterns (credentials, exec identification, source/method
     redaction) are not yet built — they would be a future
     issue, separate from #68 (healthcare PHI patterns).
-    *Defined in*: `docs/scenarios/cybersecurity/threat-hunting-incident-response.md`
+    *Defined in*: `threat-hunting-incident-response.md`
     ("Sensitive-data moments" section). The underlying pipeline
-    is documented in `docs/scenarios/clinical/demo-plan.md`.
+    is documented in `../clinical/demo-plan.md`.
     *Tracked in*: pipeline stub via #68 for healthcare; cybersec
     patterns are a future issue (not yet filed). The two
     quarantine moments in the demo would need this future work
@@ -1310,7 +1310,7 @@ GitHub issue (if any) tracking the implementation.
     work will route through LlamaStack telemetry (which RHOAI
     ships natively as a Tech Preview, avoiding the need to
     build a custom audit log).
-    *Defined in*: `docs/identity-model/authorization.md` ("Audit
+    *Defined in*: `../../../docs/identity-model/authorization.md` ("Audit
     logging — stub now, persistence later" section).
     *Tracked in*: GitHub issue #67 (audit logging stub
     interface), #70 (persistent audit log via LlamaStack
@@ -1328,9 +1328,9 @@ GitHub issue (if any) tracking the implementation.
     senior analyst heads and walks out the door when staff
     leave — exactly the kind of attrition impact a SOC manager
     cares about.
-    *Defined in*: `docs/scenarios/cybersecurity/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — second bullet);
-    `docs/scenarios/cybersecurity/threat-hunting-incident-response.md`
+    `threat-hunting-incident-response.md`
     (touchpoint 2).
     *Tracked in*: not a discrete feature — same emergence as
     narrative context. Category positioning, not separate code.
@@ -1350,7 +1350,7 @@ GitHub issue (if any) tracking the implementation.
     analysts reach different conclusions about the same
     evidence, and the team needs to track the disagreement
     explicitly rather than letting one view silently win.
-    *Defined in*: `docs/scenarios/cybersecurity/threat-hunting-incident-response.md`
+    *Defined in*: `threat-hunting-incident-response.md`
     ("Contradiction moments" section). The
     `report_contradiction` tool already exists in the MCP
     server; this is reuse, not new feature work.
@@ -1368,9 +1368,9 @@ GitHub issue (if any) tracking the implementation.
     examples include false-positive filters the fleet has
     derived from prior investigations and operational
     heuristics about which queries to run when.
-    *Defined in*: `docs/scenarios/cybersecurity/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — fifth bullet);
-    `docs/scenarios/cybersecurity/threat-hunting-incident-response.md`
+    `threat-hunting-incident-response.md`
     (touchpoint 5).
     *Tracked in*: not a discrete feature — emerges from
     `write_memory` + scope/owner conventions. The *category*
@@ -1391,7 +1391,7 @@ GitHub issue (if any) tracking the implementation.
     (the central narrative is cross-incident learning rather
     than within-incident revision), but referenced in the
     contradiction-resolution flow.
-    *Defined in*: `docs/memory-tree.md` (versioning model with
+    *Defined in*: `../../../docs/memory-tree.md` (versioning model with
     `isCurrent` flag, already implemented).
     *Tracked in*: existing functionality.
     *Visible in the demo*: implicit in the contradiction
@@ -1405,7 +1405,7 @@ GitHub issue (if any) tracking the implementation.
     harness manifest needed to deploy and identify the demo's
     agent fleet. The CLI is the source of the ten SOC agents
     seen in the demo.
-    *Defined in*: `docs/identity-model/cli-requirements.md`
+    *Defined in*: `../../../docs/identity-model/cli-requirements.md`
     (the full requirements doc for the CLI).
     *Tracked in*: GitHub issue #69 (build agent generation CLI
     for demo fleet provisioning).

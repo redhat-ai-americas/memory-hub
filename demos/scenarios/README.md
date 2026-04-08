@@ -100,7 +100,7 @@ first demo if the visualization isn't ready.
 
 ## How to add a new scenario
 
-1. Create a new sibling folder (`docs/scenarios/<name>/`).
+1. Create a new sibling folder (`demos/scenarios/<name>/`).
 2. Add an entry to the inventory table above.
 3. Start with a `README.md` that captures: target audience, value prop in
    one sentence, decision-support paradigm in this domain that we should

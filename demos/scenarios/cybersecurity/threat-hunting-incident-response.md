@@ -788,7 +788,7 @@ without finding any single detail wrong.
    demo's credibility.
 
 6. **Animation visualization.** Stretch item per
-   `docs/scenarios/README.md`. For the cybersec scenario, the
+   `../README.md`. For the cybersec scenario, the
    animation could show alerts firing into the central core, then
    pulses going out to the relevant agents, then agents pulsing to
    each other as they share findings. The rapid back-and-forth

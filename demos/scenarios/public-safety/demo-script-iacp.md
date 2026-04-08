@@ -1236,7 +1236,7 @@ GitHub issue (if any) tracking the implementation.
     word changed ("clinical" / "security" / "tactical"),
     demonstrating platform messaging consistency across
     domains.
-    *Defined in*: `docs/scenarios/public-safety/README.md`
+    *Defined in*: `README.md`
     ("The value proposition in one sentence" section).
     *Visible in the demo*: title slide (Segment 1), explicit
     callout in Segments 3 and 5 after the killer moments,
@@ -1251,9 +1251,9 @@ GitHub issue (if any) tracking the implementation.
     than a single dominant decision-support paradigm, but the
     boundary still matters — every audience member has
     investments in the existing tools.
-    *Defined in*: `docs/scenarios/public-safety/README.md`
+    *Defined in*: `README.md`
     ("The decision-support boundary" section); reinforced in
-    `docs/scenarios/public-safety/fugitive-search-daniel-voss.md`
+    `fugitive-search-daniel-voss.md`
     ("MemoryHub vs. existing LEO systems" section).
     *Visible in the demo*: framing block in Segment 1, closing
     pitch in Segment 8.
@@ -1268,11 +1268,11 @@ GitHub issue (if any) tracking the implementation.
     explicit rejection of the LEO third rails: predictive
     policing, facial recognition, autonomous threat
     assessment, and automated suspect identification.
-    *Defined in*: `docs/scenarios/README.md` ("AI supports
+    *Defined in*: `../README.md` ("AI supports
     humans, it doesn't replace them" section);
-    `docs/scenarios/public-safety/README.md` ("The 'humans in
+    `README.md` ("The 'humans in
     production' framing" section); each role description in
-    `docs/scenarios/public-safety/fugitive-search-daniel-voss.md`
+    `fugitive-search-daniel-voss.md`
     has an "In production" sidebar.
     *Visible in the demo*: agent disclaimer in Segment 1,
     explicit reinforcement at apprehension in Segment 5,
@@ -1287,7 +1287,7 @@ GitHub issue (if any) tracking the implementation.
     `actor_id` (which agent performed the operation, always
     derived from authenticated identity), `driver_id` (on
     whose behalf, may equal actor_id for autonomous operation).
-    *Defined in*: `docs/identity-model/data-model.md` ("The
+    *Defined in*: `../../../docs/identity-model/data-model.md` ("The
     triple: owner, actor, driver" section). Maps to RFC 8693
     token exchange semantics and FHIR Provenance (the FHIR
     mapping is healthcare-specific but the underlying model
@@ -1306,7 +1306,7 @@ GitHub issue (if any) tracking the implementation.
     practitioner on that human's behalf. Captured per-session
     (via `register_session(default_driver_id=...)`) or
     per-request (override parameter).
-    *Defined in*: `docs/identity-model/data-model.md` ("Tool
+    *Defined in*: `../../../docs/identity-model/data-model.md` ("Tool
     API changes" section).
     *Tracked in*: GitHub issues #65, #66.
     *Visible in the demo*: shift handoff moment in Segment 4
@@ -1324,7 +1324,7 @@ GitHub issue (if any) tracking the implementation.
     captures both "what does the IC role know about this
     search?" and "who was IC at the time of this decision?"
     as separately answerable questions.
-    *Defined in*: `docs/identity-model/data-model.md`
+    *Defined in*: `../../../docs/identity-model/data-model.md`
     (implicitly, via the actor/driver split); the IC shift
     handoff is the LEO parallel to the clinical Charge Nurse
     handoff and the cybersec on-call rotation.
@@ -1341,7 +1341,7 @@ GitHub issue (if any) tracking the implementation.
     operations, this is how the team's shared memory stays
     bounded to the participants of the specific search and
     doesn't bleed across unrelated investigations.
-    *Defined in*: `docs/identity-model/authorization.md`
+    *Defined in*: `../../../docs/identity-model/authorization.md`
     ("Project membership enforcement (critical path)"
     section).
     *Tracked in*: GitHub issue #64 (the critical-path
@@ -1370,9 +1370,9 @@ GitHub issue (if any) tracking the implementation.
     All three are forms of "what we've already learned that's
     relevant now," and they all live in the same memory
     category.
-    *Defined in*: `docs/scenarios/public-safety/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario");
-    `docs/scenarios/public-safety/fugitive-search-daniel-voss.md`
+    `fugitive-search-daniel-voss.md`
     (touchpoints 1-3, 6-7).
     *Tracked in*: emerges from project-scope membership (#64),
     schema (#65), tool plumbing (#66). No dedicated issue —
@@ -1389,10 +1389,10 @@ GitHub issue (if any) tracking the implementation.
     geographic prioritization, the team's interpretation of
     incoming evidence, the post-incident lessons in
     practitioner language.
-    *Defined in*: `docs/scenarios/public-safety/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — first and
     second bullets);
-    `docs/scenarios/public-safety/fugitive-search-daniel-voss.md`
+    `fugitive-search-daniel-voss.md`
     (multiple touchpoints).
     *Tracked in*: not a discrete feature — emerges from
     generic `write_memory` + project-scope. The *category* is
@@ -1410,10 +1410,10 @@ GitHub issue (if any) tracking the implementation.
     out the door when they retire — a real attrition pain
     point in LEO agencies, where experienced commanders are
     increasingly hard to retain.
-    *Defined in*: `docs/scenarios/public-safety/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — fifth
     bullet);
-    `docs/scenarios/public-safety/fugitive-search-daniel-voss.md`
+    `fugitive-search-daniel-voss.md`
     (touchpoint 4).
     *Tracked in*: not a discrete feature — same emergence as
     narrative context. Category positioning, not separate
@@ -1433,7 +1433,7 @@ GitHub issue (if any) tracking the implementation.
     location) and analyst disagreements (Pattern Analyst's
     behavioral hypothesis vs. Geographic Analyst's physical
     constraint check).
-    *Defined in*: `docs/scenarios/public-safety/fugitive-search-daniel-voss.md`
+    *Defined in*: `fugitive-search-daniel-voss.md`
     ("Contradiction moments" section). The
     `report_contradiction` tool already exists in the MCP
     server; this is reuse, not new feature work.
@@ -1450,10 +1450,10 @@ GitHub issue (if any) tracking the implementation.
     examples include false-positive filters the fleet has
     derived from prior operations (the Drone agent's
     cold-weather thermal-deer rule).
-    *Defined in*: `docs/scenarios/public-safety/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — sixth
     bullet);
-    `docs/scenarios/public-safety/fugitive-search-daniel-voss.md`
+    `fugitive-search-daniel-voss.md`
     (touchpoint 5).
     *Tracked in*: not a discrete feature — emerges from
     `write_memory` + scope/owner conventions. The *category*
@@ -1479,10 +1479,10 @@ GitHub issue (if any) tracking the implementation.
     redaction) are not yet built — they would be a future
     issue, separate from #68 (healthcare PHI patterns).
     *Defined in*:
-    `docs/scenarios/public-safety/fugitive-search-daniel-voss.md`
+    `fugitive-search-daniel-voss.md`
     ("Sensitive-data moments" section). The underlying
     pipeline is documented in
-    `docs/scenarios/clinical/demo-plan.md`.
+    `../clinical/demo-plan.md`.
     *Tracked in*: pipeline stub via #68 for healthcare; LEO
     patterns are a future issue (not yet filed).
     *Visible in the demo*: third-party identification
@@ -1499,7 +1499,7 @@ GitHub issue (if any) tracking the implementation.
     lines; future work will route through LlamaStack
     telemetry (which RHOAI ships natively as a Tech Preview,
     avoiding the need to build a custom audit log).
-    *Defined in*: `docs/identity-model/authorization.md`
+    *Defined in*: `../../../docs/identity-model/authorization.md`
     ("Audit logging — stub now, persistence later" section).
     *Tracked in*: GitHub issue #67 (audit logging stub
     interface), #70 (persistent audit log via LlamaStack
@@ -1514,7 +1514,7 @@ GitHub issue (if any) tracking the implementation.
     the harness manifest needed to deploy and identify the
     demo's agent fleet. The CLI is the source of the ten LEO
     agents seen in the demo.
-    *Defined in*: `docs/identity-model/cli-requirements.md`
+    *Defined in*: `../../../docs/identity-model/cli-requirements.md`
     (the full requirements doc for the CLI).
     *Tracked in*: GitHub issue #69 (build agent generation
     CLI for demo fleet provisioning).

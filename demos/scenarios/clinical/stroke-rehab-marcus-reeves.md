@@ -762,7 +762,7 @@ references but doesn't detail):
    itself, the way human teams learn about each other").
 
 5. **Animation visualization of agent coordination.** Stretch item per
-   `docs/scenarios/README.md` — circles with pulses going to and from
+   `../README.md` — circles with pulses going to and from
    the central core, agents talking to each other. If it's working,
    it'll dramatically improve the demo's emotional landing for
    non-technical audience members. If it's not, plain harness output

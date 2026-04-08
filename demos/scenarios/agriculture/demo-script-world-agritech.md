@@ -1141,7 +1141,7 @@ GitHub issue (if any) tracking the implementation.
     public safety value props with one word changed,
     demonstrating platform messaging consistency across
     domains.
-    *Defined in*: `docs/scenarios/agriculture/README.md`
+    *Defined in*: `README.md`
     ("The value proposition in one sentence" section).
     *Visible in the demo*: title slide (Segment 1), explicit
     callout in Segment 3 after the killer moment, recap slide
@@ -1156,9 +1156,9 @@ GitHub issue (if any) tracking the implementation.
     existing stack does field data and prescriptions;
     MemoryHub holds the surrounding narrative and
     operational memory.
-    *Defined in*: `docs/scenarios/agriculture/README.md`
+    *Defined in*: `README.md`
     ("The decision-support boundary" section); reinforced in
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     ("MemoryHub vs. existing precision-ag platforms"
     section).
     *Visible in the demo*: framing block in Segment 1,
@@ -1174,11 +1174,11 @@ GitHub issue (if any) tracking the implementation.
     agriculture parallel to the cybersec "no auto-containment"
     third rail and the LEO "no autonomous tactical decisions"
     third rail.
-    *Defined in*: `docs/scenarios/README.md` ("AI supports
+    *Defined in*: `../README.md` ("AI supports
     humans, it doesn't replace them" section);
-    `docs/scenarios/agriculture/README.md` ("The 'humans in
+    `README.md` ("The 'humans in
     production' framing" section); each role description in
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     has an "In production" sidebar.
     *Visible in the demo*: agent disclaimer in Segment 1; the
     Spray Drone applicator approval gate in Segment 5 is the
@@ -1195,9 +1195,9 @@ GitHub issue (if any) tracking the implementation.
     is stored, who reads it, and when it's deleted. This
     addresses the audience's biggest concern about adopting
     new ag-tech.
-    *Defined in*: `docs/scenarios/agriculture/README.md`
+    *Defined in*: `README.md`
     ("The data ownership concern" section);
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     ("Agents support humans" section, data ownership
     paragraph).
     *Visible in the demo*: opening framing in Segment 1,
@@ -1213,7 +1213,7 @@ GitHub issue (if any) tracking the implementation.
     `actor_id` (which agent performed the operation, always
     derived from authenticated identity), `driver_id` (on
     whose behalf, may equal actor_id for autonomous operation).
-    *Defined in*: `docs/identity-model/data-model.md` ("The
+    *Defined in*: `../../../docs/identity-model/data-model.md` ("The
     triple: owner, actor, driver" section). Maps to RFC 8693
     token exchange semantics and FHIR Provenance.
     *Tracked in*: GitHub issue #65 (schema migration adding
@@ -1229,7 +1229,7 @@ GitHub issue (if any) tracking the implementation.
     Tom, Kelsey, and Linda across the team consultation —
     same actor_id, three different driver_ids in succession,
     each capture in the audit trail.
-    *Defined in*: `docs/identity-model/data-model.md` ("Tool
+    *Defined in*: `../../../docs/identity-model/data-model.md` ("Tool
     API changes" section).
     *Tracked in*: GitHub issues #65, #66.
     *Visible in the demo*: family team consultation moment
@@ -1243,7 +1243,7 @@ GitHub issue (if any) tracking the implementation.
     operation, each with their own driver_id. The role's
     accumulated knowledge serves all of them; the audit
     trail captures who was driving each conversation.
-    *Defined in*: `docs/identity-model/data-model.md`
+    *Defined in*: `../../../docs/identity-model/data-model.md`
     (implicitly, via the actor/driver split). The
     family-team consultation pattern is the agriculture
     parallel to the clinical Charge Nurse handoff, the
@@ -1261,7 +1261,7 @@ GitHub issue (if any) tracking the implementation.
     deployments (cooperatives, service providers), this is
     how each operation's memory stays bounded to its own
     team.
-    *Defined in*: `docs/identity-model/authorization.md`
+    *Defined in*: `../../../docs/identity-model/authorization.md`
     ("Project membership enforcement (critical path)"
     section).
     *Tracked in*: GitHub issue #64 (the critical-path
@@ -1291,9 +1291,9 @@ GitHub issue (if any) tracking the implementation.
     category. Cross-season is the agriculture parallel to
     cross-incident learning in cybersec and public safety
     and cross-encounter narrative continuity in clinical.
-    *Defined in*: `docs/scenarios/agriculture/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario");
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     (touchpoints 1-3, 7).
     *Tracked in*: emerges from project-scope membership
     (#64), schema (#65), tool plumbing (#66). No dedicated
@@ -1311,9 +1311,9 @@ GitHub issue (if any) tracking the implementation.
     intervention decisions, the operating philosophy of the
     operation, the lessons learned in narrative form, the
     cross-season trends in practitioner language.
-    *Defined in*: `docs/scenarios/agriculture/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario");
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     (multiple touchpoints).
     *Tracked in*: not a discrete feature — emerges from
     generic `write_memory` + project-scope. The *category*
@@ -1332,10 +1332,10 @@ GitHub issue (if any) tracking the implementation.
     knowledge walks out the door when farmers retire or
     operations change hands. MemoryHub gives a structural
     mechanism for capturing it across generations.
-    *Defined in*: `docs/scenarios/agriculture/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — second
     bullet, "Multi-generational tribal knowledge");
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     (touchpoints 1, 3, 5).
     *Tracked in*: not a discrete feature — same emergence
     as cross-season. Category positioning, not separate
@@ -1356,7 +1356,7 @@ GitHub issue (if any) tracking the implementation.
     contradicted by real-time on-farm wind data during the
     application.
     *Defined in*:
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     ("Contradiction moments" section). The
     `report_contradiction` tool already exists in the MCP
     server.
@@ -1371,9 +1371,9 @@ GitHub issue (if any) tracking the implementation.
     state (the Tractor agent's confirmation that no
     equipment will be in the spray field) and learned
     sensor quirks.
-    *Defined in*: `docs/scenarios/agriculture/README.md`
+    *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario");
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     (touchpoint 6).
     *Tracked in*: not a discrete feature — emerges from
     `write_memory` + scope/owner conventions.
@@ -1397,7 +1397,7 @@ GitHub issue (if any) tracking the implementation.
     — they would be a future issue, separate from #68
     (healthcare PHI patterns).
     *Defined in*:
-    `docs/scenarios/agriculture/disease-detection-hollander-farms.md`
+    `disease-detection-hollander-farms.md`
     ("Sensitive-data moments" section).
     *Tracked in*: pipeline stub via #68 for healthcare;
     agriculture patterns are a future issue (not yet
@@ -1414,7 +1414,7 @@ GitHub issue (if any) tracking the implementation.
     For agriculture specifically, the audit log running on
     the operation's own infrastructure is the
     instantiation of the data ownership story.
-    *Defined in*: `docs/identity-model/authorization.md`
+    *Defined in*: `../../../docs/identity-model/authorization.md`
     ("Audit logging — stub now, persistence later"
     section).
     *Tracked in*: GitHub issue #67 (audit logging stub
@@ -1429,7 +1429,7 @@ GitHub issue (if any) tracking the implementation.
     the harness manifest needed to deploy and identify the
     demo's agent fleet. The CLI is the source of the ten
     agriculture agents seen in the demo.
-    *Defined in*: `docs/identity-model/cli-requirements.md`
+    *Defined in*: `../../../docs/identity-model/cli-requirements.md`
     (the full requirements doc for the CLI).
     *Tracked in*: GitHub issue #69 (build agent generation
     CLI for demo fleet provisioning).

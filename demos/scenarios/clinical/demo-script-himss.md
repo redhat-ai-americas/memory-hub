@@ -984,7 +984,7 @@ GitHub issue (if any) tracking the implementation.
     one-line value prop that anchors the entire clinical scenario.
     It's not a feature — it's the framing that makes the features
     legible to a clinical audience.
-    *Defined in*: `docs/scenarios/clinical/README.md` ("The value
+    *Defined in*: `README.md` ("The value
     proposition in one sentence" section).
     *Visible in the demo*: title slide (Segment 1), explicit
     callout in Segment 5 after the killer moment, recap slide in
@@ -994,9 +994,9 @@ GitHub issue (if any) tracking the implementation.
     framing that MemoryHub is *complementary* to Clinical Decision
     Support, not competitive with it. CDS makes the clinical
     recommendations; MemoryHub holds the surrounding context.
-    *Defined in*: `docs/scenarios/clinical/README.md` ("The CDS
+    *Defined in*: `README.md` ("The CDS
     boundary" section); reinforced in
-    `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md`
+    `stroke-rehab-marcus-reeves.md`
     ("MemoryHub vs. Clinical Decision Support" section).
     *Visible in the demo*: framing block in Segment 1, callout
     during pharmacy discharge moment in Segment 5, closing pitch
@@ -1008,11 +1008,11 @@ GitHub issue (if any) tracking the implementation.
     production. The demo presenter plays the role of the entire
     care team as a demo necessity, not as a product claim about
     automation.
-    *Defined in*: `docs/scenarios/README.md` ("AI supports humans,
+    *Defined in*: `../README.md` ("AI supports humans,
     it doesn't replace them" section);
-    `docs/scenarios/clinical/README.md` ("The humans in production
+    `README.md` ("The humans in production
     framing" section); each role description in
-    `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md` has
+    `stroke-rehab-marcus-reeves.md` has
     an "In production" sidebar.
     *Visible in the demo*: agent disclaimer in Segment 1; "what
     you cannot say" section is the verbal discipline that keeps
@@ -1025,7 +1025,7 @@ GitHub issue (if any) tracking the implementation.
     `actor_id` (which agent performed the operation, always
     derived from authenticated identity), `driver_id` (on whose
     behalf, may equal actor_id for autonomous operation).
-    *Defined in*: `docs/identity-model/data-model.md` ("The triple:
+    *Defined in*: `../../../docs/identity-model/data-model.md` ("The triple:
     owner, actor, driver" section). Maps to RFC 8693 token
     exchange semantics and FHIR Provenance.
     *Tracked in*: GitHub issue #65 (schema migration adding
@@ -1042,7 +1042,7 @@ GitHub issue (if any) tracking the implementation.
     that human's behalf. Captured per-session (via
     `register_session(default_driver_id=...)`) or per-request
     (override parameter).
-    *Defined in*: `docs/identity-model/data-model.md` ("Tool API
+    *Defined in*: `../../../docs/identity-model/data-model.md` ("Tool API
     changes" section). FHIR mapping: `Provenance.agent.onBehalfOf`.
     RFC 8693 mapping: subject_token principal.
     *Tracked in*: GitHub issues #65, #66.
@@ -1058,7 +1058,7 @@ GitHub issue (if any) tracking the implementation.
     every staff turnover, and the audit trail captures both
     "what did the role know?" and "who was driving the role at
     time T?" as separately answerable questions.
-    *Defined in*: `docs/identity-model/data-model.md`
+    *Defined in*: `../../../docs/identity-model/data-model.md`
     (implicitly, via the actor/driver split — this is how the
     triple lands in clinical settings).
     *Tracked in*: GitHub issues #65, #66 (the underlying
@@ -1074,7 +1074,7 @@ GitHub issue (if any) tracking the implementation.
     `marcus-reeves-rehab`). Project-scope memories are
     readable/writable only by members. Enforces the hive-mind
     boundary so cross-project leakage is impossible.
-    *Defined in*: `docs/identity-model/authorization.md`
+    *Defined in*: `../../../docs/identity-model/authorization.md`
     ("Project membership enforcement (critical path)" section).
     *Tracked in*: GitHub issue #64 (the critical-path
     implementation work).
@@ -1089,7 +1089,7 @@ GitHub issue (if any) tracking the implementation.
     center) at the receiving end of a transfer. The structured
     discharge summary still moves through HL7 / interface engine;
     the memory carries what won't fit in the structured handoff.
-    *Defined in*: `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md`
+    *Defined in*: `stroke-rehab-marcus-reeves.md`
     ("Memory touchpoints" — Phase 1 → Phase 2 transition).
     *Tracked in*: implicitly via project-scope reads/writes
     (#64, #65, #66). No dedicated issue — this is an emergent
@@ -1104,10 +1104,10 @@ GitHub issue (if any) tracking the implementation.
     Patient preferences, what motivates them, what the team has
     learned about how to communicate with them, family dynamics
     that matter to the care plan.
-    *Defined in*: `docs/scenarios/clinical/README.md` ("What
+    *Defined in*: `README.md` ("What
     MemoryHub does (this is where the value lives)" section,
     first bullet);
-    `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md`
+    `stroke-rehab-marcus-reeves.md`
     ("Memory touchpoints" — touchpoints 1, 2, 4 are all
     narrative context).
     *Tracked in*: not a discrete feature — emerges from generic
@@ -1126,7 +1126,7 @@ GitHub issue (if any) tracking the implementation.
     conversation, a specific source document, a specific
     observation). Lets future readers understand the basis of a
     memory without re-deriving it.
-    *Defined in*: `docs/memory-tree.md` (the underlying tree
+    *Defined in*: `../../../docs/memory-tree.md` (the underlying tree
     branch model).
     *Tracked in*: existing functionality, no new issue. The
     branch model is already implemented.
@@ -1141,9 +1141,9 @@ GitHub issue (if any) tracking the implementation.
     attempted write and quarantines it before persistence. The
     agent then reformulates the memory to preserve clinical
     meaning without identifying details.
-    *Defined in*: `docs/scenarios/clinical/demo-plan.md`
+    *Defined in*: `demo-plan.md`
     (PHI/HIPAA detection patterns section);
-    `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md` (PHI
+    `stroke-rehab-marcus-reeves.md` (PHI
     moments section).
     *Tracked in*: GitHub issue #68 (HIPAA/PHI detection patterns
     in the curation pipeline).
@@ -1156,7 +1156,7 @@ GitHub issue (if any) tracking the implementation.
     and `driver_id` recorded. For the demo, the persistence
     layer is a stub that writes structured log lines; future
     work will route through LlamaStack telemetry.
-    *Defined in*: `docs/identity-model/authorization.md` ("Audit
+    *Defined in*: `../../../docs/identity-model/authorization.md` ("Audit
     logging — stub now, persistence later" section).
     *Tracked in*: GitHub issue #67 (audit logging stub
     interface), #70 (persistent audit log via LlamaStack
@@ -1171,9 +1171,9 @@ GitHub issue (if any) tracking the implementation.
     SSRI-over-SNRI preference memory in this scenario is the
     canonical example. This kind of knowledge lives in senior
     clinicians' heads and walks out the door when they leave.
-    *Defined in*: `docs/scenarios/clinical/README.md` ("What
+    *Defined in*: `README.md` ("What
     MemoryHub does" — second bullet);
-    `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md`
+    `stroke-rehab-marcus-reeves.md`
     (touchpoint 3).
     *Tracked in*: not a discrete feature — same emergence as
     narrative context. Category positioning, not separate code.
@@ -1187,12 +1187,12 @@ GitHub issue (if any) tracking the implementation.
     relationship is queryable; the team uses the surfaced
     conflict to update their working interpretation without
     losing the original observation.
-    *Defined in*: `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md`
+    *Defined in*: `stroke-rehab-marcus-reeves.md`
     ("Contradiction moments" section). The
     `report_contradiction` tool already exists in the MCP
     server; this is reuse, not new feature work.
     *Tracked in*: existing tool. Demo scenario validation in
-    `docs/identity-model/demo-plan.md` ("Contradiction
+    `../../../docs/identity-model/demo-plan.md` ("Contradiction
     detection demo flow validation" section) — needs end-to-end
     walkthrough to confirm gaps.
     *Visible in the demo*: cane contradiction moment in Segment 4
@@ -1205,9 +1205,9 @@ GitHub issue (if any) tracking the implementation.
     (outpatient) weeks later, allowing the receiving clinician
     to skip re-derivation and start where the previous
     clinician left off.
-    *Defined in*: `docs/scenarios/clinical/README.md` ("What
+    *Defined in*: `README.md` ("What
     MemoryHub does" — third bullet);
-    `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md`
+    `stroke-rehab-marcus-reeves.md`
     (touchpoint 4 — the killer moment).
     *Tracked in*: emerges from project-scope membership (#64),
     schema (#65), and tool plumbing (#66).
@@ -1221,9 +1221,9 @@ GitHub issue (if any) tracking the implementation.
     lessons it has learned about how it works. No human writes
     these; no human reads them directly. They're the AI fleet's
     self-correction layer.
-    *Defined in*: `docs/scenarios/clinical/README.md` ("What
+    *Defined in*: `README.md` ("What
     MemoryHub does" — fourth bullet);
-    `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md`
+    `stroke-rehab-marcus-reeves.md`
     (touchpoint 5).
     *Tracked in*: not a discrete feature — emerges from
     `write_memory` + scope/owner conventions. The *category* is
@@ -1240,10 +1240,10 @@ GitHub issue (if any) tracking the implementation.
     memory. Future readers see the current state and can
     inspect the history of how the team's understanding
     evolved.
-    *Defined in*: `docs/memory-tree.md` (versioning model with
+    *Defined in*: `../../../docs/memory-tree.md` (versioning model with
     `isCurrent` flag, already implemented).
     *Tracked in*: existing functionality. Reinforced as best
-    practice in `docs/scenarios/clinical/stroke-rehab-marcus-reeves.md`
+    practice in `stroke-rehab-marcus-reeves.md`
     (touchpoint 6 — goal reassessment via update_memory).
     *Visible in the demo*: plateau prediction superseded in
     Segment 7 (PCP sees both the original prediction and the
@@ -1255,7 +1255,7 @@ GitHub issue (if any) tracking the implementation.
     manifest needed to deploy and identify the demo's agent
     fleet. The CLI is the source of the ten clinical agents
     seen in the demo.
-    *Defined in*: `docs/identity-model/cli-requirements.md`
+    *Defined in*: `../../../docs/identity-model/cli-requirements.md`
     (the full requirements doc for the CLI).
     *Tracked in*: GitHub issue #69 (build agent generation CLI
     for demo fleet provisioning).

@@ -140,7 +140,7 @@ This is the first retro in the project to span a multi-session, multi-day **desi
 | **Q9 (push fanout cost at scale).** Not actionable until a real swarm deployment exists to benchmark against. The `open-questions.md` entry is the right home for this; no GitHub issue needed. | Watch | Stays as a note in `docs/agent-memory-ergonomics/open-questions.md` Q9. Revisit when a real swarm lands. |
 | **Demo scenarios retro carry-overs from 2026-04-07** (4 domain curation pattern issues, synthetic-name cross-check, SME validation outreach, "data ownership" framing lift). | Carry-forward | Not concept work — separate effort. Documented in `retrospectives/2026-04-07_demo-scenarios-and-identity-model/RETRO.md`. Pick up when the concept-close hangover settles. |
 | **`#83` memoryhub-ui deploy script gotcha** (no `oc rollout restart`, image digest pinning). | Carry-forward | Already filed in 2026-04-07 evening retro as #83. Not a concept item. |
-| **Pre-existing untracked `docs/auth/`, `docs/identity-model/`, `docs/scenarios/` directories** + dirty `.claude/skills/issue-tracker.md`. | Process | Carry-forward from 2026-04-07 evening retro. Not concept work but clutters every `git status`. Worth resolving in a housekeeping pass. |
+| **Pre-existing untracked `docs/auth/`, `docs/identity-model/`, `demos/scenarios/` directories** + dirty `.claude/skills/issue-tracker.md`. | Process | Carry-forward from 2026-04-07 evening retro. Not concept work but clutters every `git status`. Worth resolving in a housekeeping pass. |
 
 ## Action Items
 

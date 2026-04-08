@@ -1237,7 +1237,7 @@ the GitHub issue (if any) tracking the implementation.
     four scenarios with one word changed, demonstrating
     platform messaging consistency across five domains.
     *Defined in*:
-    `docs/scenarios/emergency-response/README.md` ("The
+    `README.md` ("The
     value proposition in one sentence" section).
     *Visible in the demo*: title slide (Segment 1),
     explicit callout in Segment 3 after the killer moment,
@@ -1251,9 +1251,9 @@ the GitHub issue (if any) tracking the implementation.
     notification systems), not competitive with any of
     them.
     *Defined in*:
-    `docs/scenarios/emergency-response/README.md` ("The
+    `README.md` ("The
     decision-support boundary" section); reinforced in
-    `docs/scenarios/emergency-response/wildfire-response-meadow-creek.md`
+    `wildfire-response-meadow-creek.md`
     ("MemoryHub vs. existing emergency response systems"
     section).
     *Visible in the demo*: framing block in Segment 1,
@@ -1272,12 +1272,12 @@ the GitHub issue (if any) tracking the implementation.
     Sheriff issuing the evacuation order — not the agent
     fleet — is the central demonstration of this principle
     in Segment 5.
-    *Defined in*: `docs/scenarios/README.md` ("AI supports
+    *Defined in*: `../README.md` ("AI supports
     humans, it doesn't replace them" section);
-    `docs/scenarios/emergency-response/README.md` ("The
+    `README.md` ("The
     'humans in production' framing" section); each role
     description in
-    `docs/scenarios/emergency-response/wildfire-response-meadow-creek.md`
+    `wildfire-response-meadow-creek.md`
     has an "In production" sidebar mapping to a real ICS
     position.
     *Visible in the demo*: agent disclaimer in Segment 1
@@ -1302,11 +1302,11 @@ the GitHub issue (if any) tracking the implementation.
     what's working, what's not, and the soft dynamics
     that shape today's operations.
     *Defined in*:
-    `docs/scenarios/emergency-response/wildfire-response-meadow-creek.md`
+    `wildfire-response-meadow-creek.md`
     ("Memory touchpoints" — touchpoint 1 is the central
     demonstration). The underlying mechanism (project-scope
     memory + role-as-actor with rotating drivers) is
-    documented in `docs/identity-model/data-model.md`.
+    documented in `../../../docs/identity-model/data-model.md`.
     *Tracked in*: emerges from project-scope membership
     (#64), schema (#65), tool plumbing (#66). No
     dedicated issue — this is the application-level
@@ -1327,7 +1327,7 @@ the GitHub issue (if any) tracking the implementation.
     year ago that informs tonight's contingency planning
     on the Meadow Creek Fire.
     *Defined in*:
-    `docs/scenarios/emergency-response/wildfire-response-meadow-creek.md`
+    `wildfire-response-meadow-creek.md`
     (touchpoints 2, 7).
     *Tracked in*: emerges from project-scope membership
     (#64), schema (#65), tool plumbing (#66). No
@@ -1347,7 +1347,7 @@ the GitHub issue (if any) tracking the implementation.
     authenticated identity), `driver_id` (on whose
     behalf, may equal actor_id for autonomous
     operation).
-    *Defined in*: `docs/identity-model/data-model.md`
+    *Defined in*: `../../../docs/identity-model/data-model.md`
     ("The triple: owner, actor, driver" section).
     *Tracked in*: GitHub issue #65 (schema migration
     adding `actor_id` and `driver_id` columns to
@@ -1363,7 +1363,7 @@ the GitHub issue (if any) tracking the implementation.
     operational period (night shift IC then Cynthia Park),
     with the audit trail capturing each driver
     independently.
-    *Defined in*: `docs/identity-model/data-model.md`
+    *Defined in*: `../../../docs/identity-model/data-model.md`
     ("Tool API changes" section).
     *Tracked in*: GitHub issues #65, #66.
     *Visible in the demo*: implicit throughout the
@@ -1379,7 +1379,7 @@ the GitHub issue (if any) tracking the implementation.
     given moment is a rotating `driver_id`. The role's
     accumulated incident memory survives every shift
     handoff.
-    *Defined in*: `docs/identity-model/data-model.md`
+    *Defined in*: `../../../docs/identity-model/data-model.md`
     (implicitly, via the actor/driver split). The
     IC operational period handoff is the EM parallel to
     the clinical Charge Nurse handoff, the cybersec
@@ -1399,7 +1399,7 @@ the GitHub issue (if any) tracking the implementation.
     the team's shared memory stays bounded to the
     incident participants and doesn't bleed across
     unrelated incidents or agencies.
-    *Defined in*: `docs/identity-model/authorization.md`
+    *Defined in*: `../../../docs/identity-model/authorization.md`
     ("Project membership enforcement (critical path)"
     section).
     *Tracked in*: GitHub issue #64 (the critical-path
@@ -1418,9 +1418,9 @@ the GitHub issue (if any) tracking the implementation.
     pattern, and the night shift IC's interpretive
     notes about the dozer gap and the local microclimate.
     *Defined in*:
-    `docs/scenarios/emergency-response/README.md` ("What
+    `README.md` ("What
     MemoryHub holds in this scenario");
-    `docs/scenarios/emergency-response/wildfire-response-meadow-creek.md`
+    `wildfire-response-meadow-creek.md`
     (touchpoints 1, 3, 6).
     *Tracked in*: not a discrete feature — emerges from
     `write_memory` + scope/owner conventions. Category
@@ -1438,7 +1438,7 @@ the GitHub issue (if any) tracking the implementation.
     earlier forecast is contradicted by on-incident
     RAWS data during the wind shift event.
     *Defined in*:
-    `docs/scenarios/emergency-response/wildfire-response-meadow-creek.md`
+    `wildfire-response-meadow-creek.md`
     ("Contradiction moments" section). The
     `report_contradiction` tool already exists in the MCP
     server.
@@ -1467,7 +1467,7 @@ the GitHub issue (if any) tracking the implementation.
     would be a future issue, separate from #68
     (healthcare PHI patterns).
     *Defined in*:
-    `docs/scenarios/emergency-response/wildfire-response-meadow-creek.md`
+    `wildfire-response-meadow-creek.md`
     ("Sensitive-data moments" section).
     *Tracked in*: pipeline stub via #68 for healthcare;
     emergency response patterns are a future issue (not
@@ -1486,7 +1486,7 @@ the GitHub issue (if any) tracking the implementation.
     operation's own infrastructure is the chain of
     accountability for after-action reviews and formal
     incident investigations.
-    *Defined in*: `docs/identity-model/authorization.md`
+    *Defined in*: `../../../docs/identity-model/authorization.md`
     ("Audit logging — stub now, persistence later"
     section).
     *Tracked in*: GitHub issue #67 (audit logging stub
@@ -1503,7 +1503,7 @@ the GitHub issue (if any) tracking the implementation.
     identify the demo's agent fleet. The CLI is the
     source of the ten emergency response agents seen in
     the demo.
-    *Defined in*: `docs/identity-model/cli-requirements.md`
+    *Defined in*: `../../../docs/identity-model/cli-requirements.md`
     (the full requirements doc for the CLI).
     *Tracked in*: GitHub issue #69 (build agent
     generation CLI for demo fleet provisioning).
