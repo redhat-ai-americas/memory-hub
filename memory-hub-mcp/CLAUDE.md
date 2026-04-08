@@ -99,18 +99,16 @@ src/
 - **STDIO** (local): `MCP_TRANSPORT=stdio` - for cmcp testing
 - **HTTP** (OpenShift): `MCP_TRANSPORT=http` - streamable-http on port 8080
 
-## Testing FastMCP Decorated Functions
+## Testing FastMCP Decorated Tools
 
-FastMCP decorators wrap functions in special objects. Access the underlying function via `.fn`:
+In FastMCP 3, `@mcp.tool(...)` returns the function directly, so tests import the tool and call it — no `.fn` access needed:
 
 ```python
 from src.tools.my_tool import my_tool
 
-my_tool_fn = my_tool.fn  # Access underlying function
-
 @pytest.mark.asyncio
 async def test_my_tool():
-    result = await my_tool_fn(param1="value1")
+    result = await my_tool(param1="value1")
     assert result == "expected"
 ```
 

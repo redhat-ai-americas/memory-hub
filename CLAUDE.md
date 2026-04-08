@@ -33,7 +33,7 @@ The MCP server lives in `memory-hub-mcp/` and was scaffolded from the fips-agent
 
 When working in the MCP server, read `memory-hub-mcp/CLAUDE.md` for import conventions, testing patterns, and architecture details. Key points:
 - Always use `src.` prefix for imports
-- Test decorated functions via `.fn` attribute
+- Call decorated tools directly in tests — FastMCP 3's `@mcp.tool(...)` returns the function itself, no `.fn` access needed
 - `fips-agents` is a global CLI (pipx), not in the venv
 - Fix file permissions before deployment: `find src -name "*.py" -perm 600 -exec chmod 644 {} \;`
 
