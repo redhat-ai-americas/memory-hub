@@ -38,62 +38,63 @@ The cluster uses GitHub as its identity provider. To log in as a contributor:
 4. Authorize the OAuth application the first time you log in.
 5. You will be logged into OpenShift with your GitHub username as your OpenShift username. For example, if your GitHub username is `jdoe`, your `oc whoami` will report `jdoe`.
 
-**First-time users have no role bindings.** By default you can see the list of projects but you cannot see pods, logs, or secrets in any of them. You need explicit role grants — see the next section.
+**First-time users land with `edit` access on the three memory-hub namespaces.** Because login is restricted at the IdP layer to the `redhat-ai-americas` GitHub org, any successful login comes from a trusted contributor, and the RoleBindings set up by the cluster setup script grant that group the `edit` role in `memory-hub-mcp`, `memoryhub-auth`, and `memoryhub-db` automatically. You can read pods, logs, events, secrets, configmaps, and deployments, and you can create/modify/delete most resources in those namespaces. See [No-deploy policy for new contributors](#no-deploy-policy-for-new-contributors) below for when *not* to exercise that access.
 
 ### How the cluster admin configures GitHub IdP
 
 This is reference material for the person maintaining the cluster, not for new contributors.
 
-The GitHub IdP is configured at `oauth/cluster` under `.spec.identityProviders`:
+Configuration lives in `scripts/cluster-setup-github-idp.sh` — a re-runnable idempotent script that:
 
-```yaml
-apiVersion: config.openshift.io/v1
-kind: OAuth
-metadata:
-  name: cluster
-spec:
-  identityProviders:
-  - name: github
-    mappingMethod: claim
-    type: GitHub
-    github:
-      clientID: <github-oauth-app-client-id>
-      clientSecret:
-        name: github-oauth-secret
-      organizations:
-      - redhat-ai-americas
+1. Creates/updates a `github-oauth-secret` Secret in the `openshift-config` namespace from `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` env vars
+2. Patches `oauth/cluster` to add a GitHub identity provider with `organizations: [redhat-ai-americas]` as the login allowlist, preserving any other IdPs already configured
+3. Creates RoleBindings binding `system:authenticated:oauth` to the `edit` cluster role in `memory-hub-mcp`, `memoryhub-auth`, and `memoryhub-db`
+4. Waits for the OAuth server redeployment to complete
+5. Prints verification steps
+
+Prerequisites before running: a GitHub OAuth App must exist under the `redhat-ai-americas` GitHub org (Settings → Developer settings → OAuth Apps). Its callback URL must be the cluster's OAuth server route plus `/oauth2callback/github`. Get the current route with:
+
+```bash
+oc get route oauth-openshift -n openshift-authentication \
+  -o jsonpath='https://{.spec.host}/oauth2callback/github'
 ```
 
-The `clientID` and `clientSecret` come from a GitHub OAuth App registered under the `redhat-ai-americas` org (Settings → Developer settings → OAuth Apps). The callback URL must be the cluster's OAuth server route — typically `https://oauth-openshift.apps.<cluster>.<sandbox>.opentlc.com/oauth2callback/github`.
+Then run the setup script:
 
-Restricting `organizations` to `redhat-ai-americas` means only members of that org can log in; users who are not org members get an "Access denied" error on the OpenShift login page.
+```bash
+export GITHUB_CLIENT_ID='<from the OAuth App page>'
+export GITHUB_CLIENT_SECRET='<generated in the OAuth App page, shown once>'
+scripts/cluster-setup-github-idp.sh
+```
 
-## Requesting access
+The script is safe to re-run against a freshly-rebuilt OpenTLC sandbox. See the header of the script for the full prerequisite checklist and the verification steps.
 
-New contributors default to **no cluster access**. If you need it for a specific piece of work, file a request:
+**Why `system:authenticated:oauth` is safe here:** OpenShift groups OAuth-authenticated users (from any IdP) into `system:authenticated:oauth`. In this cluster the only other IdP is `htpasswd` with a single bootstrap user (`admin1`) that is already cluster-admin via a higher-priority binding, so broadening this group's namespace access has no effect on `admin1` and grants the intended `edit` to every GitHub IdP login. If another IdP is added later, revisit this binding — `edit` access would extend to users of that IdP too.
 
-1. Open an issue in `redhat-ai-americas/memory-hub` with:
-   - Your GitHub username
-   - What you need to do in-cluster (e.g., "view MCP server logs to debug a session-focus regression")
-   - How long you expect to need access ("one-off" vs "ongoing development")
-   - Whether you need read-only or write access
-2. Use the `type:infra` label and assign it to `@rdwj`.
-3. Wait for approval. Do not start work assuming access will be granted.
+## Access level
 
-Once approved, the cluster admin will grant you the minimum role that satisfies the request. The default progression is:
+Every contributor who successfully logs in via GitHub gets the `edit` role on `memory-hub-mcp`, `memoryhub-auth`, and `memoryhub-db`. That means you can:
 
-| Level | Role | What it lets you do |
-|---|---|---|
-| **Observer** | `view` on `memory-hub-mcp`, `memoryhub-auth`, `memoryhub-db` | Read pods, logs, events, routes, services, deployments. No secrets. No writes. This is where every new contributor starts. |
-| **Debugger** | `view` + `pods/exec` | Everything above, plus `oc rsh` / `oc exec` into running pods. Useful for live debugging. Still no writes to manifests. |
-| **Developer** | `edit` on one namespace | Deploy, rollout restart, apply manifests in a single namespace. Granted only for active development work, and only for the namespace that work touches. |
-| **Admin** | `admin` (cluster-wide) | Reserved for `@rdwj`. Not granted to contributors. |
+- Read pods, logs, events, secrets, configmaps, deployments, services, routes
+- `oc rsh` / `oc exec` into running pods for live debugging
+- Create, update, and delete most resources in those three namespaces (deployments, services, configmaps, pods, routes)
+- Trigger rollout restarts and image builds
+- Modify or delete the PostgreSQL StatefulSet and its data (be careful)
 
-You start at Observer. Most contributor work never needs more than that. If you hit a wall, ask for the next level up — explain why in the issue.
+What you **cannot** do:
+
+- Access any namespace outside the three memory-hub ones
+- Modify RBAC (RoleBindings, ClusterRoleBindings, Roles)
+- Change the cluster's OAuth configuration
+- Modify cluster-scoped resources (nodes, cluster operators, the OAuth server itself)
+
+This is a deliberately permissive trust model suitable for a small team of trusted collaborators on a disposable sandbox cluster. It is not appropriate for a shared production environment.
+
+The no-deploy policy below is a **social** guardrail, not a technical one. You can technically redeploy things. The policy says don't, because the cluster also runs demos and the coordination matters.
 
 ## No-deploy policy for new contributors
 
-**Newly onboarded contributors do not deploy to the cluster, even if they have write access to the manifests.** This is a hard rule, not a suggestion, for three reasons:
+**Newly onboarded contributors do not deploy to the cluster, even though they have the cluster permissions to do so.** This is a hard rule, not a suggestion, for three reasons:
 
 1. **The cluster runs demos.** A broken MCP server or UI in the middle of a customer call is embarrassing and hard to recover from quickly. The cluster admin needs to know when changes are landing.
 2. **Deploys touch shared state.** The PostgreSQL schema, the oauth_clients table, curation rules, seeded memories — all of these are shared across everyone using the cluster. A bad migration affects everyone, not just you.
@@ -104,7 +105,7 @@ The practical workflow for a new contributor is:
 1. Open a PR against `main` with your change.
 2. Reviewer (code owner) reviews and merges.
 3. Cluster admin (or a designated deployer) runs the deploy separately, on their schedule, after the merge.
-4. You verify the deploy worked via the logs you can see with Observer access, or by asking the deployer to confirm.
+4. You verify the deploy worked via the logs you can see in-namespace, or by asking the deployer to confirm.
 
 Do not shortcut this by running `oc apply`, `oc rollout restart`, or starting builds directly — even if your role nominally allows it. Work against your local setup, let PRs mediate changes, and let the cluster admin manage the deploy cadence.
 
