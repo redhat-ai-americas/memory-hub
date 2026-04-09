@@ -338,13 +338,20 @@ How should session focus be inferred?
   4) Auto (try inference, fall back to ask)\
 """
 
-_CONTRADICTION_BLURB = """\
+_CONTRADICTION_BLURBS: dict[str, str] = {
+    "focused": """\
 Cross-domain contradiction detection:
-  Focused mode loads only memories matching session topic. If you make
-  a decision in this session that contradicts a memory from a different
-  topic, the agent won't catch it. You can value this coverage over
-  token efficiency by switching to broad mode.\
-"""
+  Focused sessions load only memories matching the session topic. If you
+  make a decision that contradicts a memory from a different topic, the
+  agent won't catch it. Enable this to load all domains (more tokens,
+  broader coverage).""",
+    "adaptive": """\
+Cross-domain contradiction detection:
+  Adaptive sessions load memories for the current topic and add more on
+  pivot, but memories from unvisited topics aren't checked. Enable this
+  to also load all domains at session start (more tokens, broader
+  coverage).""",
+}
 
 
 _SHAPE_BY_INDEX: dict[int, SessionShape] = {1: "focused", 2: "broad", 3: "adaptive"}
@@ -408,11 +415,17 @@ def config_init(
     focus_idx = _prompt_choice(_FOCUS_PROMPT, _FOCUS_BY_INDEX, default=4)
     focus_source = _FOCUS_BY_INDEX[focus_idx]
 
-    console.print(f"\n{_CONTRADICTION_BLURB}\n")
-    keep_contradictions = typer.confirm(
-        "Keep contradiction detection across all domains?",
-        default=False,
-    )
+    if shape == "broad":
+        # Broad mode already loads everything — contradiction detection
+        # is comprehensive by default.
+        keep_contradictions = True
+    else:
+        blurb = _CONTRADICTION_BLURBS.get(shape, _CONTRADICTION_BLURBS["focused"])
+        console.print(f"\n{blurb}\n")
+        keep_contradictions = typer.confirm(
+            "Enable cross-domain contradiction detection?",
+            default=False,
+        )
 
     choices = InitChoices(
         session_shape=shape,
@@ -434,6 +447,30 @@ def config_init(
         console.print(
             f"[yellow]Backed up legacy rule to {result.legacy_backup}.[/yellow]\n"
             f"Review and delete the .bak when you're satisfied with the new rule."
+        )
+
+    # ── Summary ──
+    mode_label = {"focused": "focused", "broad": "broad", "adaptive": "focused"}[shape]
+    if shape == "adaptive":
+        mode_explanation = f"mode={mode_label} + {pattern}"
+    else:
+        mode_explanation = f"mode={mode_label}"
+    console.print("\n[bold]Summary[/bold]")
+    console.print(f"  Session shape: {shape} ({mode_explanation})")
+    console.print(f"  Loading: {pattern}")
+    console.print(f"  Focus source: {focus_source}")
+    cross = "on" if keep_contradictions else "off"
+    console.print(f"  Cross-domain contradictions: {cross}")
+
+    # ── #153: API key check ──
+    api_key_path = Path.home() / ".config" / "memoryhub" / "api-key"
+    if api_key_path.exists():
+        console.print(f"\n[green]API key found at {api_key_path}[/green]")
+    else:
+        console.print(
+            f"\n[yellow]Warning:[/yellow] No API key at {api_key_path}\n"
+            "  Create this file with your MemoryHub API key before using\n"
+            "  the agent. Ask your administrator for a key."
         )
 
 

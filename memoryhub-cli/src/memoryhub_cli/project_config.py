@@ -141,11 +141,12 @@ _PATTERN_BLOCKS: dict[LoadingPattern, str] = {
     "eager": """\
 ## At session start
 
-1. Call `register_session(api_key="<your-api-key>")` to authenticate.
-2. Immediately call `search_memory(query="", mode="index", max_results=50)`
+1. Read your API key from `~/.config/memoryhub/api-key` (trim whitespace).
+2. Call `register_session(api_key="<key>")` to authenticate.
+3. Immediately call `search_memory(query="", mode="index", max_results=50)`
    to load the full working set as lightweight stubs. The empty query plus
    `mode="index"` returns headers for everything visible to your user.
-3. Hold the returned working set in context for the entire session.
+4. Hold the returned working set in context for the entire session.
 
 ## During the session
 
@@ -158,7 +159,8 @@ _PATTERN_BLOCKS: dict[LoadingPattern, str] = {
     "lazy": """\
 ## At session start
 
-Call `register_session(api_key="<your-api-key>")` to authenticate. Do NOT
+Read your API key from `~/.config/memoryhub/api-key` (trim whitespace)
+and call `register_session(api_key="<key>")` to authenticate. Do NOT
 call `search_memory` yet — your working set is empty until the first user
 turn arrives.
 
@@ -179,7 +181,8 @@ as your working set for the session.
     "lazy_with_rebias": """\
 ## At session start
 
-Call `register_session(api_key="<your-api-key>")` to authenticate. Do NOT
+Read your API key from `~/.config/memoryhub/api-key` (trim whitespace)
+and call `register_session(api_key="<key>")` to authenticate. Do NOT
 call `search_memory` yet.
 
 ## After the first user turn
@@ -208,7 +211,8 @@ not have to re-search for memories it already saw.
     "jit": """\
 ## At session start
 
-Call `register_session(api_key="<your-api-key>")` to authenticate. Do NOT
+Read your API key from `~/.config/memoryhub/api-key` (trim whitespace)
+and call `register_session(api_key="<key>")` to authenticate. Do NOT
 call `search_memory`. There is no working set in this pattern.
 
 ## During the session
