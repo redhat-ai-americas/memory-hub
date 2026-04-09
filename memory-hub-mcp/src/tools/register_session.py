@@ -20,6 +20,8 @@ from typing import Annotated, Any
 from fastmcp import Context
 from pydantic import Field
 
+from fastmcp.exceptions import ToolError
+
 from memoryhub_core.services.push_subscriber import (
     ensure_memoryhub_subscriber_running,
     stop_memoryhub_subscriber,
@@ -167,13 +169,10 @@ async def register_session(
     user = authenticate(api_key)
 
     if user is None:
-        return {
-            "error": True,
-            "message": (
-                "Invalid API key. Contact your system administrator for a valid key. "
-                "Keys follow the format: mh-dev-<username>-<year>."
-            ),
-        }
+        raise ToolError(
+            "Invalid API key. Contact your system administrator for a valid key. "
+            "Keys follow the format: mh-dev-<username>-<year>."
+        )
 
     set_session(user)
     await _start_push_for_session(user["user_id"], ctx)
