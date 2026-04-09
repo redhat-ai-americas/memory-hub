@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import src.tools.auth as auth_mod
 from src.tools.read_memory import read_memory
@@ -196,13 +197,11 @@ async def test_read_memory_unauthorized_for_other_owner():
                 new_callable=AsyncMock,
                 return_value=other_owner_node,
             ),
+            pytest.raises(ToolError, match="Not authorized"),
         ):
-            result = await read_memory(memory_id=str(other_owner_node.id))
+            await read_memory(memory_id=str(other_owner_node.id))
     finally:
         auth_mod._current_session = None
-
-    assert result["error"] is True
-    assert "Not authorized" in result["message"]
 
 
 @pytest.mark.asyncio
