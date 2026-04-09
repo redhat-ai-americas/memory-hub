@@ -47,6 +47,10 @@ class MemoryLoadingConfig(BaseModel):
     on_topic_shift: Literal["rebias", "warn", "ignore"] = "rebias"
     cross_domain_contradiction_detection: bool = False
 
+    # Campaign enrollment — projects can join campaigns for cross-project
+    # knowledge sharing. Campaigns are identified by name (unique per tenant).
+    campaigns: list[str] = Field(default_factory=list)
+
     # Pattern E (Phase 2 — schema accepted, not yet wired into the SDK).
     live_subscription: bool = False
     push_payload: Literal["uri_only", "full_content"] = "uri_only"

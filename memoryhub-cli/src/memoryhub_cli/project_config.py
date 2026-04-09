@@ -10,7 +10,7 @@ in this module is testable without I/O of its own.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -44,6 +44,7 @@ class InitChoices:
     pattern: LoadingPattern
     focus_source: FocusSource
     cross_domain_contradiction_detection: bool
+    campaigns: list[str] = field(default_factory=list)
 
 
 # ── Defaults that the prompt suggests based on session shape ─────────────────
@@ -86,6 +87,7 @@ def build_project_config(choices: InitChoices) -> ProjectConfig:
             cross_domain_contradiction_detection=(
                 choices.cross_domain_contradiction_detection
             ),
+            campaigns=choices.campaigns,
         ),
         retrieval_defaults=RetrievalDefaults(),
     )
@@ -274,6 +276,21 @@ When you DO notice a contradiction with a loaded memory, call
 """
 
 
+_CAMPAIGN_BLOCK = """\
+## Campaign enrollment
+
+This project is enrolled in the following campaigns:
+{campaign_list}
+
+When calling `search_memory`, pass `project_id` set to this project's
+identifier so campaign-scoped memories appear in your results. Campaign
+memories contain cross-project knowledge shared by all enrolled projects.
+When writing campaign-scoped memories, use `scope="campaign"` with
+`owner_id` set to the campaign UUID and `project_id` for enrollment
+verification.
+"""
+
+
 _PATTERN_TITLES: dict[LoadingPattern, str] = {
     "eager": "Eager",
     "lazy": "Lazy",
@@ -291,14 +308,19 @@ def render_rule_file(config: ProjectConfig) -> str:
         if config.memory_loading.cross_domain_contradiction_detection
         else _CONTRADICTION_DISABLED
     )
-    return "\n".join(
-        [
-            _RULE_HEADER.format(pattern_title=_PATTERN_TITLES[pattern]),
-            pattern_block,
-            _HYGIENE_BLOCK,
-            contradiction_block,
-        ]
-    )
+    blocks = [
+        _RULE_HEADER.format(pattern_title=_PATTERN_TITLES[pattern]),
+        pattern_block,
+        _HYGIENE_BLOCK,
+        contradiction_block,
+    ]
+
+    campaigns = config.memory_loading.campaigns
+    if campaigns:
+        campaign_list = "\n".join(f"- {c}" for c in campaigns)
+        blocks.append(_CAMPAIGN_BLOCK.format(campaign_list=campaign_list))
+
+    return "\n".join(blocks)
 
 
 # ── Filesystem helpers ───────────────────────────────────────────────────────

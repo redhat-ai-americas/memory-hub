@@ -427,11 +427,30 @@ def config_init(
             default=False,
         )
 
+    # ── Campaign enrollment ──
+    console.print(
+        "\n[bold]Campaign enrollment[/bold]\n"
+        "  Campaigns enable cross-project knowledge sharing. If this\n"
+        "  project is part of a coordinated effort (e.g., a modernization\n"
+        "  initiative), enter the campaign names. Skip if none."
+    )
+    campaigns_raw = typer.prompt(
+        "Campaigns (comma-separated, or Enter to skip)",
+        default="",
+        show_default=False,
+    )
+    campaigns = (
+        [c.strip() for c in campaigns_raw.split(",") if c.strip()]
+        if campaigns_raw
+        else []
+    )
+
     choices = InitChoices(
         session_shape=shape,
         pattern=pattern,
         focus_source=focus_source,
         cross_domain_contradiction_detection=keep_contradictions,
+        campaigns=campaigns,
     )
     config = build_project_config(choices)
 
@@ -461,6 +480,8 @@ def config_init(
     console.print(f"  Focus source: {focus_source}")
     cross = "on" if keep_contradictions else "off"
     console.print(f"  Cross-domain contradictions: {cross}")
+    if campaigns:
+        console.print(f"  Campaigns: {', '.join(campaigns)}")
 
     # ── #153: API key check ──
     api_key_path = Path.home() / ".config" / "memoryhub" / "api-key"

@@ -33,6 +33,7 @@ def _choices(**overrides) -> InitChoices:
         pattern="lazy_with_rebias",
         focus_source="auto",
         cross_domain_contradiction_detection=False,
+        campaigns=[],
     )
     base.update(overrides)
     return InitChoices(**base)
@@ -74,6 +75,18 @@ def test_build_project_config_passes_contradiction_flag_through():
     assert cfg.memory_loading.cross_domain_contradiction_detection is True
 
 
+def test_build_project_config_passes_campaigns_through():
+    cfg = build_project_config(
+        _choices(campaigns=["spring-boot-modernization", "fips-compliance"])
+    )
+    assert cfg.memory_loading.campaigns == ["spring-boot-modernization", "fips-compliance"]
+
+
+def test_build_project_config_empty_campaigns_by_default():
+    cfg = build_project_config(_choices())
+    assert cfg.memory_loading.campaigns == []
+
+
 # ── render_yaml ──────────────────────────────────────────────────────────
 
 
@@ -108,6 +121,16 @@ def test_render_yaml_includes_pattern_e_knobs():
     assert "push_payload" in ml
     assert "push_filter_weight" in ml
     assert "push_transport" in ml
+
+
+def test_render_yaml_round_trips_with_campaigns(tmp_path):
+    cfg = build_project_config(
+        _choices(campaigns=["spring-boot-modernization"])
+    )
+    path = tmp_path / CONFIG_FILENAME
+    path.write_text(render_yaml(cfg))
+    reloaded = load_project_config(path)
+    assert reloaded.memory_loading.campaigns == ["spring-boot-modernization"]
 
 
 # ── render_rule_file: per-pattern structural assertions ───────────────────
@@ -195,6 +218,23 @@ def test_rule_file_warns_against_hand_editing():
     out = render_rule_file(cfg)
     assert "Do not hand-edit" in out
     assert "memoryhub config regenerate" in out
+
+
+def test_rule_file_includes_campaign_block_when_enrolled():
+    cfg = build_project_config(
+        _choices(campaigns=["spring-boot-modernization", "fips-compliance"])
+    )
+    out = render_rule_file(cfg)
+    assert "## Campaign enrollment" in out
+    assert "- spring-boot-modernization" in out
+    assert "- fips-compliance" in out
+    assert "project_id" in out
+
+
+def test_rule_file_omits_campaign_block_when_no_campaigns():
+    cfg = build_project_config(_choices(campaigns=[]))
+    out = render_rule_file(cfg)
+    assert "## Campaign enrollment" not in out
 
 
 # ── write_init_files ─────────────────────────────────────────────────────
@@ -311,7 +351,7 @@ def test_config_init_runs_end_to_end_via_cli(tmp_path: Path):
     runner = CliRunner()
     # Inputs answer: shape=adaptive(3), pattern=default(3), focus=default(4),
     # contradictions=default(N).
-    answers = "3\n3\n4\nN\n"
+    answers = "3\n3\n4\nN\n\n"
     result = runner.invoke(
         app,
         ["config", "init", "--dir", str(tmp_path)],
