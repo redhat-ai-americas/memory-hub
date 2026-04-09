@@ -3,6 +3,7 @@
 import inspect
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import src.tools.auth as auth_mod
 from src.tools.write_memory import write_memory
@@ -62,17 +63,17 @@ async def test_write_memory_rejects_orphan_branch():
         "identity_type": "user",
     }
     try:
-        result = await write_memory(
-            content="orphan branch attempt",
-            scope="user",
-            branch_type="rationale",
-        )
+        with pytest.raises(ToolError) as exc_info:
+            await write_memory(
+                content="orphan branch attempt",
+                scope="user",
+                branch_type="rationale",
+            )
     finally:
         auth_mod._current_session = None
 
-    assert result["error"] is True
-    assert "parent_id is required" in result["message"]
-    assert "branch_type" in result["message"]
+    assert "parent_id is required" in str(exc_info.value), str(exc_info.value)
+    assert "branch_type" in str(exc_info.value), str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -86,16 +87,16 @@ async def test_write_memory_still_rejects_parent_without_branch_type():
         "identity_type": "user",
     }
     try:
-        result = await write_memory(
-            content="branch with no type",
-            scope="user",
-            parent_id=str(_uuid.uuid4()),
-        )
+        with pytest.raises(ToolError) as exc_info:
+            await write_memory(
+                content="branch with no type",
+                scope="user",
+                parent_id=str(_uuid.uuid4()),
+            )
     finally:
         auth_mod._current_session = None
 
-    assert result["error"] is True
-    assert "branch_type is required" in result["message"]
+    assert "branch_type is required" in str(exc_info.value), str(exc_info.value)
 
 
 @pytest.mark.asyncio
