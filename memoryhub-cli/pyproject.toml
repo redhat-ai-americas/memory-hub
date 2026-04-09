@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memoryhub-cli"
-version = "0.1.1"
+version = "0.2.0"
 description = "CLI client for MemoryHub — centralized, governed memory for AI agents"
 readme = "README.md"
 license = "Apache-2.0"
