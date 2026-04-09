@@ -1,9 +1,13 @@
 """Create or update a user-layer curation rule."""
 
+import logging
 from typing import Annotated, Any
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import Field
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import and_, select
 
 from src.core.app import mcp
@@ -92,7 +96,7 @@ async def set_curation_rule(
     try:
         claims = get_claims_from_context()
     except AuthenticationError as exc:
-        return {"error": True, "message": str(exc)}
+        raise ToolError(str(exc)) from exc
 
     # Admin operations require memory:admin scope or service identity
     caller_scopes = claims.get("scopes", [])
@@ -103,19 +107,17 @@ async def set_curation_rule(
         pass  # allowed — user-layer rules are scoped to owner_id below
 
     if tier not in _VALID_TIERS:
-        return {
-            "error": True,
-            "message": f"Invalid tier {tier!r}. Must be one of: {', '.join(_VALID_TIERS)}.",
-        }
+        raise ToolError(
+            f"Invalid tier {tier!r}. Must be one of: {', '.join(_VALID_TIERS)}."
+        )
 
     if action not in _VALID_ACTIONS:
-        return {
-            "error": True,
-            "message": f"Invalid action {action!r}. Must be one of: {', '.join(_VALID_ACTIONS)}.",
-        }
+        raise ToolError(
+            f"Invalid action {action!r}. Must be one of: {', '.join(_VALID_ACTIONS)}."
+        )
 
     if not name.strip():
-        return {"error": True, "message": "name cannot be empty."}
+        raise ToolError("name cannot be empty.")
 
     owner_id = claims["sub"]
     tenant_id = get_tenant_filter(claims)
@@ -139,13 +141,10 @@ async def set_curation_rule(
         protected_result = await session.execute(protected_stmt)
         protected_rule = protected_result.scalar_one_or_none()
         if protected_rule is not None:
-            return {
-                "error": True,
-                "message": (
-                    f"Cannot override system rule {name!r} — it is protected "
-                    "by the platform administrator."
-                ),
-            }
+            raise ToolError(
+                f"Cannot override system rule {name!r} — it is protected "
+                "by the platform administrator."
+            )
 
         # Check for existing user rule with this name (upsert). Scope by
         # tenant so tenant A's rule doesn't collide with tenant B's rule of
@@ -200,8 +199,13 @@ async def set_curation_rule(
             "rule": rule_read.model_dump(mode="json"),
         }
 
+    except ToolError:
+        raise
     except Exception as exc:
-        return {"error": True, "message": f"Failed to set curation rule: {exc}"}
+        logger.error("Failed to set curation rule %r: %s", name, exc, exc_info=True)
+        raise ToolError(
+            f"Failed to set curation rule {name!r}. See server logs for details."
+        ) from exc
     finally:
         if gen is not None:
             await release_db_session(gen)

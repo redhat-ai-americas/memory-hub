@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import src.tools.auth as auth_mod
 from src.tools.set_curation_rule import set_curation_rule
@@ -51,26 +52,24 @@ def test_set_curation_rule_default_values():
 
 @pytest.mark.asyncio
 async def test_set_curation_rule_requires_auth():
-    """Unauthenticated calls return an error."""
+    """Unauthenticated calls raise ToolError."""
     auth_mod._current_session = None
-    result = await set_curation_rule(name="my_rule")
-    assert result["error"] is True
+    with pytest.raises(ToolError):
+        await set_curation_rule(name="my_rule")
 
 
 @pytest.mark.asyncio
 async def test_set_curation_rule_invalid_tier():
-    """Invalid tier returns an error with valid options."""
-    result = await set_curation_rule(name="my_rule", tier="magic")
-    assert result["error"] is True
-    assert "regex" in result["message"]
+    """Invalid tier raises ToolError with valid options."""
+    with pytest.raises(ToolError, match="regex"):
+        await set_curation_rule(name="my_rule", tier="magic")
 
 
 @pytest.mark.asyncio
 async def test_set_curation_rule_invalid_action():
-    """Invalid action returns an error with valid options."""
-    result = await set_curation_rule(name="my_rule", action="destroy")
-    assert result["error"] is True
-    assert "flag" in result["message"]
+    """Invalid action raises ToolError with valid options."""
+    with pytest.raises(ToolError, match="flag"):
+        await set_curation_rule(name="my_rule", action="destroy")
 
 
 @pytest.mark.asyncio
@@ -88,10 +87,9 @@ async def test_set_curation_rule_protected_system_rule():
     with (
         patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
+        pytest.raises(ToolError, match="protected"),
     ):
-        result = await set_curation_rule(name="secrets_scan")
-    assert result["error"] is True
-    assert "protected" in result["message"]
+        await set_curation_rule(name="secrets_scan")
 
 
 @pytest.mark.asyncio
