@@ -368,7 +368,7 @@ def _prompt_choice(prompt_text: str, choices: dict, default: int) -> int:
     """Prompt for an integer in `choices`, defaulting to `default`."""
     while True:
         console.print(prompt_text)
-        raw = typer.prompt(f"Choice [{default}]", default=str(default))
+        raw = typer.prompt(f"Choice [{default}]", default=str(default), show_default=False)
         try:
             value = int(raw)
         except ValueError:
