@@ -94,11 +94,23 @@ The `register_session` tool is retained as a compatibility shim for MCP clients 
 
 ## Error Handling
 
-MCP tools return clear, actionable errors as `{"error": true, "message": "..."}` dicts. Error messages explain what went wrong AND how to fix it:
+All MCP tools raise `fastmcp.exceptions.ToolError` for failures. This sets
+the `is_error` flag on the MCP wire response — no tool returns error dicts.
+Error messages explain what went wrong AND how to fix it:
 
 - "Invalid relationship_type 'friends_with'. Must be one of: derived_from, supersedes, conflicts_with, related_to."
 - "Write blocked by curation rule: secrets_scan. Content matches aws_access_key pattern (AKIA...MPLE)."
 - "Memory node abc-123 not found. Verify both source_id and target_id refer to existing, current memory nodes."
+
+The SDK classifies these messages by prefix into typed exceptions:
+`NotFoundError`, `PermissionDeniedError`, `ValidationError`,
+`AuthenticationError`, `ConflictError`, and `CurationVetoError`.
+
+See [`planning/tool-error-standardization.md`](../planning/tool-error-standardization.md) for the full design note.
+
+Generic `except Exception` handlers in tools log at ERROR and scrub internal
+details from the raised `ToolError` message to prevent leaking SQL fragments
+or stack traces to callers.
 
 ## Design Questions (Resolved)
 

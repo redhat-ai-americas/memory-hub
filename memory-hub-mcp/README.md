@@ -64,8 +64,8 @@ immediately; higher-scope writes (organizational, enterprise) are queued
 for curator review. The return value includes curation metadata — if
 `curation.similar_count > 0`, inspect the near-duplicates with
 `get_similar_memories` and consider `update_memory` instead of creating
-duplicates. If a curation rule blocks the write, `error: true` is returned
-with the reason.
+duplicates. If a curation rule blocks the write, a `ToolError` is raised with the reason
+(SDK maps to `CurationVetoError`).
 
 **Parameters:** `content` (str), `scope` (`user` | `project` | `role` |
 `organizational` | `enterprise`), `owner_id` (str, optional — defaults to
@@ -315,6 +315,45 @@ import conventions, and the reason this server registers tools directly
 in `main.py` instead of using the template's dynamic loader (short version:
 the loader was designed for FastMCP 2 and doesn't register tools correctly
 under v3).
+
+## Error handling
+
+All tools raise `fastmcp.exceptions.ToolError` for failures. This sets the
+`is_error` flag on the MCP wire response, which well-behaved clients surface
+as a tool-level error rather than a protocol error.
+
+**Contract**: no tool returns `{"error": True}` dicts. A regression test
+(`tests/test_no_error_dicts.py`) enforces this.
+
+**For tool authors**: import `ToolError` from `fastmcp.exceptions`, raise it
+for all failures, and add an `except ToolError: raise` guard before any
+broad `except Exception` handler to prevent re-wrapping:
+
+```python
+from fastmcp.exceptions import ToolError
+
+try:
+    result = await service.do_thing(...)
+except ToolError:
+    raise  # let it propagate unchanged
+except Exception as e:
+    logger.error("Unexpected error in my_tool: %s", e)
+    raise ToolError("Internal error; check server logs") from None
+```
+
+The SDK classifies errors by message prefix into typed exceptions:
+
+| Message pattern (case-insensitive) | SDK exception |
+|--------|--------------|
+| contains `"invalid api key"` or `"no authenticated session"` | `AuthenticationError` |
+| starts with `"curation rule blocked"` | `CurationVetoError` |
+| contains `"not found"` | `NotFoundError` |
+| contains `"not authorized"` or starts with `"access denied:"` | `PermissionDeniedError` |
+| contains `"already exists"` or `"already deleted"` | `ConflictError` |
+| starts with `"invalid "`, or contains `" must be "` or `"cannot be empty"` | `ValidationError` |
+
+See [`planning/tool-error-standardization.md`](../planning/tool-error-standardization.md)
+for the full design note.
 
 ## Further reading
 
