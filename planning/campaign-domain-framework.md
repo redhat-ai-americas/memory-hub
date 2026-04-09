@@ -229,14 +229,22 @@ This is a significant capability addition. Suggested phasing:
 - Co-occurrence-based hierarchy inference
 - Ontology visualization in the dashboard
 
+## Resolved decisions
+
+1. **Campaign governance**: Lower friction than org-scope. If you have access to a project that's part of the campaign, you have access to the campaign. No curator review required for campaign-scoped writes — the bounded audience and project-level access control are sufficient.
+
+2. **Campaign creation and enrollment**: Campaigns are created by admins (via the Admin UI or API). Developers enroll their projects by re-running `memoryhub config init` or editing `.memoryhub.yaml`. A project can be a member of multiple campaigns (e.g., campaign 1: refactor 500 Java apps; campaign 2: refactor any app touching API X).
+
+3. **Domain vocabulary**: Emergent, not pre-seeded. Early sessions will produce inconsistent tags ("Go" vs "golang") — that's acceptable. The LLMs in the consuming agents can differentiate fuzzy nomenclature. The curator normalizes over time as a background refinement, not a prerequisite.
+
+4. **MVP scope**: Phases 1 (campaign scope) and 2 (domain tagging) are sufficient to start. The curator promotion pipeline (Phase 3+) is high-value but not required for initial adoption. Campaign + domain tagging delivers immediate cross-project visibility and better retrieval.
+
 ## Open questions
 
-1. **Campaign governance** — Should campaign-scoped writes require curator review (like org-scope), or is lower friction appropriate since the audience is bounded? Leaning toward lower friction with curator monitoring.
+1. **Domain steward model** — Who reviews promotions when Phase 3 lands? One steward per major domain? Per campaign? The org structure determines this. Need input from the client on their team topology.
 
-2. **Domain steward model** — Who reviews promotions? One steward per major domain? Per campaign? The org structure determines this. Need input from the client on their team topology.
+2. **Cross-campaign knowledge** — When two campaigns both discover the same thing (e.g., FIPS + modernization both learn about TLS cipher suites), how does dedup work across campaigns? The curator's novelty check needs to search beyond the target campaign.
 
-3. **Cross-campaign knowledge** — When two campaigns both discover the same thing (e.g., FIPS + modernization both learn about TLS cipher suites), how does dedup work across campaigns? The curator's novelty check needs to search beyond the target campaign.
+3. **Contradiction routing for promoted memories** — When an agent contradicts a promoted memory, does the contradiction go to the memory's original author, the domain steward, or the curator? Probably the curator, which decides whether to trigger early review.
 
-4. **Contradiction routing for promoted memories** — When an agent contradicts a promoted memory, does the contradiction go to the memory's original author, the domain steward, or the curator? Probably the curator, which decides whether to trigger early review.
-
-5. **Scale** — At 1,500 apps with 500 in active modernization, how many promotion candidates per day? Need empirical data from early adopters to size the HITL team and set auto-approval thresholds.
+4. **Scale** — At 1,500 apps with 500 in active modernization, how many promotion candidates per day? Need empirical data from early adopters to size the HITL team and set auto-approval thresholds.
