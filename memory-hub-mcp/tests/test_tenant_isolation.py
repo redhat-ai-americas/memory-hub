@@ -31,6 +31,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from memoryhub_core.models.schemas import (
     MemoryNodeRead,
@@ -350,11 +351,9 @@ async def test_write_as_a_read_as_b_returns_not_found():
             "src.tools.read_memory._read_memory",
             new=AsyncMock(side_effect=_fake_read),
         ),
+        pytest.raises(ToolError, match="(?i)not found"),
     ):
-        read_result = await read_memory(memory_id=memory_id)
-
-    assert read_result.get("error") is True
-    assert "not found" in read_result["message"].lower()
+        await read_memory(memory_id=memory_id)
 
 
 @pytest.mark.asyncio
@@ -1757,13 +1756,14 @@ async def test_cross_tenant_error_does_not_mention_tenant():
             "src.tools.read_memory._read_memory",
             new=AsyncMock(side_effect=_fake_read),
         ),
+        pytest.raises(ToolError) as exc_info,
     ):
-        result = await read_memory(memory_id=memory_id)
+        await read_memory(memory_id=memory_id)
 
-    assert result.get("error") is True
-    message = result["message"].lower()
+    message = str(exc_info.value).lower()
+    assert "not found" in message
     assert "tenant" not in message, (
         f"Cross-tenant error message leaks tenant wording: {message!r}"
     )
-    assert TENANT_A not in result["message"]
-    assert TENANT_B not in result["message"]
+    assert TENANT_A.lower() not in message
+    assert TENANT_B.lower() not in message
