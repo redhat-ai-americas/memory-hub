@@ -16,6 +16,13 @@ Published to PyPI as [`memoryhub`](https://pypi.org/project/memoryhub/). Lives i
 
 ### [Unreleased]
 
+### [0.2.0] — 2026-04-09
+
+- **Error handling overhaul (#97)**: All MCP tools now raise `ToolError` instead
+  of returning error dicts. SDK classifies error messages by prefix into typed
+  exceptions: `AuthenticationError`, `CurationVetoError`, `NotFoundError`,
+  `PermissionDeniedError`, `ConflictError`, `ValidationError`.
+
 ### [0.1.0] — 2026-04-05
 
 - Initial SDK release. Typed async client wrapping the MCP tool catalog,
@@ -30,12 +37,18 @@ Published to PyPI as [`memoryhub`](https://pypi.org/project/memoryhub/). Lives i
 
 ## memoryhub-cli
 
-Lives in [`memoryhub-cli/`](memoryhub-cli/). Not yet published.
+Published to PyPI as [`memoryhub-cli`](https://pypi.org/project/memoryhub-cli/). Lives in [`memoryhub-cli/`](memoryhub-cli/).
 
 ### [Unreleased]
 
-- Terminal client for search/read/write/delete plus `memoryhub config init`
-  for generating `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`.
+### [0.1.0] — 2026-04-09
+
+- Initial release. Terminal client with search, read, write, delete, and
+  history commands.
+- `memoryhub config init` for generating `.memoryhub.yaml` and
+  `.claude/rules/memoryhub-loading.md`.
+- `memoryhub config regenerate` for re-rendering rule files.
+- Tag: `memoryhub-cli/v0.1.0`
 
 ## memory-hub-mcp
 
