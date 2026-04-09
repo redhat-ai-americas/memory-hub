@@ -213,6 +213,8 @@ Issues and PRs are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for 
 
 Most contributions do not need access to the demo OpenShift cluster — local SQLite or a podman PostgreSQL container is enough. If you do need cluster access, see [`docs/contributor-cluster-access.md`](docs/contributor-cluster-access.md) for the access policy, GitHub IdP setup, and the no-deploy rule for new contributors.
 
+Maintainers inviting new contributors should follow the checklist in [`docs/inviting-new-contributors.md`](docs/inviting-new-contributors.md).
+
 ## License
 
 Apache 2.0 — see [`LICENSE`](LICENSE).
