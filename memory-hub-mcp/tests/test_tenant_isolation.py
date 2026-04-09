@@ -1285,11 +1285,9 @@ async def test_get_similar_memories_cross_tenant_returns_not_found():
             "src.tools.get_similar_memories.get_similar_memories_service",
             new=AsyncMock(side_effect=_fake_similar),
         ),
+        pytest.raises(ToolError, match="(?i)not found"),
     ):
-        result = await get_similar_memories(memory_id=memory_id)
-
-    assert result.get("error") is True
-    assert "not found" in result["message"].lower()
+        await get_similar_memories(memory_id=memory_id)
 
 
 @pytest.mark.asyncio
