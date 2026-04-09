@@ -37,7 +37,7 @@ stringData:
   MEMORYHUB_DB_PORT: "5432"
   MEMORYHUB_DB_NAME: memoryhub
   MEMORYHUB_DB_USER: memoryhub
-  MEMORYHUB_DB_PASSWORD: REPLACE-ME-match-the-postgres-secret
+  MEMORYHUB_DB_PASSWORD: memoryhub-dev-password
   MEMORYHUB_EMBEDDING_URL: https://all-minilm-l6-v2-embedding-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/embed
   # Cross-encoder reranker for two-vector retrieval (#58). When unset
   # or unreachable, search_memories_with_focus falls back to a cosine-
