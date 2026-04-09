@@ -1,10 +1,14 @@
 """Suggest that two memories should be merged into one."""
 
+import logging
 import uuid
 from typing import Annotated, Any
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import Field
+
+logger = logging.getLogger(__name__)
 
 from src.core.app import mcp
 from src.core.authz import (
@@ -58,36 +62,28 @@ async def suggest_merge(
     try:
         claims = get_claims_from_context()
     except AuthenticationError as exc:
-        return {"error": True, "message": str(exc)}
+        raise ToolError(str(exc)) from exc
     tenant = get_tenant_filter(claims)
 
     try:
         parsed_a = uuid.UUID(memory_a_id)
     except ValueError:
-        return {
-            "error": True,
-            "message": f"Invalid memory_a_id format: {memory_a_id!r}. Must be a valid UUID.",
-        }
+        raise ToolError(
+            f"Invalid memory_a_id format: {memory_a_id!r}. Must be a valid UUID."
+        )
 
     try:
         parsed_b = uuid.UUID(memory_b_id)
     except ValueError:
-        return {
-            "error": True,
-            "message": f"Invalid memory_b_id format: {memory_b_id!r}. Must be a valid UUID.",
-        }
+        raise ToolError(
+            f"Invalid memory_b_id format: {memory_b_id!r}. Must be a valid UUID."
+        )
 
     if parsed_a == parsed_b:
-        return {
-            "error": True,
-            "message": "memory_a_id and memory_b_id must be different.",
-        }
+        raise ToolError("memory_a_id and memory_b_id must be different.")
 
     if not reasoning or not reasoning.strip():
-        return {
-            "error": True,
-            "message": "reasoning cannot be empty.",
-        }
+        raise ToolError("reasoning cannot be empty.")
 
     gen = None
     try:
@@ -100,9 +96,9 @@ async def suggest_merge(
             try:
                 mem = await _read_memory(mid, session, tenant_id=tenant)
             except MemoryNotFoundError:
-                return {"error": True, "message": f"Memory {mid} not found."}
+                raise ToolError(f"Memory {mid} not found.")
             if not authorize_read(claims, mem):
-                return {"error": True, "message": f"Not authorized to access {label} ({mid})."}
+                raise ToolError(f"Not authorized to access {label} ({mid}).")
 
         rel_create = RelationshipCreate(
             source_id=parsed_a,
@@ -125,15 +121,15 @@ async def suggest_merge(
             ),
         }
 
+    except ToolError:
+        raise
     except MemoryNotFoundError as exc:
-        return {
-            "error": True,
-            "message": f"Memory node {exc.memory_id} not found.",
-        }
+        raise ToolError(f"Memory node {exc.memory_id} not found.") from exc
     except ValueError as exc:
-        return {"error": True, "message": str(exc)}
+        raise ToolError(str(exc)) from exc
     except Exception as exc:
-        return {"error": True, "message": f"Failed to suggest merge: {exc}"}
+        logger.error("Failed to suggest merge %s+%s: %s", memory_a_id, memory_b_id, exc, exc_info=True)
+        raise ToolError("Failed to suggest merge. See server logs for details.") from exc
     finally:
         if gen is not None:
             await release_db_session(gen)

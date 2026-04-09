@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import src.tools.auth as auth_mod
 from src.tools.suggest_merge import suggest_merge
@@ -39,51 +40,48 @@ def test_suggest_merge_has_required_parameters():
 
 @pytest.mark.asyncio
 async def test_suggest_merge_requires_auth():
-    """Unauthenticated calls return an error."""
+    """Unauthenticated calls raise ToolError."""
     auth_mod._current_session = None
-    result = await suggest_merge(
-        memory_a_id=str(uuid.uuid4()),
-        memory_b_id=str(uuid.uuid4()),
-        reasoning="duplicates",
-    )
-    assert result["error"] is True
+    with pytest.raises(ToolError):
+        await suggest_merge(
+            memory_a_id=str(uuid.uuid4()),
+            memory_b_id=str(uuid.uuid4()),
+            reasoning="duplicates",
+        )
 
 
 @pytest.mark.asyncio
 async def test_suggest_merge_invalid_uuid():
-    """Bad UUID format returns a clear error."""
-    result = await suggest_merge(
-        memory_a_id="bad-uuid",
-        memory_b_id=str(uuid.uuid4()),
-        reasoning="duplicates",
-    )
-    assert result["error"] is True
-    assert "Invalid memory_a_id format" in result["message"]
+    """Bad UUID format raises ToolError with a clear message."""
+    with pytest.raises(ToolError, match="Invalid memory_a_id format"):
+        await suggest_merge(
+            memory_a_id="bad-uuid",
+            memory_b_id=str(uuid.uuid4()),
+            reasoning="duplicates",
+        )
 
 
 @pytest.mark.asyncio
 async def test_suggest_merge_self_reference():
-    """Same source and target returns an error."""
+    """Same source and target raises ToolError."""
     same_id = str(uuid.uuid4())
-    result = await suggest_merge(
-        memory_a_id=same_id,
-        memory_b_id=same_id,
-        reasoning="duplicates",
-    )
-    assert result["error"] is True
-    assert "must be different" in result["message"]
+    with pytest.raises(ToolError, match="must be different"):
+        await suggest_merge(
+            memory_a_id=same_id,
+            memory_b_id=same_id,
+            reasoning="duplicates",
+        )
 
 
 @pytest.mark.asyncio
 async def test_suggest_merge_empty_reasoning():
-    """Empty reasoning returns an error."""
-    result = await suggest_merge(
-        memory_a_id=str(uuid.uuid4()),
-        memory_b_id=str(uuid.uuid4()),
-        reasoning="   ",
-    )
-    assert result["error"] is True
-    assert "reasoning cannot be empty" in result["message"]
+    """Empty reasoning raises ToolError."""
+    with pytest.raises(ToolError, match="reasoning cannot be empty"):
+        await suggest_merge(
+            memory_a_id=str(uuid.uuid4()),
+            memory_b_id=str(uuid.uuid4()),
+            reasoning="   ",
+        )
 
 
 @pytest.mark.asyncio
