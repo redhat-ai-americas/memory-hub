@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import src.tools.auth as auth_mod
 from src.tools.create_relationship import create_relationship
@@ -47,52 +48,48 @@ def test_create_relationship_default_values():
 
 @pytest.mark.asyncio
 async def test_create_relationship_requires_auth():
-    """Unauthenticated calls return an error."""
+    """Unauthenticated calls raise ToolError."""
     auth_mod._current_session = None
-    result = await create_relationship(
-        source_id=str(uuid.uuid4()),
-        target_id=str(uuid.uuid4()),
-        relationship_type="related_to",
-    )
-    assert result["error"] is True
-    assert "Authentication required" in result["message"]
+    with pytest.raises(ToolError, match="Authentication required"):
+        await create_relationship(
+            source_id=str(uuid.uuid4()),
+            target_id=str(uuid.uuid4()),
+            relationship_type="related_to",
+        )
 
 
 @pytest.mark.asyncio
 async def test_create_relationship_invalid_type():
-    """Invalid relationship_type returns an error with valid options."""
-    result = await create_relationship(
-        source_id=str(uuid.uuid4()),
-        target_id=str(uuid.uuid4()),
-        relationship_type="bad_type",
-    )
-    assert result["error"] is True
-    assert "derived_from" in result["message"]
+    """Invalid relationship_type raises ToolError with valid options."""
+    with pytest.raises(ToolError, match="derived_from"):
+        await create_relationship(
+            source_id=str(uuid.uuid4()),
+            target_id=str(uuid.uuid4()),
+            relationship_type="bad_type",
+        )
 
 
 @pytest.mark.asyncio
 async def test_create_relationship_invalid_uuid():
-    """Bad UUID format returns a clear error."""
-    result = await create_relationship(
-        source_id="not-a-uuid",
-        target_id=str(uuid.uuid4()),
-        relationship_type="related_to",
-    )
-    assert result["error"] is True
-    assert "Invalid source_id format" in result["message"]
+    """Bad UUID format raises ToolError with clear message."""
+    with pytest.raises(ToolError, match="Invalid source_id format"):
+        await create_relationship(
+            source_id="not-a-uuid",
+            target_id=str(uuid.uuid4()),
+            relationship_type="related_to",
+        )
 
 
 @pytest.mark.asyncio
 async def test_create_relationship_self_reference():
-    """Same source and target returns an error."""
+    """Same source and target raises ToolError."""
     same_id = str(uuid.uuid4())
-    result = await create_relationship(
-        source_id=same_id,
-        target_id=same_id,
-        relationship_type="related_to",
-    )
-    assert result["error"] is True
-    assert "self-referential" in result["message"]
+    with pytest.raises(ToolError, match="self-referential"):
+        await create_relationship(
+            source_id=same_id,
+            target_id=same_id,
+            relationship_type="related_to",
+        )
 
 
 @pytest.mark.asyncio

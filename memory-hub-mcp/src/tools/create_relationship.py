@@ -1,10 +1,14 @@
 """Create a directed relationship between two memory nodes."""
 
+import logging
 import uuid
 from typing import Annotated, Any
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import Field, ValidationError
+
+logger = logging.getLogger(__name__)
 
 from src.core.app import mcp
 from src.core.authz import (
@@ -71,39 +75,33 @@ async def create_relationship(
     try:
         claims = get_claims_from_context()
     except AuthenticationError as exc:
-        return {"error": True, "message": str(exc)}
+        raise ToolError(str(exc)) from exc
     tenant = get_tenant_filter(claims)
 
     if relationship_type not in _VALID_TYPES:
-        return {
-            "error": True,
-            "message": (
-                f"Invalid relationship_type {relationship_type!r}. "
-                f"Must be one of: {', '.join(_VALID_TYPES)}."
-            ),
-        }
+        raise ToolError(
+            f"Invalid relationship_type {relationship_type!r}. "
+            f"Must be one of: {', '.join(_VALID_TYPES)}."
+        )
 
     try:
         parsed_source_id = uuid.UUID(source_id)
     except ValueError:
-        return {
-            "error": True,
-            "message": f"Invalid source_id format: {source_id!r}. Must be a valid UUID.",
-        }
+        raise ToolError(
+            f"Invalid source_id format: {source_id!r}. Must be a valid UUID."
+        )
 
     try:
         parsed_target_id = uuid.UUID(target_id)
     except ValueError:
-        return {
-            "error": True,
-            "message": f"Invalid target_id format: {target_id!r}. Must be a valid UUID.",
-        }
+        raise ToolError(
+            f"Invalid target_id format: {target_id!r}. Must be a valid UUID."
+        )
 
     if parsed_source_id == parsed_target_id:
-        return {
-            "error": True,
-            "message": "source_id and target_id must be different — self-referential edges are not allowed.",
-        }
+        raise ToolError(
+            "source_id and target_id must be different — self-referential edges are not allowed."
+        )
 
     gen = None
     try:
@@ -118,9 +116,9 @@ async def create_relationship(
             try:
                 node = await _read_memory(node_id, session, tenant_id=tenant)
             except MemoryNotFoundError:
-                return {"error": True, "message": f"Memory node {node_id} not found."}
+                raise ToolError(f"Memory node {node_id} not found.")
             if not authorize_read(claims, node):
-                return {"error": True, "message": f"Not authorized to access {label} ({node_id})."}
+                raise ToolError(f"Not authorized to access {label} ({node_id}).")
 
         try:
             rel_create = RelationshipCreate(
@@ -133,25 +131,22 @@ async def create_relationship(
         except ValidationError as exc:
             errors = exc.errors()
             messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
-            return {
-                "error": True,
-                "message": "Parameter validation failed:\n" + "\n".join(messages),
-            }
+            raise ToolError("Parameter validation failed:\n" + "\n".join(messages)) from exc
         result = await create_relationship_service(rel_create, session)
         return result.model_dump(mode="json")
 
+    except ToolError:
+        raise
     except MemoryNotFoundError as exc:
-        return {
-            "error": True,
-            "message": (
-                f"Memory node {exc.memory_id} not found. "
-                "Verify both source_id and target_id refer to existing, current memory nodes."
-            ),
-        }
+        raise ToolError(
+            f"Memory node {exc.memory_id} not found. "
+            "Verify both source_id and target_id refer to existing, current memory nodes."
+        ) from exc
     except ValueError as exc:
-        return {"error": True, "message": str(exc)}
+        raise ToolError(str(exc)) from exc
     except Exception as exc:
-        return {"error": True, "message": f"Failed to create relationship: {exc}"}
+        logger.error("Failed to create relationship %s->%s: %s", source_id, target_id, exc, exc_info=True)
+        raise ToolError("Failed to create relationship. See server logs for details.") from exc
     finally:
         if gen is not None:
             await release_db_session(gen)
