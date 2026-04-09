@@ -1,10 +1,14 @@
 """Get memories similar to a given memory, with similarity scores."""
 
+import logging
 import uuid
 from typing import Annotated, Any
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import Field
+
+logger = logging.getLogger(__name__)
 
 from src.core.app import mcp
 from src.core.authz import (
@@ -66,16 +70,15 @@ async def get_similar_memories(
     try:
         claims = get_claims_from_context()
     except AuthenticationError as exc:
-        return {"error": True, "message": str(exc)}
+        raise ToolError(str(exc)) from exc
     tenant = get_tenant_filter(claims)
 
     try:
         parsed_memory_id = uuid.UUID(memory_id)
     except ValueError:
-        return {
-            "error": True,
-            "message": f"Invalid memory_id format: {memory_id!r}. Must be a valid UUID.",
-        }
+        raise ToolError(
+            f"Invalid memory_id format: {memory_id!r}. Must be a valid UUID."
+        )
 
     gen = None
     try:
@@ -91,10 +94,7 @@ async def get_similar_memories(
             parsed_memory_id, session, tenant_id=tenant
         )
         if not authorize_read(claims, source):
-            return {
-                "error": True,
-                "message": f"Not authorized to read memory {memory_id}.",
-            }
+            raise ToolError(f"Not authorized to read memory {memory_id}.")
 
         result = await get_similar_memories_service(
             parsed_memory_id,
@@ -112,13 +112,15 @@ async def get_similar_memories(
 
         return result
 
+    except ToolError:
+        raise
     except MemoryNotFoundError as exc:
-        return {
-            "error": True,
-            "message": f"Memory {exc.memory_id} not found.",
-        }
+        raise ToolError(f"Memory {exc.memory_id} not found.")
     except Exception as exc:
-        return {"error": True, "message": f"Failed to get similar memories: {exc}"}
+        logger.error("Failed to get similar memories for %s: %s", memory_id, exc, exc_info=True)
+        raise ToolError(
+            f"Failed to get similar memories for {memory_id}. See server logs for details."
+        ) from exc
     finally:
         if gen is not None:
             await release_db_session(gen)

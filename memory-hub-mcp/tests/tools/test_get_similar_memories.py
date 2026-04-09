@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import src.tools.auth as auth_mod
 from src.tools.get_similar_memories import get_similar_memories
@@ -48,18 +49,17 @@ def test_get_similar_memories_default_values():
 
 @pytest.mark.asyncio
 async def test_get_similar_memories_requires_auth():
-    """Unauthenticated calls return an error."""
+    """Unauthenticated calls raise ToolError."""
     auth_mod._current_session = None
-    result = await get_similar_memories(memory_id=str(uuid.uuid4()))
-    assert result["error"] is True
+    with pytest.raises(ToolError):
+        await get_similar_memories(memory_id=str(uuid.uuid4()))
 
 
 @pytest.mark.asyncio
 async def test_get_similar_memories_invalid_uuid():
-    """Bad UUID format returns a clear error."""
-    result = await get_similar_memories(memory_id="not-a-uuid")
-    assert result["error"] is True
-    assert "Invalid memory_id format" in result["message"]
+    """Bad UUID format raises ToolError with a clear message."""
+    with pytest.raises(ToolError, match="Invalid memory_id format"):
+        await get_similar_memories(memory_id="not-a-uuid")
 
 
 @pytest.mark.asyncio
@@ -169,27 +169,25 @@ async def test_get_similar_memories_unauthorized_for_other_owner():
     mock_gen = AsyncMock()
     other_owner_source = SimpleNamespace(scope="user", owner_id="someone-else", tenant_id="default")
 
-    with (
-        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
-        patch(
-            "src.tools.get_similar_memories.read_memory_service",
-            new_callable=AsyncMock,
-            return_value=other_owner_source,
-        ),
-    ):
-        auth_mod._current_session = {
-            "user_id": "wjackson",
-            "scopes": ["user"],
-            "identity_type": "user",
-        }
-        try:
-            result = await get_similar_memories(memory_id=str(uuid.uuid4()))
-        finally:
-            auth_mod._current_session = None
-
-    assert result["error"] is True
-    assert "Not authorized" in result["message"]
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
+            patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.get_similar_memories.read_memory_service",
+                new_callable=AsyncMock,
+                return_value=other_owner_source,
+            ),
+            pytest.raises(ToolError, match="Not authorized"),
+        ):
+            await get_similar_memories(memory_id=str(uuid.uuid4()))
+    finally:
+        auth_mod._current_session = None
 
 
 @pytest.mark.asyncio
