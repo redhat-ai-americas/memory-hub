@@ -116,6 +116,16 @@ class MemoryNode(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_memory_nodes_owner_scope_current", "owner_id", "scope", "is_current"),
         Index("ix_memory_nodes_tenant_scope", "tenant_id", "scope"),
+        # These indexes are created by migrations 007 and 002 respectively.
+        # Declaring them here keeps autogenerate clean — without them, alembic
+        # sees the migration-created indexes in the DB but not in the metadata
+        # and proposes to drop them on every autogenerate run.
+        Index("ix_memory_nodes_deleted_at", "deleted_at"),
+        Index(
+            "ix_memory_nodes_expires_at",
+            "expires_at",
+            postgresql_where=text("expires_at IS NOT NULL"),
+        ),
     )
 
     def __repr__(self) -> str:
