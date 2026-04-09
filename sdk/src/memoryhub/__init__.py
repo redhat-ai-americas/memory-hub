@@ -12,10 +12,14 @@ from memoryhub.config import (
 )
 from memoryhub.exceptions import (
     AuthenticationError,
+    ConflictError,
     ConnectionFailedError,
+    CurationVetoError,
     MemoryHubError,
     NotFoundError,
+    PermissionDeniedError,
     ToolError,
+    ValidationError,
 )
 
 __version__ = "0.1.0"
@@ -25,9 +29,13 @@ __all__ = [
     "MemoryUpdatedCallback",
     "MemoryHubError",
     "AuthenticationError",
-    "NotFoundError",
-    "ToolError",
+    "ConflictError",
     "ConnectionFailedError",
+    "CurationVetoError",
+    "NotFoundError",
+    "PermissionDeniedError",
+    "ToolError",
+    "ValidationError",
     # Project configuration
     "CONFIG_FILENAME",
     "ConfigError",

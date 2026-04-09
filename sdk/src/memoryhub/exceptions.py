@@ -35,5 +35,21 @@ class ToolError(MemoryHubError):
         super().__init__(f"{tool_name}: {detail}")
 
 
+class PermissionDeniedError(ToolError):
+    """The caller is not authorized to perform this operation."""
+
+
+class ValidationError(ToolError):
+    """Invalid parameter or request shape."""
+
+
+class ConflictError(ToolError):
+    """Conflict with existing state (e.g., already exists, already deleted)."""
+
+
+class CurationVetoError(ToolError):
+    """A curation rule blocked the operation."""
+
+
 class ConnectionFailedError(MemoryHubError):
     """Failed to connect to the MemoryHub MCP server."""

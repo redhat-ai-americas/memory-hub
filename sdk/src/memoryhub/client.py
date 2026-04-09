@@ -16,10 +16,15 @@ from fastmcp.client.messages import MessageHandler
 from memoryhub.auth import MemoryHubAuth
 from memoryhub.config import ProjectConfig, load_project_config
 from memoryhub.exceptions import (
+    AuthenticationError,
+    ConflictError,
     ConnectionFailedError,
+    CurationVetoError,
     MemoryHubError,
     NotFoundError,
+    PermissionDeniedError,
     ToolError,
+    ValidationError,
 )
 from memoryhub.models import (
     ContradictionResult,
@@ -242,9 +247,22 @@ class MemoryHubClient:
             if result.content:
                 item = result.content[0]
                 msg = item.text if hasattr(item, "text") else str(item)
-            if "not found" in msg.lower():
+            msg_lower = msg.lower()
+            # Classify by message prefix — order matters (most specific first)
+            if "invalid api key" in msg_lower or "no authenticated session" in msg_lower:
+                raise AuthenticationError(msg)
+            if msg_lower.startswith("curation rule blocked"):
+                raise CurationVetoError(tool_name, msg)
+            if "not found" in msg_lower:
                 memory_id = args.get("memory_id", "unknown")
                 raise NotFoundError(memory_id, msg)
+            if "not authorized" in msg_lower or msg_lower.startswith("access denied:"):
+                raise PermissionDeniedError(tool_name, msg)
+            if "already exists" in msg_lower or "already deleted" in msg_lower:
+                raise ConflictError(tool_name, msg)
+            if (msg_lower.startswith("invalid ") or " must be " in msg_lower
+                    or "cannot be empty" in msg_lower):
+                raise ValidationError(tool_name, msg)
             raise ToolError(tool_name, msg or "Unknown error (empty response)")
 
         # Prefer structured_content (parsed JSON dict)

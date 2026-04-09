@@ -9,7 +9,17 @@ import pytest
 
 from memoryhub.client import MemoryHubClient
 from memoryhub.config import ProjectConfig, RetrievalDefaults
-from memoryhub.exceptions import ConnectionFailedError, MemoryHubError, NotFoundError, ToolError
+from memoryhub.exceptions import (
+    AuthenticationError,
+    ConflictError,
+    ConnectionFailedError,
+    CurationVetoError,
+    MemoryHubError,
+    NotFoundError,
+    PermissionDeniedError,
+    ToolError,
+    ValidationError,
+)
 from memoryhub.models import ContradictionResult, HistoryResult, Memory, SearchResult, WriteResult
 
 # ── Fake MCP response types ──────────────────────────────────────────────────
@@ -577,6 +587,139 @@ async def test_connection_error_without_context_manager():
 
     with pytest.raises(ConnectionFailedError, match="async with client"):
         await c.search("anything")
+
+
+async def test_authentication_error_from_invalid_api_key(client):
+    """_call() classifies 'Invalid API key' messages as AuthenticationError."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Invalid API key. Contact your system administrator.")],
+    )
+    with pytest.raises(AuthenticationError, match="Invalid API key"):
+        await c.search("anything")
+
+
+async def test_authentication_error_from_no_session(client):
+    """_call() classifies 'No authenticated session' messages as AuthenticationError."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("No authenticated session. Call register_session first.")],
+    )
+    with pytest.raises(AuthenticationError, match="No authenticated session"):
+        await c.search("anything")
+
+
+async def test_permission_denied_error(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Not authorized to read memory in scope 'enterprise'")],
+    )
+    with pytest.raises(PermissionDeniedError) as exc_info:
+        await c.read("mem-001")
+    assert exc_info.value.tool_name == "read_memory"
+    assert "Not authorized" in exc_info.value.detail
+
+
+async def test_permission_denied_access_denied_prefix(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Access denied: insufficient scope for this operation")],
+    )
+    with pytest.raises(PermissionDeniedError):
+        await c.read("mem-001")
+
+
+async def test_validation_error(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Invalid memory_id: not a valid UUID")],
+    )
+    with pytest.raises(ValidationError) as exc_info:
+        await c.read("bad-id")
+    assert exc_info.value.tool_name == "read_memory"
+
+
+async def test_validation_error_must_be(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("weight must be between 0 and 1")],
+    )
+    with pytest.raises(ValidationError):
+        await c.write("test", scope="user", weight=5.0)
+
+
+async def test_validation_error_cannot_be_empty(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("content cannot be empty")],
+    )
+    with pytest.raises(ValidationError):
+        await c.write("", scope="user")
+
+
+async def test_conflict_error_already_exists(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Relationship already exists between these memories")],
+    )
+    with pytest.raises(ConflictError) as exc_info:
+        await c._call("create_relationship", {"source_id": "a", "target_id": "b"})
+    assert exc_info.value.tool_name == "create_relationship"
+
+
+async def test_conflict_error_already_deleted(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Memory mem-001 already deleted")],
+    )
+    with pytest.raises(ConflictError):
+        await c._call("delete_memory", {"memory_id": "mem-001"})
+
+
+async def test_curation_veto_error(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Curation rule blocked: duplicate content detected")],
+    )
+    with pytest.raises(CurationVetoError) as exc_info:
+        await c.write("duplicate stuff", scope="user")
+    assert exc_info.value.tool_name == "write_memory"
+    assert "Curation rule blocked" in exc_info.value.detail
+
+
+async def test_generic_tool_error_fallback(client):
+    """Messages that don't match any prefix fall through to generic ToolError."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Something completely unexpected happened")],
+    )
+    with pytest.raises(ToolError) as exc_info:
+        await c.search("anything")
+    # Should NOT be a subclass — exactly ToolError
+    assert type(exc_info.value) is ToolError
+
+
+async def test_exception_hierarchy():
+    """New exceptions are subclasses of ToolError and MemoryHubError."""
+    assert issubclass(PermissionDeniedError, ToolError)
+    assert issubclass(ValidationError, ToolError)
+    assert issubclass(ConflictError, ToolError)
+    assert issubclass(CurationVetoError, ToolError)
+    assert issubclass(PermissionDeniedError, MemoryHubError)
+    # AuthenticationError is NOT a subclass of ToolError (it's a sibling)
+    assert not issubclass(AuthenticationError, ToolError)
+    assert issubclass(AuthenticationError, MemoryHubError)
 
 
 # ── None-arg stripping ────────────────────────────────────────────────────────
