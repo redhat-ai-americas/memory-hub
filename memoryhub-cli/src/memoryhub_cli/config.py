@@ -35,5 +35,7 @@ def get_connection_params() -> dict:
         "url": os.environ.get("MEMORYHUB_URL", config.get("url", "")),
         "auth_url": os.environ.get("MEMORYHUB_AUTH_URL", config.get("auth_url", "")),
         "client_id": os.environ.get("MEMORYHUB_CLIENT_ID", config.get("client_id", "")),
-        "client_secret": os.environ.get("MEMORYHUB_CLIENT_SECRET", config.get("client_secret", "")),
+        "client_secret": os.environ.get(
+            "MEMORYHUB_CLIENT_SECRET", config.get("client_secret", "")
+        ),
     }

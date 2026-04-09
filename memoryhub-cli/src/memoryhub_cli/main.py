@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
+from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
 from rich.console import Console
 from rich.table import Table
 
-from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
 from memoryhub_cli.config import get_connection_params, save_config
 from memoryhub_cli.project_config import (
     InitChoices,
@@ -109,7 +108,7 @@ def login(
 @app.command()
 def search(
     query: str = typer.Argument(..., help="Search query"),
-    scope: Optional[str] = typer.Option(None, "--scope", "-s", help="Filter by scope"),
+    scope: str | None = typer.Option(None, "--scope", "-s", help="Filter by scope"),
     max_results: int = typer.Option(10, "--max", "-n", help="Maximum results"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
@@ -192,8 +191,8 @@ def write(
     content: str = typer.Argument(None, help="Memory content (reads from stdin if omitted)"),
     scope: str = typer.Option("user", "--scope", "-s", help="Memory scope"),
     weight: float = typer.Option(0.7, "--weight", "-w", help="Priority weight 0.0-1.0"),
-    parent_id: Optional[str] = typer.Option(None, "--parent", help="Parent memory ID"),
-    branch_type: Optional[str] = typer.Option(None, "--branch-type", help="Branch type"),
+    parent_id: str | None = typer.Option(None, "--parent", help="Parent memory ID"),
+    branch_type: str | None = typer.Option(None, "--branch-type", help="Branch type"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Write a new memory.
