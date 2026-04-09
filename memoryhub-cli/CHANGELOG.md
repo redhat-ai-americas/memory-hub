@@ -2,6 +2,11 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [0.1.1] — 2026-04-09
+
+- Fix ruff lint errors (import sorting, `Optional` → `X | Y` annotations,
+  line length). No functional changes from 0.1.0.
+
 ## [0.1.0] — 2026-04-09
 
 - Initial release. Terminal client for MemoryHub with search, read, write,
