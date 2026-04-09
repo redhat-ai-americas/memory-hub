@@ -1,10 +1,14 @@
 """Create a new memory node or branch in the memory tree."""
 
+import logging
 import uuid
 from typing import Annotated, Any
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import Field, ValidationError
+
+logger = logging.getLogger(__name__)
 
 from src.core.app import mcp
 from src.core.authz import (
@@ -106,7 +110,7 @@ async def write_memory(
     creating duplicates.
 
     If the write is blocked by a curation rule (e.g., exact duplicate detected),
-    error=True is returned with a message explaining the reason.
+    a ToolError is raised with a message starting with "Curation rule blocked".
     """
     if ctx:
         await ctx.info("Creating memory node")
@@ -114,7 +118,7 @@ async def write_memory(
     try:
         claims = get_claims_from_context()
     except AuthenticationError as exc:
-        return {"error": True, "message": str(exc)}
+        raise ToolError(str(exc)) from exc
 
     if owner_id is None:
         owner_id = claims["sub"]
@@ -126,33 +130,24 @@ async def write_memory(
     # server_default of "default").
     write_tenant_id = get_tenant_filter(claims)
     if not authorize_write(claims, scope, owner_id, write_tenant_id):
-        return {
-            "error": True,
-            "message": (
-                f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
-            ),
-        }
+        raise ToolError(
+            f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
+        )
 
     # Validate branch_type / parent_id pairing in both directions:
     # - parent_id without branch_type: branch with no kind label
     # - branch_type without parent_id: orphan branch with no parent to attach to
     if parent_id is not None and branch_type is None:
-        return {
-            "error": True,
-            "message": (
-                "branch_type is required when parent_id is set. "
-                "Common types: rationale, provenance, description, evidence."
-            ),
-        }
+        raise ToolError(
+            "branch_type is required when parent_id is set. "
+            "Common types: rationale, provenance, description, evidence."
+        )
     if branch_type is not None and parent_id is None:
-        return {
-            "error": True,
-            "message": (
-                "parent_id is required when branch_type is set. "
-                "A branch must attach to a parent memory; omit branch_type "
-                "to create a root-level memory instead."
-            ),
-        }
+        raise ToolError(
+            "parent_id is required when branch_type is set. "
+            "A branch must attach to a parent memory; omit branch_type "
+            "to create a root-level memory instead."
+        )
 
     # Parse parent_id to UUID if provided
     parsed_parent_id: uuid.UUID | None = None
@@ -160,10 +155,9 @@ async def write_memory(
         try:
             parsed_parent_id = uuid.UUID(parent_id)
         except ValueError:
-            return {
-                "error": True,
-                "message": f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID.",
-            }
+            raise ToolError(
+                f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID."
+            )
 
     # Build the create schema with validation
     try:
@@ -179,10 +173,9 @@ async def write_memory(
     except ValidationError as exc:
         errors = exc.errors()
         messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
-        return {
-            "error": True,
-            "message": "Parameter validation failed:\n" + "\n".join(messages),
-        }
+        raise ToolError(
+            "Parameter validation failed:\n" + "\n".join(messages)
+        ) from exc
 
     session = None
     gen = None
@@ -200,18 +193,9 @@ async def write_memory(
         if curation_result["blocked"]:
             # No broadcast on a blocked write — the memory wasn't persisted,
             # so subscribers should not be told about it.
-            return {
-                "error": True,
-                "message": f"Write blocked by curation rule: {curation_result['reason']}",
-                "detail": curation_result["detail"],
-                "curation": {
-                    "blocked": True,
-                    "reason": curation_result["reason"],
-                    "similar_count": curation_result.get("similar_count", 0),
-                    "nearest_id": str(curation_result["nearest_id"]) if curation_result.get("nearest_id") else None,
-                    "nearest_score": curation_result.get("nearest_score"),
-                },
-            }
+            raise ToolError(
+                f"Curation rule blocked write: {curation_result['reason']}"
+            )
 
         # Pattern E (#62): broadcast to other connected agents post-commit.
         # Non-fatal — broadcast failures never roll back the write.
@@ -234,18 +218,18 @@ async def write_memory(
             },
         }
 
+    except ToolError:
+        raise
     except MemoryNotFoundError:
-        return {
-            "error": True,
-            "message": (
-                f"Parent memory {parent_id} not found. Check the parent_id — "
-                "it may have been deleted or you may not have access to it."
-            ),
-        }
+        raise ToolError(
+            f"Parent memory {parent_id} not found. Check the parent_id — "
+            "it may have been deleted or you may not have access to it."
+        )
     except MemoryAccessDeniedError as exc:
-        return {"error": True, "message": f"Access denied: {exc.reason}"}
+        raise ToolError(f"Access denied: {exc.reason}") from exc
     except Exception as exc:
-        return {"error": True, "message": f"Failed to create memory: {exc}"}
+        logger.error("Failed to create memory: %s", exc, exc_info=True)
+        raise ToolError("Failed to create memory. See server logs for details.") from exc
     finally:
         if gen is not None:
             await release_db_session(gen)
