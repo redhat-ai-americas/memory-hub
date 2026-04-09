@@ -13,6 +13,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.memory import (
     count_search_matches,
     search_memories,
@@ -52,7 +53,34 @@ def _to_stub(read: MemoryNodeRead) -> MemoryNodeStub:
         branch_type=read.branch_type,
         has_children=read.has_children,
         has_rationale=read.has_rationale,
+        domains=read.domains,
     )
+
+
+_DOMAIN_BOOST_PER_MATCH = 0.15  # 15% score boost per matching domain
+_DOMAIN_BOOST_CAP = 0.30  # max 30% total boost
+
+
+def _apply_domain_boost(
+    results: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+    query_domains: list[str],
+) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
+    """Boost results whose domain tags overlap with the query domains.
+
+    Non-matching results keep their original score — this is a boost,
+    not a filter. Results are re-sorted by boosted score.
+    """
+    query_set = {d.lower() for d in query_domains}
+    boosted = []
+    for item, score in results:
+        item_domains = {d.lower() for d in (getattr(item, "domains", None) or [])}
+        overlap = len(item_domains & query_set)
+        if overlap > 0:
+            boost = min(overlap * _DOMAIN_BOOST_PER_MATCH, _DOMAIN_BOOST_CAP)
+            score = min(1.0, score * (1.0 + boost))
+        boosted.append((item, score))
+    boosted.sort(key=lambda x: x[1], reverse=True)
+    return boosted
 
 
 def _estimate_tokens(payload: dict[str, Any]) -> int:
@@ -109,8 +137,8 @@ async def search_memory(
         str | None,
         Field(
             description=(
-                "Filter to a specific scope: user, project, role, organizational, enterprise. "
-                "Omit to search all accessible scopes."
+                "Filter to a specific scope: user, project, campaign, role, "
+                "organizational, enterprise. Omit to search all accessible scopes."
             ),
         ),
     ] = None,
@@ -221,6 +249,26 @@ async def search_memory(
             le=1.0,
         ),
     ] = 0.4,
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. When provided, campaign-scoped memories "
+                "for campaigns your project is enrolled in are included in results. "
+                "Omit to exclude campaign memories from search."
+            ),
+        ),
+    ] = None,
+    domains: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Domain tags to boost in results (e.g., ['React', 'Spring Boot']). "
+                "Results with matching domains are ranked higher. Non-matching "
+                "results still appear — this is a boost, not a filter."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Search memories using semantic similarity. Returns ranked results as a mix of
@@ -278,6 +326,19 @@ async def search_memory(
     authorized = build_authorized_scopes(claims)
     tenant = get_tenant_filter(claims)
 
+    # Resolve campaign membership when project_id is provided. The
+    # campaign_ids set feeds into _build_search_filters so campaign-scoped
+    # memories for enrolled campaigns appear in results.
+    campaign_ids: set[str] | None = None
+    if project_id:
+        session_for_campaign, gen_for_campaign = await get_db_session()
+        try:
+            campaign_ids = await get_campaigns_for_project(
+                session_for_campaign, project_id, tenant,
+            )
+        finally:
+            await release_db_session(gen_for_campaign)
+
     # Resolve owner_id: default to authenticated user when not explicitly set.
     # An empty string signals "no filter" (search all accessible owners).
     if owner_id is None:
@@ -320,6 +381,7 @@ async def search_memory(
                 max_results=max_results,
                 current_only=current_only,
                 authorized_scopes=authorized,
+                campaign_ids=campaign_ids,
             )
             results = bundle.results
             focus_meta = {
@@ -342,6 +404,7 @@ async def search_memory(
                 max_results=max_results,
                 current_only=current_only,
                 authorized_scopes=authorized,
+                campaign_ids=campaign_ids,
             )
 
         # Count all matching memories under the same filter set so the agent
@@ -353,7 +416,12 @@ async def search_memory(
             owner_id=owner_id,
             current_only=current_only,
             authorized_scopes=authorized,
+            campaign_ids=campaign_ids,
         )
+
+        # Apply domain boost before branch handling and budget packing.
+        if domains and results:
+            results = _apply_domain_boost(results, domains)
 
         if not results:
             response: dict[str, Any] = {
