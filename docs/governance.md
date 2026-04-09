@@ -14,6 +14,10 @@ Fully automatic creation and update. The agent writes memories on behalf of its 
 
 Any agent working within the project context can read and write project memories. The "working within" determination comes from the agent's project context (passed in the MCP request). Automatic creation, no approval required, but all operations are logged and auditable. Project owners can review and modify project memories.
 
+### Campaign-scope memories
+
+Campaign-scoped memories serve a bounded initiative — a group of projects working toward a shared goal (e.g., a modernization campaign, a compliance rollout). Any agent whose project is enrolled in the campaign can read and write campaign memories. Enrollment is checked at RBAC time via the `campaign_memberships` table; the caller passes `project_id` to the MCP tools, and the authz layer resolves which campaigns the project belongs to. No curator review is required — the bounded audience and project-level enrollment are sufficient access control. Campaign memories use the campaign UUID as their `owner_id`, which is how the RBAC layer identifies which campaign a memory belongs to.
+
 ### Role-scope memories
 
 Readable by all agents whose users hold the specified role. Writable only by the curator agent (which detects role-level patterns and promotes individual memories). Role assignment comes from the platform identity system (OpenShift OAuth / RBAC). Auditable, modifiable by role administrators.
@@ -173,6 +177,10 @@ def authorize_read(user_claims: dict, memory: MemoryNode) -> bool:
             return True  # all authenticated agents can read
         if tier == "project":
             return True  # project membership check TBD
+        if tier == "campaign":
+            if campaign_ids is None:
+                return False
+            return memory.owner_id in campaign_ids
         if tier == "role":
             # TODO: match memory's role tag against user's roles
             return True
@@ -191,6 +199,10 @@ def authorize_write(user_claims: dict, scope: str, owner_id: str) -> bool:
         return user_claims.get("identity_type") == "service"
     if scope == "project":
         return True  # project membership check TBD
+    if scope == "campaign":
+        if campaign_ids is None:
+            return False
+        return owner_id in campaign_ids
     return False
 ```
 

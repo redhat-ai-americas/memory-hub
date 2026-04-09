@@ -19,10 +19,10 @@ Deployment is automated via `deploy/deploy.sh` which stages a build context, tri
 | Tool | Purpose | Read/Write |
 |------|---------|------------|
 | `register_session` | Compatibility shim for clients that can't send HTTP auth headers; primary auth is via JWT bearer tokens | Setup |
-| `write_memory` | Create memory nodes and branches, with inline curation feedback | Write |
+| `write_memory` | Create memory nodes and branches, with inline curation feedback. Supports campaign scope and domain tags (#154) | Write |
 | `read_memory` | Retrieve memory by ID, with optional version history | Read |
 | `update_memory` | Create new version of a memory, preserving history | Write |
-| `search_memory` | Semantic search via pgvector embeddings, with optional session focus / two-vector retrieval (Layer 2, #58) | Read |
+| `search_memory` | Semantic search via pgvector embeddings, with optional session focus / two-vector retrieval (Layer 2, #58), campaign inclusion, and domain-aware boosting (#154) | Read |
 | `get_memory_history` | Version chain traversal with pagination | Read |
 | `report_contradiction` | Accumulate staleness signals against a memory | Write |
 
@@ -81,6 +81,23 @@ Focus is fully optional. When `focus` is omitted (or `session_focus_weight ≤ 0
 The cross-encoder is graceful-fallback: if `MEMORYHUB_RERANKER_URL` is unset or unreachable, the response carries a `focus_fallback_reason` field documenting the fallback and ranking falls back to pure cosine. The system stays usable even when the reranker pod is unhealthy.
 
 Empirical benchmark methodology and the four-way comparison (NEW-1 RRF blend vs NEW-2 focus-augmented query vs NEW-3 rerank-only vs cosine baseline) live in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../research/agent-memory-ergonomics/two-vector-retrieval.md). NEW-1 won; NEW-2 was eliminated for catastrophic cross-topic recall collapse; NEW-3 alone was neutral on the synthetic corpus.
+
+## Campaign scope and domain tagging (#154)
+
+Three tools gained campaign and domain awareness:
+
+**`write_memory`** now accepts `scope="campaign"` for cross-project memories. Campaign-scoped memories require `project_id` (for enrollment verification) and use the campaign UUID as `owner_id`. A new `domains` parameter (list of strings, optional at any scope) attaches crosscutting knowledge tags like "React", "Spring Boot", or "CORS" to memories.
+
+**`update_memory`** accepts a `domains` parameter to add or replace domain tags on existing memories. When updating a campaign-scoped memory, `project_id` is required for enrollment verification.
+
+**`search_memory`** accepts `project_id` to include campaign-scoped memories from enrolled campaigns. When `domains` are provided, results with matching domain tags are boosted:
+
+- **Non-focus path**: Post-retrieval score boost (15% per matching domain, capped at 30%).
+- **Focus path**: Domain overlap ranks are blended into the RRF pipeline as a third signal alongside query and focus ranks. The `domain_boost_weight` parameter (default 0.3) controls the strength; weight is carved proportionally from the query and focus weights.
+
+Domain matching is case-insensitive. Non-matching results still appear — domains boost ranking, they don't filter.
+
+Campaign membership is resolved via `get_campaigns_for_project()` in the service layer, which queries the `campaign_memberships` table for active campaigns matching the caller's project and tenant. The resolution happens once per tool call and is passed to both the RBAC layer and the search filters.
 
 ## Authentication
 
