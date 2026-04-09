@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'sdk/v*.*.*'
+      - 'memoryhub-cli/v*.*.*'
 
 permissions:
   contents: write
@@ -27,7 +28,7 @@ jobs:
         uses: lewagon/wait-on-check-action@v1.3.1
         with:
           ref: ${{ github.ref }}
-          check-regexp: 'SDK Tests'
+          check-regexp: ${{ contains(github.ref, 'sdk/') && 'SDK Tests' || 'CLI Tests' }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 
@@ -47,6 +48,8 @@ jobs:
           COMPONENT="${{ steps.version.outputs.component }}"
           if [ "$COMPONENT" = "sdk" ]; then
             VERSION_SRC=$(grep -E '^__version__' sdk/src/memoryhub/__init__.py | cut -d'"' -f2)
+          elif [ "$COMPONENT" = "memoryhub-cli" ]; then
+            VERSION_SRC=$(grep -E '^__version__' memoryhub-cli/src/memoryhub_cli/__init__.py | cut -d'"' -f2)
           else
             echo "Error: Unknown component '$COMPONENT'"
             exit 1
@@ -118,7 +121,7 @@ jobs:
 
     environment:
       name: pypi
-      url: https://pypi.org/p/memoryhub
+      url: https://pypi.org/p/${{ needs.create-release.outputs.component == 'sdk' && 'memoryhub' || 'memoryhub-cli' }}
 
     permissions:
       id-token: write
