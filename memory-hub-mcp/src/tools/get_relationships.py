@@ -1,11 +1,15 @@
 """Get graph relationships for a memory node, with optional provenance tracing."""
 
+import logging
 import uuid
 from types import SimpleNamespace
 from typing import Annotated, Any
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import Field
+
+logger = logging.getLogger(__name__)
 
 from src.core.app import mcp
 from src.core.authz import (
@@ -85,34 +89,27 @@ async def get_relationships(
     try:
         claims = get_claims_from_context()
     except AuthenticationError as exc:
-        return {"error": True, "message": str(exc)}
+        raise ToolError(str(exc)) from exc
     tenant = get_tenant_filter(claims)
 
     try:
         parsed_node_id = uuid.UUID(node_id)
     except ValueError:
-        return {
-            "error": True,
-            "message": f"Invalid node_id format: {node_id!r}. Must be a valid UUID.",
-        }
+        raise ToolError(
+            f"Invalid node_id format: {node_id!r}. Must be a valid UUID."
+        )
 
     if direction not in _VALID_DIRECTIONS:
-        return {
-            "error": True,
-            "message": (
-                f"Invalid direction {direction!r}. "
-                f"Must be one of: {', '.join(_VALID_DIRECTIONS)}."
-            ),
-        }
+        raise ToolError(
+            f"Invalid direction {direction!r}. "
+            f"Must be one of: {', '.join(_VALID_DIRECTIONS)}."
+        )
 
     if relationship_type is not None and relationship_type not in _VALID_TYPES:
-        return {
-            "error": True,
-            "message": (
-                f"Invalid relationship_type {relationship_type!r}. "
-                f"Must be one of: {', '.join(_VALID_TYPES)}."
-            ),
-        }
+        raise ToolError(
+            f"Invalid relationship_type {relationship_type!r}. "
+            f"Must be one of: {', '.join(_VALID_TYPES)}."
+        )
 
     gen = None
     try:
@@ -173,16 +170,18 @@ async def get_relationships(
 
         return result
 
+    except ToolError:
+        raise
     except MemoryNotFoundError as exc:
-        return {
-            "error": True,
-            "message": (
-                f"Memory node {exc.memory_id} not found. "
-                "Verify the node_id refers to an existing memory node."
-            ),
-        }
+        raise ToolError(
+            f"Memory node {exc.memory_id} not found. "
+            "Verify the node_id refers to an existing memory node."
+        ) from exc
     except Exception as exc:
-        return {"error": True, "message": f"Failed to get relationships: {exc}"}
+        logger.error("Failed to get relationships for %s: %s", node_id, exc, exc_info=True)
+        raise ToolError(
+            f"Failed to get relationships for node {node_id}. See server logs for details."
+        ) from exc
     finally:
         if gen is not None:
             await release_db_session(gen)

@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import src.tools.auth as auth_mod
 from src.tools.get_relationships import get_relationships
@@ -48,40 +49,37 @@ def test_get_relationships_default_values():
 
 @pytest.mark.asyncio
 async def test_get_relationships_requires_auth():
-    """Unauthenticated calls return an error."""
+    """Unauthenticated calls raise ToolError."""
     auth_mod._current_session = None
-    result = await get_relationships(node_id=str(uuid.uuid4()))
-    assert result["error"] is True
+    with pytest.raises(ToolError):
+        await get_relationships(node_id=str(uuid.uuid4()))
 
 
 @pytest.mark.asyncio
 async def test_get_relationships_invalid_uuid():
-    """Bad UUID format returns a clear error."""
-    result = await get_relationships(node_id="not-a-uuid")
-    assert result["error"] is True
-    assert "Invalid node_id format" in result["message"]
+    """Bad UUID format raises ToolError with a clear message."""
+    with pytest.raises(ToolError, match="Invalid node_id format"):
+        await get_relationships(node_id="not-a-uuid")
 
 
 @pytest.mark.asyncio
 async def test_get_relationships_invalid_direction():
-    """Invalid direction returns an error with valid options."""
-    result = await get_relationships(
-        node_id=str(uuid.uuid4()),
-        direction="sideways",
-    )
-    assert result["error"] is True
-    assert "outgoing" in result["message"]
+    """Invalid direction raises ToolError listing valid options."""
+    with pytest.raises(ToolError, match="outgoing"):
+        await get_relationships(
+            node_id=str(uuid.uuid4()),
+            direction="sideways",
+        )
 
 
 @pytest.mark.asyncio
 async def test_get_relationships_invalid_type():
-    """Invalid relationship_type returns an error."""
-    result = await get_relationships(
-        node_id=str(uuid.uuid4()),
-        relationship_type="bad_type",
-    )
-    assert result["error"] is True
-    assert "derived_from" in result["message"]
+    """Invalid relationship_type raises ToolError listing valid types."""
+    with pytest.raises(ToolError, match="derived_from"):
+        await get_relationships(
+            node_id=str(uuid.uuid4()),
+            relationship_type="bad_type",
+        )
 
 
 @pytest.mark.asyncio
