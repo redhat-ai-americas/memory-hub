@@ -209,7 +209,9 @@ See [`CLAUDE.md`](CLAUDE.md) for project conventions, the issue-tracker workflow
 
 ## Contributing
 
-Issues and PRs are welcome. Use the `/issue-tracker` slash command (or follow [`CLAUDE.md`](CLAUDE.md)) when filing — every issue references a design document and follows the Backlog → In Progress → Done flow.
+Issues and PRs are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for the local dev setup, coding conventions, and PR flow. Use the `/issue-tracker` slash command (or follow [`CLAUDE.md`](CLAUDE.md)) when filing — every issue references a design document and follows the Backlog → In Progress → Done flow.
+
+Most contributions do not need access to the demo OpenShift cluster — local SQLite or a podman PostgreSQL container is enough. If you do need cluster access, see [`docs/contributor-cluster-access.md`](docs/contributor-cluster-access.md) for the access policy, GitHub IdP setup, and the no-deploy rule for new contributors.
 
 ## License
 
