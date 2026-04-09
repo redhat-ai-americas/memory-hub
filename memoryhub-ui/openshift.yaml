@@ -71,6 +71,16 @@ spec:
           value: "http://mcp-server.memory-hub-mcp.svc:8080/mcp/"
         - name: MEMORYHUB_AUTH_SERVICE_URL
           value: "http://auth-server.memoryhub-auth.svc:8081"
+        # Public-facing Route URLs used by the Client Management welcome-email
+        # renderer. Populated at deploy time by memoryhub-ui/deploy/deploy.sh
+        # which queries the actual Routes and calls `oc set env`. These
+        # defaults are placeholders — if they appear in a generated welcome
+        # email, the deploy script's post-deploy `oc set env` step didn't
+        # run.
+        - name: MEMORYHUB_PUBLIC_MCP_URL
+          value: "https://mcp-server.example.com/mcp/"
+        - name: MEMORYHUB_PUBLIC_AUTH_URL
+          value: "https://auth-server.example.com"
         - name: MEMORYHUB_ADMIN_KEY
           valueFrom:
             secretKeyRef:

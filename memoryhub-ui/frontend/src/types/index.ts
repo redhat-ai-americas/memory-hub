@@ -99,6 +99,14 @@ export interface SecretRotatedResponse {
   client_secret: string;
 }
 
+/** Public-facing URLs used to compose contributor welcome emails.
+ *  Returned by GET /api/public-config. Populated at deploy time from
+ *  the cluster's Route addresses. */
+export interface PublicConfig {
+  mcp_url: string;
+  auth_url: string;
+}
+
 export interface CreateClientPayload {
   client_id: string;
   client_name: string;

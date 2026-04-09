@@ -66,6 +66,35 @@ echo ""
 echo "Re-applying manifest to re-resolve image digest..."
 oc apply -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
 
+# Step 5b: Populate the public-facing route URLs used by the Client
+# Management welcome-email renderer. The openshift.yaml manifest ships
+# with example.com placeholders so the UI renders an obviously wrong URL
+# if this step is skipped; real values come from the actual cluster Routes.
+# Idempotent — re-running the deploy against a rebuilt sandbox updates the
+# env vars to the new Route hostnames automatically.
+echo ""
+echo "Populating public Route URLs for the welcome-email feature..."
+MCP_ROUTE_HOST=$(oc get route memory-hub-mcp -n memory-hub-mcp -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+AUTH_ROUTE_HOST=$(oc get route auth-server -n memoryhub-auth -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+if [ -n "$MCP_ROUTE_HOST" ] && [ -n "$AUTH_ROUTE_HOST" ]; then
+    MCP_PUBLIC_URL="https://$MCP_ROUTE_HOST/mcp/"
+    AUTH_PUBLIC_URL="https://$AUTH_ROUTE_HOST"
+    echo "  MEMORYHUB_PUBLIC_MCP_URL=$MCP_PUBLIC_URL"
+    echo "  MEMORYHUB_PUBLIC_AUTH_URL=$AUTH_PUBLIC_URL"
+    oc set env "deployment/$DEPLOYMENT" -n "$NAMESPACE" \
+        "MEMORYHUB_PUBLIC_MCP_URL=$MCP_PUBLIC_URL" \
+        "MEMORYHUB_PUBLIC_AUTH_URL=$AUTH_PUBLIC_URL" \
+        --containers="$DEPLOYMENT" >/dev/null
+    echo "  Env vars applied to deployment/$DEPLOYMENT."
+else
+    echo "  WARNING: could not resolve mcp-server or auth-server Route host."
+    echo "  MCP:  ${MCP_ROUTE_HOST:-<missing>}"
+    echo "  Auth: ${AUTH_ROUTE_HOST:-<missing>}"
+    echo "  The welcome-email feature will render example.com placeholder URLs"
+    echo "  until the routes exist. Re-run this script after mcp-server and"
+    echo "  auth-server are deployed."
+fi
+
 # Step 6: Force rollout restart so the new image digest is picked up.
 echo ""
 echo "Restarting rollout..."
