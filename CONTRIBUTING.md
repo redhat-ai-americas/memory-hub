@@ -72,6 +72,10 @@ npm install
 npm run build
 ```
 
+## Cluster access
+
+Most contributions never need to touch the demo OpenShift cluster. Local development against SQLite or a podman-run PostgreSQL is enough for almost everything. If you do need access to the cluster — to read logs, reproduce a deploy-specific bug, or run the SDK's live-auth tests — see [`docs/contributor-cluster-access.md`](docs/contributor-cluster-access.md). The short version: read-only access is granted on request, deploy access is not, and the cluster admin (`@rdwj`) handles deploys on their own cadence.
+
 ## Filing issues
 
 Use the `/issue-tracker` slash command — it enforces our conventions automatically. If you're filing manually, the rules are:
