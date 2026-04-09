@@ -390,6 +390,7 @@ def _build_search_filters(
     current_only: bool,
     authorized_scopes: dict[str, str | None] | None,
     tenant_id: str,
+    campaign_ids: set[str] | None = None,
 ) -> list | None:
     """Build the SQL filter list shared by search_memories and count_search_matches.
 
@@ -417,6 +418,20 @@ def _build_search_filters(
             return None  # no authorized scopes → no results
         scope_conditions = []
         for scope_name, required_owner in authorized_scopes.items():
+            if scope_name == "campaign":
+                # Campaign-scoped memories are only visible when the
+                # caller's project is enrolled in the campaign. The
+                # memory's owner_id holds the campaign UUID.
+                if campaign_ids:
+                    scope_conditions.append(
+                        and_(
+                            MemoryNode.scope == "campaign",
+                            MemoryNode.owner_id.in_(campaign_ids),
+                        )
+                    )
+                # If campaign_ids is empty/None, skip — no campaign
+                # memories are visible to this caller.
+                continue
             if required_owner is not None:
                 scope_conditions.append(
                     and_(
@@ -426,7 +441,12 @@ def _build_search_filters(
                 )
             else:
                 scope_conditions.append(MemoryNode.scope == scope_name)
-        filters.append(or_(*scope_conditions))
+        if scope_conditions:
+            filters.append(or_(*scope_conditions))
+        else:
+            # All authorized scopes were skipped (e.g., campaign-only
+            # caller with no campaign_ids). No scope matches → no results.
+            return None
 
     return filters
 
@@ -439,6 +459,7 @@ async def count_search_matches(
     owner_id: str | None = None,
     current_only: bool = True,
     authorized_scopes: dict[str, str | None] | None = None,
+    campaign_ids: set[str] | None = None,
 ) -> int:
     """Count memories matching the same filter set used by search_memories.
 
@@ -452,7 +473,8 @@ async def count_search_matches(
     ``has_more``.
     """
     filters = _build_search_filters(
-        scope, owner_id, current_only, authorized_scopes, tenant_id
+        scope, owner_id, current_only, authorized_scopes, tenant_id,
+        campaign_ids=campaign_ids,
     )
     if filters is None:
         return 0
@@ -472,6 +494,7 @@ async def search_memories(
     max_results: int = 20,
     current_only: bool = True,
     authorized_scopes: dict[str, str | None] | None = None,
+    campaign_ids: set[str] | None = None,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity.
 
@@ -493,7 +516,8 @@ async def search_memories(
     query_embedding = await embedding_service.embed(query)
 
     filters = _build_search_filters(
-        scope, owner_id, current_only, authorized_scopes, tenant_id
+        scope, owner_id, current_only, authorized_scopes, tenant_id,
+        campaign_ids=campaign_ids,
     )
     if filters is None:
         return []
@@ -634,6 +658,7 @@ async def search_memories_with_focus(
     max_results: int = 20,
     current_only: bool = True,
     authorized_scopes: dict[str, str | None] | None = None,
+    campaign_ids: set[str] | None = None,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -679,6 +704,7 @@ async def search_memories_with_focus(
             max_results=max_results,
             current_only=current_only,
             authorized_scopes=authorized_scopes,
+            campaign_ids=campaign_ids,
         )
         return FocusedSearchResult(results=plain)
 
@@ -695,7 +721,8 @@ async def search_memories_with_focus(
         )
 
     filters = _build_search_filters(
-        scope, owner_id, current_only, authorized_scopes, tenant_id
+        scope, owner_id, current_only, authorized_scopes, tenant_id,
+        campaign_ids=campaign_ids,
     )
     if filters is None:
         return FocusedSearchResult(

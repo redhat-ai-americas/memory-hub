@@ -240,7 +240,7 @@ def test_get_claims_session_fallback():
     session_user = {
         "user_id": "wjackson",
         "name": "Wes Jackson",
-        "scopes": ["user", "project", "role", "organizational", "enterprise"],
+        "scopes": ["user", "project", "campaign", "role", "organizational", "enterprise"],
         "identity_type": "user",
     }
 
@@ -286,3 +286,147 @@ def test_get_claims_no_identity():
          patch("src.core.authz.get_current_user", return_value=None):
         with pytest.raises(AuthenticationError):
             get_claims_from_context()
+
+
+# -- Campaign scope (issue #157) ---------------------------------------------
+
+@pytest.mark.parametrize("claims,memory_owner,campaign_ids,expected", [
+    # Caller enrolled in campaign → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "campaign-uuid-1",
+        {"campaign-uuid-1", "campaign-uuid-2"},
+        True,
+    ),
+    # Caller not enrolled in this campaign → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "campaign-uuid-3",
+        {"campaign-uuid-1", "campaign-uuid-2"},
+        False,
+    ),
+    # No campaign_ids provided → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "campaign-uuid-1",
+        None,
+        False,
+    ),
+    # Empty campaign_ids set → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "campaign-uuid-1",
+        set(),
+        False,
+    ),
+    # Has campaign-specific read scope → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:read:campaign"]},
+        "campaign-uuid-1",
+        {"campaign-uuid-1"},
+        True,
+    ),
+    # No read scope at all → denied even if enrolled
+    (
+        {"sub": "alice", "scopes": []},
+        "campaign-uuid-1",
+        {"campaign-uuid-1"},
+        False,
+    ),
+    # Has wrong tier scope → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read:user"]},
+        "campaign-uuid-1",
+        {"campaign-uuid-1"},
+        False,
+    ),
+])
+def test_authorize_read_campaign(claims, memory_owner, campaign_ids, expected):
+    memory = SimpleNamespace(
+        scope="campaign", owner_id=memory_owner, tenant_id="default"
+    )
+    assert authorize_read(claims, memory, campaign_ids=campaign_ids) == expected
+
+
+def test_authorize_read_campaign_cross_tenant_denied():
+    """Campaign RBAC doesn't bypass tenant isolation."""
+    memory = SimpleNamespace(
+        scope="campaign", owner_id="campaign-uuid-1", tenant_id="tenant_a"
+    )
+    claims = {
+        "sub": "alice",
+        "tenant_id": "tenant_b",
+        "scopes": ["memory:read"],
+    }
+    assert authorize_read(claims, memory, campaign_ids={"campaign-uuid-1"}) is False
+
+
+@pytest.mark.parametrize("claims,owner_id,campaign_ids,expected", [
+    # Caller enrolled → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:write"]},
+        "campaign-uuid-1",
+        {"campaign-uuid-1"},
+        True,
+    ),
+    # Caller not enrolled → denied
+    (
+        {"sub": "alice", "scopes": ["memory:write"]},
+        "campaign-uuid-2",
+        {"campaign-uuid-1"},
+        False,
+    ),
+    # No campaign_ids → denied
+    (
+        {"sub": "alice", "scopes": ["memory:write"]},
+        "campaign-uuid-1",
+        None,
+        False,
+    ),
+    # Has campaign-specific write scope → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:write:campaign"]},
+        "campaign-uuid-1",
+        {"campaign-uuid-1"},
+        True,
+    ),
+    # Non-service user can write campaign (lower friction than org)
+    (
+        {"sub": "alice", "identity_type": "user", "scopes": ["memory:write"]},
+        "campaign-uuid-1",
+        {"campaign-uuid-1"},
+        True,
+    ),
+])
+def test_authorize_write_campaign(claims, owner_id, campaign_ids, expected):
+    assert authorize_write(
+        claims, "campaign", owner_id, "default", campaign_ids=campaign_ids
+    ) == expected
+
+
+def test_authorize_write_campaign_cross_tenant_denied():
+    """Campaign write RBAC doesn't bypass tenant isolation."""
+    claims = {
+        "sub": "alice",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:write"],
+    }
+    assert authorize_write(
+        claims, "campaign", "campaign-uuid-1", "tenant_b",
+        campaign_ids={"campaign-uuid-1"},
+    ) is False
+
+
+def test_build_authorized_scopes_includes_campaign():
+    """build_authorized_scopes includes campaign when caller has read access."""
+    claims = {"sub": "alice", "scopes": ["memory:read"]}
+    result = build_authorized_scopes(claims)
+    assert "campaign" in result
+    assert result["campaign"] is None  # no owner filter; campaign_ids handles it
+
+
+def test_build_authorized_scopes_campaign_specific_scope():
+    """Only campaign scope when caller has campaign-specific read."""
+    claims = {"sub": "alice", "scopes": ["memory:read:campaign"]}
+    result = build_authorized_scopes(claims)
+    assert result == {"campaign": None}

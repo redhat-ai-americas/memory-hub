@@ -10,7 +10,7 @@ from src.tools.auth import get_current_user
 
 log = get_logger("authz")
 
-ALL_TIERS = ("user", "project", "role", "organizational", "enterprise")
+ALL_TIERS = ("user", "project", "campaign", "role", "organizational", "enterprise")
 
 
 class AuthenticationError(Exception):
@@ -110,14 +110,14 @@ def get_claims_from_context() -> dict:
         log.debug("Resolved session identity: sub=%s", claims["sub"])
         return claims
 
-    # 3. No identity
+    # 4. No identity
     log.warning("No JWT or session identity available")
     raise AuthenticationError(
         "Authentication required. Provide a JWT or call register_session."
     )
 
 
-def authorize_read(claims: dict, memory) -> bool:
+def authorize_read(claims: dict, memory, campaign_ids: set[str] | None = None) -> bool:
     """Can this identity read this memory?"""
     # Tenant isolation: reject cross-tenant reads before any other check.
     # This is the most fundamental boundary -- a cross-tenant caller should
@@ -141,12 +141,19 @@ def authorize_read(claims: dict, memory) -> bool:
         return True
     if tier == "project":
         return True  # project membership check TBD
+    if tier == "campaign":
+        # Campaign memories are accessible when the caller's project is
+        # enrolled in the campaign. The memory's owner_id holds the
+        # campaign UUID. campaign_ids is pre-resolved by the tool layer.
+        if campaign_ids is None:
+            return False
+        return memory.owner_id in campaign_ids
     if tier == "role":
         return True  # role matching TBD
     return False
 
 
-def authorize_write(claims: dict, scope: str, owner_id: str, tenant_id: str) -> bool:
+def authorize_write(claims: dict, scope: str, owner_id: str, tenant_id: str, campaign_ids: set[str] | None = None) -> bool:
     """Can this identity write a memory at this scope for this owner in this tenant?"""
     # Tenant isolation: reject cross-tenant writes before any other check.
     # The tenant_id passed in is the tenant of the memory being written; the
@@ -169,6 +176,12 @@ def authorize_write(claims: dict, scope: str, owner_id: str, tenant_id: str) -> 
         return claims.get("identity_type") == "service"
     if scope == "project":
         return True  # project membership check TBD
+    if scope == "campaign":
+        # Campaign writes are lower friction than org writes — no curator
+        # review required. Access check: caller's project must be enrolled.
+        if campaign_ids is None:
+            return False
+        return owner_id in campaign_ids
     return False
 
 
