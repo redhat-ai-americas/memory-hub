@@ -25,6 +25,7 @@ from src.tools._deps import (
 from src.tools._push_helpers import broadcast_after_write
 
 from memoryhub_core.models.schemas import MemoryNodeCreate
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import MemoryAccessDeniedError, MemoryNotFoundError
 from memoryhub_core.services.memory import create_memory
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
@@ -46,8 +47,10 @@ async def write_memory(
         str,
         Field(
             description=(
-                "One of: user, project, role, organizational, enterprise. "
-                "Most agent-created memories are 'user' scope."
+                "One of: user, project, campaign, role, organizational, enterprise. "
+                "Most agent-created memories are 'user' scope. "
+                "For campaign scope, set owner_id to the campaign UUID and "
+                "provide project_id for enrollment verification."
             ),
         ),
     ],
@@ -94,6 +97,25 @@ async def write_memory(
             description="Arbitrary key-value pairs for tags, source references, etc.",
         ),
     ] = None,
+    domains: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Crosscutting knowledge domain tags (e.g., 'React', 'Spring Boot', "
+                "'CORS'). Improves retrieval for domain-relevant queries. Optional "
+                "at any scope."
+            ),
+        ),
+    ] = None,
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. Required when scope is 'campaign' — "
+                "used to verify your project is enrolled in the campaign."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Create a new memory node or branch in the memory tree.
@@ -129,7 +151,24 @@ async def write_memory(
     # stamped explicitly (rather than relying on the column's
     # server_default of "default").
     write_tenant_id = get_tenant_filter(claims)
-    if not authorize_write(claims, scope, owner_id, write_tenant_id):
+
+    # Resolve campaign membership when writing to campaign scope.
+    campaign_ids: set[str] | None = None
+    if scope == "campaign":
+        if not project_id:
+            raise ToolError(
+                "project_id is required when scope is 'campaign'. "
+                "Set it to your project identifier so enrollment can be verified."
+            )
+        session_for_campaign, gen_for_campaign = await get_db_session()
+        try:
+            campaign_ids = await get_campaigns_for_project(
+                session_for_campaign, project_id, write_tenant_id,
+            )
+        finally:
+            await release_db_session(gen_for_campaign)
+
+    if not authorize_write(claims, scope, owner_id, write_tenant_id, campaign_ids=campaign_ids):
         raise ToolError(
             f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
         )
@@ -169,6 +208,7 @@ async def write_memory(
             parent_id=parsed_parent_id,
             branch_type=branch_type,
             metadata=metadata,
+            domains=domains,
         )
     except ValidationError as exc:
         errors = exc.errors()

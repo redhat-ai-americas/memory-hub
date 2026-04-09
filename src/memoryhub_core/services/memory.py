@@ -120,6 +120,7 @@ async def create_memory(
         parent_id=data.parent_id,
         branch_type=data.branch_type,
         metadata_=data.metadata,
+        domains=data.domains,
         embedding=embedding,
         is_current=True,
         version=1,
@@ -247,6 +248,7 @@ async def update_memory(
     new_content = data.content if data.content is not None else old_node.content
     new_weight = data.weight if data.weight is not None else old_node.weight
     new_metadata = data.metadata if data.metadata is not None else old_node.metadata_
+    new_domains = data.domains if data.domains is not None else old_node.domains
 
     embedding = await embedding_service.embed(new_content)
     stub = generate_stub(
@@ -269,6 +271,7 @@ async def update_memory(
         parent_id=old_node.parent_id,
         branch_type=old_node.branch_type,
         metadata_=new_metadata,
+        domains=new_domains,
         embedding=embedding,
         is_current=True,
         version=old_node.version + 1,
@@ -304,6 +307,7 @@ async def update_memory(
             parent_id=new_node.id,
             branch_type=child.branch_type,
             metadata_=child.metadata_,
+            domains=child.domains,
             embedding=list(child.embedding) if child.embedding is not None else None,
             is_current=True,
             version=child.version,

@@ -13,6 +13,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub_core.models.schemas import MemoryNodeUpdate
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import (
     MemoryAccessDeniedError,
     MemoryNotCurrentError,
@@ -66,6 +67,24 @@ async def update_memory(
             description="New metadata to merge with existing metadata. Omit to keep existing."
         ),
     ] = None,
+    domains: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "New domain tags to replace existing ones. "
+                "Omit to keep existing domains."
+            ),
+        ),
+    ] = None,
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. Required when updating a campaign-scoped "
+                "memory — used to verify enrollment."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Create a new version of an existing memory, preserving the old version for history.
@@ -74,9 +93,9 @@ async def update_memory(
     needs refinement. The old version stays accessible via get_memory_history.
     At least one of content, weight, or metadata must be provided.
     """
-    if content is None and weight is None and metadata is None:
+    if content is None and weight is None and metadata is None and domains is None:
         raise ToolError(
-            "No changes provided. Include at least one of: content, weight, metadata."
+            "No changes provided. Include at least one of: content, weight, metadata, domains."
         )
 
     try:
@@ -90,6 +109,7 @@ async def update_memory(
         content=content,
         weight=weight,
         metadata=metadata,
+        domains=domains,
     )
 
     try:
@@ -105,7 +125,20 @@ async def update_memory(
         # a nonexistent row; the follow-up authorize_write (which also
         # checks tenant) is defense in depth.
         existing = await _read_memory(parsed_id, session, tenant_id=tenant)
-        if not authorize_write(claims, existing.scope, existing.owner_id, existing.tenant_id):
+
+        # Resolve campaign membership for campaign-scoped memories.
+        campaign_ids: set[str] | None = None
+        if existing.scope == "campaign":
+            if not project_id:
+                raise ToolError(
+                    "project_id is required when updating a campaign-scoped memory. "
+                    "Set it to your project identifier so enrollment can be verified."
+                )
+            campaign_ids = await get_campaigns_for_project(
+                session, project_id, tenant,
+            )
+
+        if not authorize_write(claims, existing.scope, existing.owner_id, existing.tenant_id, campaign_ids=campaign_ids):
             raise ToolError(
                 f"Not authorized to update this {existing.scope}-scope memory."
             )
