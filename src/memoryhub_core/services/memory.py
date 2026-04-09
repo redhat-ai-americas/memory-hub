@@ -663,6 +663,8 @@ async def search_memories_with_focus(
     current_only: bool = True,
     authorized_scopes: dict[str, str | None] | None = None,
     campaign_ids: set[str] | None = None,
+    domains: list[str] | None = None,
+    domain_boost_weight: float = 0.3,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -831,18 +833,50 @@ async def search_memories_with_focus(
         node.id: idx + 1 for idx, node in enumerate(focus_scored)
     }
 
+    # Domain ranks: when domain tags are provided, rank candidates by
+    # overlap count (more matching domains = better rank). This becomes
+    # a third RRF signal alongside query and focus.
+    use_domain_boost = bool(domains) and domain_boost_weight > 0.0
+    rank_domain: dict[uuid.UUID, int] = {}
+    if use_domain_boost:
+        domain_set = {d.lower() for d in domains}
+        domain_scored = sorted(
+            candidate_nodes,
+            key=lambda n: len(
+                domain_set & {d.lower() for d in (n.domains or [])}
+            ),
+            reverse=True,
+        )
+        rank_domain = {
+            node.id: idx + 1 for idx, node in enumerate(domain_scored)
+        }
+
     # RRF blend: rank_query carries the cross-encoder ranks (or
     # cosine fallback ranks); rank_focus carries the focus-cosine
-    # ranks. weight_b = session_focus_weight pushes the result
-    # toward focus.
-    weight_q = 1.0 - session_focus_weight
+    # ranks; rank_domain carries domain-overlap ranks (when active).
+    # Domain weight is carved proportionally from query and focus.
+    base_q = 1.0 - session_focus_weight
+    if use_domain_boost:
+        weight_d = domain_boost_weight
+        weight_q = base_q * (1.0 - weight_d)
+        weight_f = session_focus_weight * (1.0 - weight_d)
+    else:
+        weight_d = 0.0
+        weight_q = base_q
+        weight_f = session_focus_weight
+
     blended_scores: list[tuple[MemoryNode, float]] = []
     for node in candidate_nodes:
         score_q = weight_q / (RRF_K + rank_query.get(node.id, k_recall + 1))
-        score_f = session_focus_weight / (
+        score_f = weight_f / (
             RRF_K + rank_focus.get(node.id, k_recall + 1)
         )
-        blended_scores.append((node, score_q + score_f))
+        score_d = (
+            weight_d / (RRF_K + rank_domain.get(node.id, k_recall + 1))
+            if use_domain_boost
+            else 0.0
+        )
+        blended_scores.append((node, score_q + score_f + score_d))
     blended_scores.sort(key=lambda pair: pair[1], reverse=True)
 
     top_nodes = [node for node, _ in blended_scores[:max_results]]

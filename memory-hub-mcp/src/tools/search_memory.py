@@ -249,6 +249,18 @@ async def search_memory(
             le=1.0,
         ),
     ] = 0.4,
+    domain_boost_weight: Annotated[
+        float,
+        Field(
+            description=(
+                "Strength of the domain boost (0.0-1.0). Default 0.3. "
+                "Higher values favor domain-matching results more aggressively. "
+                "Ignored when domains is not set."
+            ),
+            ge=0.0,
+            le=1.0,
+        ),
+    ] = 0.3,
     project_id: Annotated[
         str | None,
         Field(
@@ -382,6 +394,8 @@ async def search_memory(
                 current_only=current_only,
                 authorized_scopes=authorized,
                 campaign_ids=campaign_ids,
+                domains=domains,
+                domain_boost_weight=domain_boost_weight,
             )
             results = bundle.results
             focus_meta = {
@@ -419,8 +433,11 @@ async def search_memory(
             campaign_ids=campaign_ids,
         )
 
-        # Apply domain boost before branch handling and budget packing.
-        if domains and results:
+        # Apply post-retrieval domain boost only on the non-focus path.
+        # The focus path handles domains via RRF integration in the
+        # service layer — applying it here too would double-boost.
+        used_focus_path = focus and focus.strip()
+        if domains and results and not used_focus_path:
             results = _apply_domain_boost(results, domains)
 
         if not results:
