@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Awaitable, Callable, Literal
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal
 
 import mcp.types as mt
 from fastmcp import Client
