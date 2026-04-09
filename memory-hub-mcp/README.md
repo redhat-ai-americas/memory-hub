@@ -233,6 +233,27 @@ spot recent coverage gaps.
 — defaults to 30 days before `end_date`), `end_date` (ISO `YYYY-MM-DD`,
 optional — defaults to today UTC).
 
+## Entry point
+
+The canonical entry point is `src.main`. The server imports each tool
+module statically and registers it with a `FastMCP` instance via
+`mcp.add_tool()` — see `src/main.py`. **Do not** use the template's
+dynamic `UnifiedMCPServer` / `load_all` loader; it was designed for
+FastMCP 2 and silently fails to register tools under v3. An earlier
+`src.server_v3` entry point existed briefly during the FastMCP 2→3 pivot
+and was consolidated away in commit `6aa2b28`; it no longer exists.
+
+Every script, Containerfile, and workflow in this repo uses `src.main`:
+
+- `memory-hub-mcp/Containerfile` — `CMD ["python", "-m", "src.main"]`
+- `memory-hub-mcp/Makefile` — `make run-local` → `python -m src.main`
+- `memory-hub-mcp/run-local.sh` and `run_local.py`
+- `memory-hub-mcp/pyproject.toml` — `fastmcp-unified = "src.main:main"`
+
+When you add a new tool, you must import it into `src/main.py` and add
+it to the `mcp.add_tool()` list — see `memory-hub-mcp/CLAUDE.md` for the
+full instructions.
+
 ## Running the server
 
 ### Local (STDIO)
