@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import fakeredis.aioredis
 import pytest
+from fastmcp.exceptions import ToolError
 
 from memoryhub_core.config import ValkeySettings
 from memoryhub_core.services.push_subscriber import (
@@ -129,18 +130,16 @@ class FakeContext:
 
 
 class TestInvalidApiKey:
-    """An invalid key should not touch the push pipeline at all."""
+    """An invalid key must raise ToolError and not touch the push pipeline."""
 
-    async def test_returns_error_and_no_push_wiring(
+    async def test_raises_tool_error_and_no_push_wiring(
         self, fake_valkey, mock_authenticate, mock_set_session
     ):
         mock_authenticate.return_value = None
         ctx = FakeContext()
 
-        result = await register_session_fn(api_key="bogus", ctx=ctx)
-
-        assert result["error"] is True
-        assert "Invalid API key" in result["message"]
+        with pytest.raises(ToolError, match="Invalid API key"):
+            await register_session_fn(api_key="bogus", ctx=ctx)
 
         # No SADD, no subscriber, no cleanup callback.
         members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
