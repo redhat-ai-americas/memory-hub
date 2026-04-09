@@ -19,6 +19,17 @@ dependencies = [
     "rich>=13.0",
     "pyyaml>=6.0",
 ]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Environment :: Console",
+]
 
 [project.scripts]
 memoryhub = "memoryhub_cli.main:app"
@@ -28,6 +39,11 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/redhat-ai-americas/memory-hub"
+Repository = "https://github.com/redhat-ai-americas/memory-hub"
+Issues = "https://github.com/redhat-ai-americas/memory-hub/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memoryhub_cli"]
