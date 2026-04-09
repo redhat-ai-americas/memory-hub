@@ -8,6 +8,7 @@ import type {
   CurationRule,
   GraphResponse,
   MemoryDetail,
+  PublicConfig,
   SearchMatch,
   SecretRotatedResponse,
   StatsResponse,
@@ -89,6 +90,10 @@ async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 
 export async function fetchClients(): Promise<ClientResponse[]> {
   return apiFetch<ClientResponse[]>('/clients');
+}
+
+export async function fetchPublicConfig(): Promise<PublicConfig> {
+  return apiFetch<PublicConfig>('/public-config');
 }
 
 export async function createClient(payload: CreateClientPayload): Promise<ClientCreatedResponse> {

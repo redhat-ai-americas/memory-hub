@@ -31,6 +31,7 @@ from src.schemas import (
     GraphNode,
     GraphResponse,
     MemoryDetail,
+    PublicConfigResponse,
     RecentActivity,
     ScopeCount,
     SearchMatch,
@@ -124,6 +125,23 @@ async def _get_embedding(text_query: str, embedding_url: str) -> list[float] | N
 @router.get("/healthz")
 async def healthz():
     return {"status": "ok"}
+
+
+@router.get("/api/public-config", response_model=PublicConfigResponse)
+async def get_public_config(settings: SettingsDep) -> PublicConfigResponse:
+    """Return the public-facing route URLs the UI uses to compose contributor
+    welcome emails. These are the URLs an external agent would connect to
+    (not the BFF-internal SVC addresses used by the backend itself).
+
+    Populated from MEMORYHUB_PUBLIC_MCP_URL and MEMORYHUB_PUBLIC_AUTH_URL
+    env vars at deploy time. If the env vars are missing, returns the
+    example.com placeholders from config defaults so the UI renders an
+    obviously wrong URL rather than silently returning localhost.
+    """
+    return PublicConfigResponse(
+        mcp_url=settings.public_mcp_url,
+        auth_url=settings.public_auth_url,
+    )
 
 
 # ---------------------------------------------------------------------------

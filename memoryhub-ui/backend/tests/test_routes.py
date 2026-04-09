@@ -158,6 +158,43 @@ class TestHealthz:
         assert response.json() == {"status": "ok"}
 
 
+class TestPublicConfig:
+    def test_returns_default_placeholders_when_env_unset(self, client, test_settings):
+        app.dependency_overrides[get_settings] = lambda: test_settings
+        try:
+            response = client.get("/api/public-config")
+            assert response.status_code == 200
+            body = response.json()
+            # Defaults from config.py Settings — obviously-wrong placeholders
+            # so the UI doesn't silently render a localhost URL.
+            assert body["mcp_url"] == "https://mcp-server.example.com/mcp/"
+            assert body["auth_url"] == "https://auth-server.example.com"
+        finally:
+            app.dependency_overrides.pop(get_settings, None)
+
+    def test_returns_configured_public_urls(self, client):
+        custom_settings = Settings(
+            db_host="localhost",
+            db_port=5432,
+            db_name="memoryhub",
+            db_user="memoryhub",
+            db_password="",
+            embedding_url="",
+            mcp_server_url="http://mcp-server:8080/mcp/",
+            public_mcp_url="https://mcp.cluster-xyz.example.com/mcp/",
+            public_auth_url="https://auth.cluster-xyz.example.com",
+        )
+        app.dependency_overrides[get_settings] = lambda: custom_settings
+        try:
+            response = client.get("/api/public-config")
+            assert response.status_code == 200
+            body = response.json()
+            assert body["mcp_url"] == "https://mcp.cluster-xyz.example.com/mcp/"
+            assert body["auth_url"] == "https://auth.cluster-xyz.example.com"
+        finally:
+            app.dependency_overrides.pop(get_settings, None)
+
+
 # ---------------------------------------------------------------------------
 # Async client tests using mocked DB
 # ---------------------------------------------------------------------------

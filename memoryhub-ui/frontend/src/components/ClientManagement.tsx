@@ -23,8 +23,14 @@ import {
   ToolbarItem,
 } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
-import type { ClientResponse, CreateClientPayload } from '@/types';
-import { createClient, fetchClients, rotateClientSecret, updateClient } from '@/api/client';
+import type { ClientResponse, CreateClientPayload, PublicConfig } from '@/types';
+import {
+  createClient,
+  fetchClients,
+  fetchPublicConfig,
+  rotateClientSecret,
+  updateClient,
+} from '@/api/client';
 import { formatDate } from '@/utils/time';
 import SecretRevealModal from './SecretRevealModal';
 
@@ -45,11 +51,22 @@ const ClientManagement: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  // Secret reveal modal state
-  const [secretModal, setSecretModal] = useState<{ clientId: string; secret: string } | null>(null);
+  // Secret reveal modal state — carries the full context needed to render
+  // the welcome email body, not just the secret.
+  const [secretModal, setSecretModal] = useState<{
+    clientId: string;
+    clientName: string;
+    secret: string;
+    tenantId: string;
+    scopes: string[];
+  } | null>(null);
 
   // Action feedback
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Public-facing URLs (from /api/public-config). Populated once on mount;
+  // used by the welcome email block in SecretRevealModal.
+  const [publicConfig, setPublicConfig] = useState<PublicConfig | null>(null);
 
   const loadClients = useCallback(async () => {
     try {
@@ -64,6 +81,19 @@ const ClientManagement: React.FC = () => {
   }, []);
 
   useEffect(() => { loadClients(); }, [loadClients]);
+
+  // Load public config once on mount. A failure here is non-fatal — the
+  // welcome email will render with the example.com placeholder URLs, which
+  // is an obvious signal that the env vars weren't populated at deploy
+  // time, rather than a silent wrong-host bug.
+  useEffect(() => {
+    fetchPublicConfig()
+      .then(setPublicConfig)
+      .catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn('Failed to load public config for welcome email', err);
+      });
+  }, []);
 
   const resetForm = () => {
     setFormClientId('');
@@ -88,7 +118,13 @@ const ClientManagement: React.FC = () => {
       const result = await createClient(payload);
       setCreateModalOpen(false);
       resetForm();
-      setSecretModal({ clientId: result.client_id, secret: result.client_secret });
+      setSecretModal({
+        clientId: result.client_id,
+        clientName: result.client_name,
+        secret: result.client_secret,
+        tenantId: result.tenant_id,
+        scopes: result.default_scopes,
+      });
       await loadClients();
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create client');
@@ -107,11 +143,19 @@ const ClientManagement: React.FC = () => {
     }
   };
 
-  const handleRotateSecret = async (clientId: string) => {
+  const handleRotateSecret = async (client: ClientResponse) => {
     setActionError(null);
     try {
-      const result = await rotateClientSecret(clientId);
-      setSecretModal({ clientId: result.client_id, secret: result.client_secret });
+      const result = await rotateClientSecret(client.client_id);
+      // Rotate only returns client_id + new secret, so fill in the rest
+      // from the row the user clicked on for the welcome email.
+      setSecretModal({
+        clientId: result.client_id,
+        clientName: client.client_name,
+        secret: result.client_secret,
+        tenantId: client.tenant_id,
+        scopes: client.default_scopes,
+      });
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : 'Failed to rotate secret');
     }
@@ -215,7 +259,7 @@ const ClientManagement: React.FC = () => {
                         </Button>
                       </FlexItem>
                       <FlexItem>
-                        <Button variant="warning" size="sm" onClick={() => handleRotateSecret(c.client_id)}>
+                        <Button variant="warning" size="sm" onClick={() => handleRotateSecret(c)}>
                           Rotate Secret
                         </Button>
                       </FlexItem>
@@ -290,7 +334,12 @@ const ClientManagement: React.FC = () => {
         <SecretRevealModal
           isOpen
           clientId={secretModal.clientId}
+          clientName={secretModal.clientName}
           clientSecret={secretModal.secret}
+          tenantId={secretModal.tenantId}
+          scopes={secretModal.scopes}
+          mcpUrl={publicConfig?.mcp_url ?? 'https://mcp-server.example.com/mcp/'}
+          authUrl={publicConfig?.auth_url ?? 'https://auth-server.example.com'}
           onClose={() => setSecretModal(null)}
         />
       )}

@@ -120,6 +120,17 @@ class SecretRotatedResponse(BaseModel):
     client_secret: str
 
 
+class PublicConfigResponse(BaseModel):
+    """Public-facing URLs used by the UI to generate contributor welcome text.
+
+    These are the URLs an external agent would use to reach MemoryHub from
+    outside the cluster. The BFF itself uses the internal SVC addresses.
+    """
+
+    mcp_url: str
+    auth_url: str
+
+
 # --- Curation Rules ---
 
 class CurationRuleResponse(BaseModel):
