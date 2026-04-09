@@ -18,7 +18,40 @@ The tools are designed around the tree-based memory model: memories are nodes wi
 
 **Weight-aware responses.** search_memory returns a mix of full content (high-weight matches) and stubs (lower-weight matches). Agents see stubs with indicators like "rationale available" and decide whether to expand, keeping context lean.
 
+## Error Handling Contract
+
+All 15 tools raise `fastmcp.exceptions.ToolError` for every failure. No tool returns `{"error": True}` dicts — errors always set `is_error` on the MCP wire so the consuming agent's harness knows the call failed.
+
+The SDK classifies `ToolError` messages into typed exceptions by prefix:
+
+| Category | Message prefix patterns | SDK exception |
+|---|---|---|
+| Not found | "Memory \<uuid\> not found" / "... not found." | `NotFoundError` |
+| Not authorized | "Not authorized to" / "Access denied:" | `PermissionDeniedError` |
+| Invalid parameter | "Invalid " / "... must be" / "... cannot be empty" | `ValidationError` |
+| Authentication | "Invalid API key" / "No authenticated session" | `AuthenticationError` |
+| Conflict | "... already exists" / "... already deleted" | `ConflictError` |
+| Curation veto | "Curation rule blocked" | `CurationVetoError` |
+| Generic | anything else | `ToolError` |
+
+Generic `except Exception` handlers log at ERROR level and scrub internal details before raising `ToolError`. Tool authors must include an `except ToolError: raise` guard before the generic handler to avoid double-wrapping expected errors.
+
+Full design note: `planning/tool-error-standardization.md`
+
 ## Tools
+
+### register_session
+
+- **Purpose**: Authenticate the session with an API key. Call this once at the start of every conversation to establish identity. After registration, `write_memory` and `search_memory` default to the authenticated `user_id`. Also wires the session into the #62 Pattern E push pipeline so the client receives broadcast notifications without polling. When the server is deployed behind a JWT-issuing auth server, session registration is a no-op: the JWT's `sub` claim is used directly.
+- **Parameters**:
+  - `api_key` (string, required): Your MemoryHub API key. Format: `mh-dev-<username>-<year>`.
+- **Returns**: The authenticated identity with `user_id`, `name`, accessible `scopes`, and a confirmation message. If push subscriber wiring fails, the response still succeeds with a non-fatal warning.
+- **Error Cases**:
+  - "Invalid API key. Contact your system administrator for a valid key. Keys follow the format: mh-dev-\<username\>-\<year\>." — The API key is not recognized. → SDK: `AuthenticationError`
+- **Example Usage**:
+  ```
+  register_session(api_key="mh-dev-wjackson-2026")
+  ```
 
 ### write_memory
 
@@ -33,10 +66,12 @@ The tools are designed around the tree-based memory model: memories are nodes wi
   - `metadata` (object, optional): Arbitrary key-value pairs for extensibility. Use for tags, source references, tool context, etc.
 - **Returns**: The created memory node with its generated ID, stub text, and timestamp. If the write was queued (above user scope), returns a status indicating "queued_for_review" with the queue position.
 - **Error Cases**:
-  - "Access denied: you cannot write to [scope] scope. Your identity allows writes to: [list of allowed scopes]." — Agent tried to write to a scope it doesn't have permission for.
-  - "Parent memory [id] not found. Check the parent_id — it may have been deleted or you may not have access to it." — Invalid parent_id for branch creation.
-  - "branch_type is required when parent_id is set. Common types: rationale, provenance, description, evidence." — Missing branch_type on a branch write.
-  - "Content flagged by security scan: [reason]. The memory was not stored. Remove sensitive content and retry." — Secrets/PII detected in content.
+  - "Access denied: you cannot write to [scope] scope. Your identity allows writes to: [list of allowed scopes]." — Agent tried to write to a scope it doesn't have permission for. → SDK: `PermissionDeniedError`
+  - "Parent memory [id] not found. Check the parent_id — it may have been deleted or you may not have access to it." — Invalid parent_id for branch creation. → SDK: `NotFoundError`
+  - "branch_type is required when parent_id is set. Common types: rationale, provenance, description, evidence." — Missing branch_type on a branch write. → SDK: `ValidationError`
+  - "Content flagged by security scan: [reason]. The memory was not stored. Remove sensitive content and retry." — Secrets/PII detected in content. → SDK: `CurationVetoError`
+  - "No authenticated session. Call register_session first." — No auth context available for the write. → SDK: `AuthenticationError`
+  - "Curation rule blocked: [reason]." — A user or system curation rule rejected the content. → SDK: `CurationVetoError`
 - **Example Usage**: An agent recording a user preference:
   ```
   write_memory(content="prefers Podman over Docker for container builds", scope="user", owner_id="wjackson", weight=0.9)
@@ -58,8 +93,8 @@ The tools are designed around the tree-based memory model: memories are nodes wi
   - `current_version_id` (string/UUID or null): When `is_current` is false, points at the live version of this memory's chain. Null when the requested node is itself current. Lets agents pivot to the current version in one extra `read_memory` call.
   - When `include_versions=true`, an additional `version_history` object: `{versions, total_versions, has_more, offset}` matching the `get_memory_history` shape.
 - **Error Cases**:
-  - "Memory [id] not found. It may have been deleted, or you may not have access to this memory's scope." — Memory doesn't exist or is inaccessible.
-  - "Not authorized to read memory [id]." — Caller is authenticated but doesn't have read access to this memory's scope.
+  - "Memory [id] not found. It may have been deleted, or you may not have access to this memory's scope." — Memory doesn't exist or is inaccessible. → SDK: `NotFoundError`
+  - "Not authorized to read memory [id]." — Caller is authenticated but doesn't have read access to this memory's scope. → SDK: `PermissionDeniedError`
 
   Historical reads do **not** error: they return the historical row plus a `current_version_id` pointer (see #51). Earlier spec drafts described an "is not current — returning the current version instead" warning; that design was replaced with the pointer field so agents can choose whether to follow the link.
 - **Example Usage**: Reading a memory and discovering it's superseded:
@@ -78,9 +113,9 @@ The tools are designed around the tree-based memory model: memories are nodes wi
   - `metadata` (object, optional): New metadata. Merged with existing metadata (not replaced).
 - **Returns**: The new version of the memory with its new ID, version number, and the previous_version_id linking back to the old version. The old version's isCurrent is now false.
 - **Error Cases**:
-  - "Memory [id] is not the current version. The current version is [current_id] (version [N]). Update that instead." — Agent tried to update a superseded version.
-  - "Access denied: only the memory owner can update user-scope memories. This memory belongs to [owner]." — Attribution protection: can't edit someone else's memories.
-  - "No changes provided. Include at least one of: content, weight, metadata." — Empty update.
+  - "Memory [id] is not the current version. The current version is [current_id] (version [N]). Update that instead." — Agent tried to update a superseded version. → SDK: `ConflictError`
+  - "Access denied: only the memory owner can update user-scope memories. This memory belongs to [owner]." — Attribution protection: can't edit someone else's memories. → SDK: `PermissionDeniedError`
+  - "No changes provided. Include at least one of: content, weight, metadata." — Empty update. → SDK: `ValidationError`
 - **Example Usage**: Updating a preference:
   ```
   update_memory(memory_id="abc-123", content="prefers Rust for systems work, Python for scripting and ML")
@@ -117,8 +152,8 @@ The tools are designed around the tree-based memory model: memories are nodes wi
 
   Earlier spec drafts described a single `total_accessible` field that conflated "page size" and "total matches"; that field was replaced with the unambiguous `total_matching` + `has_more` pair (see #53).
 - **Error Cases**:
-  - "No memories found matching your query. Try broader search terms or remove scope/owner filters." — Empty results with guidance.
-  - "Invalid scope filter: [value]. Valid scopes: user, project, role, organizational, enterprise." — Bad scope parameter.
+  - "No memories found matching your query. Try broader search terms or remove scope/owner filters." — Not an error; returns empty results with guidance. The tool succeeds with an empty result set.
+  - "Invalid scope filter: [value]. Valid scopes: user, project, role, organizational, enterprise." — Bad scope parameter. → SDK: `ValidationError`
 - **Example Usage**: Finding relevant context for a container build task:
   ```
   search_memory(query="container runtime preferences and build requirements", scope="user", owner_id="wjackson", max_results=5)
@@ -143,8 +178,8 @@ The tools are designed around the tree-based memory model: memories are nodes wi
   - `memory_id` (string/UUID, required): The ID of any version of the memory (current or historical). The tool traces the full chain regardless of which version ID you provide.
 - **Returns**: An ordered list (newest first) of all versions of this memory. Each entry includes: version number, content stub, is_current flag, created_at timestamp, and the full content. The current version is marked.
 - **Error Cases**:
-  - "Memory [id] not found." — Invalid ID.
-  - "This memory has no version history (version 1, never updated)." — Not an error per se, but a clear response that there's only one version.
+  - "Memory [id] not found." — Invalid ID. → SDK: `NotFoundError`
+  - "This memory has no version history (version 1, never updated)." — Not an error; returns the single version with an informational message.
 - **Example Usage**: Checking if a preference changed:
   ```
   get_memory_history(memory_id="abc-123")
@@ -160,8 +195,8 @@ The tools are designed around the tree-based memory model: memories are nodes wi
   - `confidence` (float, optional, default 0.7): How confident the agent is that this is a real contradiction (0.0-1.0). Temporary exceptions (e.g., using Docker for a specific client requirement) warrant lower confidence. Repeated, consistent contradictions warrant higher.
 - **Returns**: Acknowledgment with the current contradiction count for this memory. If enough contradictions have accumulated, indicates that a revision prompt will be triggered: "Contradiction recorded (3 of 5 threshold). The user will be prompted to review this memory."
 - **Error Cases**:
-  - "Memory [id] not found." — Invalid memory ID.
-  - "Memory [id] is not current. Contradictions can only be reported against current memories." — Can't contradict a superseded version.
+  - "Memory [id] not found." — Invalid memory ID. → SDK: `NotFoundError`
+  - "Memory [id] is not current. Contradictions can only be reported against current memories." — Can't contradict a superseded version. → SDK: `ValidationError`
 - **Example Usage**:
   ```
   report_contradiction(memory_id="abc-123", observed_behavior="User ran 'docker build' and created a docker-compose.yml in the last 3 projects", confidence=0.8)
@@ -191,10 +226,10 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
   - `metadata` (object, optional): Key-value context about the relationship — reasoning, confidence, curator notes.
 - **Returns**: The created relationship with its UUID, timestamps, `created_by` identity, and stub text from both the source and target nodes for context.
 - **Error Cases**:
-  - "Memory node [id] not found. Verify both source_id and target_id refer to existing, current memory nodes." — One or both nodes missing.
-  - "Relationship ([source] --[type]--> [target]) already exists." — Duplicate edge. The agent should use the existing relationship.
-  - "source_id and target_id must be different — self-referential edges are not allowed."
-  - "Invalid relationship_type '[value]'. Must be one of: derived_from, supersedes, conflicts_with, related_to."
+  - "Memory node [id] not found. Verify both source_id and target_id refer to existing, current memory nodes." — One or both nodes missing. → SDK: `NotFoundError`
+  - "Relationship ([source] --[type]--> [target]) already exists." — Duplicate edge. The agent should use the existing relationship. → SDK: `ConflictError`
+  - "source_id and target_id must be different — self-referential edges are not allowed." → SDK: `ValidationError`
+  - "Invalid relationship_type '[value]'. Must be one of: derived_from, supersedes, conflicts_with, related_to." → SDK: `ValidationError`
 - **Example Usage**: Marking provenance for a promoted memory:
   ```
   create_relationship(source_id="<org-memory-id>", target_id="<user-memory-id>", relationship_type="derived_from", metadata={"promoted_by": "curator"})
@@ -210,9 +245,9 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
   - `include_provenance` (boolean, optional, default false): If true, additionally traces `derived_from` edges backward from this node to build a provenance chain showing where this memory originated. Useful for organizational memories that were promoted from user memories.
 - **Returns**: A dict with `relationships` (list of edges with source/target stubs), `count`, and optionally `provenance_chain` (list of `{hop, node, relationship}` entries tracing back to the origin).
 - **Error Cases**:
-  - "Memory node [id] not found. Verify the node_id refers to an existing memory node."
-  - "Invalid direction '[value]'. Must be one of: outgoing, incoming, both."
-  - "Invalid relationship_type '[value]'. Must be one of: derived_from, supersedes, conflicts_with, related_to."
+  - "Memory node [id] not found. Verify the node_id refers to an existing memory node." → SDK: `NotFoundError`
+  - "Invalid direction '[value]'. Must be one of: outgoing, incoming, both." → SDK: `ValidationError`
+  - "Invalid relationship_type '[value]'. Must be one of: derived_from, supersedes, conflicts_with, related_to." → SDK: `ValidationError`
 - **Example Usage**: Tracing the origin of an organizational memory:
   ```
   get_relationships(node_id="<org-memory>", include_provenance=true)
@@ -228,8 +263,8 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
   - `offset` (integer, optional, default 0): Pagination offset. Use with `has_more` from the response.
 - **Returns**: `{"results": [{id, stub, score}], "total": int, "has_more": bool}`. Results are ordered by similarity (highest first). The `total` is the full count of memories above the threshold, not just the page.
 - **Error Cases**:
-  - "Memory [id] not found." — Invalid or inaccessible memory ID.
-  - "Memory [id] has no embedding — similarity search unavailable." — Memory was stored without an embedding (shouldn't happen in normal operation).
+  - "Memory [id] not found." — Invalid or inaccessible memory ID. → SDK: `NotFoundError`
+  - "Memory [id] has no embedding — similarity search unavailable." — Memory was stored without an embedding (shouldn't happen in normal operation). → SDK: `ToolError`
 - **Example Usage**: After `write_memory` returns `similar_count: 3`:
   ```
   get_similar_memories(memory_id="<new-memory-id>", max_results=3)
@@ -245,10 +280,10 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
   - `reasoning` (string, required): Why these memories should be merged. Be specific — "Both describe Podman preference but with different wording" is better than "duplicates".
 - **Returns**: The created `conflicts_with` relationship with merge metadata (`merge_suggested: true`, `reasoning`, `suggested_by`), plus a confirmation message.
 - **Error Cases**:
-  - "Memory node [id] not found." — One or both memories don't exist.
-  - "memory_a_id and memory_b_id must be different."
-  - "reasoning cannot be empty."
-  - "A merge suggestion already exists between these memories." — Duplicate suggestion.
+  - "Memory node [id] not found." — One or both memories don't exist. → SDK: `NotFoundError`
+  - "memory_a_id and memory_b_id must be different." → SDK: `ValidationError`
+  - "reasoning cannot be empty." → SDK: `ValidationError`
+  - "A merge suggestion already exists between these memories." — Duplicate suggestion. → SDK: `ConflictError`
 - **Example Usage**: After finding two similar container preference memories:
   ```
   suggest_merge(memory_a_id="<older-memory>", memory_b_id="<newer-memory>", reasoning="Both describe Podman preference. The newer version includes Containerfile guidance that should be consolidated.")
@@ -267,9 +302,9 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
   - `priority` (integer, optional, default 10): Evaluation priority within the tier (lower = higher priority).
 - **Returns**: The created or updated rule with its UUID and all fields. Includes `"created": true` or `"updated": true` to indicate which action was taken.
 - **Error Cases**:
-  - "Cannot override system rule '[name]' — it is protected by the platform administrator." — Agent tried to create a user rule with the same name as a protected system rule.
-  - "Invalid tier '[value]'. Must be one of: regex, embedding."
-  - "Invalid action '[value]'. Must be one of: flag, block, quarantine, reject_with_pointer, decay_weight."
+  - "Cannot override system rule '[name]' — it is protected by the platform administrator." — Agent tried to create a user rule with the same name as a protected system rule. → SDK: `PermissionDeniedError`
+  - "Invalid tier '[value]'. Must be one of: regex, embedding." → SDK: `ValidationError`
+  - "Invalid action '[value]'. Must be one of: flag, block, quarantine, reject_with_pointer, decay_weight." → SDK: `ValidationError`
 - **Example Usage**: Raising the dedup threshold because dataset memories are intentionally similar:
   ```
   set_curation_rule(name="my_dedup_threshold", tier="embedding", action="reject_with_pointer", config={"threshold": 0.98})
@@ -303,11 +338,11 @@ Phase 3 adds memory deletion. The need surfaced from the dashboard work in Phase
   - `total_deleted` (integer): Sum of versions + branches. This is the total number of rows the tool affected.
   The agent uses this to confirm the scope of the deletion: if the agent expected to delete a single memory but `total_deleted` is 8, it knows the memory had a deep history or many branches and can mention this to the user.
 - **Error Cases**:
-  - "Memory [id] not found. It may have already been deleted, or you may not have read access to its scope." — The memory doesn't exist, has already been soft-deleted, OR the caller doesn't have `memory:read` for the memory's scope. **All three of these collapse to a single not-found error.**
+  - "Memory [id] not found. It may have already been deleted, or you may not have read access to its scope." — The memory doesn't exist, has already been soft-deleted, OR the caller doesn't have `memory:read` for the memory's scope. **All three of these collapse to a single not-found error.** → SDK: `NotFoundError`
 
     Earlier spec drafts proposed a distinct "Memory [id] has already been deleted. Use get_memory_history to see when it was deleted." 409-equivalent for the already-deleted case. The implementation deliberately rejects that distinction because it would leak the *existence* of memories the caller can't read: a non-reader could probe IDs and infer "this UUID once existed and is now deleted" from the differentiated error. Folding all three causes into "not found" preserves the deleted state's invisibility to non-readers. See `src/tools/delete_memory.py` for the well-commented rationale; this is by design and should not be reverted.
-  - "Not authorized to delete this [scope]-scope memory. You need either ownership of the memory or the memory:admin scope." — Caller has read access but not write access to this memory's scope, and is not a memory:admin. Tells the agent exactly what would unblock the call.
-  - "Invalid memory_id format: '[value]'. Expected a UUID string." — The memory_id parameter wasn't a valid UUID. Standard format error.
+  - "Not authorized to delete this [scope]-scope memory. You need either ownership of the memory or the memory:admin scope." — Caller has read access but not write access to this memory's scope, and is not a memory:admin. Tells the agent exactly what would unblock the call. → SDK: `PermissionDeniedError`
+  - "Invalid memory_id format: '[value]'. Expected a UUID string." — The memory_id parameter wasn't a valid UUID. Standard format error. → SDK: `ValidationError`
 - **Tool Annotations**:
   - `readOnlyHint: false` — Modifies state.
   - `destructiveHint: true` — **This is the key annotation for delete_memory.** Tells the consuming agent's harness that this operation removes data and should be surfaced to the user (e.g., shown in a confirmation prompt or marked in transcripts).
@@ -355,9 +390,9 @@ Phase 4 adds two tools that make session focus a stored, analyzable signal rathe
   - `expires_at` (string, ISO datetime): When the active-session record will auto-expire from Valkey.
   - `message` (string): Human-readable confirmation.
 - **Error Cases**:
-  - "focus must not be empty. Provide a 5-10 word topic describing the session's current focus." — Empty or whitespace-only focus.
-  - "No authenticated session found. Call register_session first, or provide a JWT in the Authorization header." — No auth context available.
-  - "Session focus store is unavailable: [reason]. Focus was not recorded; retry after the backend recovers." — Valkey unreachable. Surfaces as an MCP error so the agent knows the write didn't land.
+  - "focus must not be empty. Provide a 5-10 word topic describing the session's current focus." — Empty or whitespace-only focus. → SDK: `ValidationError`
+  - "No authenticated session found. Call register_session first, or provide a JWT in the Authorization header." — No auth context available. → SDK: `AuthenticationError`
+  - "Session focus store is unavailable: [reason]. Focus was not recorded; retry after the backend recovers." — Valkey unreachable. Surfaces as an MCP error so the agent knows the write didn't land. → SDK: `ToolError`
 - **Tool Annotations**:
   - `readOnlyHint: false` — Writes Valkey state.
   - `destructiveHint: false` — Doesn't destroy prior state; the TTL handles eviction.
@@ -385,9 +420,9 @@ Phase 4 adds two tools that make session focus a stored, analyzable signal rathe
   - `total_sessions` (integer): Number of focus declarations in the window.
   - `histogram` (list of dicts): Sorted by count descending, ties broken by focus string. Each entry: `{"focus": str, "count": int}`. Empty list if `total_sessions` is 0.
 - **Error Cases**:
-  - "start_date (X) is after end_date (Y). Provide dates as YYYY-MM-DD where start_date <= end_date." — Inverted range.
-  - "Invalid date format: 'X'. Expected ISO format YYYY-MM-DD." — Malformed date string.
-  - "Session focus store is unavailable: [reason]. Histogram data cannot be retrieved until the backend recovers." — Valkey unreachable.
+  - "start_date (X) is after end_date (Y). Provide dates as YYYY-MM-DD where start_date <= end_date." — Inverted range. → SDK: `ValidationError`
+  - "Invalid date format: 'X'. Expected ISO format YYYY-MM-DD." — Malformed date string. → SDK: `ValidationError`
+  - "Session focus store is unavailable: [reason]. Histogram data cannot be retrieved until the backend recovers." — Valkey unreachable. → SDK: `ToolError`
 - **Tool Annotations**:
   - `readOnlyHint: true` — Pure read from Valkey.
   - `destructiveHint: false`
