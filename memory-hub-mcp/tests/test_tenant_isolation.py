@@ -1103,11 +1103,9 @@ async def test_get_relationships_cross_tenant_returns_not_found():
             "src.tools.get_relationships.get_relationships_service",
             new=AsyncMock(side_effect=_fake_get_rels),
         ),
+        pytest.raises(ToolError, match="not found"),
     ):
-        result = await get_relationships(node_id=str(src_id))
-
-    assert result.get("error") is True
-    assert "not found" in result["message"].lower()
+        await get_relationships(node_id=str(src_id))
 
 
 @pytest.mark.asyncio
