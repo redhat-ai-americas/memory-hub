@@ -27,6 +27,18 @@ from memoryhub_core.models import Base  # noqa: E402
 
 target_metadata = Base.metadata
 
+# Tables that are owned by separate packages (e.g. memoryhub-auth) and live in
+# the same database but are NOT declared in memoryhub_core.models. Without this
+# hook, autogenerate would see them in the DB and propose to drop them every run.
+_EXTERNAL_TABLES = {"oauth_clients", "refresh_tokens"}
+
+
+def include_object(object, name, type_, reflected, compare_to):  # noqa: A002
+    """Skip external tables so autogenerate does not propose dropping them."""
+    if type_ == "table" and name in _EXTERNAL_TABLES:
+        return False
+    return True
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -40,6 +52,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -58,7 +71,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
+        )
 
         with context.begin_transaction():
             context.run_migrations()
