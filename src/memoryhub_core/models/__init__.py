@@ -2,9 +2,15 @@
 
 from memoryhub_core.models.base import Base, TimestampMixin
 from memoryhub_core.models.contradiction import ContradictionReport
+from memoryhub_core.models.campaign import Campaign, CampaignMembership
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.schemas import (
+    CampaignCreate,
+    CampaignMembershipCreate,
+    CampaignMembershipRead,
+    CampaignRead,
+    CampaignStatus,
     CurationResult,
     CuratorRuleCreate,
     CuratorRuleRead,
@@ -27,6 +33,13 @@ from memoryhub_core.models.utils import generate_stub
 
 __all__ = [
     "Base",
+    "Campaign",
+    "CampaignCreate",
+    "CampaignMembership",
+    "CampaignMembershipCreate",
+    "CampaignMembershipRead",
+    "CampaignRead",
+    "CampaignStatus",
     "ContradictionReport",
     "CurationResult",
     "CuratorRule",

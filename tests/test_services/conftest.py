@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.types import TypeDecorator
 
 from memoryhub_core.models.base import Base
+from memoryhub_core.models.campaign import Campaign, CampaignMembership  # noqa: F401 — import registers tables with Base
 from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
@@ -59,6 +60,13 @@ async def async_session():
     original_rule_config_default = rule_config_col.server_default
     rule_config_col.server_default = None
 
+    # Patch ARRAY(Text) domains column to JSON-encoded TEXT for SQLite.
+    domains_col = MemoryNode.__table__.c.domains
+    original_domains_type = domains_col.type
+    original_domains_default = domains_col.server_default
+    domains_col.type = _JsonEncodedVector()  # reuse: list[str] ↔ JSON text
+    domains_col.server_default = None
+
     try:
         async with engine.begin() as conn:
             await conn.execute(text("PRAGMA journal_mode=WAL"))
@@ -71,6 +79,8 @@ async def async_session():
         embedding_col.type = original_type
         rel_metadata_col.server_default = original_rel_metadata_default
         rule_config_col.server_default = original_rule_config_default
+        domains_col.type = original_domains_type
+        domains_col.server_default = original_domains_default
         await engine.dispose()
 
 

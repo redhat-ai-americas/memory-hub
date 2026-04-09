@@ -5,7 +5,7 @@ REST API layer. They are intentionally separate from the SQLAlchemy ORM models.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -26,9 +26,18 @@ class MemoryScope(StrEnum):
 
     USER = "user"
     PROJECT = "project"
+    CAMPAIGN = "campaign"
     ROLE = "role"
     ORGANIZATIONAL = "organizational"
     ENTERPRISE = "enterprise"
+
+
+class CampaignStatus(StrEnum):
+    """Lifecycle states for a campaign."""
+
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
 
 
 class StorageType(StrEnum):
@@ -54,6 +63,7 @@ class MemoryNodeCreate(BaseModel):
         description="Branch type (rationale, provenance, description, etc.). Null for root memories.",
     )
     metadata: dict[str, Any] | None = Field(default=None, description="Extensible metadata")
+    domains: list[str] | None = Field(default=None, description="Crosscutting knowledge domain tags (e.g., 'React', 'Spring Boot')")
 
 
 class MemoryNodeUpdate(BaseModel):
@@ -65,6 +75,7 @@ class MemoryNodeUpdate(BaseModel):
     content: str | None = Field(default=None, min_length=1)
     weight: float | None = Field(default=None, ge=0.0, le=1.0)
     metadata: dict[str, Any] | None = None
+    domains: list[str] | None = Field(default=None, description="Updated domain tags")
 
 
 # -- Output schemas --
@@ -94,6 +105,7 @@ class MemoryNodeRead(BaseModel):
     # ORM row now carries the real tenant. A missing tenant_id here is a
     # bug in the service layer and must fail loudly at validation time.
     tenant_id: str
+    domains: list[str] | None = None
     is_current: bool
     version: int
     previous_version_id: uuid.UUID | None
@@ -124,6 +136,7 @@ class MemoryNodeStub(BaseModel):
     branch_type: str | None = None
     has_children: bool = False
     has_rationale: bool = False
+    domains: list[str] | None = None
 
 
 class RelationshipCreate(BaseModel):
@@ -281,3 +294,50 @@ class CurationResult(BaseModel):
     nearest_id: uuid.UUID | None = None
     nearest_score: float | None = None
     flags: list[str] = Field(default_factory=list)
+
+
+# -- Campaign schemas --
+
+
+class CampaignCreate(BaseModel):
+    """Input schema for creating a campaign."""
+
+    name: str = Field(min_length=1, max_length=255, description="Unique campaign name within the tenant")
+    description: str | None = Field(default=None, description="Campaign purpose and context")
+    status: CampaignStatus = Field(default=CampaignStatus.ACTIVE)
+    default_ttl: timedelta | None = Field(default=None, description="Default TTL for campaign-scoped memories")
+
+
+class CampaignRead(BaseModel):
+    """Output schema for reading a campaign."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    status: CampaignStatus
+    default_ttl: timedelta | None = None
+    tenant_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class CampaignMembershipCreate(BaseModel):
+    """Input schema for enrolling a project in a campaign."""
+
+    campaign_id: uuid.UUID
+    project_id: str = Field(min_length=1, description="Project identifier to enroll")
+    enrolled_by: str = Field(min_length=1, description="User or agent performing enrollment")
+
+
+class CampaignMembershipRead(BaseModel):
+    """Output schema for reading a campaign membership."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    campaign_id: uuid.UUID
+    project_id: str
+    enrolled_at: datetime
+    enrolled_by: str

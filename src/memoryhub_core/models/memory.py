@@ -12,7 +12,7 @@ from typing import Optional
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from memoryhub_core.models.base import Base, TimestampMixin
@@ -58,6 +58,13 @@ class MemoryNode(TimestampMixin, Base):
         String(255),
         nullable=False,
         server_default=text("'default'"),
+    )
+
+    # Crosscutting knowledge domains (e.g., "React", "Spring Boot", "CORS")
+    domains: Mapped[list[str] | None] = mapped_column(
+        ARRAY(Text),
+        nullable=True,
+        server_default=text("'{}'::text[]"),
     )
 
     # Versioning
@@ -121,6 +128,7 @@ class MemoryNode(TimestampMixin, Base):
         # sees the migration-created indexes in the DB but not in the metadata
         # and proposes to drop them on every autogenerate run.
         Index("ix_memory_nodes_deleted_at", "deleted_at"),
+        Index("ix_memory_nodes_domains", "domains", postgresql_using="gin"),
         Index(
             "ix_memory_nodes_expires_at",
             "expires_at",
