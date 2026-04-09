@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["ai", "agents", "memory", "cli", "mcp"]
 dependencies = [
-    "memoryhub>=0.1.0",
+    "memoryhub>=0.3.0",
     "typer[all]>=0.15",
     "rich>=13.0",
     "pyyaml>=6.0",
