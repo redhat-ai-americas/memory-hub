@@ -5,12 +5,20 @@ API key authentication. Both paths produce a normalized claims dict that the
 authorize_read / authorize_write helpers consume uniformly.
 """
 
+import os
+
 from src.core.logging import get_logger
 from src.tools.auth import get_current_user
 
 log = get_logger("authz")
 
 ALL_TIERS = ("user", "project", "campaign", "role", "organizational", "enterprise")
+
+# Feature flags for scope isolation (issue #167). Default: enabled.
+# Set to "false" to revert to the pre-isolation behavior (open access)
+# while debugging or during phased rollout.
+PROJECT_ISOLATION_ENABLED = os.environ.get("MEMORYHUB_PROJECT_ISOLATION_ENABLED", "true").lower() == "true"
+ROLE_ISOLATION_ENABLED = os.environ.get("MEMORYHUB_ROLE_ISOLATION_ENABLED", "true").lower() == "true"
 
 
 class AuthenticationError(Exception):
@@ -117,7 +125,13 @@ def get_claims_from_context() -> dict:
     )
 
 
-def authorize_read(claims: dict, memory, campaign_ids: set[str] | None = None) -> bool:
+def authorize_read(
+    claims: dict,
+    memory,
+    campaign_ids: set[str] | None = None,
+    project_ids: set[str] | None = None,
+    role_names: set[str] | None = None,
+) -> bool:
     """Can this identity read this memory?"""
     # Tenant isolation: reject cross-tenant reads before any other check.
     # This is the most fundamental boundary -- a cross-tenant caller should
@@ -140,7 +154,11 @@ def authorize_read(claims: dict, memory, campaign_ids: set[str] | None = None) -
     if tier in ("enterprise", "organizational"):
         return True
     if tier == "project":
-        return True  # project membership check TBD
+        if not PROJECT_ISOLATION_ENABLED:
+            return True
+        if project_ids is None:
+            return False
+        return memory.scope_id in project_ids
     if tier == "campaign":
         # Campaign memories are accessible when the caller's project is
         # enrolled in the campaign. The memory's owner_id holds the
@@ -149,11 +167,24 @@ def authorize_read(claims: dict, memory, campaign_ids: set[str] | None = None) -
             return False
         return memory.owner_id in campaign_ids
     if tier == "role":
-        return True  # role matching TBD
+        if not ROLE_ISOLATION_ENABLED:
+            return True
+        if role_names is None:
+            return False
+        return memory.scope_id in role_names
     return False
 
 
-def authorize_write(claims: dict, scope: str, owner_id: str, tenant_id: str, campaign_ids: set[str] | None = None) -> bool:
+def authorize_write(
+    claims: dict,
+    scope: str,
+    owner_id: str,
+    tenant_id: str,
+    campaign_ids: set[str] | None = None,
+    scope_id: str | None = None,
+    project_ids: set[str] | None = None,
+    role_names: set[str] | None = None,
+) -> bool:
     """Can this identity write a memory at this scope for this owner in this tenant?"""
     # Tenant isolation: reject cross-tenant writes before any other check.
     # The tenant_id passed in is the tenant of the memory being written; the
@@ -172,10 +203,24 @@ def authorize_write(claims: dict, scope: str, owner_id: str, tenant_id: str, cam
         return owner_id == claims["sub"]
     if scope == "enterprise":
         return False  # always rejected; HITL approval flow bypasses
-    if scope in ("organizational", "role"):
+    if scope == "organizational":
         return claims.get("identity_type") == "service"
+    if scope == "role":
+        if claims.get("identity_type") != "service":
+            return False
+        if not ROLE_ISOLATION_ENABLED:
+            return True
+        if role_names is None:
+            return False
+        return scope_id in role_names
     if scope == "project":
-        return True  # project membership check TBD
+        if not PROJECT_ISOLATION_ENABLED:
+            return True
+        if project_ids is None:
+            return False
+        if scope_id is None:
+            return False
+        return scope_id in project_ids
     if scope == "campaign":
         # Campaign writes are lower friction than org writes — no curator
         # review required. Access check: caller's project must be enrolled.
