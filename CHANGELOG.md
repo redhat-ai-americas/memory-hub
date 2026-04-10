@@ -16,6 +16,19 @@ Published to PyPI as [`memoryhub`](https://pypi.org/project/memoryhub/). Lives i
 
 ### [Unreleased]
 
+### [0.4.0] — 2026-04-09
+
+- **Campaign & domain parameter support (#164)**: Added `project_id` to all 11
+  client methods for campaign enrollment verification. Added `domains` and
+  `domain_boost_weight` to `search()`, and `domains` to `write()`/`update()`.
+- All parameters are optional — existing callers are unaffected.
+
+### [0.3.0] — 2026-04-09
+
+- Session focus support (#61): `set_session_focus()`, `get_focus_history()`,
+  two-vector retrieval via `focus`/`session_focus_weight` on `search()`.
+- Push notification support (#62): `on_memory_updated()` for Pattern E.
+
 ### [0.2.0] — 2026-04-09
 
 - **Error handling overhaul (#97)**: All MCP tools now raise `ToolError` instead
@@ -40,6 +53,17 @@ Published to PyPI as [`memoryhub`](https://pypi.org/project/memoryhub/). Lives i
 Published to PyPI as [`memoryhub-cli`](https://pypi.org/project/memoryhub-cli/). Lives in [`memoryhub-cli/`](memoryhub-cli/).
 
 ### [Unreleased]
+
+### [0.3.0] — 2026-04-09
+
+- **Campaign & domain parameter support (#164)**: Added `--project-id` to
+  search, read, write, delete, and history commands. Added `--domain` to
+  search and write. Auto-loads `project_id` from `.memoryhub.yaml` campaigns.
+
+### [0.2.0] — 2026-04-09
+
+- Campaign enrollment prompt in `memoryhub config init` (#160).
+- API key check after config init (#153).
 
 ### [0.1.0] — 2026-04-09
 

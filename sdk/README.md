@@ -4,7 +4,7 @@ Centralized, governed memory for AI agents.
 
 MemoryHub provides a persistent memory layer for AI agents running on OpenShift AI, with scope-based access control, multi-tenant isolation, and an immutable audit trail. It works with any agent framework — LlamaStack, LangChain, Claude Code, Cursor, and more.
 
-**Status:** Alpha (v0.1.0). Core operations are stable; curation and relationship APIs may evolve.
+**Status:** Alpha (v0.4.0). Core operations are stable; curation and relationship APIs may evolve.
 
 ## Installation
 
@@ -49,6 +49,13 @@ async def main():
         # Update it
         updated = await client.update(written.memory.id, weight=0.9)
         print(f"Version: {updated.version}")
+
+        # Campaign-scoped search (requires project enrollment)
+        campaign_results = await client.search(
+            "shared patterns",
+            project_id="my-project",
+            domains=["React", "Spring Boot"],
+        )
 
 asyncio.run(main())
 ```
@@ -113,27 +120,29 @@ results = client.search_sync("deployment patterns")
 
 | Method | Description |
 |--------|-------------|
-| `search(query, *, scope, max_results, ...)` | Semantic similarity search |
-| `read(memory_id, *, depth, include_versions)` | Read a memory by ID |
-| `write(content, *, scope, weight, parent_id, ...)` | Create a new memory |
-| `update(memory_id, *, content, weight, metadata)` | Update an existing memory |
+| `search(query, *, scope, max_results, project_id, domains, ...)` | Semantic similarity search |
+| `read(memory_id, *, include_versions, project_id)` | Read a memory by ID |
+| `write(content, *, scope, weight, project_id, domains, ...)` | Create a new memory |
+| `update(memory_id, *, content, weight, project_id, domains, ...)` | Update an existing memory |
 
 ### Lifecycle
 
 | Method | Description |
 |--------|-------------|
-| `get_history(memory_id, *, max_versions)` | Version history |
-| `report_contradiction(memory_id, observed_behavior, *, confidence)` | Flag stale memories |
+| `get_history(memory_id, *, max_versions, project_id)` | Version history |
+| `report_contradiction(memory_id, observed_behavior, *, project_id)` | Flag stale memories |
 
 ### Relationships and curation
 
 | Method | Description |
 |--------|-------------|
-| `get_similar(memory_id, *, threshold)` | Find similar memories |
-| `get_relationships(node_id, *, relationship_type, direction)` | Get memory relationships |
-| `create_relationship(source_id, target_id, relationship_type)` | Create a relationship |
-| `suggest_merge(memory_a_id, memory_b_id, reasoning)` | Suggest merging duplicates |
+| `get_similar(memory_id, *, threshold, project_id)` | Find similar memories |
+| `get_relationships(node_id, *, relationship_type, direction, project_id)` | Get memory relationships |
+| `create_relationship(source_id, target_id, relationship_type, *, project_id)` | Create a relationship |
+| `suggest_merge(memory_a_id, memory_b_id, reasoning, *, project_id)` | Suggest merging duplicates |
 | `set_curation_rule(name, *, tier, action, config)` | Configure curation rules |
+
+All methods accepting `project_id` use it for campaign enrollment verification. When a target memory has `scope="campaign"`, the server resolves campaign membership through `project_id`. The `domains` parameter on `search()` boosts domain-matching results (non-matching results still appear); on `write()`/`update()` it tags the memory with crosscutting knowledge domains.
 
 ## Authentication
 

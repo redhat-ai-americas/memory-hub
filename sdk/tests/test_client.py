@@ -831,6 +831,199 @@ async def test_get_focus_history_strips_none_dates(client):
     assert "end_date" not in forwarded
 
 
+# ── project_id / domains forwarding (#164) ───────────────────────────────────
+
+
+async def test_search_forwards_project_id_and_domains(client):
+    """search() forwards project_id, domains, and domain_boost_weight."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search(
+        "query",
+        project_id="proj-123",
+        domains=["React", "Spring Boot"],
+        domain_boost_weight=0.5,
+    )
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["project_id"] == "proj-123"
+    assert forwarded["domains"] == ["React", "Spring Boot"]
+    assert forwarded["domain_boost_weight"] == 0.5
+
+
+async def test_search_omits_campaign_params_when_none(client):
+    """project_id, domains, domain_boost_weight are stripped when None."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("query")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert "project_id" not in forwarded
+    assert "domains" not in forwarded
+    assert "domain_boost_weight" not in forwarded
+
+
+async def test_write_forwards_project_id_and_domains(client):
+    """write() forwards project_id and domains."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"memory": MINIMAL_MEMORY, "curation": MINIMAL_CURATION}
+    )
+
+    await c.write("content", project_id="proj-123", domains=["React"])
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["project_id"] == "proj-123"
+    assert forwarded["domains"] == ["React"]
+
+
+async def test_update_forwards_project_id_and_domains(client):
+    """update() forwards project_id and domains."""
+    c, mock_mcp = client
+    updated = {**MINIMAL_MEMORY, "version": 2}
+    mock_mcp.call_tool.return_value = FakeCallToolResult(structured_content=updated)
+
+    await c.update("mem-001", content="updated", project_id="proj-123", domains=["React"])
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["project_id"] == "proj-123"
+    assert forwarded["domains"] == ["React"]
+
+
+# Shared response fixtures for parametrized #164 tests
+_WRITE_RESPONSE = {
+    "memory": MINIMAL_MEMORY,
+    "curation": MINIMAL_CURATION,
+}
+_DELETE_RESPONSE = {
+    "deleted_id": "mem-001",
+    "total_deleted": 1,
+    "versions_deleted": 1,
+    "branches_deleted": 0,
+}
+_HISTORY_RESPONSE = {
+    "memory_id": "mem-001",
+    "versions": [],
+    "total_versions": 0,
+    "has_more": False,
+    "offset": 0,
+}
+_CONTRADICTION_RESPONSE = {
+    "memory_id": "mem-001",
+    "contradiction_count": 1,
+    "threshold": 5,
+    "revision_triggered": False,
+    "message": "ok",
+}
+_RELATIONSHIPS_RESPONSE = {
+    "node_id": "mem-001",
+    "relationships": [],
+    "total": 0,
+}
+_CREATE_REL_KWARGS = {
+    "source_id": "a",
+    "target_id": "b",
+    "relationship_type": "related",
+}
+_CREATE_REL_RESPONSE = {
+    "id": "rel-1",
+    "source_id": "a",
+    "target_id": "b",
+    "relationship_type": "related",
+}
+_MERGE_KWARGS = {
+    "memory_a_id": "a",
+    "memory_b_id": "b",
+    "reasoning": "similar",
+}
+
+
+@pytest.mark.parametrize(
+    "method,tool_name,call_kwargs,response",
+    [
+        ("read", "read_memory",
+         {"memory_id": "mem-001"}, MINIMAL_MEMORY),
+        ("write", "write_memory",
+         {"content": "test"}, _WRITE_RESPONSE),
+        ("update", "update_memory",
+         {"memory_id": "mem-001", "content": "updated"},
+         {**MINIMAL_MEMORY, "version": 2}),
+        ("delete", "delete_memory",
+         {"memory_id": "mem-001"}, _DELETE_RESPONSE),
+        ("get_history", "get_memory_history",
+         {"memory_id": "mem-001"}, _HISTORY_RESPONSE),
+        ("report_contradiction", "report_contradiction",
+         {"memory_id": "mem-001", "observed_behavior": "changed"},
+         _CONTRADICTION_RESPONSE),
+        ("get_similar", "get_similar_memories",
+         {"memory_id": "mem-001"}, {"results": []}),
+        ("get_relationships", "get_relationships",
+         {"node_id": "mem-001"}, _RELATIONSHIPS_RESPONSE),
+        ("create_relationship", "create_relationship",
+         _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
+        ("suggest_merge", "suggest_merge",
+         _MERGE_KWARGS, {"status": "suggested"}),
+    ],
+)
+async def test_project_id_forwarded_when_provided(
+    client, method, tool_name, call_kwargs, response,
+):
+    """project_id is forwarded to the MCP tool when provided."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content=response,
+    )
+
+    func = getattr(c, method)
+    await func(**call_kwargs, project_id="proj-123")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["project_id"] == "proj-123"
+
+
+@pytest.mark.parametrize(
+    "method,call_kwargs,response",
+    [
+        ("read",
+         {"memory_id": "mem-001"}, MINIMAL_MEMORY),
+        ("delete",
+         {"memory_id": "mem-001"}, _DELETE_RESPONSE),
+        ("get_history",
+         {"memory_id": "mem-001"}, _HISTORY_RESPONSE),
+        ("report_contradiction",
+         {"memory_id": "mem-001", "observed_behavior": "changed"},
+         _CONTRADICTION_RESPONSE),
+        ("get_similar",
+         {"memory_id": "mem-001"}, {"results": []}),
+        ("get_relationships",
+         {"node_id": "mem-001"}, _RELATIONSHIPS_RESPONSE),
+        ("create_relationship",
+         _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
+        ("suggest_merge",
+         _MERGE_KWARGS, {"status": "suggested"}),
+    ],
+)
+async def test_project_id_omitted_when_none(
+    client, method, call_kwargs, response,
+):
+    """project_id is stripped from payload when not provided."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content=response,
+    )
+
+    await getattr(c, method)(**call_kwargs)
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert "project_id" not in forwarded
+
+
 # ── sync wrapper ──────────────────────────────────────────────────────────────
 
 

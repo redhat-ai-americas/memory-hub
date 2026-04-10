@@ -23,10 +23,16 @@ memoryhub read <memory-id>
 # Write a new memory
 memoryhub write "Use Podman, not Docker" --scope user --weight 0.9
 
+# Campaign-scoped operations (requires project enrollment)
+memoryhub search "shared patterns" --project-id my-project --domain React
+memoryhub write "Use vLLM for embeddings" --project-id my-project --domain ML
+
 # Set up project-level memory loading
 memoryhub config init
 memoryhub config regenerate
 ```
+
+The `--project-id` flag enables campaign-scoped memory access. When your project is enrolled in campaigns via `.memoryhub.yaml`, the CLI auto-loads the project identifier from config, so you can omit the flag in most cases. Use `--domain` to tag writes or boost domain-matching results in search.
 
 ## Project configuration
 

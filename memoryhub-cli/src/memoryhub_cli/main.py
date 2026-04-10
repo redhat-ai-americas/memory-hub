@@ -58,6 +58,21 @@ def _get_client():
     )
 
 
+def _get_project_id_default() -> str | None:
+    """Try to load project_id from .memoryhub.yaml campaigns config.
+
+    Returns the project directory name as the project identifier when
+    campaigns are configured, or None when no config/campaigns exist.
+    """
+    try:
+        config = load_project_config()  # auto-discovers .memoryhub.yaml
+        if config.memory_loading.campaigns:
+            return Path.cwd().name
+    except Exception:
+        pass
+    return None
+
+
 def _run(coro):
     """Run an async coroutine."""
     return asyncio.run(coro)
@@ -110,15 +125,23 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     scope: str | None = typer.Option(None, "--scope", "-s", help="Filter by scope"),
     max_results: int = typer.Option(10, "--max", "-n", help="Maximum results"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    domains: list[str] | None = typer.Option(
+        None, "--domain", help="Domain tags to boost",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Search memories using semantic similarity."""
     client = _get_client()
+    _project_id = project_id or _get_project_id_default()
 
     async def _do():
         async with client:
             return await client.search(
                 query, scope=scope, max_results=max_results,
+                project_id=_project_id, domains=domains or None,
             )
 
     result = _run(_do())
@@ -158,14 +181,18 @@ def search(
 @app.command()
 def read(
     memory_id: str = typer.Argument(..., help="Memory UUID"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Read a memory by ID."""
     client = _get_client()
+    _project_id = project_id or _get_project_id_default()
 
     async def _do():
         async with client:
-            return await client.read(memory_id)
+            return await client.read(memory_id, project_id=_project_id)
 
     memory = _run(_do())
 
@@ -193,6 +220,12 @@ def write(
     weight: float = typer.Option(0.7, "--weight", "-w", help="Priority weight 0.0-1.0"),
     parent_id: str | None = typer.Option(None, "--parent", help="Parent memory ID"),
     branch_type: str | None = typer.Option(None, "--branch-type", help="Branch type"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    domains: list[str] | None = typer.Option(
+        None, "--domain", help="Domain tags",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Write a new memory.
@@ -210,12 +243,14 @@ def write(
         raise typer.Exit(1)
 
     client = _get_client()
+    _project_id = project_id or _get_project_id_default()
 
     async def _do():
         async with client:
             return await client.write(
                 content, scope=scope, weight=weight,
                 parent_id=parent_id, branch_type=branch_type,
+                project_id=_project_id, domains=domains or None,
             )
 
     result = _run(_do())
@@ -240,6 +275,9 @@ def write(
 def delete(
     memory_id: str = typer.Argument(..., help="Memory UUID to delete"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Soft-delete a memory and its version chain."""
@@ -249,10 +287,11 @@ def delete(
             raise typer.Abort()
 
     client = _get_client()
+    _project_id = project_id or _get_project_id_default()
 
     async def _do():
         async with client:
-            return await client.delete(memory_id)
+            return await client.delete(memory_id, project_id=_project_id)
 
     result = _run(_do())
 
@@ -270,14 +309,21 @@ def delete(
 def history(
     memory_id: str = typer.Argument(..., help="Memory UUID"),
     max_versions: int = typer.Option(20, "--max", "-n", help="Maximum versions to show"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Show version history for a memory."""
     client = _get_client()
+    _project_id = project_id or _get_project_id_default()
 
     async def _do():
         async with client:
-            return await client.get_history(memory_id, max_versions=max_versions)
+            return await client.get_history(
+                memory_id, max_versions=max_versions,
+                project_id=_project_id,
+            )
 
     result = _run(_do())
 

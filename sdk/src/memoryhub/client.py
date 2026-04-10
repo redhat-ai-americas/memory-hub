@@ -301,6 +301,9 @@ class MemoryHubClient:
         include_branches: bool = False,
         focus: str | None = None,
         session_focus_weight: float | None = None,
+        project_id: str | None = None,
+        domains: list[str] | None = None,
+        domain_boost_weight: float | None = None,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -343,6 +346,9 @@ class MemoryHubClient:
                 Ignored when focus is None. Defaults to the project config's
                 ``memory_loading.session_focus_weight`` when omitted (schema
                 default 0.4).
+            project_id: Project identifier for campaign enrollment verification.
+            domains: Domain tags to boost in results. Non-matching results still appear.
+            domain_boost_weight: Strength of domain boost (0.0-1.0). Server default 0.3.
         """
         defaults = self._project_config.retrieval_defaults
         loading = self._project_config.memory_loading
@@ -365,6 +371,9 @@ class MemoryHubClient:
             "mode": mode,
             "max_response_tokens": max_response_tokens,
             "include_branches": include_branches,
+            "project_id": project_id,
+            "domains": domains,
+            "domain_boost_weight": domain_boost_weight,
         }
         # Only forward focus params when the caller actually supplied a
         # focus string. Sending session_focus_weight without focus would
@@ -381,16 +390,23 @@ class MemoryHubClient:
         memory_id: str,
         *,
         include_versions: bool = False,
+        project_id: str | None = None,
     ) -> Memory:
         """Read a memory by ID, optionally with version history.
 
         Branch contents are no longer expanded inline; the returned Memory
         carries a branch_count summary. Inspect specific branches by issuing
         follow-up search_memory or read_memory calls.
+
+        Args:
+            memory_id: ID of the memory to read.
+            include_versions: If True, include version history in the response.
+            project_id: Project identifier for campaign enrollment verification.
         """
         data = await self._call("read_memory", {
             "memory_id": memory_id,
             "include_versions": include_versions,
+            "project_id": project_id,
         })
         return Memory.model_validate(data)
 
@@ -404,8 +420,22 @@ class MemoryHubClient:
         parent_id: str | None = None,
         branch_type: str | None = None,
         metadata: dict[str, Any] | None = None,
+        project_id: str | None = None,
+        domains: list[str] | None = None,
     ) -> WriteResult:
-        """Write a new memory."""
+        """Write a new memory.
+
+        Args:
+            content: The memory content to store.
+            scope: Memory scope (default "user").
+            owner_id: Owner override; defaults to the authenticated user.
+            weight: Memory weight (0.0-1.0, default 0.7).
+            parent_id: Parent memory ID for branching.
+            branch_type: Branch type label (e.g., "rationale").
+            metadata: Arbitrary metadata dict.
+            project_id: Project identifier for campaign enrollment verification.
+            domains: Domain tags for the memory, e.g. ['React', 'Spring Boot'].
+        """
         data = await self._call("write_memory", {
             "content": content,
             "scope": scope,
@@ -414,6 +444,8 @@ class MemoryHubClient:
             "parent_id": parent_id,
             "branch_type": branch_type,
             "metadata": metadata,
+            "project_id": project_id,
+            "domains": domains,
         })
         return WriteResult.model_validate(data)
 
@@ -424,10 +456,20 @@ class MemoryHubClient:
         content: str | None = None,
         weight: float | None = None,
         metadata: dict[str, Any] | None = None,
+        project_id: str | None = None,
+        domains: list[str] | None = None,
     ) -> Memory:
         """Update an existing memory (creates a new version).
 
         At least one of content, weight, or metadata must be provided.
+
+        Args:
+            memory_id: ID of the memory to update.
+            content: Replacement content.
+            weight: New weight (0.0-1.0).
+            metadata: New metadata dict (replaces existing).
+            project_id: Project identifier for campaign enrollment verification.
+            domains: Domain tags for the memory, e.g. ['React', 'Spring Boot'].
         """
         if content is None and weight is None and metadata is None:
             raise ValueError(
@@ -438,13 +480,21 @@ class MemoryHubClient:
             "content": content,
             "weight": weight,
             "metadata": metadata,
+            "project_id": project_id,
+            "domains": domains,
         })
         return Memory.model_validate(data)
 
-    async def delete(self, memory_id: str) -> DeleteResult:
-        """Soft-delete a memory and its entire version chain."""
+    async def delete(self, memory_id: str, *, project_id: str | None = None) -> DeleteResult:
+        """Soft-delete a memory and its entire version chain.
+
+        Args:
+            memory_id: ID of the memory to delete.
+            project_id: Project identifier for campaign enrollment verification.
+        """
         data = await self._call("delete_memory", {
             "memory_id": memory_id,
+            "project_id": project_id,
         })
         return DeleteResult.model_validate(data)
 
@@ -456,12 +506,21 @@ class MemoryHubClient:
         *,
         max_versions: int = 20,
         offset: int = 0,
+        project_id: str | None = None,
     ) -> HistoryResult:
-        """Get the version history of a memory."""
+        """Get the version history of a memory.
+
+        Args:
+            memory_id: ID of the memory to fetch history for.
+            max_versions: Maximum number of versions to return (default 20).
+            offset: Pagination offset (default 0).
+            project_id: Project identifier for campaign enrollment verification.
+        """
         data = await self._call("get_memory_history", {
             "memory_id": memory_id,
             "max_versions": max_versions,
             "offset": offset,
+            "project_id": project_id,
         })
         return HistoryResult.model_validate(data)
 
@@ -471,12 +530,21 @@ class MemoryHubClient:
         observed_behavior: str,
         *,
         confidence: float = 0.7,
+        project_id: str | None = None,
     ) -> ContradictionResult:
-        """Report that a memory contradicts observed behavior."""
+        """Report that a memory contradicts observed behavior.
+
+        Args:
+            memory_id: ID of the memory that is contradicted.
+            observed_behavior: Description of the behavior that contradicts the memory.
+            confidence: Reporter's confidence in the contradiction (0.0-1.0, default 0.7).
+            project_id: Project identifier for campaign enrollment verification.
+        """
         data = await self._call("report_contradiction", {
             "memory_id": memory_id,
             "observed_behavior": observed_behavior,
             "confidence": confidence,
+            "project_id": project_id,
         })
         return ContradictionResult.model_validate(data)
 
@@ -489,13 +557,23 @@ class MemoryHubClient:
         threshold: float = 0.80,
         max_results: int = 10,
         offset: int = 0,
+        project_id: str | None = None,
     ) -> list[Memory]:
-        """Find memories similar to the given one."""
+        """Find memories similar to the given one.
+
+        Args:
+            memory_id: ID of the reference memory.
+            threshold: Minimum cosine similarity (0.0-1.0, default 0.80).
+            max_results: Maximum number of results to return (default 10).
+            offset: Pagination offset (default 0).
+            project_id: Project identifier for campaign enrollment verification.
+        """
         data = await self._call("get_similar_memories", {
             "memory_id": memory_id,
             "threshold": threshold,
             "max_results": max_results,
             "offset": offset,
+            "project_id": project_id,
         })
         results = data.get("results", [])
         return [Memory.model_validate(r) for r in results]
@@ -507,13 +585,23 @@ class MemoryHubClient:
         relationship_type: str | None = None,
         direction: str = "both",
         include_provenance: bool = False,
+        project_id: str | None = None,
     ) -> RelationshipsResult:
-        """Get relationships for a memory node."""
+        """Get relationships for a memory node.
+
+        Args:
+            node_id: ID of the memory node to query relationships for.
+            relationship_type: Filter by relationship type (e.g., "related").
+            direction: Edge direction to traverse: "both", "outgoing", or "incoming".
+            include_provenance: If True, include provenance metadata on each edge.
+            project_id: Project identifier for campaign enrollment verification.
+        """
         data = await self._call("get_relationships", {
             "node_id": node_id,
             "relationship_type": relationship_type,
             "direction": direction,
             "include_provenance": include_provenance,
+            "project_id": project_id,
         })
         return RelationshipsResult.model_validate(data)
 
@@ -524,13 +612,23 @@ class MemoryHubClient:
         relationship_type: str,
         *,
         metadata: dict[str, Any] | None = None,
+        project_id: str | None = None,
     ) -> RelationshipInfo:
-        """Create a relationship between two memories."""
+        """Create a relationship between two memories.
+
+        Args:
+            source_id: ID of the source memory node.
+            target_id: ID of the target memory node.
+            relationship_type: Relationship label (e.g., "related", "supersedes").
+            metadata: Arbitrary metadata for the relationship edge.
+            project_id: Project identifier for campaign enrollment verification.
+        """
         data = await self._call("create_relationship", {
             "source_id": source_id,
             "target_id": target_id,
             "relationship_type": relationship_type,
             "metadata": metadata,
+            "project_id": project_id,
         })
         return RelationshipInfo.model_validate(data)
 
@@ -541,12 +639,22 @@ class MemoryHubClient:
         memory_a_id: str,
         memory_b_id: str,
         reasoning: str,
+        *,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
-        """Suggest that two memories should be merged."""
+        """Suggest that two memories should be merged.
+
+        Args:
+            memory_a_id: ID of the first memory.
+            memory_b_id: ID of the second memory.
+            reasoning: Human-readable rationale for the merge suggestion.
+            project_id: Project identifier for campaign enrollment verification.
+        """
         return await self._call("suggest_merge", {
             "memory_a_id": memory_a_id,
             "memory_b_id": memory_b_id,
             "reasoning": reasoning,
+            "project_id": project_id,
         })
 
     async def set_curation_rule(

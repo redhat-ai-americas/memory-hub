@@ -2,6 +2,22 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.4.0] — 2026-04-09
+
+- **Campaign & domain parameter support (#164)**: Added `project_id` to all 11
+  client methods for campaign enrollment verification. Added `domains` and
+  `domain_boost_weight` to `search()`, and `domains` to `write()` and
+  `update()` for crosscutting knowledge tagging. All parameters are optional
+  with `None` defaults — existing callers are unaffected.
+
+## [0.3.0] — 2026-04-09
+
+- Added session focus support (#61): `set_session_focus()` and
+  `get_focus_history()` methods. Two-vector retrieval via `focus` and
+  `session_focus_weight` parameters on `search()`.
+- Push notification support (#62): `on_memory_updated()` for Pattern E
+  live subscription when enabled in `.memoryhub.yaml`.
+
 ## [0.2.0] — 2026-04-09
 
 - **Error handling overhaul (#97)**: All MCP tools now raise `ToolError` instead

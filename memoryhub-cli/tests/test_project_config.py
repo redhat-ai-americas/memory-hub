@@ -6,12 +6,11 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from memoryhub import (
     CONFIG_FILENAME,
-    ProjectConfig,
     load_project_config,
 )
+
 from memoryhub_cli.project_config import (
     GENERATED_RULE_NAME,
     LEGACY_RULE_NAME,
@@ -425,3 +424,76 @@ def test_rewrite_rule_file_does_not_touch_yaml(tmp_path: Path):
     # YAML untouched.
     assert yaml_path.stat().st_mtime == yaml_mtime_before
     assert "pattern: eager" in yaml_path.read_text()
+
+
+# ── CLI option wiring: project_id and domains ────────────────────────────
+
+
+def test_search_accepts_project_id_option():
+    """--project-id is recognized by the search command."""
+    from typer.testing import CliRunner
+
+    from memoryhub_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["search", "--help"])
+    assert result.exit_code == 0
+    assert "--project-id" in result.stdout
+
+
+def test_search_accepts_domain_option():
+    """--domain is recognized by the search command."""
+    from typer.testing import CliRunner
+
+    from memoryhub_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["search", "--help"])
+    assert result.exit_code == 0
+    assert "--domain" in result.stdout
+
+
+def test_write_accepts_project_id_and_domain_options():
+    """--project-id and --domain are recognized by the write command."""
+    from typer.testing import CliRunner
+
+    from memoryhub_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["write", "--help"])
+    assert result.exit_code == 0
+    assert "--project-id" in result.stdout
+    assert "--domain" in result.stdout
+
+
+def test_read_accepts_project_id_option():
+    from typer.testing import CliRunner
+
+    from memoryhub_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["read", "--help"])
+    assert result.exit_code == 0
+    assert "--project-id" in result.stdout
+
+
+def test_delete_accepts_project_id_option():
+    from typer.testing import CliRunner
+
+    from memoryhub_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["delete", "--help"])
+    assert result.exit_code == 0
+    assert "--project-id" in result.stdout
+
+
+def test_history_accepts_project_id_option():
+    from typer.testing import CliRunner
+
+    from memoryhub_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["history", "--help"])
+    assert result.exit_code == 0
+    assert "--project-id" in result.stdout
