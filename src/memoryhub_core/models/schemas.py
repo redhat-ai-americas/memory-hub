@@ -343,3 +343,53 @@ class CampaignMembershipRead(BaseModel):
     project_id: str
     enrolled_at: datetime
     enrolled_by: str
+
+
+# -- Project membership schemas --
+
+
+class ProjectMembershipCreate(BaseModel):
+    """Input schema for adding a user to a project."""
+
+    project_id: str = Field(min_length=1, max_length=255, description="Project identifier")
+    user_id: str = Field(min_length=1, max_length=255, description="User to enroll")
+    role: str = Field(default="member", pattern="^(member|admin)$", description="Role within the project")
+    joined_by: str = Field(min_length=1, description="User or agent performing enrollment")
+
+
+class ProjectMembershipRead(BaseModel):
+    """Output schema for reading a project membership."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: str
+    user_id: str
+    role: str
+    joined_at: datetime
+    joined_by: str
+
+
+# -- Role assignment schemas --
+
+
+class RoleAssignmentCreate(BaseModel):
+    """Input schema for assigning a role to a user."""
+
+    user_id: str = Field(min_length=1, max_length=255, description="User to assign the role to")
+    role_name: str = Field(min_length=1, max_length=100, description="Role name (e.g., 'sre', 'data-engineer')")
+    tenant_id: str = Field(default="default", description="Tenant scope for this assignment")
+    assigned_by: str = Field(min_length=1, description="User or agent performing assignment")
+
+
+class RoleAssignmentRead(BaseModel):
+    """Output schema for reading a role assignment."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: str
+    role_name: str
+    tenant_id: str
+    assigned_at: datetime
+    assigned_by: str
