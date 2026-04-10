@@ -12,9 +12,9 @@ spec:
   description: >-
     Centralized agent memory with governance and curation
     for OpenShift AI workloads.
-  category: Red Hat managed
-  provider: "Red Hat"
-  support: "red hat"
+  category: Partners
+  provider: "Community"
+  support: "community"
   route: memoryhub-ui
   routeNamespace: memory-hub-mcp
   docsLink: ""

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     db_user: str = "memoryhub"
     db_password: str = ""
     embedding_url: str = ""
-    mcp_server_url: str = "http://mcp-server:8080/mcp/"
+    mcp_server_url: str = "http://memory-hub-mcp:8080/mcp/"
     auth_service_url: str = "http://auth-server.memoryhub-auth.svc:8081"
     admin_key: str = ""
     # Public-facing route URLs used in the contributor welcome email.

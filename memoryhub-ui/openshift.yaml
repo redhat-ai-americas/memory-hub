@@ -68,7 +68,7 @@ spec:
             name: memoryhub-db-credentials
         env:
         - name: MEMORYHUB_MCP_SERVER_URL
-          value: "http://mcp-server.memory-hub-mcp.svc:8080/mcp/"
+          value: "http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/"
         - name: MEMORYHUB_AUTH_SERVICE_URL
           value: "http://auth-server.memoryhub-auth.svc:8081"
         # Public-facing Route URLs used by the Client Management welcome-email
