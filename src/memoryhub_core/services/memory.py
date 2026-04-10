@@ -114,6 +114,7 @@ async def create_memory(
         content=data.content,
         stub=stub,
         scope=data.scope,
+        scope_id=data.scope_id,
         weight=data.weight,
         owner_id=data.owner_id,
         tenant_id=tenant_id,
@@ -395,6 +396,8 @@ def _build_search_filters(
     authorized_scopes: dict[str, str | None] | None,
     tenant_id: str,
     campaign_ids: set[str] | None = None,
+    project_ids: set[str] | None = None,
+    role_names: set[str] | None = None,
 ) -> list | None:
     """Build the SQL filter list shared by search_memories and count_search_matches.
 
@@ -436,6 +439,28 @@ def _build_search_filters(
                 # If campaign_ids is empty/None, skip — no campaign
                 # memories are visible to this caller.
                 continue
+            if scope_name == "project":
+                if project_ids:
+                    scope_conditions.append(
+                        and_(
+                            MemoryNode.scope == "project",
+                            MemoryNode.scope_id.in_(project_ids),
+                        )
+                    )
+                # If project_ids is empty/None, skip — no project
+                # memories are visible to this caller.
+                continue
+            if scope_name == "role":
+                if role_names:
+                    scope_conditions.append(
+                        and_(
+                            MemoryNode.scope == "role",
+                            MemoryNode.scope_id.in_(role_names),
+                        )
+                    )
+                # If role_names is empty/None, skip — no role
+                # memories are visible to this caller.
+                continue
             if required_owner is not None:
                 scope_conditions.append(
                     and_(
@@ -464,6 +489,8 @@ async def count_search_matches(
     current_only: bool = True,
     authorized_scopes: dict[str, str | None] | None = None,
     campaign_ids: set[str] | None = None,
+    project_ids: set[str] | None = None,
+    role_names: set[str] | None = None,
 ) -> int:
     """Count memories matching the same filter set used by search_memories.
 
@@ -479,6 +506,8 @@ async def count_search_matches(
     filters = _build_search_filters(
         scope, owner_id, current_only, authorized_scopes, tenant_id,
         campaign_ids=campaign_ids,
+        project_ids=project_ids,
+        role_names=role_names,
     )
     if filters is None:
         return 0
@@ -499,6 +528,8 @@ async def search_memories(
     current_only: bool = True,
     authorized_scopes: dict[str, str | None] | None = None,
     campaign_ids: set[str] | None = None,
+    project_ids: set[str] | None = None,
+    role_names: set[str] | None = None,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity.
 
@@ -522,6 +553,8 @@ async def search_memories(
     filters = _build_search_filters(
         scope, owner_id, current_only, authorized_scopes, tenant_id,
         campaign_ids=campaign_ids,
+        project_ids=project_ids,
+        role_names=role_names,
     )
     if filters is None:
         return []
@@ -663,6 +696,8 @@ async def search_memories_with_focus(
     current_only: bool = True,
     authorized_scopes: dict[str, str | None] | None = None,
     campaign_ids: set[str] | None = None,
+    project_ids: set[str] | None = None,
+    role_names: set[str] | None = None,
     domains: list[str] | None = None,
     domain_boost_weight: float = 0.3,
 ) -> FocusedSearchResult:
@@ -711,6 +746,8 @@ async def search_memories_with_focus(
             current_only=current_only,
             authorized_scopes=authorized_scopes,
             campaign_ids=campaign_ids,
+            project_ids=project_ids,
+            role_names=role_names,
         )
         return FocusedSearchResult(results=plain)
 
@@ -729,6 +766,8 @@ async def search_memories_with_focus(
     filters = _build_search_filters(
         scope, owner_id, current_only, authorized_scopes, tenant_id,
         campaign_ids=campaign_ids,
+        project_ids=project_ids,
+        role_names=role_names,
     )
     if filters is None:
         return FocusedSearchResult(

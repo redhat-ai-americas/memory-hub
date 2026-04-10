@@ -57,6 +57,7 @@ class MemoryNodeCreate(BaseModel):
     scope: MemoryScope
     weight: float = Field(default=0.7, ge=0.0, le=1.0, description="Injection priority (0.0-1.0)")
     owner_id: str = Field(min_length=1, description="Owning user, project, or org identifier")
+    scope_id: str | None = Field(default=None, description="Project ID or role name for project/role-scoped memories")
     parent_id: uuid.UUID | None = Field(default=None, description="Parent node for branch creation")
     branch_type: str | None = Field(
         default=None,
@@ -105,6 +106,7 @@ class MemoryNodeRead(BaseModel):
     # ORM row now carries the real tenant. A missing tenant_id here is a
     # bug in the service layer and must fail loudly at validation time.
     tenant_id: str
+    scope_id: str | None = None
     domains: list[str] | None = None
     is_current: bool
     version: int

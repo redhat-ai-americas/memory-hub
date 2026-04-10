@@ -59,6 +59,10 @@ class MemoryNode(TimestampMixin, Base):
         nullable=False,
         server_default=text("'default'"),
     )
+    # Scope group identifier for project and role isolation.
+    # Holds the project_id for project-scoped memories, role_name for
+    # role-scoped memories, NULL for other scopes.
+    scope_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Crosscutting knowledge domains (e.g., "React", "Spring Boot", "CORS")
     domains: Mapped[list[str] | None] = mapped_column(
@@ -128,6 +132,7 @@ class MemoryNode(TimestampMixin, Base):
         # sees the migration-created indexes in the DB but not in the metadata
         # and proposes to drop them on every autogenerate run.
         Index("ix_memory_nodes_deleted_at", "deleted_at"),
+        Index("ix_memory_nodes_scope_id", "scope_id"),
         Index("ix_memory_nodes_domains", "domains", postgresql_using="gin"),
         Index(
             "ix_memory_nodes_expires_at",
