@@ -9,16 +9,17 @@ At the START of every conversation, before doing any other work:
 1. Run `scripts/cluster-health-check.sh` to verify cluster deployment state. If it reports issues, tell the user before proceeding. Use `--full` when the session involves deployment, migrations, or the DB.
 2. Read your personal api key from `~/.config/memoryhub/api-key` (trim the trailing newline). This file is per-operator and lives outside the repo — it is not committed. If the file does not exist, ask the user to create it before continuing.
 3. Call `register_session(api_key="<the value you just read>")` to authenticate.
-4. Call `search_memory` with a query relevant to the current task to load context.
+4. Call `search_memory` with a query relevant to the current task to load context. **Always pass `project_id="memory-hub"`** to include project-scoped memories in results.
 5. Use the returned memories to inform your work.
 
 ### During Work
 
-- **Search memory again when the topic shifts.** The initial search covers the conversation's starting topic, but if work moves to a different area (e.g., from implementation to deployment, or from one subsystem to another), search memory for the new topic. Memories are retrieved on demand, not loaded once — use that.
+- **Search memory again when the topic shifts.** The initial search covers the conversation's starting topic, but if work moves to a different area (e.g., from implementation to deployment, or from one subsystem to another), search memory for the new topic. Memories are retrieved on demand, not loaded once — use that. Always include `project_id="memory-hub"` in every `search_memory` call.
 - When you learn something important about the user's preferences, project context, or decisions, call `write_memory` to persist it
 - When the user tells you something that should be remembered across conversations, write it to memory
 - Add rationale branches (via `parent_id` + `branch_type: "rationale"`) when the "why" behind a preference matters
 - Use appropriate scopes: `user` for personal preferences, `project` for project-specific context, `organizational` for team/org patterns, `enterprise` for mandated policies
+- When writing project-scoped memories, pass `project_id="memory-hub"` — the server tags the memory to this project and verifies your membership
 - When you notice behavior contradicting a stored memory, call `report_contradiction`
 - When updating an existing memory, use `update_memory` (not write_memory) to preserve version history
 

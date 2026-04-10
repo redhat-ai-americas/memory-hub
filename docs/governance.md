@@ -176,14 +176,21 @@ def authorize_read(user_claims: dict, memory: MemoryNode) -> bool:
         if tier in ("enterprise", "organizational"):
             return True  # all authenticated agents can read
         if tier == "project":
-            return True  # project membership check TBD
+            if not PROJECT_ISOLATION_ENABLED:
+                return True
+            if project_ids is None:
+                return False
+            return memory.scope_id in project_ids
         if tier == "campaign":
             if campaign_ids is None:
                 return False
             return memory.owner_id in campaign_ids
         if tier == "role":
-            # TODO: match memory's role tag against user's roles
-            return True
+            if not ROLE_ISOLATION_ENABLED:
+                return True
+            if role_names is None:
+                return False
+            return memory.scope_id in role_names
     return False
 
 def authorize_write(user_claims: dict, scope: str, owner_id: str) -> bool:
@@ -198,7 +205,13 @@ def authorize_write(user_claims: dict, scope: str, owner_id: str) -> bool:
     if scope in ("organizational", "role"):
         return user_claims.get("identity_type") == "service"
     if scope == "project":
-        return True  # project membership check TBD
+        if not PROJECT_ISOLATION_ENABLED:
+            return True
+        if project_ids is None:
+            return False
+        if scope_id is None:
+            return False
+        return scope_id in project_ids
     if scope == "campaign":
         if campaign_ids is None:
             return False
@@ -494,15 +507,15 @@ For search operations, `request_context` must include: the query text, the scope
 
 ```sql
 -- Search query with scope enforcement
--- Bind params derived from JWT: e.g., :has_project_scope = 'memory:read:project' in token.scopes
---                                      or 'memory:read' in token.scopes (wildcard)
+-- :caller_project_ids and :caller_role_names are lists resolved from the
+-- project_memberships / role_assignments tables (plus JWT claims for roles).
 SELECT * FROM memory_nodes
 WHERE is_current = true
   AND tenant_id = :tenant_id
   AND (
     (scope = 'user' AND owner_id = :caller_id)
-    OR (scope = 'project' AND :has_project_scope)
-    OR (scope = 'role' AND :has_role_scope)  -- TODO: add role_tag matching
+    OR (scope = 'project' AND scope_id IN (:caller_project_ids))
+    OR (scope = 'role' AND scope_id IN (:caller_role_names))
     OR (scope = 'organizational' AND :has_org_scope)
     OR (scope = 'enterprise' AND :has_enterprise_scope)
   )

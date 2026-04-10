@@ -36,15 +36,18 @@ The framework correctly enforces:
 
 The framework does **not** enforce:
 
-- **Project-scope membership.** This is the gap that blocks the demo.
-  `authz.py:135` and `:156` literally `return True` for project-scope reads
-  and writes, with `# project membership check TBD` comments. The SQL filter
-  at `authz.py:173-177` emits no `owner_id` predicate for non-user tiers, so
-  project-scope `search_memory` calls return every project-scope memory in
-  the database regardless of caller. Tests at `test_authz.py:23,57`
-  explicitly assert the permissive behavior as the correct outcome.
-- **Role matching.** `authz.py:138` notes `# role matching TBD`. Role scope
-  is not in scope for the demo.
+- **Project-scope membership (implemented, #167).** `authz.py` checks
+  `memory.scope_id in project_ids` for reads and `scope_id in project_ids`
+  for writes, where `project_ids` is resolved from the `project_memberships`
+  table via `get_projects_for_user()`. The `_build_search_filters` function
+  filters project-scoped results by `scope_id IN (caller's project
+  memberships)`. Feature-flagged via `MEMORYHUB_PROJECT_ISOLATION_ENABLED`
+  (default: on).
+- **Role matching (implemented, #167).** `authz.py` checks
+  `memory.scope_id in role_names` where `role_names` is resolved from the
+  `role_assignments` table plus JWT `roles` claims. Role writes remain
+  restricted to service identities (curator agent). Feature-flagged via
+  `MEMORYHUB_ROLE_ISOLATION_ENABLED` (default: on).
 - **Anything resembling an audit log.** No `audit` module exists in the
   codebase.
 
