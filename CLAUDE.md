@@ -40,6 +40,12 @@ When working in the MCP server, read `memory-hub-mcp/CLAUDE.md` for import conve
 ### MCP Tool Creation — MUST use fips-agents workflow
 **Never create MCP tools by hand or via sub-agents.** Always use the slash command workflow: `/plan-tools` → `/create-tools` → `/exercise-tools`. Sub-agents cannot run slash commands and will skip the scaffold step, producing tools that lack the template's test structure, permission handling, and registration patterns. This was learned the hard way in Phase 2 — tools created by sub-agents had to be entirely redone. The fips-agents scaffold produces materially better tools with proper test coverage and consistent patterns. When adding tools in future sessions, follow this workflow in the main conversation context, not delegated to sub-agents.
 
+## Onboarding and Process
+
+If this is your first session on this project, read [CONTRIBUTING.md](CONTRIBUTING.md) before writing code. It covers repo layout, dev environment setup, PR expectations, and the same-commit consumer audit rule.
+
+Use `/issue-tracker` for all issue operations (filing, updating, closing). Use `/retro` after completing a major feature, fixing a gnarly bug, or finishing a multi-session effort — retros are where the project's institutional knowledge accumulates (see `retrospectives/`).
+
 ## Design Documents
 Shipped architecture and subsystem designs live in docs/. In-flight designs for unimplemented or skeleton-stage features live in planning/. Research investigations live in research/. Demo scripts live in demos/. When implementing a feature, always read the relevant design doc first. If the design doc is a skeleton or has TBD sections, flesh it out before implementing.
 
