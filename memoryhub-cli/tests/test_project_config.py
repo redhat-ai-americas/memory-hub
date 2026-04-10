@@ -429,6 +429,13 @@ def test_rewrite_rule_file_does_not_touch_yaml(tmp_path: Path):
 # ── CLI option wiring: project_id and domains ────────────────────────────
 
 
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text for reliable assertions."""
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 def test_search_accepts_project_id_option():
     """--project-id is recognized by the search command."""
     from typer.testing import CliRunner
@@ -438,7 +445,8 @@ def test_search_accepts_project_id_option():
     runner = CliRunner()
     result = runner.invoke(app, ["search", "--help"])
     assert result.exit_code == 0
-    assert "--project-id" in result.stdout
+    text = _strip_ansi(result.stdout)
+    assert "--project-id" in text, f"--project-id not in: {text}"
 
 
 def test_search_accepts_domain_option():
@@ -450,7 +458,8 @@ def test_search_accepts_domain_option():
     runner = CliRunner()
     result = runner.invoke(app, ["search", "--help"])
     assert result.exit_code == 0
-    assert "--domain" in result.stdout
+    text = _strip_ansi(result.stdout)
+    assert "--domain" in text, f"--domain not in: {text}"
 
 
 def test_write_accepts_project_id_and_domain_options():
@@ -462,8 +471,9 @@ def test_write_accepts_project_id_and_domain_options():
     runner = CliRunner()
     result = runner.invoke(app, ["write", "--help"])
     assert result.exit_code == 0
-    assert "--project-id" in result.stdout
-    assert "--domain" in result.stdout
+    text = _strip_ansi(result.stdout)
+    assert "--project-id" in text, f"--project-id not in: {text}"
+    assert "--domain" in text, f"--domain not in: {text}"
 
 
 def test_read_accepts_project_id_option():
@@ -474,7 +484,8 @@ def test_read_accepts_project_id_option():
     runner = CliRunner()
     result = runner.invoke(app, ["read", "--help"])
     assert result.exit_code == 0
-    assert "--project-id" in result.stdout
+    text = _strip_ansi(result.stdout)
+    assert "--project-id" in text, f"--project-id not in: {text}"
 
 
 def test_delete_accepts_project_id_option():
@@ -485,7 +496,8 @@ def test_delete_accepts_project_id_option():
     runner = CliRunner()
     result = runner.invoke(app, ["delete", "--help"])
     assert result.exit_code == 0
-    assert "--project-id" in result.stdout
+    text = _strip_ansi(result.stdout)
+    assert "--project-id" in text, f"--project-id not in: {text}"
 
 
 def test_history_accepts_project_id_option():
@@ -496,4 +508,5 @@ def test_history_accepts_project_id_option():
     runner = CliRunner()
     result = runner.invoke(app, ["history", "--help"])
     assert result.exit_code == 0
-    assert "--project-id" in result.stdout
+    text = _strip_ansi(result.stdout)
+    assert "--project-id" in text, f"--project-id not in: {text}"
