@@ -16,6 +16,7 @@ from src.core.authz import (
 )
 from src.tools._deps import get_db_session, release_db_session
 
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import get_memory_history as _get_memory_history
 from memoryhub_core.services.memory import read_memory as _read_memory
@@ -54,6 +55,16 @@ async def get_memory_history(
             ge=0,
         ),
     ] = 0,
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. Required when the target memory has "
+                "campaign scope — used to verify your project is enrolled in "
+                "the campaign."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict:
     """Get the version history of a memory with pagination.
@@ -89,7 +100,18 @@ async def get_memory_history(
         # caller's tenant so a cross-tenant ID is indistinguishable from
         # a nonexistent row.
         memory_node = await _read_memory(parsed_id, session, tenant_id=tenant)
-        if not authorize_read(claims, memory_node):
+
+        # Resolve campaign membership when accessing a campaign-scoped memory.
+        campaign_ids: set[str] | None = None
+        if memory_node.scope == "campaign":
+            if not project_id:
+                raise ToolError(
+                    "project_id is required when viewing history of a campaign-scoped memory. "
+                    "Set it to your project identifier so enrollment can be verified."
+                )
+            campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
+
+        if not authorize_read(claims, memory_node, campaign_ids=campaign_ids):
             raise ToolError(f"Not authorized to view history for memory {memory_id}.")
 
         history_result = await _get_memory_history(

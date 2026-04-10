@@ -16,6 +16,7 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import (
     MemoryAccessDeniedError,
     MemoryAlreadyDeletedError,
@@ -56,6 +57,15 @@ async def delete_memory(
             )
         ),
     ],
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. Required when deleting a campaign-scoped "
+                "memory — used to verify your project is enrolled in the campaign."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Soft-delete a memory and its entire version chain.
@@ -114,7 +124,17 @@ async def delete_memory(
         # service call (race condition).
         existing = await _read_memory(parsed_id, session, tenant_id=tenant)
 
-        is_owner = authorize_write(claims, existing.scope, existing.owner_id, existing.tenant_id)
+        # Resolve campaign membership when deleting a campaign-scoped memory.
+        campaign_ids: set[str] | None = None
+        if existing.scope == "campaign":
+            if not project_id:
+                raise ToolError(
+                    "project_id is required when deleting a campaign-scoped memory. "
+                    "Set it to your project identifier so enrollment can be verified."
+                )
+            campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
+
+        is_owner = authorize_write(claims, existing.scope, existing.owner_id, existing.tenant_id, campaign_ids=campaign_ids)
         is_admin = "memory:admin" in claims.get("scopes", [])
         if not (is_owner or is_admin):
             raise ToolError(

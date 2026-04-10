@@ -19,6 +19,7 @@ from src.core.authz import (
 )
 from src.tools._deps import get_db_session, release_db_session
 
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import get_memory_history, read_memory as _read_memory
 
@@ -44,6 +45,16 @@ async def read_memory(
             ),
         ),
     ] = False,
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. Required when the target memory has "
+                "campaign scope — used to verify your project is enrolled in "
+                "the campaign."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Retrieve a memory by ID.
@@ -79,7 +90,17 @@ async def read_memory(
 
         node = await _read_memory(parsed_id, session, tenant_id=tenant)
 
-        if not authorize_read(claims, node):
+        # Resolve campaign membership when accessing a campaign-scoped memory.
+        campaign_ids: set[str] | None = None
+        if node.scope == "campaign":
+            if not project_id:
+                raise ToolError(
+                    "project_id is required when reading a campaign-scoped memory. "
+                    "Set it to your project identifier so enrollment can be verified."
+                )
+            campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
+
+        if not authorize_read(claims, node, campaign_ids=campaign_ids):
             raise ToolError(f"Not authorized to read memory {memory_id}.")
 
         result = node.model_dump(mode="json")
