@@ -20,6 +20,7 @@ from src.core.authz import (
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.models.schemas import RelationshipCreate
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.graph import create_relationship as create_relationship_service
 from memoryhub_core.services.memory import read_memory as _read_memory
@@ -45,6 +46,16 @@ async def suggest_merge(
         str,
         Field(description="Why these memories should be merged. Be specific."),
     ],
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. Required when either memory has "
+                "campaign scope — used to verify your project is enrolled in "
+                "the campaign."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Suggest that two memories should be merged into one.
@@ -89,6 +100,10 @@ async def suggest_merge(
     try:
         session, gen = await get_db_session()
 
+        # Resolve campaign membership once — used for both memories if either
+        # is campaign-scoped.
+        campaign_ids: set[str] | None = None
+
         # Verify read access to both memories. The tenant filter on
         # read_memory makes a cross-tenant ID indistinguishable from a
         # nonexistent row.
@@ -97,7 +112,14 @@ async def suggest_merge(
                 mem = await _read_memory(mid, session, tenant_id=tenant)
             except MemoryNotFoundError:
                 raise ToolError(f"Memory {mid} not found.")
-            if not authorize_read(claims, mem):
+            if mem.scope == "campaign" and campaign_ids is None:
+                if not project_id:
+                    raise ToolError(
+                        f"project_id is required when {label} is a campaign-scoped memory. "
+                        "Set it to your project identifier so enrollment can be verified."
+                    )
+                campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
+            if not authorize_read(claims, mem, campaign_ids=campaign_ids):
                 raise ToolError(f"Not authorized to access {label} ({mid}).")
 
         rel_create = RelationshipCreate(

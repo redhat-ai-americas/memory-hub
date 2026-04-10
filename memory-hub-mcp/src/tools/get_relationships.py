@@ -21,6 +21,7 @@ from src.core.authz import (
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.models.schemas import RelationshipType
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.graph import (
     get_relationships as get_relationships_service,
@@ -72,6 +73,15 @@ async def get_relationships(
             ),
         ),
     ] = False,
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. Required when the queried node or any "
+                "related node has campaign scope — used to verify enrollment."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Get all graph relationships for a memory node.
@@ -128,6 +138,11 @@ async def get_relationships(
             "count": len(rels),
         }
 
+        # Resolve campaign membership once for all RBAC checks below.
+        campaign_ids: set[str] | None = None
+        if project_id:
+            campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
+
         # Post-fetch RBAC filter on related nodes
         original_rels = result["relationships"]
         accessible_rels = []
@@ -140,7 +155,7 @@ async def get_relationships(
                         owner_id=node_data.get("owner_id", ""),
                         tenant_id=node_data.get("tenant_id", "default"),
                     )
-                    if not authorize_read(claims, proxy):
+                    if not authorize_read(claims, proxy, campaign_ids=campaign_ids):
                         break
             else:
                 accessible_rels.append(rel)
@@ -160,7 +175,7 @@ async def get_relationships(
                     owner_id=node_dump.get("owner_id", ""),
                     tenant_id=node_dump.get("tenant_id", "default"),
                 )
-                if authorize_read(claims, proxy):
+                if authorize_read(claims, proxy, campaign_ids=campaign_ids):
                     accessible_steps.append({
                         "hop": step["hop"],
                         "node": node_dump,

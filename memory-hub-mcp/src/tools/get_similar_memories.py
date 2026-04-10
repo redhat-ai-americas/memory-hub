@@ -19,6 +19,7 @@ from src.core.authz import (
 )
 from src.tools._deps import get_db_session, release_db_session
 
+from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.curation.similarity import get_similar_memories as get_similar_memories_service
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import read_memory as read_memory_service
@@ -56,6 +57,16 @@ async def get_similar_memories(
         int,
         Field(description="Pagination offset. Default: 0.", ge=0),
     ] = 0,
+    project_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Your project identifier. Required when the target memory has "
+                "campaign scope — used to verify your project is enrolled in "
+                "the campaign."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Get memories similar to a given memory, with similarity scores.
@@ -93,7 +104,19 @@ async def get_similar_memories(
         source = await read_memory_service(
             parsed_memory_id, session, tenant_id=tenant
         )
-        if not authorize_read(claims, source):
+
+        # Resolve campaign membership when accessing a campaign-scoped memory.
+        campaign_ids: set[str] | None = None
+        if source.scope == "campaign":
+            if not project_id:
+                raise ToolError(
+                    "project_id is required when finding similar memories for a "
+                    "campaign-scoped memory. Set it to your project identifier "
+                    "so enrollment can be verified."
+                )
+            campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
+
+        if not authorize_read(claims, source, campaign_ids=campaign_ids):
             raise ToolError(f"Not authorized to read memory {memory_id}.")
 
         result = await get_similar_memories_service(
