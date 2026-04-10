@@ -14,6 +14,8 @@ from pydantic import Field
 
 from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
 from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.memory import (
     count_search_matches,
     search_memories,
@@ -22,6 +24,8 @@ from memoryhub_core.services.memory import (
 from src.core.app import mcp
 from src.core.authz import (
     AuthenticationError,
+    PROJECT_ISOLATION_ENABLED,
+    ROLE_ISOLATION_ENABLED,
     build_authorized_scopes,
     get_claims_from_context,
     get_tenant_filter,
@@ -265,9 +269,11 @@ async def search_memory(
         str | None,
         Field(
             description=(
-                "Your project identifier. When provided, campaign-scoped memories "
-                "for campaigns your project is enrolled in are included in results. "
-                "Omit to exclude campaign memories from search."
+                "Your project identifier. Required to include project-scoped "
+                "memories in results (memories are filtered to projects you belong to). "
+                "Also used to resolve campaign-scoped memories for campaigns your "
+                "project is enrolled in. Pass your configured project_id from your "
+                "agent setup. Omit to exclude project and campaign memories from search."
             ),
         ),
     ] = None,
@@ -351,6 +357,31 @@ async def search_memory(
         finally:
             await release_db_session(gen_for_campaign)
 
+    # Resolve project memberships for the caller.
+    # When PROJECT_ISOLATION_ENABLED is False, skip resolution — the
+    # search filter's generic branch handles project scope without
+    # scope_id filtering, and authorize_read returns True.
+    project_ids: set[str] | None = None
+    if project_id and PROJECT_ISOLATION_ENABLED:
+        session_for_project, gen_for_project = await get_db_session()
+        try:
+            project_ids = await get_projects_for_user(
+                session_for_project, claims["sub"],
+            )
+        finally:
+            await release_db_session(gen_for_project)
+
+    # Resolve role assignments for the caller (table + JWT claims).
+    role_names: set[str] | None = None
+    if ROLE_ISOLATION_ENABLED:
+        session_for_roles, gen_for_roles = await get_db_session()
+        try:
+            role_names = await get_roles_for_user(
+                session_for_roles, claims["sub"], tenant, claims=claims,
+            )
+        finally:
+            await release_db_session(gen_for_roles)
+
     # Resolve owner_id: default to authenticated user when not explicitly set.
     # An empty string signals "no filter" (search all accessible owners).
     if owner_id is None:
@@ -394,6 +425,8 @@ async def search_memory(
                 current_only=current_only,
                 authorized_scopes=authorized,
                 campaign_ids=campaign_ids,
+                project_ids=project_ids,
+                role_names=role_names,
                 domains=domains,
                 domain_boost_weight=domain_boost_weight,
             )
@@ -419,6 +452,8 @@ async def search_memory(
                 current_only=current_only,
                 authorized_scopes=authorized,
                 campaign_ids=campaign_ids,
+                project_ids=project_ids,
+                role_names=role_names,
             )
 
         # Count all matching memories under the same filter set so the agent
@@ -431,6 +466,8 @@ async def search_memory(
             current_only=current_only,
             authorized_scopes=authorized,
             campaign_ids=campaign_ids,
+            project_ids=project_ids,
+            role_names=role_names,
         )
 
         # Apply post-retrieval domain boost only on the non-focus path.

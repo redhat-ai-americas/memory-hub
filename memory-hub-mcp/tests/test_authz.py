@@ -21,8 +21,9 @@ from src.core.authz import (
     ({"sub": "alice", "scopes": ["memory:read"]}, "user", "bob", False),
     ({"sub": "alice", "scopes": ["memory:read"]}, "organizational", "org-1", True),
     ({"sub": "alice", "scopes": ["memory:read"]}, "enterprise", "global", True),
-    ({"sub": "alice", "scopes": ["memory:read"]}, "project", "proj-1", True),
-    ({"sub": "alice", "scopes": ["memory:read"]}, "role", "admin", True),
+    # Project/role without membership params → denied (fail closed)
+    ({"sub": "alice", "scopes": ["memory:read"]}, "project", "proj-1", False),
+    ({"sub": "alice", "scopes": ["memory:read"]}, "role", "admin", False),
     ({"sub": "alice", "scopes": []}, "user", "alice", False),
     ({"sub": "alice", "scopes": ["memory:read:user"]}, "user", "alice", True),
     ({"sub": "alice", "scopes": ["memory:read:user"]}, "organizational", "org-1", False),
@@ -60,8 +61,9 @@ def test_authorize_read_with_enum_scope():
     ({"sub": "curator", "identity_type": "service", "scopes": ["memory:write"]}, "organizational", "org-1", True),
     ({"sub": "alice", "identity_type": "user", "scopes": ["memory:write"]}, "organizational", "org-1", False),
     ({"sub": "alice", "scopes": ["memory:write"]}, "organizational", "org-1", False),
-    ({"sub": "curator", "identity_type": "service", "scopes": ["memory:write"]}, "role", "admin", True),
-    ({"sub": "alice", "scopes": ["memory:write"]}, "project", "proj-1", True),
+    # Role/project without membership params → denied (fail closed)
+    ({"sub": "curator", "identity_type": "service", "scopes": ["memory:write"]}, "role", "admin", False),
+    ({"sub": "alice", "scopes": ["memory:write"]}, "project", "proj-1", False),
     ({"sub": "alice", "scopes": []}, "user", "alice", False),
     ({"sub": "curator", "identity_type": "service", "scopes": ["memory:write:user"]}, "organizational", "org-1", False),
 ])
@@ -415,6 +417,184 @@ def test_authorize_write_campaign_cross_tenant_denied():
         claims, "campaign", "campaign-uuid-1", "tenant_b",
         campaign_ids={"campaign-uuid-1"},
     ) is False
+
+
+# -- Project scope isolation (issue #167) --------------------------------------
+
+@pytest.mark.parametrize("claims,memory_scope_id,project_ids,expected", [
+    # Caller is member of the project → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "memory-hub",
+        {"memory-hub", "other-proj"},
+        True,
+    ),
+    # Caller is not member of this project → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "memory-hub",
+        {"other-proj"},
+        False,
+    ),
+    # No project_ids provided → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "memory-hub",
+        None,
+        False,
+    ),
+    # Empty project_ids set → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "memory-hub",
+        set(),
+        False,
+    ),
+    # Has project-specific read scope → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:read:project"]},
+        "memory-hub",
+        {"memory-hub"},
+        True,
+    ),
+    # No read scope at all → denied even if member
+    (
+        {"sub": "alice", "scopes": []},
+        "memory-hub",
+        {"memory-hub"},
+        False,
+    ),
+])
+def test_authorize_read_project(claims, memory_scope_id, project_ids, expected):
+    memory = SimpleNamespace(
+        scope="project", owner_id="alice", scope_id=memory_scope_id,
+        tenant_id="default",
+    )
+    assert authorize_read(claims, memory, project_ids=project_ids) == expected
+
+
+def test_authorize_read_project_cross_tenant_denied():
+    """Project RBAC doesn't bypass tenant isolation."""
+    memory = SimpleNamespace(
+        scope="project", owner_id="alice", scope_id="memory-hub",
+        tenant_id="tenant_a",
+    )
+    claims = {"sub": "alice", "tenant_id": "tenant_b", "scopes": ["memory:read"]}
+    assert authorize_read(claims, memory, project_ids={"memory-hub"}) is False
+
+
+@pytest.mark.parametrize("claims,scope_id,project_ids,expected", [
+    # Member writing to own project → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:write"]},
+        "memory-hub",
+        {"memory-hub"},
+        True,
+    ),
+    # Not a member → denied
+    (
+        {"sub": "alice", "scopes": ["memory:write"]},
+        "memory-hub",
+        {"other-proj"},
+        False,
+    ),
+    # No project_ids → denied
+    (
+        {"sub": "alice", "scopes": ["memory:write"]},
+        "memory-hub",
+        None,
+        False,
+    ),
+    # scope_id is None → denied
+    (
+        {"sub": "alice", "scopes": ["memory:write"]},
+        None,
+        {"memory-hub"},
+        False,
+    ),
+])
+def test_authorize_write_project(claims, scope_id, project_ids, expected):
+    assert authorize_write(
+        claims, "project", "alice", "default",
+        project_ids=project_ids, scope_id=scope_id,
+    ) == expected
+
+
+# -- Role scope isolation (issue #167) ----------------------------------------
+
+@pytest.mark.parametrize("claims,memory_scope_id,role_names,expected", [
+    # Caller holds the role → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "sre",
+        {"sre", "architect"},
+        True,
+    ),
+    # Caller doesn't hold this role → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "sre",
+        {"architect"},
+        False,
+    ),
+    # No role_names provided → denied
+    (
+        {"sub": "alice", "scopes": ["memory:read"]},
+        "sre",
+        None,
+        False,
+    ),
+    # Has role-specific read scope → allowed
+    (
+        {"sub": "alice", "scopes": ["memory:read:role"]},
+        "sre",
+        {"sre"},
+        True,
+    ),
+])
+def test_authorize_read_role(claims, memory_scope_id, role_names, expected):
+    memory = SimpleNamespace(
+        scope="role", owner_id="curator-agent", scope_id=memory_scope_id,
+        tenant_id="default",
+    )
+    assert authorize_read(claims, memory, role_names=role_names) == expected
+
+
+@pytest.mark.parametrize("claims,scope_id,role_names,expected", [
+    # Service with role → allowed
+    (
+        {"sub": "curator", "identity_type": "service", "scopes": ["memory:write"]},
+        "sre",
+        {"sre"},
+        True,
+    ),
+    # Service without the role → denied
+    (
+        {"sub": "curator", "identity_type": "service", "scopes": ["memory:write"]},
+        "sre",
+        {"architect"},
+        False,
+    ),
+    # Non-service user with role → denied (curator-only writes)
+    (
+        {"sub": "alice", "identity_type": "user", "scopes": ["memory:write"]},
+        "sre",
+        {"sre"},
+        False,
+    ),
+    # Service with no role_names → denied
+    (
+        {"sub": "curator", "identity_type": "service", "scopes": ["memory:write"]},
+        "sre",
+        None,
+        False,
+    ),
+])
+def test_authorize_write_role(claims, scope_id, role_names, expected):
+    assert authorize_write(
+        claims, "role", "curator", "default",
+        role_names=role_names, scope_id=scope_id,
+    ) == expected
 
 
 def test_build_authorized_scopes_includes_campaign():

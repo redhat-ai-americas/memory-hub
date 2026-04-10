@@ -17,6 +17,8 @@ from src.core.authz import (
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import get_memory_history as _get_memory_history
 from memoryhub_core.services.memory import read_memory as _read_memory
@@ -111,7 +113,24 @@ async def get_memory_history(
                 )
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
 
-        if not authorize_read(claims, memory_node, campaign_ids=campaign_ids):
+        # Resolve project membership for project-scoped memories.
+        project_ids: set[str] | None = None
+        if memory_node.scope == "project":
+            project_ids = await get_projects_for_user(session, claims["sub"])
+
+        # Resolve role assignments for role-scoped memories.
+        role_names: set[str] | None = None
+        if memory_node.scope == "role":
+            role_names = await get_roles_for_user(
+                session, claims["sub"], tenant, claims=claims,
+            )
+
+        if not authorize_read(
+            claims, memory_node,
+            campaign_ids=campaign_ids,
+            project_ids=project_ids,
+            role_names=role_names,
+        ):
             raise ToolError(f"Not authorized to view history for memory {memory_id}.")
 
         history_result = await _get_memory_history(

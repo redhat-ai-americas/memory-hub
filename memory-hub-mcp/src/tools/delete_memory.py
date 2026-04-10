@@ -17,6 +17,8 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.exceptions import (
     MemoryAccessDeniedError,
     MemoryAlreadyDeletedError,
@@ -134,7 +136,25 @@ async def delete_memory(
                 )
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
 
-        is_owner = authorize_write(claims, existing.scope, existing.owner_id, existing.tenant_id, campaign_ids=campaign_ids)
+        # Resolve project membership for project-scoped memories.
+        project_ids: set[str] | None = None
+        if existing.scope == "project":
+            project_ids = await get_projects_for_user(session, claims["sub"])
+
+        # Resolve role assignments for role-scoped memories.
+        role_names: set[str] | None = None
+        if existing.scope == "role":
+            role_names = await get_roles_for_user(
+                session, claims["sub"], tenant, claims=claims,
+            )
+
+        is_owner = authorize_write(
+            claims, existing.scope, existing.owner_id, existing.tenant_id,
+            campaign_ids=campaign_ids,
+            project_ids=project_ids,
+            role_names=role_names,
+            scope_id=existing.scope_id,
+        )
         is_admin = "memory:admin" in claims.get("scopes", [])
         if not (is_owner or is_admin):
             raise ToolError(

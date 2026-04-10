@@ -17,6 +17,8 @@ from src.core.authz import (
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import (
     read_memory as _read_memory,
@@ -127,7 +129,24 @@ async def report_contradiction(
                 )
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
 
-        if not authorize_read(claims, target_memory, campaign_ids=campaign_ids):
+        # Resolve project membership for project-scoped memories.
+        project_ids: set[str] | None = None
+        if target_memory.scope == "project":
+            project_ids = await get_projects_for_user(session, claims["sub"])
+
+        # Resolve role assignments for role-scoped memories.
+        role_names: set[str] | None = None
+        if target_memory.scope == "role":
+            role_names = await get_roles_for_user(
+                session, claims["sub"], tenant, claims=claims,
+            )
+
+        if not authorize_read(
+            claims, target_memory,
+            campaign_ids=campaign_ids,
+            project_ids=project_ids,
+            role_names=role_names,
+        ):
             raise ToolError(f"Not authorized to access memory {memory_id}.")
 
         contradiction_count = await _report_contradiction(

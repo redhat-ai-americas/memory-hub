@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 from src.core.app import mcp
 from src.core.authz import (
     AuthenticationError,
+    PROJECT_ISOLATION_ENABLED,
+    ROLE_ISOLATION_ENABLED,
     authorize_write,
     get_claims_from_context,
     get_tenant_filter,
@@ -26,6 +28,8 @@ from src.tools._push_helpers import broadcast_after_write
 
 from memoryhub_core.models.schemas import MemoryNodeCreate
 from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.exceptions import MemoryAccessDeniedError, MemoryNotFoundError
 from memoryhub_core.services.memory import create_memory
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
@@ -111,8 +115,10 @@ async def write_memory(
         str | None,
         Field(
             description=(
-                "Your project identifier. Required when scope is 'campaign' — "
-                "used to verify your project is enrolled in the campaign."
+                "Your project identifier. Required when scope is 'project' or "
+                "'campaign'. For project scope, the memory is tagged to this project "
+                "and only project members can read it. For campaign scope, used to "
+                "verify your project is enrolled in the campaign."
             ),
         ),
     ] = None,
@@ -168,7 +174,51 @@ async def write_memory(
         finally:
             await release_db_session(gen_for_campaign)
 
-    if not authorize_write(claims, scope, owner_id, write_tenant_id, campaign_ids=campaign_ids):
+    # Resolve project membership when writing to project scope.
+    project_ids: set[str] | None = None
+    scope_id_value: str | None = None
+    if scope == "project":
+        if not project_id:
+            raise ToolError(
+                "project_id is required when scope is 'project'. "
+                "Set it to your project identifier from your agent configuration."
+            )
+        scope_id_value = project_id
+        if PROJECT_ISOLATION_ENABLED:
+            session_for_project, gen_for_project = await get_db_session()
+            try:
+                project_ids = await get_projects_for_user(
+                    session_for_project, claims["sub"],
+                )
+            finally:
+                await release_db_session(gen_for_project)
+            if not project_ids or project_id not in project_ids:
+                raise ToolError(
+                    f"Not a member of project '{project_id}'. "
+                    "You can only write project-scoped memories for projects you belong to."
+                )
+
+    # Resolve role assignments when writing to role scope.
+    # Role writes require service identity (checked by authorize_write).
+    # TODO: Add a role_name parameter when the curator agent is built;
+    # for now role-scope writes set scope_id via the curator's own logic.
+    role_names: set[str] | None = None
+    if scope == "role" and ROLE_ISOLATION_ENABLED:
+        session_for_roles, gen_for_roles = await get_db_session()
+        try:
+            role_names = await get_roles_for_user(
+                session_for_roles, claims["sub"], write_tenant_id, claims=claims,
+            )
+        finally:
+            await release_db_session(gen_for_roles)
+
+    if not authorize_write(
+        claims, scope, owner_id, write_tenant_id,
+        campaign_ids=campaign_ids,
+        project_ids=project_ids,
+        role_names=role_names,
+        scope_id=scope_id_value,
+    ):
         raise ToolError(
             f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
         )
@@ -209,6 +259,7 @@ async def write_memory(
             branch_type=branch_type,
             metadata=metadata,
             domains=domains,
+            scope_id=scope_id_value,
         )
     except ValidationError as exc:
         errors = exc.errors()

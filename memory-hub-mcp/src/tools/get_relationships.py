@@ -22,6 +22,8 @@ from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.models.schemas import RelationshipType
 from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.graph import (
     get_relationships as get_relationships_service,
@@ -143,6 +145,16 @@ async def get_relationships(
         if project_id:
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
 
+        # Resolve project membership once for all project-scoped checks.
+        project_ids: set[str] | None = None
+        project_ids = await get_projects_for_user(session, claims["sub"])
+
+        # Resolve role assignments once for all role-scoped checks.
+        role_names: set[str] | None = None
+        role_names = await get_roles_for_user(
+            session, claims["sub"], tenant, claims=claims,
+        )
+
         # Post-fetch RBAC filter on related nodes
         original_rels = result["relationships"]
         accessible_rels = []
@@ -155,7 +167,12 @@ async def get_relationships(
                         owner_id=node_data.get("owner_id", ""),
                         tenant_id=node_data.get("tenant_id", "default"),
                     )
-                    if not authorize_read(claims, proxy, campaign_ids=campaign_ids):
+                    if not authorize_read(
+                        claims, proxy,
+                        campaign_ids=campaign_ids,
+                        project_ids=project_ids,
+                        role_names=role_names,
+                    ):
                         break
             else:
                 accessible_rels.append(rel)
@@ -175,7 +192,12 @@ async def get_relationships(
                     owner_id=node_dump.get("owner_id", ""),
                     tenant_id=node_dump.get("tenant_id", "default"),
                 )
-                if authorize_read(claims, proxy, campaign_ids=campaign_ids):
+                if authorize_read(
+                    claims, proxy,
+                    campaign_ids=campaign_ids,
+                    project_ids=project_ids,
+                    role_names=role_names,
+                ):
                     accessible_steps.append({
                         "hop": step["hop"],
                         "node": node_dump,

@@ -20,6 +20,8 @@ from src.core.authz import (
 from src.tools._deps import get_db_session, release_db_session
 
 from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import get_memory_history, read_memory as _read_memory
 
@@ -100,7 +102,34 @@ async def read_memory(
                 )
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
 
-        if not authorize_read(claims, node, campaign_ids=campaign_ids):
+        # Resolve project membership for project-scoped memories.
+        project_ids: set[str] | None = None
+        if node.scope == "project":
+            session_for_project, gen_for_project = await get_db_session()
+            try:
+                project_ids = await get_projects_for_user(
+                    session_for_project, claims["sub"],
+                )
+            finally:
+                await release_db_session(gen_for_project)
+
+        # Resolve role assignments for role-scoped memories.
+        role_names: set[str] | None = None
+        if node.scope == "role":
+            session_for_roles, gen_for_roles = await get_db_session()
+            try:
+                role_names = await get_roles_for_user(
+                    session_for_roles, claims["sub"], tenant, claims=claims,
+                )
+            finally:
+                await release_db_session(gen_for_roles)
+
+        if not authorize_read(
+            claims, node,
+            campaign_ids=campaign_ids,
+            project_ids=project_ids,
+            role_names=role_names,
+        ):
             raise ToolError(f"Not authorized to read memory {memory_id}.")
 
         result = node.model_dump(mode="json")
