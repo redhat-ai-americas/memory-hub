@@ -268,6 +268,20 @@ Watch for topic pivots. A pivot is any of:
 When you detect a pivot, call `search_memory` with a query for the new topic. ADD the results to your working set; do not replace it.
 ```
 
+### Slash command onboarding path
+
+For users already working in Claude Code, a user-level slash command provides a zero-context-switch onboarding path. The command delegates to the CLI wizard:
+
+```bash
+# One-time install
+curl -o ~/.claude/commands/memoryhub-init.md \
+  https://raw.githubusercontent.com/redhat-ai-americas/memory-hub/main/tools/claude-commands/memoryhub-init.md
+```
+
+Then in any project, type `/memoryhub-init` at the Claude Code prompt. The command checks for `memoryhub-cli`, runs `memoryhub config init`, and prints remaining setup steps (API key, MCP server registration). It accepts the same arguments as the CLI (`/memoryhub-init --dir /path --force`).
+
+The slash command file lives in the repo at `tools/claude-commands/memoryhub-init.md`. It embeds no rule templates — all generation logic stays in the CLI, avoiding drift.
+
 ### Session focus history as a usage signal
 
 The focus declarations themselves become data worth keeping. If memory-hub records the focus string of the last 20 sessions, that's a usage histogram: "this project is actually 60% deployment, 30% MCP tools, 10% UI." That signal could feed back into weight tuning — memories tagged or matching frequently-used focuses could get gentle weight bumps; memories never matching any session focus could decay toward stub-only. This is a phase-2 idea, not a v1 requirement.

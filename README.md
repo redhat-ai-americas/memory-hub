@@ -81,6 +81,16 @@ MemoryHub splits configuration into two files with different lifecycles: project
 
 `memoryhub config init` is an interactive wizard that asks about session shape, loading pattern, focus source, and retrieval defaults, then writes `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`. Both files are meant to be committed so every contributor's agent inherits the same loading pattern. On first run, any legacy `.claude/rules/memoryhub-integration.md` is backed up to `.bak` before the new rule file is written.
 
+**From inside Claude Code**, you can run the same wizard without leaving the prompt:
+
+```bash
+# One-time install of the slash command
+curl -o ~/.claude/commands/memoryhub-init.md \
+  https://raw.githubusercontent.com/redhat-ai-americas/memory-hub/main/tools/claude-commands/memoryhub-init.md
+```
+
+Then type `/memoryhub-init` in any project. It runs `memoryhub config init` and prints remaining setup steps.
+
 After hand-editing `.memoryhub.yaml`, run `memoryhub config regenerate` to re-render the rule file from the YAML without touching the YAML itself.
 
 The YAML has two top-level keys — `memory_loading` (when and how agents load memory) and `retrieval_defaults` (defaults applied to SDK/agent search calls):
