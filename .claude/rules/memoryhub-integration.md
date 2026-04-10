@@ -6,10 +6,11 @@ This project has a MemoryHub MCP server that provides persistent, centralized me
 
 At the START of every conversation, before doing any other work:
 
-1. Read your personal api key from `~/.config/memoryhub/api-key` (trim the trailing newline). This file is per-operator and lives outside the repo — it is not committed. If the file does not exist, ask the user to create it before continuing.
-2. Call `register_session(api_key="<the value you just read>")` to authenticate.
-3. Call `search_memory` with a query relevant to the current task to load context.
-4. Use the returned memories to inform your work.
+1. Run `scripts/cluster-health-check.sh` to verify cluster deployment state. If it reports issues, tell the user before proceeding. Use `--full` when the session involves deployment, migrations, or the DB.
+2. Read your personal api key from `~/.config/memoryhub/api-key` (trim the trailing newline). This file is per-operator and lives outside the repo — it is not committed. If the file does not exist, ask the user to create it before continuing.
+3. Call `register_session(api_key="<the value you just read>")` to authenticate.
+4. Call `search_memory` with a query relevant to the current task to load context.
+5. Use the returned memories to inform your work.
 
 ### During Work
 
