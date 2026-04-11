@@ -31,7 +31,7 @@ from src.core.authz import (
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session
 from src.tools._push_helpers import broadcast_after_write
 
 
@@ -172,6 +172,7 @@ async def update_memory(
             data=update_data,
             session=session,
             embedding_service=embedding_service,
+            s3_adapter=get_s3_adapter(),
         )
 
         # Pattern E (#62): broadcast to other connected agents post-commit.

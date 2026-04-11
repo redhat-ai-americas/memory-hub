@@ -35,7 +35,7 @@ from src.core.authz import (
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._deps import get_db_session, release_db_session
+from src.tools._deps import get_db_session, get_s3_adapter, release_db_session
 from src.tools._push_helpers import broadcast_after_write
 
 
@@ -168,6 +168,7 @@ async def delete_memory(
         result = await svc_delete_memory(
             memory_id=parsed_id,
             session=session,
+            s3_adapter=get_s3_adapter(),
         )
 
         # Pattern E (#62): broadcast to other connected agents post-commit.

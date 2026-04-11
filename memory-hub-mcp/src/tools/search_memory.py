@@ -106,6 +106,12 @@ def _format_entry(
     entry = item.model_dump(mode="json")
     entry["result_type"] = "full" if isinstance(item, MemoryNodeRead) else "stub"
     entry["relevance_score"] = round(relevance_score, 4)
+    # Guide agents from chunk hits to the parent memory's full content
+    if item.branch_type == "chunk" and item.parent_id is not None:
+        entry["parent_hint"] = (
+            f"This is a chunk of a larger memory. Call "
+            f"read_memory('{item.parent_id}', hydrate=true) for full content."
+        )
     if nested_branches:
         branch_entries: list[dict[str, Any]] = []
         for branch_item, branch_score in nested_branches:

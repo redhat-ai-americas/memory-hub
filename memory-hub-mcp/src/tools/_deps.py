@@ -13,10 +13,13 @@ from memoryhub_core.services.rerank import (
     NoopRerankerService,
     RerankerService,
 )
+from memoryhub_core.storage.s3 import S3StorageAdapter
 from src.tools.auth import require_auth
 
 _embedding_service: EmbeddingService | None = None
 _reranker_service: RerankerService | None = None
+_s3_adapter: S3StorageAdapter | None = None
+_s3_checked: bool = False
 
 
 def get_embedding_service() -> EmbeddingService:
@@ -60,6 +63,23 @@ async def release_db_session(gen):
         await gen.__anext__()
     except StopAsyncIteration:
         pass
+
+
+def get_s3_adapter() -> S3StorageAdapter | None:
+    """Return the S3 adapter, or None if MEMORYHUB_S3_ACCESS_KEY is not set.
+
+    Follows the same singleton pattern as get_embedding_service. Returns
+    None (rather than raising) when S3 is not configured so callers can
+    degrade gracefully to inline storage.
+    """
+    global _s3_adapter, _s3_checked
+    if not _s3_checked:
+        from memoryhub_core.config import MinIOSettings
+        settings = MinIOSettings()
+        if settings.access_key:
+            _s3_adapter = S3StorageAdapter(settings)
+        _s3_checked = True
+    return _s3_adapter
 
 
 def get_authenticated_owner() -> str | None:

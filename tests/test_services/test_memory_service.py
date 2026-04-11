@@ -21,6 +21,7 @@ from memoryhub_core.services.memory import (
     DEFAULT_PIVOT_THRESHOLD,
     count_search_matches as _svc_count_search_matches,
     create_memory as _svc_create_memory,
+    delete_memory as _svc_delete_memory,
     get_memory_history as _svc_get_memory_history,
     read_memory as _svc_read_memory,
     report_contradiction,
@@ -41,7 +42,7 @@ from memoryhub_core.services.rerank import NoopRerankerService, RerankerService
 _TEST_TENANT_ID = "default"
 
 
-async def create_memory(data, session, embedding_service, skip_curation=False, *, tenant_id=_TEST_TENANT_ID):
+async def create_memory(data, session, embedding_service, skip_curation=False, *, tenant_id=_TEST_TENANT_ID, s3_adapter=None):
     """Test wrapper around the service create_memory with a default tenant."""
     return await _svc_create_memory(
         data,
@@ -49,6 +50,7 @@ async def create_memory(data, session, embedding_service, skip_curation=False, *
         embedding_service,
         tenant_id=tenant_id,
         skip_curation=skip_curation,
+        s3_adapter=s3_adapter,
     )
 
 
@@ -57,9 +59,9 @@ async def read_memory(memory_id, session, *, tenant_id=_TEST_TENANT_ID):
     return await _svc_read_memory(memory_id, session, tenant_id=tenant_id)
 
 
-async def update_memory(memory_id, data, session, embedding_service):
+async def update_memory(memory_id, data, session, embedding_service, s3_adapter=None):
     """Test wrapper around update_memory (tenant inherited from existing row)."""
-    return await _svc_update_memory(memory_id, data, session, embedding_service)
+    return await _svc_update_memory(memory_id, data, session, embedding_service, s3_adapter=s3_adapter)
 
 
 async def get_memory_history(memory_id, session, *, tenant_id=_TEST_TENANT_ID, **kwargs):
@@ -1344,3 +1346,293 @@ async def test_get_memory_history_tenant_id_is_keyword_only():
     tenant_param = sig.parameters["tenant_id"]
     assert tenant_param.kind == inspect.Parameter.KEYWORD_ONLY
     assert tenant_param.default is inspect.Parameter.empty
+
+
+# ---------------------------------------------------------------------------
+# Two-tier storage (S3 + semantic chunking)
+# ---------------------------------------------------------------------------
+
+
+class MockS3Adapter:
+    """In-memory S3 adapter for testing two-tier storage."""
+
+    def __init__(self):
+        self.store: dict[str, str] = {}
+        self.deleted: list[str] = []
+
+    async def put_content(self, tenant_id, memory_id, version_id, content):
+        key = f"{tenant_id}/{memory_id}/{version_id}"
+        self.store[key] = content
+        return key
+
+    async def get_content(self, content_ref):
+        return self.store[content_ref]
+
+    async def delete_content(self, content_ref):
+        self.store.pop(content_ref, None)
+        self.deleted.append(content_ref)
+
+    async def delete_contents(self, refs):
+        for ref in refs:
+            self.store.pop(ref, None)
+            self.deleted.append(ref)
+
+
+def _make_oversized_content() -> str:
+    """Return content exceeding the 4096-byte S3 threshold.
+
+    Uses distinct paragraphs separated by double-newlines so that the
+    semantic chunker produces multiple chunks (it splits on paragraph
+    boundaries first).
+    """
+    paragraphs = [
+        f"Paragraph {i}: " + "x" * 400
+        for i in range(15)
+    ]
+    return "\n\n".join(paragraphs)
+
+
+# -- create_memory: two-tier storage --
+
+
+async def test_create_memory_inline_when_under_threshold(async_session, embedding_service):
+    """Content under 4096 bytes stays inline even with an S3 adapter present."""
+    s3 = MockS3Adapter()
+    data = _make_create_data(content="Short content that fits inline")
+    result, curation = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    assert curation["blocked"] is False
+    assert result.storage_type == "inline"
+    assert result.content_ref is None
+    assert len(s3.store) == 0, "nothing should be written to S3"
+
+
+async def test_create_memory_s3_when_over_threshold(async_session, embedding_service):
+    """Content over 4096 bytes is uploaded to S3 when an adapter is provided."""
+    s3 = MockS3Adapter()
+    big_content = _make_oversized_content()
+    assert len(big_content.encode("utf-8")) > 4096
+
+    data = _make_create_data(content=big_content)
+    result, curation = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    assert curation["blocked"] is False
+    assert result.storage_type == "s3"
+    assert result.content_ref is not None
+    assert result.content_ref in s3.store, "content_ref should be a valid S3 key"
+    assert s3.store[result.content_ref] == big_content
+
+
+async def test_create_memory_s3_creates_chunks(async_session, embedding_service):
+    """Oversized S3 content produces chunk children with branch_type='chunk'."""
+    from sqlalchemy import select as sa_select
+    from memoryhub_core.models.memory import MemoryNode as MN
+
+    s3 = MockS3Adapter()
+    data = _make_create_data(content=_make_oversized_content())
+    result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    chunks_stmt = sa_select(MN).where(
+        MN.parent_id == result.id,
+        MN.branch_type == "chunk",
+        MN.deleted_at.is_(None),
+    )
+    chunks = (await async_session.execute(chunks_stmt)).scalars().all()
+
+    assert len(chunks) >= 2, f"expected multiple chunks, got {len(chunks)}"
+    for chunk in chunks:
+        assert chunk.branch_type == "chunk"
+        assert chunk.weight == 0.0
+        assert chunk.is_current is True
+
+
+async def test_create_memory_s3_chunks_have_embeddings(async_session, embedding_service):
+    """Each semantic chunk gets its own embedding vector."""
+    from sqlalchemy import select as sa_select
+    from memoryhub_core.models.memory import MemoryNode as MN
+
+    s3 = MockS3Adapter()
+    data = _make_create_data(content=_make_oversized_content())
+    result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    chunks_stmt = sa_select(MN).where(
+        MN.parent_id == result.id,
+        MN.branch_type == "chunk",
+    )
+    chunks = (await async_session.execute(chunks_stmt)).scalars().all()
+
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        assert chunk.embedding is not None, "chunk should have a non-None embedding"
+        assert len(chunk.embedding) > 0, "embedding should not be empty"
+
+
+async def test_create_memory_s3_no_adapter_inline_fallback(async_session, embedding_service):
+    """Oversized content without an S3 adapter falls back to inline storage."""
+    big_content = _make_oversized_content()
+    assert len(big_content.encode("utf-8")) > 4096
+
+    data = _make_create_data(content=big_content)
+    result, curation = await create_memory(data, async_session, embedding_service, s3_adapter=None)
+
+    assert curation["blocked"] is False
+    assert result.storage_type == "inline"
+    assert result.content_ref is None
+
+
+# -- update_memory: two-tier storage --
+
+
+async def test_update_memory_s3_content_changed_rechunks(async_session, embedding_service):
+    """Updating S3 content retires old chunks and creates new ones."""
+    from sqlalchemy import select as sa_select
+    from memoryhub_core.models.memory import MemoryNode as MN
+
+    s3 = MockS3Adapter()
+    original_content = _make_oversized_content()
+    data = _make_create_data(content=original_content)
+    original, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    # Verify original chunks exist
+    old_chunks_stmt = sa_select(MN).where(
+        MN.parent_id == original.id,
+        MN.branch_type == "chunk",
+    )
+    old_chunks = (await async_session.execute(old_chunks_stmt)).scalars().all()
+    assert len(old_chunks) >= 2
+
+    # Update with new oversized content
+    new_content = "\n\n".join(
+        [f"Updated paragraph {i}: " + "y" * 400 for i in range(15)]
+    )
+    updated = await update_memory(
+        original.id,
+        MemoryNodeUpdate(content=new_content),
+        async_session,
+        embedding_service,
+        s3_adapter=s3,
+    )
+
+    assert updated.storage_type == "s3"
+
+    # Old chunks should be retired (is_current=False)
+    async_session.expire_all()
+    old_chunks = (await async_session.execute(old_chunks_stmt)).scalars().all()
+    for chunk in old_chunks:
+        assert chunk.is_current is False, "old chunks must be retired"
+
+    # New chunks should exist under the updated version
+    new_chunks_stmt = sa_select(MN).where(
+        MN.parent_id == updated.id,
+        MN.branch_type == "chunk",
+        MN.is_current.is_(True),
+    )
+    new_chunks = (await async_session.execute(new_chunks_stmt)).scalars().all()
+    assert len(new_chunks) >= 2, "new chunks should be created after rechunking"
+
+
+async def test_update_memory_s3_content_unchanged_preserves_storage(async_session, embedding_service):
+    """Updating only weight on an S3 memory preserves storage_type and content_ref."""
+    s3 = MockS3Adapter()
+    data = _make_create_data(content=_make_oversized_content(), weight=0.8)
+    original, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    assert original.storage_type == "s3"
+    original_ref = original.content_ref
+
+    updated = await update_memory(
+        original.id,
+        MemoryNodeUpdate(weight=0.5),
+        async_session,
+        embedding_service,
+        s3_adapter=s3,
+    )
+
+    assert updated.storage_type == "s3"
+    assert updated.content_ref == original_ref, "content_ref should be inherited when content is unchanged"
+
+
+async def test_update_memory_non_chunk_branches_still_copied(async_session, embedding_service):
+    """On content update, rationale branches are deep-copied but chunk branches are retired."""
+    from sqlalchemy import select as sa_select
+    from memoryhub_core.models.memory import MemoryNode as MN
+
+    s3 = MockS3Adapter()
+    parent_data = _make_create_data(content=_make_oversized_content())
+    parent, _ = await create_memory(parent_data, async_session, embedding_service, s3_adapter=s3)
+
+    # Add a rationale branch manually
+    rationale_data = _make_create_data(
+        content="Rationale: oversized content is stored in S3 for efficiency",
+        parent_id=parent.id,
+        branch_type="rationale",
+    )
+    await create_memory(rationale_data, async_session, embedding_service)
+
+    # Verify starting state: chunks + 1 rationale
+    children_stmt = sa_select(MN).where(MN.parent_id == parent.id, MN.deleted_at.is_(None))
+    old_children = (await async_session.execute(children_stmt)).scalars().all()
+    old_chunk_count = sum(1 for c in old_children if c.branch_type == "chunk")
+    old_rationale_count = sum(1 for c in old_children if c.branch_type == "rationale")
+    assert old_chunk_count >= 2
+    assert old_rationale_count == 1
+
+    # Update content (triggers rechunk + deep-copy of non-chunk branches)
+    new_content = "\n\n".join(
+        [f"Revised paragraph {i}: " + "z" * 400 for i in range(15)]
+    )
+    updated = await update_memory(
+        parent.id,
+        MemoryNodeUpdate(content=new_content),
+        async_session,
+        embedding_service,
+        s3_adapter=s3,
+    )
+
+    # New version should have deep-copied rationale + new chunks
+    new_children_stmt = sa_select(MN).where(
+        MN.parent_id == updated.id,
+        MN.deleted_at.is_(None),
+    )
+    new_children = (await async_session.execute(new_children_stmt)).scalars().all()
+
+    new_rationale = [c for c in new_children if c.branch_type == "rationale"]
+    new_chunks = [c for c in new_children if c.branch_type == "chunk"]
+
+    assert len(new_rationale) == 1, "rationale branch should be deep-copied"
+    assert len(new_chunks) >= 2, "new chunks should be created"
+    # The copied rationale should have a new ID (deep copy, not move)
+    old_rationale_ids = {c.id for c in old_children if c.branch_type == "rationale"}
+    assert new_rationale[0].id not in old_rationale_ids, "deep-copied rationale should have a new ID"
+
+
+# -- delete_memory: two-tier storage --
+
+
+async def test_delete_memory_s3_removes_objects(async_session, embedding_service):
+    """Deleting an S3-backed memory cleans up the S3 objects."""
+    s3 = MockS3Adapter()
+    data = _make_create_data(content=_make_oversized_content())
+    result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    assert result.storage_type == "s3"
+    content_ref = result.content_ref
+    assert content_ref in s3.store
+
+    await _svc_delete_memory(result.id, async_session, s3_adapter=s3)
+
+    assert content_ref in s3.deleted, "S3 object should be deleted"
+    assert content_ref not in s3.store, "S3 object should be removed from store"
+
+
+async def test_delete_memory_inline_no_s3_cleanup(async_session, embedding_service):
+    """Deleting an inline memory does not attempt S3 cleanup, even with an adapter."""
+    s3 = MockS3Adapter()
+    data = _make_create_data(content="Short inline content")
+    result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    assert result.storage_type == "inline"
+
+    await _svc_delete_memory(result.id, async_session, s3_adapter=s3)
+
+    assert len(s3.deleted) == 0, "no S3 cleanup should be attempted for inline memories"

@@ -17,7 +17,7 @@ from src.core.authz import (
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._deps import get_db_session, release_db_session
+from src.tools._deps import get_db_session, get_s3_adapter, release_db_session
 
 from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.project import get_projects_for_user
@@ -44,6 +44,18 @@ async def read_memory(
             description=(
                 "If true, includes version history alongside the current content. "
                 "Useful for understanding how a memory evolved."
+            ),
+        ),
+    ] = False,
+    hydrate: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true and the memory uses external (S3) storage, fetches "
+                "the full content instead of the truncated prefix. Set to true "
+                "when you need the complete content — for example, after finding "
+                "a chunk via search and following parent_id to the full memory. "
+                "Has no effect on inline memories."
             ),
         ),
     ] = False,
@@ -133,6 +145,27 @@ async def read_memory(
             raise ToolError(f"Not authorized to read memory {memory_id}.")
 
         result = node.model_dump(mode="json")
+
+        # Hydrate S3 content when requested
+        if hydrate and node.storage_type == "s3" and node.content_ref:
+            s3 = get_s3_adapter()
+            if s3 is not None:
+                full_content = await s3.get_content(node.content_ref)
+                result["content"] = full_content
+                result["hydrated"] = True
+            else:
+                result["hydrated"] = False
+                result["storage_hint"] = (
+                    "S3 storage is not configured on this server. "
+                    "The truncated prefix is all that is available."
+                )
+        elif node.storage_type == "s3":
+            result["hydrated"] = False
+            result["storage_hint"] = (
+                "This memory's content is truncated (prefix only). "
+                "Call read_memory with hydrate=true to fetch the full "
+                "content from storage."
+            )
 
         if include_versions:
             # get_memory_history returns a dict with a "versions" list plus

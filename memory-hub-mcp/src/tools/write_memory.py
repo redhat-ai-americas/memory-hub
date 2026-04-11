@@ -22,6 +22,7 @@ from src.core.authz import (
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
+    get_s3_adapter,
     release_db_session,
 )
 from src.tools._push_helpers import broadcast_after_write
@@ -279,6 +280,7 @@ async def write_memory(
             session,
             embedding_service,
             tenant_id=write_tenant_id,
+            s3_adapter=get_s3_adapter(),
         )
 
         if curation_result["blocked"]:

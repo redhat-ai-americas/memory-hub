@@ -1,0 +1,82 @@
+# NOTE: The upstream MinIO image runs as uid 1000. OpenShift assigns random
+# UIDs by default via the restricted SCC, which breaks the image. This
+# Deployment uses a dedicated ServiceAccount (memoryhub-minio) granted the
+# "anyuid" SCC, scoping the grant to just this workload rather than the
+# namespace's default SA. See README.md for the prerequisite oc adm command.
+#
+# Uses strategy.Recreate because the PVC is ReadWriteOnce -- a rolling update
+# would hit a multi-attach error when the old pod still holds the volume.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memoryhub-minio
+  labels:
+    app.kubernetes.io/name: memoryhub-minio
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: storage
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoryhub-minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memoryhub-minio
+        app.kubernetes.io/part-of: memoryhub
+        app.kubernetes.io/component: storage
+    spec:
+      serviceAccountName: memoryhub-minio
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:latest
+          args:
+            - "server"
+            - "/data"
+            - "--console-address"
+            - ":9001"
+          ports:
+            - containerPort: 9000
+              name: api
+              protocol: TCP
+            - containerPort: 9001
+              name: console
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: memoryhub-minio-credentials
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 1Gi
+              cpu: "1"
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: memoryhub-minio-data

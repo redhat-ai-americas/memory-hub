@@ -117,11 +117,52 @@ Content that stays in PostgreSQL: short memories (a few sentences), embeddings, 
 
 Content that goes to MinIO: document-sized memories (multi-paragraph or multi-page), files attached to memories, archived content. These benefit from object storage economics and streaming access.
 
-The threshold is TBD but probably in the range of 4-8 KB. Below that, PostgreSQL is fine. Above that, MinIO is more appropriate. The node row always exists in PostgreSQL regardless -- MinIO stores the body, PostgreSQL stores everything else including a reference to the MinIO object.
+**Threshold: 4 KB (4096 bytes).** Content at or below 4 KB stays inline in PostgreSQL. Content above 4 KB is stored as an S3 object in MinIO, with the PostgreSQL row holding a reference (`content_ref`) and a truncated prefix for quick access.
+
+The rationale for 4 KB: MiniLM-L6-v2 (our embedding model) has a ~512 token input limit. 4 KB of English text is roughly 600--1000 tokens, well above the embedder's comfort zone. Setting the threshold at 4 KB keeps most memories inline while catching anything that would blow the embedder's context window.
+
+The node row always exists in PostgreSQL regardless -- MinIO stores the body, PostgreSQL stores everything else including a reference to the MinIO object.
+
+### What gets embedded for S3-backed content
+
+For memories stored in MinIO, the PostgreSQL row holds a truncated prefix (~1500 characters, ~375 tokens) in the `content` column. This prefix is what gets embedded for the parent node. Full content is searchable via **semantic chunk children** -- each chunk is a child node with `branch_type="chunk"`, its own embedding, and `weight=0.0`. Agents find relevant chunks through `search_memory`, then follow `parent_id` to retrieve the full memory.
+
+### Curator participation
+
+The curation engine runs on the full content string but uses the prefix embedding for similarity comparison when checking for near-duplicates. This may reduce dedup sensitivity for content that only differs deep in the body -- two long documents with identical openings but different conclusions could slip past. This is acceptable divergence: the curator is a best-effort dedup aid, not a guarantee. If precision matters, agents can call `get_similar_memories` explicitly after writing large content.
+
+### Read-time behavior
+
+**Lazy hydration.** `read_memory` returns the prefix (the `content` column) by default. When called with `hydrate=True`, the full content is fetched from S3 and returned in place of the prefix. Search results for chunk nodes include a `parent_hint` field guiding the agent to the full memory via its `parent_id`.
+
+This keeps the common read path fast (no S3 round-trip) while giving agents a clear escalation path when they need the full document.
+
+### Version chain in S3
+
+Each version of an S3-backed memory gets its own S3 object, keyed as `{tenant_id}/{memory_id}/{version_id}`. On update, a new S3 object is uploaded and the PostgreSQL row's `content_ref` is updated to point to it. The previous version's S3 object lives until the version expires (TTL-based, governed by the same retention policy as PostgreSQL version rows). On delete, S3 objects for all versions in the chain are removed in a single batch operation.
+
+### Semantic chunking
+
+When content exceeds the 4 KB threshold and lands in S3, the write path also creates **semantic chunks** as child nodes in the memory tree. These chunks enable fine-grained search over large documents without requiring agents to hydrate and scan the full content.
+
+Chunk nodes have:
+- `branch_type="chunk"` -- distinguishes them from rationale, provenance, and other branch types
+- `weight=0.0` -- chunks are search scaffolding, not memories in their own right; zero weight keeps them out of weight-based rankings
+- Their own embedding -- each chunk is independently searchable via `search_memory`
+- `parent_id` pointing to the S3-backed parent memory
+
+**Chunking strategy**: `semantic_chunk()` splits content on paragraph boundaries first, then sentence boundaries, targeting ~256 tokens per chunk. This keeps each chunk well within the embedding model's 512-token window while preserving semantic coherence.
+
+**Search behavior**: Default search omits chunks whose parent is already in the result set (consistent with existing branch-collapsing behavior). This prevents a large document from dominating search results with multiple chunk hits when the parent memory already matched.
+
+**Retrieval paths** (cheapest to most expensive):
+1. **Read chunk directly** -- if the chunk itself answers the agent's question, no further action needed
+2. **Traverse graph** -- follow `parent_id` to get the parent memory's prefix and metadata
+3. **Hydrate** -- call `read_memory(memory_id, hydrate=True)` to fetch the full S3 content
 
 ## Schema Design
 
-**Status: TBD.** Schema design is one of the first implementation tasks. Here are the considerations driving it.
+Here are the considerations that drove the schema design.
 
 ### Core tables (conceptual)
 
@@ -149,7 +190,7 @@ Both systems' backup data should be encrypted. PostgreSQL backups inherit OS-lev
 
 ## Design Questions
 
-- What's the right content size threshold for PostgreSQL vs. MinIO storage?
+- ~~What's the right content size threshold for PostgreSQL vs. MinIO storage?~~ **Resolved**: 4 KB. See "When content goes to MinIO vs. PostgreSQL" above.
 - How do we handle embedding model upgrades? If we switch embedding models, all existing vectors need re-computation. Do we store the model identifier alongside the embedding?
 - What's the retention policy for audit logs? Infinite retention is expensive; time-bounded retention loses forensic capability. Tiered storage (hot/warm/cold) for audit data?
 - Connection pooling: does the OOTB operator include PgBouncer, or do we deploy it separately?

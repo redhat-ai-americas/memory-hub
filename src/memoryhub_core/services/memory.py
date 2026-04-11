@@ -4,6 +4,8 @@ This module sits between the MCP tools and the database. All methods are async
 and receive an explicit AsyncSession (no hidden global state).
 """
 
+from __future__ import annotations
+
 import logging
 import math
 import uuid
@@ -33,6 +35,8 @@ from memoryhub_core.services.exceptions import (
     MemoryNotFoundError,
 )
 from memoryhub_core.services.rerank import RERANK_MAX_BATCH, RerankerService
+from memoryhub_core.storage.chunker import semantic_chunk
+from memoryhub_core.storage.s3 import S3StorageAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,7 @@ async def create_memory(
     *,
     tenant_id: str,
     skip_curation: bool = False,
+    s3_adapter: S3StorageAdapter | None = None,
 ) -> tuple[MemoryNodeRead | None, dict]:
     """Create a new memory node.
 
@@ -76,8 +81,20 @@ async def create_memory(
     stamped with the correct tenant. Phase 2's authorize_write already
     verified the caller is allowed to write into this tenant; this function
     just persists that decision onto the row.
+
+    ``s3_adapter`` enables two-tier storage. When provided, content exceeding
+    ``AppSettings.s3_threshold_bytes`` is uploaded to MinIO and stored as
+    semantic chunks (child nodes with ``branch_type="chunk"``).
     """
-    embedding = await embedding_service.embed(data.content)
+    app_settings = AppSettings()
+    content_bytes = len(data.content.encode("utf-8"))
+    is_oversized = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
+
+    # For oversized content, embed only the prefix (fits within embedder's
+    # ~512 token limit). Full content is searchable via chunk children.
+    embed_text = data.content[:app_settings.s3_prefix_chars] if is_oversized else data.content
+    embedding = await embedding_service.embed(embed_text)
+
     stub = generate_stub(
         content=data.content,
         scope=data.scope,
@@ -109,9 +126,31 @@ async def create_memory(
         }
 
     now = datetime.now(UTC)
+    memory_id = uuid.uuid4()
+
+    # Upload to S3 before DB commit so a failed upload doesn't leave a
+    # dangling row. If the DB commit later fails, the S3 object becomes
+    # orphaned (acceptable; cleaned up by periodic reaper).
+    if is_oversized:
+        content_ref = await s3_adapter.put_content(
+            tenant_id, memory_id, memory_id, data.content,
+        )
+        db_content = data.content[:app_settings.s3_prefix_chars]
+        storage_type = "s3"
+    else:
+        content_ref = None
+        db_content = data.content
+        storage_type = "inline"
+        if content_bytes > app_settings.s3_threshold_bytes:
+            logger.warning(
+                "Memory %s exceeds S3 threshold (%d > %d bytes) but no S3 "
+                "adapter configured; storing inline",
+                memory_id, content_bytes, app_settings.s3_threshold_bytes,
+            )
+
     node = MemoryNode(
-        id=uuid.uuid4(),
-        content=data.content,
+        id=memory_id,
+        content=db_content,
         stub=stub,
         scope=data.scope,
         scope_id=data.scope_id,
@@ -125,7 +164,8 @@ async def create_memory(
         embedding=embedding,
         is_current=True,
         version=1,
-        storage_type="inline",
+        storage_type=storage_type,
+        content_ref=content_ref,
         created_at=now,
         updated_at=now,
     )
@@ -134,8 +174,94 @@ async def create_memory(
     await session.commit()
     await session.refresh(node)
 
-    memory = node_to_read(node, has_children=False, has_rationale=False)
+    # Create semantic chunks for S3 memories so each section is
+    # independently searchable via its own embedding. The parent is
+    # already committed — if chunk creation fails, the memory still
+    # exists (searchable via its prefix embedding) but without chunk
+    # granularity.
+    has_children = False
+    if is_oversized:
+        try:
+            has_children = await _create_chunk_children(
+                content=data.content,
+                parent_id=memory_id,
+                scope=data.scope,
+                scope_id=data.scope_id,
+                owner_id=data.owner_id,
+                tenant_id=tenant_id,
+                domains=data.domains,
+                embedding_service=embedding_service,
+                session=session,
+                now=now,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to create chunks for oversized memory %s; "
+                "memory is saved but only prefix is searchable",
+                memory_id,
+                exc_info=True,
+            )
+
+    memory = node_to_read(node, has_children=has_children, has_rationale=False)
     return memory, curation_result
+
+
+async def _create_chunk_children(
+    *,
+    content: str,
+    parent_id: uuid.UUID,
+    scope: str,
+    scope_id: str | None,
+    owner_id: str,
+    tenant_id: str,
+    domains: list[str] | None,
+    embedding_service: EmbeddingService,
+    session: AsyncSession,
+    now: datetime,
+) -> bool:
+    """Create semantic chunk children for an oversized memory.
+
+    Returns True if chunks were created, False if the content produced
+    only a single chunk (not worth splitting).
+    """
+    chunks = semantic_chunk(content)
+    if len(chunks) <= 1:
+        return False
+
+    chunk_embeddings = await embedding_service.embed_batch(chunks)
+    for i, (chunk_text, chunk_emb) in enumerate(
+        zip(chunks, chunk_embeddings, strict=True)
+    ):
+        chunk_stub = generate_stub(
+            content=chunk_text,
+            scope=scope,
+            weight=0.0,
+            branch_count=0,
+            has_rationale=False,
+        )
+        chunk_node = MemoryNode(
+            id=uuid.uuid4(),
+            content=chunk_text,
+            stub=chunk_stub,
+            scope=scope,
+            scope_id=scope_id,
+            weight=0.0,
+            owner_id=owner_id,
+            tenant_id=tenant_id,
+            parent_id=parent_id,
+            branch_type="chunk",
+            metadata_={"chunk_index": i, "total_chunks": len(chunks)},
+            domains=domains,
+            embedding=chunk_emb,
+            is_current=True,
+            version=1,
+            storage_type="inline",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(chunk_node)
+    await session.commit()
+    return True
 
 
 async def read_memory(
@@ -204,6 +330,7 @@ async def update_memory(
     data: MemoryNodeUpdate,
     session: AsyncSession,
     embedding_service: EmbeddingService,
+    s3_adapter: S3StorageAdapter | None = None,
 ) -> MemoryNodeRead:
     """Create a new version of a memory node.
 
@@ -217,6 +344,11 @@ async def update_memory(
     caller shares the memory's tenant before we get here (it passes
     ``existing.tenant_id``). Deep-copied child branches also inherit their
     parent's tenant.
+
+    When ``s3_adapter`` is provided and updated content exceeds the S3
+    threshold, the new version is stored in S3 with fresh semantic chunks.
+    Old chunk children are retired (not deep-copied) since they reflect
+    the previous content.
     """
     stmt = select(MemoryNode).where(MemoryNode.id == memory_id)
     result = await session.execute(stmt)
@@ -235,8 +367,6 @@ async def update_memory(
                 MemoryNode.is_current.is_(True),
             )
             .where(
-                # Walk the version chain: the current node should share
-                # the same root. For simplicity, report old_node.id as both.
                 MemoryNode.id != memory_id,
             )
         )
@@ -246,12 +376,26 @@ async def update_memory(
         raise MemoryNotCurrentError(memory_id, current_id)
 
     # Apply updates
-    new_content = data.content if data.content is not None else old_node.content
+    content_changed = data.content is not None
+    new_content = data.content if content_changed else old_node.content
     new_weight = data.weight if data.weight is not None else old_node.weight
     new_metadata = data.metadata if data.metadata is not None else old_node.metadata_
     new_domains = data.domains if data.domains is not None else old_node.domains
 
-    embedding = await embedding_service.embed(new_content)
+    app_settings = AppSettings()
+
+    # Determine storage strategy for the new version
+    if content_changed:
+        content_bytes = len(new_content.encode("utf-8"))
+        is_oversized = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
+        embed_text = new_content[:app_settings.s3_prefix_chars] if is_oversized else new_content
+    else:
+        is_oversized = old_node.storage_type == "s3" and s3_adapter is not None
+        # For unchanged content, the old node's content field already
+        # holds the prefix (if S3) or full content (if inline)
+        embed_text = new_content
+
+    embedding = await embedding_service.embed(embed_text)
     stub = generate_stub(
         content=new_content,
         scope=old_node.scope,
@@ -261,11 +405,32 @@ async def update_memory(
     )
 
     now = datetime.now(UTC)
+    new_id = uuid.uuid4()
+
+    # Handle S3 storage for the new version
+    if content_changed and is_oversized:
+        content_ref = await s3_adapter.put_content(
+            old_node.tenant_id, new_id, new_id, new_content,
+        )
+        db_content = new_content[:app_settings.s3_prefix_chars]
+        storage_type = "s3"
+    elif content_changed:
+        # Content changed but fits inline (or no S3 adapter)
+        content_ref = None
+        db_content = new_content
+        storage_type = "inline"
+    else:
+        # Content unchanged — inherit storage from old node
+        content_ref = old_node.content_ref
+        db_content = old_node.content
+        storage_type = old_node.storage_type
+
     new_node = MemoryNode(
-        id=uuid.uuid4(),
-        content=new_content,
+        id=new_id,
+        content=db_content,
         stub=stub,
         scope=old_node.scope,
+        scope_id=old_node.scope_id,
         weight=new_weight,
         owner_id=old_node.owner_id,
         tenant_id=old_node.tenant_id,
@@ -277,26 +442,34 @@ async def update_memory(
         is_current=True,
         version=old_node.version + 1,
         previous_version_id=old_node.id,
-        storage_type=old_node.storage_type,
-        content_ref=old_node.content_ref,
+        storage_type=storage_type,
+        content_ref=content_ref,
         created_at=now,
         updated_at=now,
     )
 
     # Set TTL on the old version
-    app_settings = AppSettings()
     old_node.is_current = False
     old_node.expires_at = now + timedelta(days=app_settings.version_retention_days)
 
     session.add(new_node)
 
-    # Deep-copy one level of child branches from old node to new node
+    # Deep-copy one level of child branches from old node to new node.
+    # Chunk branches are skipped when content changed (they reflect old
+    # content and will be replaced by fresh chunks below).
     children_stmt = select(MemoryNode).where(MemoryNode.parent_id == old_node.id)
     children_result = await session.execute(children_stmt)
     old_children = children_result.scalars().all()
 
+    copied_count = 0
     for child in old_children:
-        # Deep copy branch to new parent
+        if child.branch_type == "chunk" and content_changed:
+            # Retire old chunk — new chunks will be created below
+            child.is_current = False
+            child.expires_at = now + timedelta(days=app_settings.version_retention_days)
+            continue
+
+        # Deep copy non-chunk branch to new parent
         copied_child = MemoryNode(
             id=uuid.uuid4(),
             content=child.content,
@@ -319,27 +492,56 @@ async def update_memory(
             updated_at=now,
         )
         session.add(copied_child)
+        copied_count += 1
 
         # Retire old branch — deep copy is the canonical version now
         child.is_current = False
         child.expires_at = now + timedelta(days=app_settings.version_retention_days)
 
     await session.commit()
+
+    # Create fresh semantic chunks if the new version is S3-backed.
+    # Uses the same _create_chunk_children helper as create_memory.
+    chunk_created = False
+    if content_changed and is_oversized:
+        try:
+            chunk_created = await _create_chunk_children(
+                content=new_content,
+                parent_id=new_id,
+                scope=old_node.scope,
+                scope_id=old_node.scope_id,
+                owner_id=old_node.owner_id,
+                tenant_id=old_node.tenant_id,
+                domains=new_domains,
+                embedding_service=embedding_service,
+                session=session,
+                now=now,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to create chunks for updated memory %s; "
+                "memory is saved but only prefix is searchable",
+                new_id,
+                exc_info=True,
+            )
+
     await session.refresh(new_node)
 
-    has_children = len(old_children) > 0
-    has_rationale = any(c.branch_type == "rationale" for c in old_children)
+    has_children = copied_count > 0 or chunk_created
+    non_chunk_children = [c for c in old_children if c.branch_type != "chunk"]
+    has_rationale = any(c.branch_type == "rationale" for c in non_chunk_children)
     return node_to_read(
         new_node,
         has_children=has_children,
         has_rationale=has_rationale,
-        branch_count=len(old_children),
+        branch_count=copied_count,
     )
 
 
 async def delete_memory(
     memory_id: uuid.UUID,
     session: AsyncSession,
+    s3_adapter: S3StorageAdapter | None = None,
 ) -> dict:
     """Soft-delete a memory and its entire version chain.
 
@@ -347,6 +549,9 @@ async def delete_memory(
     deleted_at = now. Relationships are left intact (they reference
     deleted nodes, which are filtered from queries). Returns a summary
     dict with the count of deleted versions.
+
+    When ``s3_adapter`` is provided, also removes S3 objects for any
+    versions that used external storage.
 
     Raises MemoryNotFoundError if the node doesn't exist, or
     MemoryAlreadyDeletedError if already soft-deleted.
@@ -372,6 +577,20 @@ async def delete_memory(
     child_ids = {child.id for child in child_result.scalars().all()}
     all_ids = version_ids | child_ids
 
+    # Collect S3 content_refs before soft-delete so we can clean up objects
+    s3_refs: list[str] = []
+    if s3_adapter is not None:
+        s3_refs_stmt = (
+            select(MemoryNode.content_ref)
+            .where(
+                MemoryNode.id.in_(list(all_ids)),
+                MemoryNode.storage_type == "s3",
+                MemoryNode.content_ref.isnot(None),
+            )
+        )
+        s3_result = await session.execute(s3_refs_stmt)
+        s3_refs = [row[0] for row in s3_result.all()]
+
     # Bulk soft-delete
     await session.execute(
         update(MemoryNode)
@@ -380,6 +599,10 @@ async def delete_memory(
     )
 
     await session.commit()
+
+    # Clean up S3 objects after successful DB commit
+    if s3_refs:
+        await s3_adapter.delete_contents(s3_refs)
 
     return {
         "deleted_id": str(memory_id),
