@@ -1,84 +1,63 @@
-# Next session: SDK + CLI campaign/domain parameter catch-up (#164)
+# Next session context
 
-## Context in one paragraph
-
-Campaign & domain framework is fully shipped server-side — all MCP tools accept `project_id` for campaign enrollment verification and `domains` for crosscutting knowledge tags. The read-path wiring (#162) landed this session, closing the last gap where per-ID tools returned 403 on campaign-scoped direct lookups. However, the Python SDK (`memoryhub` on PyPI) has typed wrapper methods that don't expose `project_id` or `domains`, so SDK consumers can't use campaign features. The CLI config init already prompts for campaign enrollment but may not wire `project_id` through to tool calls. Filed as #164. Main is green on commit `3e3f78c`, all CI passing, MCP server deployed with 15 tools verified.
-
-## What shipped this session
-
-### #162 — Wire campaign_ids into read-path tools (merged)
-- 8 tools modified: read_memory, get_memory_history, get_similar_memories, report_contradiction, create_relationship, suggest_merge, get_relationships, delete_memory
-- Each now accepts optional `project_id`; when target memory has scope="campaign", requires it and resolves campaign_ids via `get_campaigns_for_project` before authz check
-- get_relationships uses eager resolution with silent omit for post-fetch RBAC
-- 24 new tests in `test_campaign_read_path.py`
-- MCP server redeployed, 15/15 tools verified via mcp-test-mcp
-
-### Database migrations catch-up
-- DB was at migration 008 (sandbox had drifted); applied 009 (campaigns) + 010 (domains) via port-forward + alembic upgrade head
-- Confirmed: campaigns table, campaign_memberships table, domains column all present
-- MemoryHub search_memory working end-to-end (domains column error resolved)
-
-### #47 — Already closed
-- Was closed on 2026-04-07, before this session started
-
-## Where things stand
+## Where things stand (as of 2026-04-11)
 
 ### Repo + CI
-- Main on `3e3f78c`. All CI jobs green.
+- Main includes uncommitted #120 work (two-tier storage). Commit and PR before starting new work.
 - No open PRs.
-- 246 MCP server tests, 88 SDK tests (across 3 Python versions), 32 CLI tests.
+- 70 open issues (68 + #173 suggest_merge consolidation + #174 get_memory_history consolidation), 65 items in Backlog, 35 Done on the project board.
+- SDK v0.4.0, CLI v0.3.0.
 
 ### Cluster
 - Sandbox `cluster-n7pd5.n7pd5.sandbox5167.opentlc.com` healthy.
-- MCP server deployed with full campaign/domain support (15 tools verified).
-- Migrations 001-010 applied.
+- MCP pod running. DB pod running in memoryhub-db.
+- MinIO manifests created in `deploy/minio/` but NOT yet deployed. Deploy before testing #120 end-to-end.
+- Migrations 001-010 applied. No new migration needed for #120 (schema already supports storage_type/content_ref).
 
-### Project board
-- 85 items in Backlog (including new #164)
-- No items In Progress
+### Recent work (this session)
+- #120 (two-tier storage with semantic chunking) — implemented but not yet committed/merged
+  - S3 adapter: `src/memoryhub_core/storage/s3.py` (async minio wrapper)
+  - Chunker: `src/memoryhub_core/storage/chunker.py` (paragraph/sentence splitting, ~256 token chunks)
+  - Service layer: `create_memory`, `update_memory`, `delete_memory` all accept optional `s3_adapter`
+  - MCP tools: `read_memory` gains `hydrate` parameter, write/update/delete pass S3 adapter through
+  - Search: chunk hits include `parent_hint` guiding agent to full content
+  - No new MCP tool added — consolidated into existing `read_memory` per Anthropic tool design guidance
+  - Design doc `docs/storage-layer.md` updated: all 5 TBDs closed
+  - MinIO manifests: `deploy/minio/` (deployment, service, PVC, kustomization)
+  - Tests: 266 root tests passing (20 new for S3/chunker, 10 new for service layer)
+  - Pre-existing bug fixed: `scope_id` was dropped in `update_memory` (missing from node constructor)
+- #173 filed — Consolidate `suggest_merge` into `create_relationship` (Backlog)
+- #174 filed — Consolidate `get_memory_history` into `read_memory` (Backlog)
+- Tool audit completed — 15 tools total, two consolidation opportunities identified
 
-### PyPI
-- `memoryhub` v0.3.0 live (missing campaign/domain params)
-- `memoryhub-cli` v0.2.0 live (missing project_id passthrough)
+### Remaining #120 follow-ups
+- Deploy MinIO to cluster and test end-to-end
+- Call `ensure_bucket()` at MCP server startup (lifespan hook) rather than deferring to first write
+- Pin MinIO image tag in `deploy/minio/deployment.yaml`
+- Periodic S3 reaper for expired versions (out of scope for initial PR)
 
-## Plan: #164
+## Session goal: #168 — Conversation thread persistence
 
-### SDK methods needing `project_id` added
+### What it is
+Design and implement conversation thread persistence as a first-class governed subsystem. Extends MemoryHub from extracted observations (memories) to raw conversation threads — with the same governance guarantees (scope isolation, tenant isolation, RBAC, audit trails, retention policies).
 
-All in `sdk/src/memoryhub/client.py`:
+### Research done
+- `research/conversation-persistence-survey.md` completed 2026-04-10
+- Key finding: governed conversation persistence is genuine whitespace. No framework provides thread-level RBAC, auditable conversation-to-memory pipelines, retention policy enforcement with cascade to extracted memories, or cross-agent handoff governance.
+- EU AI Act (August 2026 deadline for high-risk systems) makes audit trails from conversation to memory to decision mandatory.
 
-| Method | MCP tool | Also needs `domains`? |
-|--------|----------|----------------------|
-| `read()` | read_memory | no |
-| `get_history()` | get_memory_history | no |
-| `get_similar()` | get_similar_memories | no |
-| `get_relationships()` | get_relationships | no |
-| `create_relationship()` | create_relationship | no |
-| `suggest_merge()` | suggest_merge | no |
-| `report_contradiction()` | report_contradiction | no |
-| `delete()` | delete_memory | no |
-| `write()` | write_memory | yes (`domains`, `project_id`) |
-| `update()` | update_memory | yes (`domains`, `project_id`) |
-| `search()` | search_memory | yes (`domains`, `project_id`) |
+### Design doc needed
+- `docs/conversation-persistence.md` — author as part of this issue
+- Should cover: data model (Thread entity), MCP tools (start_thread, append_message, read_thread, etc.), governance model, integration with existing subsystems
+- Read the research survey and #168 issue first
 
-### SDK search() check
-
-Verify whether `search()` already passes `project_id` and `domains` from the v0.3.0 release. If not, add them.
-
-### CLI passthrough
-
-- CLI config init already prompts for campaign enrollment (#160)
-- Check if the CLI passes `project_id` from `.memoryhub.yaml` config when calling tools
-- If not, wire it through for all affected commands
-
-### Versioning
-
-- SDK: bump to v0.4.0 (additive parameter changes = minor)
-- CLI: bump to v0.3.0 if changes needed
-
-### Sync methods
-
-The SDK also has `read_sync()`, `delete_sync()`, and other `_sync` wrappers — these delegate to the async versions so they should inherit the new params, but verify.
+### Open design questions from #168
+1. Thread entity: new table vs. reusing memory_nodes with a special branch_type?
+2. Message ordering: sequence numbers vs. timestamps?
+3. Extraction pipeline: how do conversations produce memories? Manual, automatic, or hybrid?
+4. Retention cascade: when a thread expires, what happens to memories extracted from it?
+5. Cross-agent handoff: how does one agent transfer a conversation to another with proper RBAC?
+6. Tool consolidation: how many new tools does this need? Follow Anthropic's guidance — fewer, more capable tools.
 
 ## Things to know before touching anything
 
@@ -109,25 +88,9 @@ MEMORYHUB_DB_HOST=localhost MEMORYHUB_DB_PORT=15432 MEMORYHUB_DB_NAME=memoryhub 
 
 ### Merge flow
 - Self-review: `gh pr merge <num> --admin --rebase --delete-branch`
-- Always linear history
+- Note: branch protection currently requires 1 approving review; no other approvers on the repo yet, so admin override or temporarily lowering the requirement is needed for solo merges.
 
 ### Commits
 - `subsystem: Imperative summary`
 - `Assisted-by: Claude Code (Opus 4.6)` trailer
 - Never `Co-authored-by:` or `Signed-off-by:`
-
-### Issue sanity check
-Before referencing any issue:
-```bash
-scripts/issue-sanity-check.sh <issue-number>
-```
-
-### MCP tool work
-Per project memory: do MCP tool work in the main conversation context, not delegated to sub-agents. But #164 is SDK/CLI work, not MCP tool changes — sub-agents are fine.
-
-## Background reading
-
-- [`planning/campaign-domain-framework.md`](planning/campaign-domain-framework.md) — the full campaign/domain design
-- [`sdk/src/memoryhub/client.py`](sdk/src/memoryhub/client.py) — SDK typed client (the file to modify)
-- [`memoryhub-cli/`](memoryhub-cli/) — CLI source
-- [`docs/mcp-server.md`](docs/mcp-server.md) — tool surface with campaign/domain parameters (the server-side contract)
