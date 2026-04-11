@@ -68,5 +68,5 @@ class AppSettings(BaseSettings):
 
     log_level: str = "INFO"
     version_retention_days: int = 90
-    s3_threshold_bytes: int = 4096    # Content above this goes to S3
+    s3_threshold_bytes: int = 1024    # Content above this goes to S3
     s3_prefix_chars: int = 1000       # Chars kept inline for S3 memories (~250 tokens)

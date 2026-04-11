@@ -117,9 +117,9 @@ Content that stays in PostgreSQL: short memories (a few sentences), embeddings, 
 
 Content that goes to MinIO: document-sized memories (multi-paragraph or multi-page), files attached to memories, archived content. These benefit from object storage economics and streaming access.
 
-**Threshold: 4 KB (4096 bytes).** Content at or below 4 KB stays inline in PostgreSQL. Content above 4 KB is stored as an S3 object in MinIO, with the PostgreSQL row holding a reference (`content_ref`) and a truncated prefix for quick access.
+**Threshold: 1 KB (1024 bytes).** Content at or below 1 KB stays inline in PostgreSQL. Content above 1 KB is stored as an S3 object in MinIO, with the PostgreSQL row holding a reference (`content_ref`) and a truncated prefix for quick access.
 
-The rationale for 4 KB: MiniLM-L6-v2 (our embedding model) has a ~512 token input limit. 4 KB of English text is roughly 600--1000 tokens, well above the embedder's comfort zone. Setting the threshold at 4 KB keeps most memories inline while catching anything that would blow the embedder's context window.
+The rationale for 1 KB: all-MiniLM-L6-v2 (our embedding model) rejects inputs above ~1100 characters of English text with HTTP 413. Setting the threshold at 1024 bytes ensures content that would fail the embedder is always routed to S3 with a safe prefix (~1000 chars) embedded instead. The threshold is configurable via `MEMORYHUB_S3_THRESHOLD_BYTES`.
 
 The node row always exists in PostgreSQL regardless -- MinIO stores the body, PostgreSQL stores everything else including a reference to the MinIO object.
 
@@ -143,7 +143,7 @@ Each version of an S3-backed memory gets its own S3 object, keyed as `{tenant_id
 
 ### Semantic chunking
 
-When content exceeds the 4 KB threshold and lands in S3, the write path also creates **semantic chunks** as child nodes in the memory tree. These chunks enable fine-grained search over large documents without requiring agents to hydrate and scan the full content.
+When content exceeds the 1 KB threshold and lands in S3, the write path also creates **semantic chunks** as child nodes in the memory tree. These chunks enable fine-grained search over large documents without requiring agents to hydrate and scan the full content.
 
 Chunk nodes have:
 - `branch_type="chunk"` -- distinguishes them from rationale, provenance, and other branch types
@@ -190,7 +190,7 @@ Both systems' backup data should be encrypted. PostgreSQL backups inherit OS-lev
 
 ## Design Questions
 
-- ~~What's the right content size threshold for PostgreSQL vs. MinIO storage?~~ **Resolved**: 4 KB. See "When content goes to MinIO vs. PostgreSQL" above.
+- ~~What's the right content size threshold for PostgreSQL vs. MinIO storage?~~ **Resolved**: 1 KB (1024 bytes). See "When content goes to MinIO vs. PostgreSQL" above.
 - How do we handle embedding model upgrades? If we switch embedding models, all existing vectors need re-computation. Do we store the model identifier alongside the embedding?
 - What's the retention policy for audit logs? Infinite retention is expensive; time-bounded retention loses forensic capability. Tiered storage (hot/warm/cold) for audit data?
 - Connection pooling: does the OOTB operator include PgBouncer, or do we deploy it separately?
