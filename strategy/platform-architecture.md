@@ -248,6 +248,23 @@ Agent: "Customer reports critical billing bug"
 
 Each service handles one concern. The agent's reasoning is simple: I need context, I need data, I need to act, I need to remember.
 
+## EU AI Act Compliance Out of the Box
+
+The EU AI Act (phased enforcement through August 2, 2026) mandates that high-risk AI systems maintain automatic event logging that links outputs to source data, model versions, and user prompts. Penalties reach 7% of global annual revenue or EUR 35 million. No agent framework provides Article 12-ready audit trails today.
+
+MemoryHub's architecture provides demonstrable compliance support as a platform capability, not an aftermarket bolt-on:
+
+| EU AI Act Requirement | MemoryHub Capability |
+|---|---|
+| **Article 12: Automatic logging** of events over the system lifetime | Conversation thread persistence (#168) with immutable append-only history, versioned memories, and provenance chains linking every memory to its source conversation |
+| **Article 19: Traceability** from output back to input data and model version | Entity graph (#170) with `derived_from` relationships tracing memories → conversations → decisions. Compaction provenance (#169) records what was summarized and why |
+| **Right to explanation** (GDPR Art. 22) | Graph traversal from any decision back through the rationale chain: "this decision was informed by memory X, which was extracted from conversation Y, turn Z" |
+| **Right to erasure** (GDPR Art. 17) | Retention policies with cascade: delete a conversation thread and all extracted memories cascade (or are flagged for review). Dual-track storage preserves compliance records separately from operational data |
+| **Data minimization** (GDPR Art. 5) | Governed compaction (#169): reduce operational context to the minimum necessary while archiving full records in cold storage for compliance |
+| **Record-keeping** (financial/healthcare regulations) | Cold-path archive in S3/MinIO with tenant-isolated, immutable storage. 7+ year retention configurable per scope |
+
+For regulated customers (government, financial services, healthcare, defense), this is the difference between "we built something that probably complies" and "we deployed a platform that was designed for compliance from the ground up." The governance substrate — scope isolation, tenant isolation, RBAC, versioning, contradiction detection, audit trails — isn't a feature we added; it's the foundation everything else is built on.
+
 ## Why Not Just Markdown Files?
 
 Manus, OpenClaw, and Claude Code all converged on plain markdown files as their primary agent memory system ([Lanham, 2026](https://medium.com/@Micheal-Lanham/the-markdown-file-that-beat-a-50m-vector-database-38e1f5113cbe)). This is the right default for single-agent, single-user, local workflows — files are inspectable, versionable, cache-friendly, and human-editable.
