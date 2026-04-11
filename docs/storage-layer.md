@@ -125,7 +125,7 @@ The node row always exists in PostgreSQL regardless -- MinIO stores the body, Po
 
 ### What gets embedded for S3-backed content
 
-For memories stored in MinIO, the PostgreSQL row holds a truncated prefix (~1500 characters, ~375 tokens) in the `content` column. This prefix is what gets embedded for the parent node. Full content is searchable via **semantic chunk children** -- each chunk is a child node with `branch_type="chunk"`, its own embedding, and `weight=0.0`. Agents find relevant chunks through `search_memory`, then follow `parent_id` to retrieve the full memory.
+For memories stored in MinIO, the PostgreSQL row holds a truncated prefix (~1000 characters, ~250 tokens) in the `content` column. This prefix is what gets embedded for the parent node. The all-MiniLM-L6-v2 embedder has a practical input limit of ~1100 characters of English text; 1000 provides margin. Full content is searchable via **semantic chunk children** -- each chunk is a child node with `branch_type="chunk"`, its own embedding, and `weight=0.0`. Agents find relevant chunks through `search_memory`, then follow `parent_id` to retrieve the full memory.
 
 ### Curator participation
 

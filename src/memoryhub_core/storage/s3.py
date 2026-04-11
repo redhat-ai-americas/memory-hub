@@ -30,13 +30,21 @@ class S3StorageAdapter:
             secure=settings.secure,
         )
         self._bucket = settings.bucket
+        self._bucket_verified = False
 
     async def ensure_bucket(self) -> None:
-        """Create the bucket if it doesn't exist. Call once at startup."""
+        """Create the bucket if it doesn't exist.
+
+        Called automatically on the first ``put_content`` call. Safe to
+        call multiple times — the check is cached after the first success.
+        """
+        if self._bucket_verified:
+            return
         exists = await asyncio.to_thread(self._client.bucket_exists, self._bucket)
         if not exists:
             await asyncio.to_thread(self._client.make_bucket, self._bucket)
             logger.info("Created S3 bucket: %s", self._bucket)
+        self._bucket_verified = True
 
     @staticmethod
     def _build_key(tenant_id: str, memory_id: uuid.UUID, version_id: uuid.UUID) -> str:
@@ -50,6 +58,7 @@ class S3StorageAdapter:
         content: str,
     ) -> str:
         """Store content and return the content_ref key."""
+        await self.ensure_bucket()
         key = self._build_key(tenant_id, memory_id, version_id)
         data = content.encode("utf-8")
         stream = io.BytesIO(data)
