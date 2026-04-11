@@ -248,6 +248,23 @@ Agent: "Customer reports critical billing bug"
 
 Each service handles one concern. The agent's reasoning is simple: I need context, I need data, I need to act, I need to remember.
 
+## Why Not Just Markdown Files?
+
+Manus, OpenClaw, and Claude Code all converged on plain markdown files as their primary agent memory system ([Lanham, 2026](https://medium.com/@Micheal-Lanham/the-markdown-file-that-beat-a-50m-vector-database-38e1f5113cbe)). This is the right default for single-agent, single-user, local workflows — files are inspectable, versionable, cache-friendly, and human-editable.
+
+MemoryHub doesn't replace that pattern. It's what you need when it breaks down:
+
+| File-based memory works when... | You need a platform service when... |
+|---|---|
+| One agent, one user | Multiple agents, multiple users |
+| Single session or local resume | Cross-session, cross-deployment persistence |
+| Trust the agent completely | Need audit trails and access control |
+| No contradictions matter | Contradictions need detection and resolution |
+| Context fits in one window | Knowledge compilation and compaction needed |
+| No compliance requirements | EU AI Act, GDPR, financial regulations |
+
+The failure modes that file-based systems hit — concurrent access corruption, semantic retrieval degradation at scale, KV cache invalidation costs from dynamic context manipulation, and the "lost in the middle" attention problem — are the problems that governed platform services solve. MemoryHub, RetrievalHub, and the broader platform architecture exist for the teams that have graduated past what a markdown file can do.
+
 ## Boundaries
 
 These boundaries are intentional and load-bearing:
