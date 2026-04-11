@@ -302,6 +302,76 @@ This design generates several implementation candidates. Each gets a backlog iss
 6. **[SHIPPED 2026-04-07 · #61]** Session focus history as a usage signal. Ships two new MCP tools (`set_session_focus`, `get_focus_history`) backed by a single-pod Valkey 8 deployment in the `memory-hub-mcp` namespace (`deploy/valkey/`). `set_session_focus` writes the active-session record (`memoryhub:sessions:<session_id>` — focus string, 384-dim focus vector base64-encoded, user_id, project, created_at, expires_at; TTL from `MEMORYHUB_VALKEY_SESSION_TTL_SECONDS`, default 900) AND appends a JSON entry to the per-project per-day history log (`memoryhub:session_focus_history:<project>:<yyyy-mm-dd>`; 30-day retention TTL). `get_focus_history` reads the history keys across a date range, aggregates by focus string, returns a sorted `{focus, count}` histogram. **Advisory-only** — the histogram does NOT auto-tune memory weights or feed into retrieval ranking; humans and agents consume it informationally. The Valkey schema (two key prefixes, active-session record carrying both the focus string and vector) is designed so the #62 Pattern E broadcast filter can reuse the same active-session records without schema changes. The SDK surfaces both tools via `MemoryHubClient.set_session_focus()` and `MemoryHubClient.get_focus_history()`. **Session-id model is interim**: uses the authenticated `sub` claim as session_id, so one session per user at a time; upgrade to JWT `jti` or a server-minted session cookie when multi-concurrent-session-per-user is needed (the `ValkeyClient.write_session_focus` API already accepts an opaque session_id so the switch is local to `src/tools/set_session_focus.py`).
 7. **[SHIPPED 2026-04-08 · #62]** Real-time push (Pattern E): server-push notifications for swarm broadcast. Memory-hub now ships its own end-to-end push pipeline on top of the existing Valkey deployment. **Server side:** `memoryhub_core/services/push_broadcast.py` exposes `broadcast_to_sessions(notification, memory_embedding, push_filter_weight)` which enumerates the new `memoryhub:active_sessions` set, reads each session's focus vector from the #61 hash (no re-embedding), cosine-filters with `push_filter_weight` (default 0.6), and LPUSHes JSON envelopes onto per-session queues at `memoryhub:broadcast:<session_id>`. `push_subscriber.py` runs a per-session asyncio Task started from `register_session` via `_start_push_for_session`; the loop BRPOPs from the broadcast queue, reconstructs `ServerNotification(ResourceUpdatedNotification(...))`, and forwards via `session.send_notification`. Cleanup is wired through `ctx.session._exit_stack.push_async_callback`, which cancels the subscriber and SREMs from the active set on disconnect. `write_memory` / `update_memory` / `delete_memory` call `broadcast_after_write` (in `memory-hub-mcp/src/tools/_push_helpers.py`) post-commit -- the helper short-circuits when there are no other subscribers so single-session deployments pay zero broadcast overhead. **SDK side:** `MemoryHubClient.on_memory_updated(callback)` registers callbacks invoked when `notifications/resources/updated` arrives with a `memoryhub://memory/` URI; the FastMCP `Client` is constructed with a `_MemoryHubMessageHandler` only when `memory_loading.live_subscription` is true. **Why memory-hub built its own pipeline rather than reusing FastMCP's:** FastMCP 3.2.0's built-in `notification_subscriber_loop` calls `_send_mcp_notification`, which hard-codes `method != "notifications/tasks/status"` → `ValueError("Unsupported notification method for subscriber")`. Memory-hub's `ResourceUpdatedNotification` would silently fail through that pipeline. Cloning the pattern verbatim and namespacing the keys under `memoryhub:` was simpler than upstream work (see [`fastmcp-3-push-notifications.md`](../../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md) §Subscriber lifecycle for the spike that surfaced this). **Deferred to a follow-up:** the SDK callback receives only spec-compliant URI-only notifications. The custom `notifications/memoryhub/memory_written` (full content) is sent server-side fine, but the typed Python SDK can't receive it because the underlying `mcp` library deserializes incoming notifications against the closed `ServerNotification` Pydantic union which has no slot for vendor-prefixed methods. Receiving full-content notifications requires either an mcp SDK upgrade or a raw transport-level subscriber. Open questions Q6 (push payload), Q7 (subscriber lifecycle), Q8 (transport default), Q9 (fanout cost) are resolved in [`planning/agent-memory-ergonomics-open-questions.md`](../../planning/agent-memory-ergonomics-open-questions.md).
 
+## Cache-Optimized Memory Assembly
+
+Patterns A-E describe *when* to fetch memories. This section describes *how* to assemble fetched memories into the prompt for maximum KV cache efficiency. See `research/vllm-cache-optimization.md` for the full investigation.
+
+### The principle
+
+vLLM's Automatic Prefix Caching (APC) and all major provider caching (Anthropic, OpenAI, Google) share the same constraint: **cache matches on exact token-level prefix identity.** Any divergence invalidates from that point forward. A single different token in block N means blocks N+ are recomputed.
+
+This means memories injected into an agent's context are either a cache asset (stable prefix → cache hit → 2-10x latency reduction, 90% cost reduction on Anthropic) or a cache liability (unstable ordering → cache miss every request → full prefill cost).
+
+### Assembly rules
+
+1. **Deterministic sort order**: Memories must be assembled in the same order every time. The canonical sort is `weight DESC → created_at ASC → id ASC`. This ensures the same memory set produces the same token sequence across requests. Never use random ordering or non-deterministic tie-breaking.
+
+2. **Inject as user-message context, not system prompt**: Place memories in the first user message, before the conversation history. This puts them in the high-attention zone (beginning of context) and keeps the system prompt purely behavioral. The memory block sits in the "stable prefix" region of the prompt.
+
+3. **No per-request metadata in the memory block**: No "retrieved at" timestamps, no request IDs, no session IDs, no "X memories found" counts. These change every request and invalidate the cache from the first divergence.
+
+4. **Stable formatting**: Use plain text or minimal markup. If using structured format, ensure deterministic serialization (`sort_keys=True` equivalent). Key ordering differences produce different tokens.
+
+5. **Append-only growth**: When new memories are added between requests, append them to the end of the memory block. Do not re-sort the entire block (which would change token positions for existing memories and invalidate cache from the first moved memory). Instead: `[existing memories in stable order] + [new memories appended at end]`.
+
+6. **Separate stable from volatile**: If some memories are high-churn (updated frequently) and others are stable (rarely change), emit them in separate blocks with stable memories first. The stable block caches; the volatile block after it is small and cheap to recompute.
+
+7. **Compiled articles are ideal cache content**: Versioned, immutable until recompilation, deterministic output for the same input set. The knowledge compilation service (#171) should produce cache-optimal output by design.
+
+### How this composes with the five access patterns
+
+| Pattern | Cache behavior | Optimization |
+|---------|---------------|--------------|
+| **A (Eager)** | Large stable prefix loaded at session start. All subsequent requests share this prefix. Excellent cache reuse within a session. | Sort by weight, never re-sort mid-session. |
+| **B (Lazy)** | Prefix established after first turn. Stable for the rest of the session. | Same as A once loaded. |
+| **C (Lazy + rebias)** | Prefix grows on pivot (new memories appended). Cache hit on the unchanged portion; only the appended segment is new. | Append new memories at end, don't re-sort. |
+| **D (JIT)** | Memories injected ad hoc. Cache benefit depends on how stable the injection set is across turns. | If the JIT set is consistent, it caches. If it changes every turn, no benefit. |
+| **E (Push)** | Push notifications add memories mid-session. Same append pattern as C. | Append pushed memories to end of existing block. |
+
+### Anti-patterns that thrash the cache
+
+- Including timestamps in the memory injection block (`"Retrieved: 2026-04-11T10:30:00Z"`)
+- Re-sorting memories differently on each request (e.g., by relevance score which changes per query)
+- Including a request counter or turn number in the memory block
+- Wrapping memories in per-agent or per-request JSON envelopes
+- Non-deterministic JSON serialization (different key ordering per run)
+- Dynamically removing tools from context between turns (changes early tokens)
+
+### Config extension (.memoryhub.yaml)
+
+```yaml
+memory_loading:
+  # ... existing fields ...
+
+  # Cache optimization (new)
+  injection_position: user_message_prefix  # or: system_prompt_suffix (legacy)
+  sort_order: weight_desc                  # stable canonical sort; never randomize
+  append_only_growth: true                 # new memories append, don't re-sort
+  include_metadata_in_injection: false     # no timestamps/IDs in the injected block
+```
+
+These defaults should be the generated output for all new projects. Existing projects retain their current behavior until they regenerate via `memoryhub config regenerate`.
+
+### llm-d integration (OpenShift deployments)
+
+When the model serving layer uses llm-d (Red Hat/IBM/NVIDIA CNCF project), prefix-cache-aware routing automatically sends requests with similar memory prefixes to the same vLLM pod. This means:
+
+- Agents in the same project with similar memory contexts get routed to pods that already hold their KV blocks.
+- The compilation service (#171) producing identical articles for multiple agents guarantees cross-agent cache hits at the pod level.
+- No application-level coordination needed — llm-d's KV Block Index handles it.
+
+This is "free" performance: MemoryHub structures output deterministically, llm-d routes based on prefix similarity, vLLM caches the blocks. Benchmarked at 87.4% hit rate, 152x TTFT improvement over random routing.
+
 ## Cross-references
 
 - `../mcp-server.md` — current tool surface, including `search_memory` parameters and response shape
