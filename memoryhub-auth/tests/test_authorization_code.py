@@ -7,10 +7,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import pytest
-import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from src.models import AuthSession
+
 from tests.conftest import TEST_CLIENT_SECRET
 
 

@@ -4,7 +4,6 @@ Validates the client, PKCE challenge, and redirect URI, persists a pending
 auth session, then 302s the user to OpenShift's OAuth server.
 """
 
-import hashlib
 import logging
 import re
 import secrets

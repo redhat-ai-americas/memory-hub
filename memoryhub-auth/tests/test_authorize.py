@@ -1,13 +1,11 @@
 """Tests for GET /authorize — PKCE authorization endpoint."""
 
-import hashlib
 import base64
+import hashlib
 import os
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
-
 from src.config import settings
 
 

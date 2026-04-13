@@ -1,15 +1,12 @@
 """Tests for GET /oauth/openshift/callback — OpenShift broker callback."""
 
-import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from src.config import settings
 from src.models import AuthSession
 
