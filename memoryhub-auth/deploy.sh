@@ -59,6 +59,64 @@ else
     echo "  RSA key secret already exists."
 fi
 
+# Generate OpenShift OAuth client secret if it doesn't exist
+echo "→ Checking OpenShift OAuth client secret..."
+EXISTING_OAUTH_SECRET=$(oc get secret openshift-oauth-client-secret -n "$PROJECT" -o jsonpath='{.data.AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET}' 2>/dev/null || echo "")
+if [ -z "$EXISTING_OAUTH_SECRET" ]; then
+    echo "  Generating OpenShift OAuth client secret..."
+    OAUTH_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+    oc create secret generic openshift-oauth-client-secret \
+        --from-literal=AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET="$OAUTH_SECRET" \
+        --dry-run=client -o yaml | oc apply -f - -n "$PROJECT"
+    echo "  OpenShift OAuth client secret created."
+else
+    echo "  OpenShift OAuth client secret already exists."
+fi
+
+# Apply OAuthClient CR (cluster-scoped, requires cluster-admin)
+echo "→ Checking OAuthClient CR..."
+if oc auth can-i create oauthclients 2>/dev/null; then
+    if [ -f deploy/oauthclient.yaml ]; then
+        # Replace the placeholder secret with the actual value from the K8s Secret.
+        OAUTH_SECRET_VALUE=$(oc get secret openshift-oauth-client-secret -n "$PROJECT" \
+            -o jsonpath='{.data.AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET}' | base64 -d)
+        sed "s|secret: PLACEHOLDER-SEE-COMMENTS-ABOVE|secret: $OAUTH_SECRET_VALUE|" \
+            deploy/oauthclient.yaml | oc apply -f - 2>&1
+        echo "  OAuthClient CR applied."
+    else
+        echo "  deploy/oauthclient.yaml not found, skipping."
+    fi
+else
+    echo "  Skipping OAuthClient CR (no cluster-admin permissions)."
+    echo "  Ask a cluster-admin to run: oc apply -f deploy/oauthclient.yaml"
+fi
+
+# Run Alembic migrations before deploying new code
+echo "→ Running database migrations..."
+DB_NAMESPACE="memoryhub-db"
+oc port-forward -n "$DB_NAMESPACE" svc/memoryhub-pg 15432:5432 &
+MIGRATE_PF_PID=$!
+WAITED=0
+until nc -z localhost 15432 2>/dev/null; do
+    if [ $WAITED -ge 10 ]; then
+        echo "  ERROR: Port-forward for migrations did not become ready."
+        kill "$MIGRATE_PF_PID" 2>/dev/null || true
+        exit 1
+    fi
+    sleep 1
+    WAITED=$((WAITED + 1))
+done
+DB_PASS=$(oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" \
+    -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+AUTH_DB_HOST=localhost \
+AUTH_DB_PORT=15432 \
+AUTH_DB_USER=memoryhub \
+AUTH_DB_PASSWORD="$DB_PASS" \
+AUTH_DB_NAME=memoryhub \
+    .venv/bin/alembic upgrade head 2>&1
+kill "$MIGRATE_PF_PID" 2>/dev/null || true
+echo "  Migrations complete."
+
 # Apply OpenShift resources (skip the RSA secret since we handle it above)
 echo "→ Applying OpenShift resources..."
 apply_manifest
