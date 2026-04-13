@@ -93,6 +93,36 @@ class TestCreateClient:
         )
         assert resp.status_code == 422, resp.text
 
+    async def test_create_with_redirect_uris_and_public(self, client):
+        body = {
+            "client_id": "spa-client",
+            "client_name": "SPA Client",
+            "tenant_id": "tenant-spa",
+            "redirect_uris": ["https://app.example.com/callback", "https://app.example.com/silent"],
+            "public": True,
+        }
+        resp = await client.post(
+            "/admin/clients", json=body, headers=ADMIN_HEADERS
+        )
+        assert resp.status_code == 201, resp.text
+        data = resp.json()
+        assert data["redirect_uris"] == ["https://app.example.com/callback", "https://app.example.com/silent"]
+        assert data["public"] is True
+
+    async def test_create_defaults_redirect_uris_null_and_public_false(self, client):
+        body = {
+            "client_id": "basic-client",
+            "client_name": "Basic Client",
+            "tenant_id": "tenant-1",
+        }
+        resp = await client.post(
+            "/admin/clients", json=body, headers=ADMIN_HEADERS
+        )
+        assert resp.status_code == 201, resp.text
+        data = resp.json()
+        assert data["redirect_uris"] is None
+        assert data["public"] is False
+
 
 @pytest.mark.asyncio
 class TestGetClient:
@@ -155,6 +185,38 @@ class TestUpdateClient:
             headers=ADMIN_HEADERS,
         )
         assert resp.status_code == 404, resp.text
+
+    async def test_update_redirect_uris(self, client, sample_client):
+        new_uris = ["https://myapp.example.com/cb"]
+        resp = await client.patch(
+            "/admin/clients/test-agent",
+            json={"redirect_uris": new_uris},
+            headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["redirect_uris"] == new_uris
+        # Other fields unchanged
+        assert data["active"] is True
+        assert data["tenant_id"] == "test-tenant"
+
+    async def test_update_public_flag(self, client, sample_client):
+        resp = await client.patch(
+            "/admin/clients/test-agent",
+            json={"public": True},
+            headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["public"] is True
+
+    async def test_client_response_includes_redirect_uris_and_public(self, client, sample_client):
+        resp = await client.get(
+            "/admin/clients/test-agent", headers=ADMIN_HEADERS
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert "redirect_uris" in data
+        assert "public" in data
 
 
 @pytest.mark.asyncio

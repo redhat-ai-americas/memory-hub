@@ -39,6 +39,8 @@ def _client_to_response(client: OAuthClient) -> ClientResponse:
         identity_type=client.identity_type,
         tenant_id=client.tenant_id,
         default_scopes=client.default_scopes,
+        redirect_uris=client.redirect_uris,
+        public=client.public,
         active=client.active,
         created_at=client.created_at,
         updated_at=client.updated_at,
@@ -86,6 +88,8 @@ async def create_client(
         identity_type=body.identity_type,
         tenant_id=body.tenant_id,
         default_scopes=body.default_scopes,
+        redirect_uris=body.redirect_uris,
+        public=body.public,
         active=True,
         created_at=now,
         updated_at=now,
@@ -102,6 +106,8 @@ async def create_client(
         identity_type=client.identity_type,
         tenant_id=client.tenant_id,
         default_scopes=client.default_scopes,
+        redirect_uris=client.redirect_uris,
+        public=client.public,
         active=client.active,
         created_at=client.created_at,
         updated_at=client.updated_at,
@@ -142,6 +148,10 @@ async def update_client(
         client.active = body.active
     if body.default_scopes is not None:
         client.default_scopes = body.default_scopes
+    if body.redirect_uris is not None:
+        client.redirect_uris = body.redirect_uris
+    if body.public is not None:
+        client.public = body.public
 
     client.updated_at = datetime.now(timezone.utc)
     await session.commit()
