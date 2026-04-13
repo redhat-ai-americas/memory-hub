@@ -103,15 +103,22 @@ async def _admin_request(
 
 
 async def _get_embedding(text_query: str, embedding_url: str) -> list[float] | None:
-    """Call the embedding service; return None if unavailable."""
+    """Call the embedding service; return None if unavailable.
+
+    Compatible with HuggingFace Text Embeddings Inference (TEI):
+    POST {"inputs": "text"} → [[float, …]]
+    """
     if not embedding_url:
         return None
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.post(embedding_url, json={"text": text_query})
+            response = await client.post(embedding_url, json={"inputs": text_query})
             response.raise_for_status()
             data = response.json()
-            return data.get("embedding")
+            # TEI returns [[float, ...]] — unwrap the outer batch array
+            if not data:
+                return None
+            return data[0] if isinstance(data[0], list) else data
     except Exception as exc:
         logger.warning("Embedding service unavailable, falling back to text search: %s", exc)
         return None

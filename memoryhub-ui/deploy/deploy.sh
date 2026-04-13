@@ -76,14 +76,26 @@ echo ""
 echo "Populating public Route URLs for the welcome-email feature..."
 MCP_ROUTE_HOST=$(oc get route memory-hub-mcp -n memory-hub-mcp -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 AUTH_ROUTE_HOST=$(oc get route auth-server -n memoryhub-auth -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+EMBEDDING_SVC_HOST=$(oc get svc all-minilm-l6-v2 -n embedding-model -o jsonpath='{.metadata.name}.{.metadata.namespace}.svc.cluster.local' 2>/dev/null || echo "")
 if [ -n "$MCP_ROUTE_HOST" ] && [ -n "$AUTH_ROUTE_HOST" ]; then
     MCP_PUBLIC_URL="https://$MCP_ROUTE_HOST/mcp/"
     AUTH_PUBLIC_URL="https://$AUTH_ROUTE_HOST"
     echo "  MEMORYHUB_PUBLIC_MCP_URL=$MCP_PUBLIC_URL"
     echo "  MEMORYHUB_PUBLIC_AUTH_URL=$AUTH_PUBLIC_URL"
+    ENV_ARGS=(
+        "MEMORYHUB_PUBLIC_MCP_URL=$MCP_PUBLIC_URL"
+        "MEMORYHUB_PUBLIC_AUTH_URL=$AUTH_PUBLIC_URL"
+    )
+    if [ -n "$EMBEDDING_SVC_HOST" ]; then
+        EMBEDDING_URL="http://$EMBEDDING_SVC_HOST:80"
+        echo "  MEMORYHUB_EMBEDDING_URL=$EMBEDDING_URL"
+        ENV_ARGS+=("MEMORYHUB_EMBEDDING_URL=$EMBEDDING_URL")
+    else
+        echo "  WARNING: embedding service not found in embedding-model namespace"
+        echo "  Search will fall back to text matching until the service is deployed."
+    fi
     oc set env "deployment/$DEPLOYMENT" -n "$NAMESPACE" \
-        "MEMORYHUB_PUBLIC_MCP_URL=$MCP_PUBLIC_URL" \
-        "MEMORYHUB_PUBLIC_AUTH_URL=$AUTH_PUBLIC_URL" \
+        "${ENV_ARGS[@]}" \
         --containers="$DEPLOYMENT" >/dev/null
     echo "  Env vars applied to deployment/$DEPLOYMENT."
 else
