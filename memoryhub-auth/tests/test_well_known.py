@@ -20,14 +20,28 @@ class TestOAuthServerMetadata:
         body = (await client.get("/.well-known/oauth-authorization-server")).json()
         assert body["jwks_uri"] == "https://test-auth.example.com/.well-known/jwks.json"
 
+    async def test_authorization_endpoint(self, client):
+        body = (await client.get("/.well-known/oauth-authorization-server")).json()
+        assert body["authorization_endpoint"] == "https://test-auth.example.com/authorize"
+
     async def test_grant_types(self, client):
         body = (await client.get("/.well-known/oauth-authorization-server")).json()
         assert "client_credentials" in body["grant_types_supported"]
         assert "refresh_token" in body["grant_types_supported"]
+        assert "authorization_code" in body["grant_types_supported"]
+
+    async def test_response_types_supported(self, client):
+        body = (await client.get("/.well-known/oauth-authorization-server")).json()
+        assert body["response_types_supported"] == ["code"]
+
+    async def test_code_challenge_methods_supported(self, client):
+        body = (await client.get("/.well-known/oauth-authorization-server")).json()
+        assert body["code_challenge_methods_supported"] == ["S256"]
 
     async def test_auth_methods(self, client):
         body = (await client.get("/.well-known/oauth-authorization-server")).json()
         assert "client_secret_post" in body["token_endpoint_auth_methods_supported"]
+        assert "none" in body["token_endpoint_auth_methods_supported"]
 
     async def test_scopes_supported(self, client):
         body = (await client.get("/.well-known/oauth-authorization-server")).json()

@@ -12,10 +12,20 @@ async def oauth_server_metadata(request: Request):
     base = settings.issuer
     return {
         "issuer": base,
+        "authorization_endpoint": f"{base}/authorize",
         "token_endpoint": f"{base}/token",
         "jwks_uri": f"{base}/.well-known/jwks.json",
-        "grant_types_supported": ["client_credentials", "refresh_token"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post"],
+        "grant_types_supported": [
+            "client_credentials",
+            "refresh_token",
+            "authorization_code",
+        ],
+        "response_types_supported": ["code"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_post",
+            "none",
+        ],
         "scopes_supported": [
             "memory:read",
             "memory:read:user",
@@ -25,7 +35,6 @@ async def oauth_server_metadata(request: Request):
             "memory:write:organizational",
             "memory:admin",
         ],
-        "response_types_supported": [],
         "service_documentation": "https://github.com/redhat-ai-americas/memory-hub",
     }
 
