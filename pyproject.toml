@@ -46,5 +46,6 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: tests requiring real PostgreSQL + pgvector (deselect with '-m not integration')",
+    "deployed: tests requiring a live OpenShift cluster with port-forwarding (deselect with '-m not deployed')",
     "perf: benchmark suite that talks to deployed embedding/reranker services (opt-in via '-m perf')",
 ]
