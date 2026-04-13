@@ -38,7 +38,7 @@ class AuthSettings(BaseSettings):
     # OpenShift OAuth broker settings
     openshift_oauth_authorize_url: str = ""
     openshift_oauth_token_url: str = ""
-    openshift_user_info_url: str = "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/apis/user.openshift.io/v1/users/~"
+    openshift_user_info_url: str = "https://kubernetes.default.svc/apis/user.openshift.io/v1/users/~"
     openshift_oauth_client_id: str = "memoryhub-auth-broker"
     openshift_oauth_client_secret: str = ""
     openshift_allowed_group: str = ""  # empty = allow all authenticated users

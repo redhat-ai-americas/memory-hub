@@ -111,7 +111,9 @@ spec:
         - name: AUTH_OPENSHIFT_OAUTH_TOKEN_URL
           value: "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/oauth/token"
         - name: AUTH_OPENSHIFT_USER_INFO_URL
-          value: "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/apis/user.openshift.io/v1/users/~"
+          value: "https://kubernetes.default.svc/apis/user.openshift.io/v1/users/~"
+        - name: AUTH_OPENSHIFT_TLS_VERIFY
+          value: "false"
         - name: AUTH_OPENSHIFT_OAUTH_CLIENT_ID
           value: "memoryhub-auth-broker"
         - name: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET
