@@ -10,6 +10,9 @@ Run with the compose stack active:
     pytest tests/integration/test_focused_search.py
 """
 
+import json
+
+import pydantic_core
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -438,3 +441,94 @@ async def test_domain_boost_zero_weight_has_no_effect(
             f"Score mismatch for {nd_text!r}: "
             f"no_domains={nd_score} vs zero_weight={zw_score}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 3. Pydantic serialization roundtrip (numpy.float32 regression guard)
+# ---------------------------------------------------------------------------
+
+
+async def test_focused_results_survive_pydantic_serialization(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """FocusedSearchResult must survive pydantic_core serialization without error.
+
+    Regression guard for the numpy.float32 class of bug: pgvector can return
+    numpy scalars that pydantic_core.to_jsonable_python cannot serialize, causing
+    a downstream crash in the MCP tool layer. The service must coerce all scores
+    to native Python types before returning.
+    """
+    await create_memory(
+        _make("distributed tracing opentelemetry instrumentation"),
+        async_session, embedding_service, skip_curation=True,
+    )
+    await create_memory(
+        _make("observability metrics prometheus grafana dashboards"),
+        async_session, embedding_service, skip_curation=True,
+    )
+
+    result: FocusedSearchResult = await search_with_focus(
+        "distributed systems observability",
+        async_session, embedding_service,
+        focus_string="cloud native monitoring",
+        session_focus_weight=0.4,
+    )
+
+    assert len(result.results) > 0, "Expected at least one result for serialization test"
+
+    # Build the response dict that mimics what the MCP tool returns.
+    response = {
+        "results": [
+            {
+                "content": node.content if hasattr(node, "content") else node.stub,
+                "relevance_score": score,
+                "id": str(node.id),
+                "scope": node.scope,
+                "weight": node.weight,
+            }
+            for node, score in result.results
+        ],
+        "pivot_suggested": result.pivot_suggested,
+        "pivot_distance": result.pivot_distance,
+        "pivot_threshold": result.pivot_threshold,
+        "pivot_reason": result.pivot_reason,
+    }
+
+    # pydantic_core.to_jsonable_python must not raise — this is the step that
+    # fails when scores are numpy.float32 instead of native Python floats.
+    try:
+        serialized = pydantic_core.to_jsonable_python(response)
+    except Exception as exc:  # noqa: BLE001
+        raise AssertionError(
+            f"pydantic_core.to_jsonable_python raised {type(exc).__name__}: {exc}\n"
+            f"Score types: {[(type(score).__name__, type(score).__module__) for _, score in result.results]}"
+        ) from exc
+
+    # json.dumps catches any remaining non-serializable types that slipped through.
+    try:
+        json_str = json.dumps(serialized)
+    except (TypeError, ValueError) as exc:
+        raise AssertionError(
+            f"json.dumps raised {type(exc).__name__}: {exc}\n"
+            f"serialized={serialized!r}"
+        ) from exc
+
+    # Verify the round-tripped data has the expected structure.
+    round_tripped = json.loads(json_str)
+    assert "results" in round_tripped, "Serialized response missing 'results' key"
+    assert isinstance(round_tripped["results"], list), "'results' must be a list"
+    assert len(round_tripped["results"]) == len(result.results), (
+        f"Round-tripped result count {len(round_tripped['results'])} "
+        f"!= original {len(result.results)}"
+    )
+
+    for idx, item in enumerate(round_tripped["results"]):
+        assert "content" in item, f"Result {idx} missing 'content'"
+        assert "relevance_score" in item, f"Result {idx} missing 'relevance_score'"
+        assert isinstance(item["relevance_score"], (int, float)), (
+            f"Result {idx} relevance_score is {type(item['relevance_score']).__name__}, "
+            f"expected int or float after JSON round-trip"
+        )
+
+    assert "pivot_suggested" in round_tripped, "Serialized response missing 'pivot_suggested'"

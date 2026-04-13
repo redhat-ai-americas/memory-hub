@@ -1,4 +1,4 @@
-# Ephemeral PostgreSQL + pgvector for integration testing.
+# Ephemeral PostgreSQL + pgvector + Valkey for integration testing.
 # Usage: podman-compose -f tests/integration/compose.yaml up -d
 services:
   postgres:
@@ -13,6 +13,18 @@ services:
       - /var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U memoryhub -d memoryhub"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: docker.io/valkey/valkey:8.0-alpine
+    ports:
+      - "16379:6379"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 2s
       timeout: 5s
       retries: 10

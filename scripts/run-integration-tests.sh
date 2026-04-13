@@ -16,6 +16,7 @@ MEMORYHUB_DB_PORT=15433 \
 MEMORYHUB_DB_USER=memoryhub \
 MEMORYHUB_DB_PASSWORD=memoryhub-test \
 MEMORYHUB_DB_NAME=memoryhub \
+MEMORYHUB_VALKEY_URL=redis://localhost:16379/0 \
   "$VENV/bin/pytest" tests/integration/ -v --tb=short
 EXIT_CODE=$?
 

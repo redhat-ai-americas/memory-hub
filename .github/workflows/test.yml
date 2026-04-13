@@ -169,6 +169,15 @@ jobs:
           --health-interval 2s
           --health-timeout 5s
           --health-retries 10
+      valkey:
+        image: docker.io/valkey/valkey:8.0-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v4
@@ -204,6 +213,7 @@ jobs:
           MEMORYHUB_DB_USER: memoryhub
           MEMORYHUB_DB_PASSWORD: memoryhub-test
           MEMORYHUB_DB_NAME: memoryhub
+          MEMORYHUB_VALKEY_URL: redis://localhost:6379/0
         run: pytest tests/integration/ -v --tb=short
 
   status:

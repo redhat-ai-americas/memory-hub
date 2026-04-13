@@ -1,4 +1,4 @@
-"""Integration test fixtures connecting to real PostgreSQL + pgvector.
+"""Integration test fixtures connecting to real PostgreSQL + pgvector + Valkey.
 
 All integration tests require the compose stack to be running:
 
@@ -10,7 +10,7 @@ Or use the helper script which handles lifecycle automatically:
 
 Connection defaults match the compose file; override with env vars:
     MEMORYHUB_DB_HOST, MEMORYHUB_DB_PORT, MEMORYHUB_DB_USER,
-    MEMORYHUB_DB_PASSWORD, MEMORYHUB_DB_NAME
+    MEMORYHUB_DB_PASSWORD, MEMORYHUB_DB_NAME, MEMORYHUB_VALKEY_URL
 """
 
 import os
@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from memoryhub_core.config import DatabaseSettings
 from memoryhub_core.services.embeddings import MockEmbeddingService
+from memoryhub_core.services.valkey_client import ValkeyClient, ValkeySettings, set_valkey_client
 
 # Mark every test in this package as an integration test automatically.
 pytestmark = pytest.mark.integration
@@ -109,3 +110,32 @@ async def async_session(_db_schema) -> AsyncSession:
 def embedding_service():
     """Deterministic MockEmbeddingService — tests pgvector storage, not the model."""
     return MockEmbeddingService()
+
+
+def _build_valkey_url() -> str:
+    """Build the Valkey URL from env vars (with compose-file defaults)."""
+    return os.environ.get("MEMORYHUB_VALKEY_URL", "redis://localhost:16379/0")
+
+
+@pytest.fixture
+async def valkey_client():
+    """Real Valkey client connected to the compose instance.
+
+    Flushes the database after each test so the next test starts clean.
+    Registers itself as the module-level default so service code that
+    calls ``get_valkey_client()`` picks it up automatically.
+    """
+    settings = ValkeySettings(
+        url=_build_valkey_url(),
+        broadcast_pop_timeout_seconds=2,  # fast tests
+    )
+    client = ValkeyClient(settings=settings)
+    set_valkey_client(client)
+    try:
+        yield client
+    finally:
+        # Flush all keys so the next test starts clean.
+        raw = await client._get_client()
+        await raw.flushdb()
+        await client.close()
+        set_valkey_client(None)
