@@ -53,6 +53,23 @@ Shipped architecture and subsystem designs live in docs/. In-flight designs for 
 Use conventional commit format: `subsystem: Description in imperative mood`
 Example: `memory-tree: Add versioning with isCurrent flag`
 
+## Deployment Reproducibility (IaC)
+
+Every change must be deployable from code without manual steps. When implementing a feature, verify that all of the following are captured in version-controlled code:
+
+**Database schema** — Services that own a database MUST use Alembic for schema management. `create_all()` is not sufficient because it cannot add columns to existing tables. Every model change requires an Alembic migration committed alongside the code change. Deploy scripts run `alembic upgrade head` before rolling out new code.
+
+**Kubernetes resources** — Any K8s resource the service depends on (Secrets, ConfigMaps, CRDs, cluster-scoped resources) must either be created by the deploy script or documented as an explicit prerequisite with a creation command. If a deploy.sh generates a Secret (like RSA keys), every new Secret the service needs should follow the same pattern. Never leave a resource that only exists because someone ran a one-off `oc create` command.
+
+**API completeness** — When adding a column to a model that is managed through an admin API, the API schemas (request and response) must be updated in the same PR. If the only way to set a field is direct DB manipulation, the field is not shippable.
+
+**The checklist** — Before marking a feature as deployed, verify:
+- [ ] Schema changes have an Alembic migration
+- [ ] deploy.sh creates all required Secrets (with generate-if-missing pattern)
+- [ ] deploy.sh applies all required K8s resources (with idempotent guards)
+- [ ] Admin/management APIs expose all user-facing model fields
+- [ ] requirements.txt matches pyproject.toml dependencies (container builds use requirements.txt)
+
 ## Testing
 - pytest for all Python testing
 - 80%+ coverage target
