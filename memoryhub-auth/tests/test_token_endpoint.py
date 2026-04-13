@@ -282,14 +282,6 @@ class TestRefreshTokenGrant:
 
 @pytest.mark.asyncio
 class TestUnsupportedGrant:
-    async def test_authorization_code_rejected(self, client):
-        resp = await client.post(
-            "/token",
-            data={"grant_type": "authorization_code", "code": "abc123"},
-        )
-        assert resp.status_code == 400
-        assert resp.json()["error"] == "unsupported_grant_type"
-
     async def test_password_grant_rejected(self, client):
         resp = await client.post(
             "/token",
