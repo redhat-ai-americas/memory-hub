@@ -14,14 +14,12 @@ from src.tools.read_memory import read_memory
 from src.tools.update_memory import update_memory
 from src.tools.delete_memory import delete_memory
 from src.tools.search_memory import search_memory
-from src.tools.get_memory_history import get_memory_history
 from src.tools.report_contradiction import report_contradiction
 from src.tools.register_session import register_session
 
 from src.tools.create_relationship import create_relationship
 from src.tools.get_relationships import get_relationships
 from src.tools.get_similar_memories import get_similar_memories
-from src.tools.suggest_merge import suggest_merge
 from src.tools.set_curation_rule import set_curation_rule
 
 from src.tools.set_session_focus import set_session_focus
@@ -34,19 +32,20 @@ mcp = FastMCP(
         "Memories form a tree with branches (rationale, provenance, etc.). "
         "IMPORTANT: Call register_session(api_key=...) at the start of every "
         "conversation to authenticate. Then use write_memory to create, "
-        "search_memory to find, read_memory to expand details, update_memory "
-        "to revise, get_memory_history for forensics, and report_contradiction "
-        "for staleness detection. "
+        "search_memory to find, read_memory to expand details (with optional "
+        "paginated version history via include_versions), update_memory "
+        "to revise, and report_contradiction for staleness detection. "
         "Curation tools: get_similar_memories to inspect near-duplicates flagged "
-        "during write, suggest_merge to link overlapping memories for review, and "
-        "set_curation_rule to tune your personal duplicate-detection thresholds."
+        "during write, create_relationship to link memories (use "
+        "relationship_type='conflicts_with' with merge metadata to suggest "
+        "merges), and set_curation_rule to tune duplicate-detection thresholds."
     ),
 )
 
 for tool_fn in [register_session, write_memory, read_memory, update_memory,
-                delete_memory, search_memory, get_memory_history,
+                delete_memory, search_memory,
                 report_contradiction, create_relationship, get_relationships,
-                get_similar_memories, suggest_merge, set_curation_rule,
+                get_similar_memories, set_curation_rule,
                 set_session_focus, get_focus_history]:
     mcp.add_tool(tool_fn)
 

@@ -33,7 +33,7 @@ def test_read_memory_has_required_parameters():
         f"Missing required params: {required - param_names}"
     )
 
-    optional = {"include_versions", "ctx"}
+    optional = {"include_versions", "history_offset", "history_max_versions", "ctx"}
     assert optional.issubset(param_names), (
         f"Missing optional params: {optional - param_names}"
     )
@@ -296,3 +296,60 @@ async def test_read_memory_include_versions_forwards_tenant_id():
         f"Expected include_versions=True to forward tenant_id to get_memory_history, "
         f"got kwargs={kwargs}"
     )
+
+
+@pytest.mark.asyncio
+async def test_read_memory_include_versions_forwards_pagination():
+    """#174: history_offset and history_max_versions are forwarded to the
+    service-layer get_memory_history call when include_versions=True."""
+    from unittest.mock import MagicMock
+
+    fake_node = _fake_node()
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:read:user", "memory:write:user"],
+    }
+
+    class _DumpableHistory:
+        def model_dump(self, mode="json"):
+            return {"id": "v1", "version": 1}
+
+    with (
+        patch(
+            "src.tools.read_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch("src.tools.read_memory.get_db_session", return_value=(mock_session, mock_gen)),
+        patch("src.tools.read_memory.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.read_memory._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
+        patch(
+            "src.tools.read_memory.get_memory_history",
+            new_callable=AsyncMock,
+            return_value={
+                "versions": [_DumpableHistory()],
+                "total_versions": 5,
+                "has_more": True,
+                "offset": 2,
+            },
+        ) as mock_history,
+    ):
+        result = await read_memory(
+            memory_id=str(fake_node.id),
+            include_versions=True,
+            history_offset=2,
+            history_max_versions=3,
+        )
+
+    _, kwargs = mock_history.call_args
+    assert kwargs.get("offset") == 2, f"Expected offset=2, got kwargs={kwargs}"
+    assert kwargs.get("max_versions") == 3, f"Expected max_versions=3, got kwargs={kwargs}"
+    assert result["version_history"]["has_more"] is True
+    assert result["version_history"]["offset"] == 2

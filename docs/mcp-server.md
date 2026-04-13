@@ -2,7 +2,7 @@
 
 The MCP server is the sole external interface to MemoryHub. Every agent interaction -- reading, writing, searching, versioning -- goes through MCP tools. There is no REST API, no direct database access, no alternative path. This simplifies security (one interface to secure) and governance (one interface to audit).
 
-**Status: implemented.** 15 tools deployed on OpenShift via streamable-http transport. Layer 1 (response shape, #56/#57) and Layer 2 (session focus retrieval, #58) of the agent-memory-ergonomics work are both shipped. See `memory-hub-mcp/TOOLS_PLAN.md` for the full tool specifications and [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) for the design behind the search-memory parameters.
+**Status: implemented.** 13 tools deployed on OpenShift via streamable-http transport. Layer 1 (response shape, #56/#57) and Layer 2 (session focus retrieval, #58) of the agent-memory-ergonomics work are both shipped. Tool consolidation (#173/#174) merged `suggest_merge` into `create_relationship` and `get_memory_history` into `read_memory`. See `memory-hub-mcp/TOOLS_PLAN.md` for the full tool specifications and [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) for the design behind the search-memory parameters.
 
 ## Transport and Deployment
 
@@ -14,26 +14,24 @@ Deployment is automated via `deploy/deploy.sh` which stages a build context, tri
 
 ## Implemented Tool Surface
 
-### Phase 1: Core Memory Operations (7 tools)
+### Phase 1: Core Memory Operations (6 tools)
 
 | Tool | Purpose | Read/Write |
 |------|---------|------------|
 | `register_session` | Compatibility shim for clients that can't send HTTP auth headers; primary auth is via JWT bearer tokens | Setup |
 | `write_memory` | Create memory nodes and branches, with inline curation feedback. Supports campaign scope and domain tags (#154) | Write |
-| `read_memory` | Retrieve memory by ID, with optional version history | Read |
+| `read_memory` | Retrieve memory by ID, with optional paginated version history (history_offset, history_max_versions). Consolidated from `get_memory_history` (#174) | Read |
 | `update_memory` | Create new version of a memory, preserving history | Write |
 | `search_memory` | Semantic search via pgvector embeddings, with optional session focus / two-vector retrieval (Layer 2, #58), campaign inclusion, and domain-aware boosting (#154) | Read |
-| `get_memory_history` | Version chain traversal with pagination | Read |
 | `report_contradiction` | Accumulate staleness signals against a memory | Write |
 
-### Phase 2: Graph Relationships & Curation (5 tools)
+### Phase 2: Graph Relationships & Curation (4 tools)
 
 | Tool | Purpose | Read/Write |
 |------|---------|------------|
-| `create_relationship` | Create directed edges between memories (derived_from, supersedes, conflicts_with, related_to) | Write |
+| `create_relationship` | Create directed edges between memories (derived_from, supersedes, conflicts_with, related_to). Use `conflicts_with` with merge metadata to suggest merges (consolidated from `suggest_merge`, #173) | Write |
 | `get_relationships` | Query edges for a node with optional provenance tracing | Read |
 | `get_similar_memories` | Paged similar memory lookup by embedding similarity | Read |
-| `suggest_merge` | Record merge suggestion as a conflicts_with relationship | Write |
 | `set_curation_rule` | Create/update user-layer curation rules (dedup thresholds, custom regex) | Write |
 
 ### Phase 3: Lifecycle (1 tool)

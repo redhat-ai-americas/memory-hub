@@ -129,7 +129,6 @@ results = client.search_sync("deployment patterns")
 
 | Method | Description |
 |--------|-------------|
-| `get_history(memory_id, *, max_versions, project_id)` | Version history |
 | `report_contradiction(memory_id, observed_behavior, *, project_id)` | Flag stale memories |
 
 ### Relationships and curation
@@ -138,9 +137,10 @@ results = client.search_sync("deployment patterns")
 |--------|-------------|
 | `get_similar(memory_id, *, threshold, project_id)` | Find similar memories |
 | `get_relationships(node_id, *, relationship_type, direction, project_id)` | Get memory relationships |
-| `create_relationship(source_id, target_id, relationship_type, *, project_id)` | Create a relationship |
-| `suggest_merge(memory_a_id, memory_b_id, reasoning, *, project_id)` | Suggest merging duplicates |
+| `create_relationship(source_id, target_id, relationship_type, *, project_id)` | Create a relationship (use `conflicts_with` + merge metadata to suggest merges) |
 | `set_curation_rule(name, *, tier, action, config)` | Configure curation rules |
+
+Version history is accessed via `read(memory_id, include_versions=True, history_offset=0, history_max_versions=10)`.
 
 All methods accepting `project_id` use it for campaign enrollment verification. When a target memory has `scope="campaign"`, the server resolves campaign membership through `project_id`. The `domains` parameter on `search()` boosts domain-matching results (non-matching results still appear); on `write()`/`update()` it tags the memory with crosscutting knowledge domains.
 
