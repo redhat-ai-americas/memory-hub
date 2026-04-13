@@ -29,12 +29,22 @@ _BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _validate_code_challenge(value: str) -> None:
-    """Ensure code_challenge is non-empty, valid base64url."""
+    """Ensure code_challenge is valid base64url with RFC 7636 §4.2 length bounds.
+
+    A SHA-256 digest base64url-encoded without padding is always 43 characters.
+    The RFC allows 43–128 to support future methods; we enforce that range.
+    """
     if not value or not _BASE64URL_RE.match(value):
         raise OAuthError(
             400,
             "invalid_request",
             "code_challenge must be a non-empty base64url string",
+        )
+    if len(value) < 43 or len(value) > 128:
+        raise OAuthError(
+            400,
+            "invalid_request",
+            f"code_challenge length must be 43-128 characters (got {len(value)})",
         )
 
 

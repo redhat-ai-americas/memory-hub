@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import APIRouter, Depends, Form
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
@@ -55,7 +55,10 @@ async def _lookup_client(client_id: str, session: AsyncSession) -> OAuthClient:
 
 def _verify_pkce(code_verifier: str, code_challenge: str) -> bool:
     """Verify PKCE S256: base64url(SHA256(verifier)) == challenge."""
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    try:
+        digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    except UnicodeEncodeError:
+        return False  # RFC 7636 §4.1: verifier is unreserved ASCII only
     computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
     return computed == code_challenge
 
@@ -255,13 +258,18 @@ async def _handle_authorization_code(
         if not bcrypt.checkpw(client_secret.encode(), client.client_secret_hash.encode()):
             raise OAuthError(401, "invalid_client", "Invalid client secret")
 
-    # Look up the authorization code
+    # Atomically claim the authorization code — prevents TOCTOU replay.
+    # UPDATE ... WHERE status='ready' returns the row only if we won the race.
     code_hash = hashlib.sha256(code.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
     result = await session.execute(
-        select(AuthSession).where(
+        update(AuthSession)
+        .where(
             AuthSession.code_hash == code_hash,
             AuthSession.status == "ready",
         )
+        .values(status="used", used_at=now)
+        .returning(AuthSession)
     )
     auth_session = result.scalar_one_or_none()
     if auth_session is None:
@@ -283,10 +291,6 @@ async def _handle_authorization_code(
     # PKCE verification
     if not _verify_pkce(code_verifier, auth_session.code_challenge):
         raise OAuthError(400, "invalid_grant", "PKCE code_verifier mismatch")
-
-    # Mark used in same transaction as token issuance (replay protection)
-    auth_session.status = "used"
-    auth_session.used_at = datetime.now(timezone.utc)
 
     scopes = auth_session.scopes or []
     access_token = create_access_token(

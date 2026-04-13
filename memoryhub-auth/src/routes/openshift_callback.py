@@ -7,6 +7,7 @@ and redirects the user back to the original client (e.g., LibreChat).
 
 import hashlib
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -27,13 +28,28 @@ log = logging.getLogger("memoryhub-auth.routes.openshift_callback")
 router = APIRouter()
 
 
+def _openshift_tls_verify() -> bool | str:
+    """Resolve TLS verification setting for OpenShift HTTP calls.
+
+    Returns the cluster CA bundle path if it exists, True for system CAs,
+    or False only when explicitly disabled via config.
+    """
+    if not settings.openshift_tls_verify:
+        log.warning("TLS verification DISABLED for OpenShift calls — do not use in production")
+        return False
+    ca = settings.openshift_ca_bundle
+    if ca and os.path.isfile(ca):
+        return ca
+    return True
+
+
 async def _exchange_openshift_code(code: str) -> str:
     """Exchange an OpenShift authorization code for an opaque access token.
 
     Returns the opaque token. Raises OAuthError on failure.
     """
     broker_callback = f"{settings.issuer}/oauth/openshift/callback"
-    async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+    async with httpx.AsyncClient(verify=_openshift_tls_verify(), timeout=10.0) as client:
         resp = await client.post(
             settings.openshift_oauth_token_url,
             data={
@@ -71,7 +87,7 @@ async def _resolve_openshift_user(opaque_token: str) -> str:
     The opaque token is used only for this call and NEVER persisted.
     Returns the OpenShift username (metadata.name).
     """
-    async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+    async with httpx.AsyncClient(verify=_openshift_tls_verify(), timeout=10.0) as client:
         resp = await client.get(
             settings.openshift_user_info_url,
             headers={"Authorization": f"Bearer {opaque_token}"},

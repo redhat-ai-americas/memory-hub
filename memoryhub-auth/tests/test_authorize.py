@@ -130,6 +130,13 @@ class TestAuthorizeValidation:
         resp = await client.get("/authorize", params=params)
         assert resp.status_code == 400
 
+    async def test_short_code_challenge_rejected(self, client, sample_client):
+        """RFC 7636 §4.2: challenge must be at least 43 characters."""
+        params = {**VALID_PARAMS, "code_challenge": "dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFW"}  # 36 chars
+        resp = await client.get("/authorize", params=params)
+        assert resp.status_code == 400
+        assert "43-128" in resp.json()["error_description"]
+
     async def test_broker_not_configured(self, client, sample_client, monkeypatch):
         """If OpenShift OAuth URL is not set, return 503."""
         monkeypatch.setattr(settings, "openshift_oauth_authorize_url", "")

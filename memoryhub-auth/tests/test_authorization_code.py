@@ -309,3 +309,25 @@ class TestAuthorizationCodeValidation:
         )
         assert resp.status_code == 400
         assert "client_secret" in resp.json()["error_description"]
+
+    async def test_non_ascii_verifier_rejected(self, client, sample_client, db_engine):
+        """Non-ASCII code_verifier should fail PKCE check, not crash with 500."""
+        factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+        auth_sess, raw_code, _verifier = _ready_session()
+        async with factory() as sess:
+            sess.add(auth_sess)
+            await sess.commit()
+
+        resp = await client.post(
+            "/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": "test-agent",
+                "client_secret": TEST_CLIENT_SECRET,
+                "code": raw_code,
+                "redirect_uri": "https://example.com/callback",
+                "code_verifier": "verifier-with-émojis-and-ünïcödé",
+            },
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "invalid_grant"

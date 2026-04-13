@@ -42,6 +42,8 @@ class AuthSettings(BaseSettings):
     openshift_oauth_client_id: str = "memoryhub-auth-broker"
     openshift_oauth_client_secret: str = ""
     openshift_allowed_group: str = ""  # empty = allow all authenticated users
+    openshift_tls_verify: bool = True  # set False only for dev/debug
+    openshift_ca_bundle: str = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
     # Broker defaults for human users
     default_tenant_id: str = "default"
