@@ -8,3 +8,4 @@ PyJWT
 cryptography
 bcrypt
 python-multipart
+httpx
