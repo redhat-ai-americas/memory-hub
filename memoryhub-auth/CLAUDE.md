@@ -55,6 +55,14 @@ The admin API at `/admin/clients` manages OAuth client registrations. All OAuthC
 - Run: `cd memoryhub-auth && .venv/bin/python -m pytest tests/ -x -q`
 - OpenShift HTTP calls in callback tests are mocked (patch `_exchange_openshift_code` and `_resolve_openshift_user`)
 
+### E2e tests are mandatory for OpenShift API changes
+
+Any change that touches the OpenShift OAuth redirect chain or calls an OpenShift API (groups, users, tokens) **must** be validated with `tests/integration/test_pkce_e2e.py` against the live cluster before merging. Unit tests with mocked HTTP responses cannot catch encoding conventions, permission models, or response shape surprises from the real APIs. Three bugs were invisible to unit tests but caught by e2e:
+
+1. Wrong user-info URL (returned HTML instead of JSON)
+2. IDP selection page not handled (multi-IDP clusters show a picker)
+3. b64-encoded usernames in Groups API (`kube:admin` stored as `b64:a3ViZTphZG1pbg==` — the `in` check silently fails)
+
 ## Key Files
 
 | File | What |
