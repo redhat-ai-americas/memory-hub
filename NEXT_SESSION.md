@@ -1,64 +1,69 @@
-# Next session: Enforce allowed_group + deploy TLS hardening (#179)
+# Next session: MCP tool consolidation (#173, #174)
 
 ## What was completed (2026-04-13)
 
-- Merged `feat/pkce-broker-flow` (14 commits) to main
-- Shipped Playwright e2e test for the full PKCE broker flow (#81)
-- Fixed deployment bugs discovered by e2e: wrong user-info URL, missing TLS config, IDP selection
-- Hardened deployment: internal service URLs, combined CA bundle, TLS verification re-enabled, cluster-specific URLs derived dynamically by `deploy.sh`
+- Deployed TLS hardening to memoryhub-auth (combined CA bundle, init container, internal service URLs, TLS verify enabled)
+- Implemented and deployed #179 (openshift_allowed_group enforcement) with b64-encoded username handling
+- Validated all three e2e scenarios on the live cluster: user in group, user not in group (403), no group configured (allow all)
+- Closed #81 (e2e test) and #179 (group enforcement, PR #180 merged)
+- Added e2e-mandatory rule to memoryhub-auth/CLAUDE.md
+- Retro written: `retrospectives/2026-04-13_tls-hardening-and-group-enforcement/`
 
-## Deploy the TLS hardening
+## #173: Consolidate suggest_merge into create_relationship
 
-The `openshift.yaml` and `deploy.sh` changes from this session have NOT been deployed yet (committed but not applied to the cluster). They introduce:
+`suggest_merge` is a thin wrapper around `create_relationship` that hardcodes `relationship_type=conflicts_with` with merge metadata. Removing it reduces the tool count from 15 to 14.
 
-- `service-ca-bundle` ConfigMap with CA injection annotation
-- Init container that combines cluster CA + service CA into a single bundle
-- Internal service URLs for token exchange and user-info (cluster-generic)
-- Placeholder substitution in `deploy.sh` for cluster-specific URLs (AUTH_ISSUER, OAuth authorize URL)
+### Steps
+1. Update `create_relationship` tool description to mention the merge-suggestion pattern: `relationship_type="conflicts_with"` with `metadata={"merge_suggested": true, "reasoning": "..."}`
+2. Remove `memory-hub-mcp/src/tools/suggest_merge.py`
+3. Remove suggest_merge from tool registration in `__init__.py`
+4. Remove suggest_merge tests, add test for merge-via-relationship pattern
+5. Update SYSTEM_PROMPT.md and any docs referencing suggest_merge
+6. Update SDK (`sdk/src/memoryhub/client.py`) — remove or deprecate `suggest_merge` method
+7. Update the MemoryHub MCP integration rule in `.claude/rules/memoryhub-integration.md` if it references suggest_merge
 
-To deploy:
-```bash
-cd memoryhub-auth && ./deploy.sh
-```
+### Key files
+- `memory-hub-mcp/src/tools/suggest_merge.py` (remove)
+- `memory-hub-mcp/src/tools/create_relationship.py` (update description)
+- `memory-hub-mcp/src/tools/__init__.py` (update registration)
+- `sdk/src/memoryhub/client.py` (remove/deprecate wrapper)
+- `sdk/tests/test_client.py` (update)
 
-After deploy, re-run the e2e test to verify TLS hardening didn't break the flow:
-```bash
-pytest memoryhub-auth/tests/integration/test_pkce_e2e.py -v --timeout=60
-```
+## #174: Consolidate get_memory_history into read_memory
 
-## #179: Enforce `openshift_allowed_group`
+`read_memory` already supports `include_versions=True` for inline version history but without pagination. `get_memory_history` adds pagination (`offset`, `max_versions`) as a standalone tool. Merging them reduces tools from 14 to 13.
 
-The `openshift_allowed_group` config field exists in `src/config.py` but is never checked. Anyone who can log into OpenShift gets a MemoryHub JWT. This is the natural follow-up to the PKCE broker — the auth plumbing is proven end-to-end.
+### Steps
+1. Add `history_offset: int = 0` and `history_max_versions: int = 10` parameters to `read_memory`
+2. When `include_versions=True`, paginate the version history using those params
+3. Deprecate `get_memory_history` — add deprecation notice to its description pointing to `read_memory`
+4. Update SDK: add pagination params to `read_memory`, deprecate `get_memory_history`
+5. Update SYSTEM_PROMPT.md and docs
+6. Update the MemoryHub MCP integration rule if it references get_memory_history
 
-### What to implement
+### Key files
+- `memory-hub-mcp/src/tools/read_memory.py` (add pagination params)
+- `memory-hub-mcp/src/tools/get_memory_history.py` (deprecation notice, eventual removal)
+- `memory-hub-mcp/src/tools/__init__.py` (registration update after removal)
+- `sdk/src/memoryhub/client.py` (update read_memory, deprecate get_memory_history)
+- `sdk/tests/test_client.py` (update)
 
-In `src/routes/openshift_callback.py`, after `_resolve_openshift_user()` returns the username:
-1. If `settings.openshift_allowed_group` is non-empty, call the OpenShift Groups API to check membership
-2. Reject with 403 if the user isn't in the group
-3. The Groups API is at `https://kubernetes.default.svc/apis/user.openshift.io/v1/groups/{group_name}` — check if the user is in `.users[]`
+### Migration note
+The issue says to use a deprecation period for #174 since agents may call `get_memory_history`. Keep the tool with a deprecation notice for one release cycle, then remove. For #173, `suggest_merge` has no external consumers — clean removal.
 
-### Design considerations
+## Approach
 
-- The group check uses the user's opaque token (same one used for user-info), so no extra auth needed
-- Consider caching group membership briefly (groups don't change often)
-- Add unit tests that mock the group API call
-- Update the e2e test to verify the group check (if the test user is in the group)
+Both changes follow the same pattern: update the surviving tool, remove or deprecate the absorbed tool, update SDK + docs + tests. Do #173 first (simpler — pure removal) then #174 (requires adding pagination params).
 
-## #176: Multi-user usage tracking
-
-The PKCE flow was the prerequisite. Now that browser-based users get per-user JWTs with `sub=<username>`, usage can be tracked per-user. This is a larger effort — scope it before starting.
-
-## Retro
-
-Run `/retro` to capture lessons from this session:
-- E2e tests against the real cluster are the only way to validate the OAuth redirect chain
-- Three deployment bugs (wrong user-info URL, IDP selection, TLS config) were invisible to unit tests
-- Internal service URLs (`kubernetes.default.svc`, `oauth-openshift.openshift-authentication.svc`) are portable across clusters; external Route URLs are not
+**Important:** These are MCP tool changes. Per CLAUDE.md, read `memory-hub-mcp/CLAUDE.md` before making changes. However, since these are modifications to existing tools (not new tools), the `/plan-tools` -> `/create-tools` workflow is not needed — these are refactoring operations.
 
 ## Cluster state
 
-- Auth server: `auth-server` in `memoryhub-auth` (Running, TLS verify currently disabled via env override — deploy.sh run will fix)
-- OAuthClient CR: `memoryhub-auth-broker` (grantMethod=prompt)
-- DB: `memoryhub-pg-0` in `memoryhub-db`, Alembic at revision 001
-- MCP: `memory-hub-mcp` in `memory-hub-mcp` (Running)
-- e2e test client: `e2e-test` (public, registered via admin API)
+- Auth server: Running in `memoryhub-auth`, TLS hardened, group enforcement active (`memoryhub-users`)
+- DB: `memoryhub-pg-0` in `memoryhub-db`
+- MCP: Running in `memory-hub-mcp` (15 tools currently)
+- `memoryhub-users` group on cluster: `kube:admin` (b64-encoded), `rdwj`
+
+## After the tool consolidation
+
+Deploy the updated MCP server and verify the tool count dropped (15 -> 13). Use `mcp-test-mcp` to verify remaining tools still work.
