@@ -18,7 +18,7 @@ os.environ.setdefault("AUTH_ACCESS_TOKEN_TTL", "300")
 os.environ.setdefault("AUTH_REFRESH_TOKEN_TTL", "3600")
 
 from src.keys import load_keys  # noqa: E402
-from src.models import Base, OAuthClient, RefreshToken  # noqa: E402
+from src.models import Base, OAuthClient, RefreshToken, AuthSession  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Key loading — once per session
@@ -167,6 +167,8 @@ async def sample_client(db_session) -> OAuthClient:
         tenant_id="test-tenant",
         default_scopes=["memory:read", "memory:write:user"],
         active=True,
+        redirect_uris=["https://example.com/callback"],
+        public=False,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -187,6 +189,28 @@ async def inactive_client(db_session) -> OAuthClient:
         tenant_id="test-tenant",
         default_scopes=["memory:read"],
         active=False,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(obj)
+    await db_session.commit()
+    return obj
+
+
+@pytest_asyncio.fixture
+async def public_client(db_session) -> OAuthClient:
+    """Public OAuth client (no secret required, PKCE only)."""
+    obj = OAuthClient(
+        id=str(uuid.uuid4()),
+        client_id="librechat",
+        client_secret_hash="",  # public clients have no secret
+        client_name="LibreChat",
+        identity_type="user",
+        tenant_id="default",
+        default_scopes=["memory:read:user", "memory:write:user"],
+        active=True,
+        redirect_uris=["https://librechat.example.com/api/mcp/memoryhub/oauth/callback"],
+        public=True,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
