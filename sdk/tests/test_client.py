@@ -20,7 +20,7 @@ from memoryhub.exceptions import (
     ToolError,
     ValidationError,
 )
-from memoryhub.models import ContradictionResult, HistoryResult, Memory, SearchResult, WriteResult
+from memoryhub.models import ContradictionResult, Memory, SearchResult, WriteResult
 
 # ── Fake MCP response types ──────────────────────────────────────────────────
 
@@ -495,35 +495,6 @@ async def test_update(client):
     assert call_args[0][1]["memory_id"] == "mem-001"
 
 
-# ── get_history ───────────────────────────────────────────────────────────────
-
-
-async def test_get_history(client):
-    c, mock_mcp = client
-    mock_mcp.call_tool.return_value = FakeCallToolResult(
-        structured_content={
-            "memory_id": "mem-001",
-            "versions": [
-                {"id": "mem-001", "version": 1, "content": "Use Podman.", "is_current": True},
-            ],
-            "total_versions": 1,
-            "has_more": False,
-            "offset": 0,
-        }
-    )
-
-    result = await c.get_history("mem-001")
-
-    assert isinstance(result, HistoryResult)
-    assert result.memory_id == "mem-001"
-    assert len(result.versions) == 1
-    assert result.versions[0].version == 1
-
-    call_args = mock_mcp.call_tool.call_args
-    assert call_args[0][0] == "get_memory_history"
-    assert call_args[0][1]["memory_id"] == "mem-001"
-
-
 # ── report_contradiction ──────────────────────────────────────────────────────
 
 
@@ -907,13 +878,6 @@ _DELETE_RESPONSE = {
     "versions_deleted": 1,
     "branches_deleted": 0,
 }
-_HISTORY_RESPONSE = {
-    "memory_id": "mem-001",
-    "versions": [],
-    "total_versions": 0,
-    "has_more": False,
-    "offset": 0,
-}
 _CONTRADICTION_RESPONSE = {
     "memory_id": "mem-001",
     "contradiction_count": 1,
@@ -937,13 +901,6 @@ _CREATE_REL_RESPONSE = {
     "target_id": "b",
     "relationship_type": "related",
 }
-_MERGE_KWARGS = {
-    "memory_a_id": "a",
-    "memory_b_id": "b",
-    "reasoning": "similar",
-}
-
-
 @pytest.mark.parametrize(
     "method,tool_name,call_kwargs,response",
     [
@@ -956,8 +913,6 @@ _MERGE_KWARGS = {
          {**MINIMAL_MEMORY, "version": 2}),
         ("delete", "delete_memory",
          {"memory_id": "mem-001"}, _DELETE_RESPONSE),
-        ("get_history", "get_memory_history",
-         {"memory_id": "mem-001"}, _HISTORY_RESPONSE),
         ("report_contradiction", "report_contradiction",
          {"memory_id": "mem-001", "observed_behavior": "changed"},
          _CONTRADICTION_RESPONSE),
@@ -967,8 +922,6 @@ _MERGE_KWARGS = {
          {"node_id": "mem-001"}, _RELATIONSHIPS_RESPONSE),
         ("create_relationship", "create_relationship",
          _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
-        ("suggest_merge", "suggest_merge",
-         _MERGE_KWARGS, {"status": "suggested"}),
     ],
 )
 async def test_project_id_forwarded_when_provided(
@@ -994,8 +947,6 @@ async def test_project_id_forwarded_when_provided(
          {"memory_id": "mem-001"}, MINIMAL_MEMORY),
         ("delete",
          {"memory_id": "mem-001"}, _DELETE_RESPONSE),
-        ("get_history",
-         {"memory_id": "mem-001"}, _HISTORY_RESPONSE),
         ("report_contradiction",
          {"memory_id": "mem-001", "observed_behavior": "changed"},
          _CONTRADICTION_RESPONSE),
@@ -1005,8 +956,6 @@ async def test_project_id_forwarded_when_provided(
          {"node_id": "mem-001"}, _RELATIONSHIPS_RESPONSE),
         ("create_relationship",
          _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
-        ("suggest_merge",
-         _MERGE_KWARGS, {"status": "suggested"}),
     ],
 )
 async def test_project_id_omitted_when_none(

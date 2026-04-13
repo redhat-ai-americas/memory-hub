@@ -75,6 +75,11 @@ async def create_relationship(
     marking that an organizational memory was derived_from several user memories,
     or that one memory supersedes another.
 
+    To suggest a merge between duplicate or overlapping memories, use
+    relationship_type="conflicts_with" with
+    metadata={"merge_suggested": true, "reasoning": "why they should merge"}.
+    Use get_relationships to find pending merge suggestions.
+
     Relationships are immutable (create or delete, never update). Edge direction:
     for derived_from, source is the derived node, target is the origin.
 

@@ -43,10 +43,31 @@ async def read_memory(
         Field(
             description=(
                 "If true, includes version history alongside the current content. "
-                "Useful for understanding how a memory evolved."
+                "Useful for understanding how a memory evolved. Supports pagination "
+                "via history_offset and history_max_versions."
             ),
         ),
     ] = False,
+    history_offset: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of versions to skip from newest when include_versions is true. "
+                "Use for pagination on long-lived memories."
+            ),
+            ge=0,
+        ),
+    ] = 0,
+    history_max_versions: Annotated[
+        int,
+        Field(
+            description=(
+                "Maximum number of versions to return when include_versions is true (1-100)."
+            ),
+            ge=1,
+            le=100,
+        ),
+    ] = 10,
     hydrate: Annotated[
         bool,
         Field(
@@ -71,12 +92,16 @@ async def read_memory(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Retrieve a memory by ID.
+    """Retrieve a memory by ID, with optional paginated version history.
 
     Returns the node with branch_count set to the number of direct child
     branches. Branch contents are not loaded inline -- to inspect them, use
-    search_memory or follow up with read_memory on a specific child ID. Use
-    include_versions=true to see how the memory evolved over time.
+    search_memory or follow up with read_memory on a specific child ID.
+
+    Use include_versions=true to see how the memory evolved over time.
+    Paginate version history with history_offset and history_max_versions
+    for long-lived memories. You can pass any version ID (current or
+    historical) — the full chain is traced regardless.
     """
     if ctx:
         await ctx.info(f"Reading memory {memory_id}")
@@ -171,7 +196,12 @@ async def read_memory(
             # get_memory_history returns a dict with a "versions" list plus
             # pagination metadata; embed both so callers see total_versions
             # and has_more without a follow-up call.
-            history = await get_memory_history(parsed_id, session, tenant_id=tenant)
+            history = await get_memory_history(
+                parsed_id, session,
+                tenant_id=tenant,
+                max_versions=history_max_versions,
+                offset=history_offset,
+            )
             result["version_history"] = {
                 "versions": [v.model_dump(mode="json") for v in history["versions"]],
                 "total_versions": history["total_versions"],

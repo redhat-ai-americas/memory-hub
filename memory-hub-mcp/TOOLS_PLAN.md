@@ -12,7 +12,7 @@ The tools are designed around the tree-based memory model: memories are nodes wi
 
 **Tool descriptions as steering mechanisms.** Each tool description explains the tree model concepts (stubs, branches, weight) so agents understand how to use MemoryHub effectively. An agent that's never seen MemoryHub before should be able to use it correctly from the descriptions alone.
 
-**Composable, not monolithic.** Rather than a single "get me everything relevant" tool, agents compose search_memory (find relevant memories) + read_memory (expand interesting ones) + get_memory_history (check evolution). This gives agents control over their context budget.
+**Composable, not monolithic.** Rather than a single "get me everything relevant" tool, agents compose search_memory (find relevant memories) + read_memory (expand interesting ones, with optional paginated version history). This gives agents control over their context budget.
 
 **Actionable errors.** Every error tells the agent what went wrong AND what to do about it. "Write to organizational scope requires curator approval — memory has been queued for review" not just "403 Forbidden".
 
@@ -171,20 +171,12 @@ Full design note: `planning/tool-error-standardization.md`
   search_memory(query="auth decisions", include_branches=true, max_response_tokens=8000)
   ```
 
-### get_memory_history
+### get_memory_history (CONSOLIDATED into read_memory — #174)
 
-- **Purpose**: Retrieve the full version history of a specific memory. Shows how the memory evolved: what changed, when, and what the previous content was. Supports forensics ("what did the agent believe on March 15th?") and helps agents understand context drift.
-- **Parameters**:
-  - `memory_id` (string/UUID, required): The ID of any version of the memory (current or historical). The tool traces the full chain regardless of which version ID you provide.
-- **Returns**: An ordered list (newest first) of all versions of this memory. Each entry includes: version number, content stub, is_current flag, created_at timestamp, and the full content. The current version is marked.
-- **Error Cases**:
-  - "Memory [id] not found." — Invalid ID. → SDK: `NotFoundError`
-  - "This memory has no version history (version 1, never updated)." — Not an error; returns the single version with an informational message.
-- **Example Usage**: Checking if a preference changed:
-  ```
-  get_memory_history(memory_id="abc-123")
-  ```
-  Returns: [v2: "prefers Rust for systems, Python for scripting" (current), v1: "prefers Python" (superseded 2026-03-01)]
+> **Removed.** Version history is now accessed via `read_memory(include_versions=True, history_offset=..., history_max_versions=...)`. The pagination params are forwarded to the same service-layer function.
+
+- **Original purpose**: Retrieve the full version history of a specific memory with pagination.
+- **Migration**: `get_memory_history(memory_id="abc-123", offset=0, max_versions=20)` → `read_memory(memory_id="abc-123", include_versions=True, history_offset=0, history_max_versions=20)`
 
 ### report_contradiction
 
@@ -214,7 +206,7 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
 
 **Graph tools expose the relationship model, not raw queries.** Rather than a generic "run graph query" tool, we expose specific workflows: create a typed edge, query edges for a node, trace provenance. The relationship_type enum (`derived_from`, `supersedes`, `conflicts_with`, `related_to`) constrains the agent to valid edge types — reducing hallucination risk per Anthropic's guidance on semantic names over freeform strings.
 
-**Curation tools let agents self-manage.** Rather than relying on a background curator for everything, agents can tune their own dedup thresholds via `set_curation_rule` and suggest merges via `suggest_merge`. This follows the "context-aware tools" principle — tools that consolidate what would otherwise require multiple steps.
+**Curation tools let agents self-manage.** Rather than relying on a background curator for everything, agents can tune their own dedup thresholds via `set_curation_rule` and suggest merges via `create_relationship` (with `conflicts_with` type and merge metadata). This follows the "context-aware tools" principle — tools that consolidate what would otherwise require multiple steps.
 
 ### create_relationship
 
@@ -269,25 +261,13 @@ Phase 2 adds 5 tools covering two capabilities: graph relationships between memo
   ```
   get_similar_memories(memory_id="<new-memory-id>", max_results=3)
   ```
-  If the results look redundant, call `update_memory` on the existing one or `suggest_merge` to link them.
+  If the results look redundant, call `update_memory` on the existing one or `create_relationship` with `conflicts_with` type to suggest a merge.
 
-### suggest_merge
+### suggest_merge (CONSOLIDATED into create_relationship — #173)
 
-- **Purpose**: Suggest that two memories should be merged into one. Records the suggestion as a `conflicts_with` relationship between the two memories with merge reasoning in the metadata. This is how agents flag redundancy for review — the merge suggestion can be found later via `get_relationships`. RBAC-scoped: you can only suggest merges for memories you can read.
-- **Parameters**:
-  - `memory_a_id` (string/UUID, required): UUID of the first memory.
-  - `memory_b_id` (string/UUID, required): UUID of the second memory. Must differ from memory_a_id.
-  - `reasoning` (string, required): Why these memories should be merged. Be specific — "Both describe Podman preference but with different wording" is better than "duplicates".
-- **Returns**: The created `conflicts_with` relationship with merge metadata (`merge_suggested: true`, `reasoning`, `suggested_by`), plus a confirmation message.
-- **Error Cases**:
-  - "Memory node [id] not found." — One or both memories don't exist. → SDK: `NotFoundError`
-  - "memory_a_id and memory_b_id must be different." → SDK: `ValidationError`
-  - "reasoning cannot be empty." → SDK: `ValidationError`
-  - "A merge suggestion already exists between these memories." — Duplicate suggestion. → SDK: `ConflictError`
-- **Example Usage**: After finding two similar container preference memories:
-  ```
-  suggest_merge(memory_a_id="<older-memory>", memory_b_id="<newer-memory>", reasoning="Both describe Podman preference. The newer version includes Containerfile guidance that should be consolidated.")
-  ```
+> **Removed.** Merge suggestions are now expressed via `create_relationship(source_id=..., target_id=..., relationship_type="conflicts_with", metadata={"merge_suggested": true, "reasoning": "..."})`. The underlying service call was always `create_relationship`; the standalone tool was a thin wrapper.
+
+- **Migration**: `suggest_merge(memory_a_id="a", memory_b_id="b", reasoning="duplicates")` → `create_relationship(source_id="a", target_id="b", relationship_type="conflicts_with", metadata={"merge_suggested": true, "reasoning": "duplicates"})`
 
 ### set_curation_rule
 

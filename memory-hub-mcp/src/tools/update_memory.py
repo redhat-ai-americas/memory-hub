@@ -92,7 +92,7 @@ async def update_memory(
     """Create a new version of an existing memory, preserving the old version for history.
 
     Use this when a preference changes, information is corrected, or a memory
-    needs refinement. The old version stays accessible via get_memory_history.
+    needs refinement. The old version stays accessible via read_memory with include_versions=true.
     At least one of content, weight, or metadata must be provided.
     """
     if content is None and weight is None and metadata is None and domains is None:

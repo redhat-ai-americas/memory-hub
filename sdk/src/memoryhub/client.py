@@ -30,7 +30,6 @@ from memoryhub.models import (
     ContradictionResult,
     CurationRuleResult,
     DeleteResult,
-    HistoryResult,
     Memory,
     RelationshipInfo,
     RelationshipsResult,
@@ -390,24 +389,37 @@ class MemoryHubClient:
         memory_id: str,
         *,
         include_versions: bool = False,
+        history_offset: int = 0,
+        history_max_versions: int = 10,
         project_id: str | None = None,
     ) -> Memory:
-        """Read a memory by ID, optionally with version history.
+        """Read a memory by ID, optionally with paginated version history.
 
         Branch contents are no longer expanded inline; the returned Memory
         carries a branch_count summary. Inspect specific branches by issuing
         follow-up search_memory or read_memory calls.
 
+        When include_versions is True, the returned Memory includes a
+        ``version_history`` dict with ``versions``, ``total_versions``,
+        ``has_more``, and ``offset`` keys. Paginate with history_offset
+        and history_max_versions for long-lived memories.
+
         Args:
             memory_id: ID of the memory to read.
             include_versions: If True, include version history in the response.
+            history_offset: Versions to skip from newest (default 0).
+            history_max_versions: Max versions to return (1-100, default 10).
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call("read_memory", {
+        payload: dict[str, Any] = {
             "memory_id": memory_id,
             "include_versions": include_versions,
             "project_id": project_id,
-        })
+        }
+        if include_versions:
+            payload["history_offset"] = history_offset
+            payload["history_max_versions"] = history_max_versions
+        data = await self._call("read_memory", payload)
         return Memory.model_validate(data)
 
     async def write(
@@ -499,30 +511,6 @@ class MemoryHubClient:
         return DeleteResult.model_validate(data)
 
     # ── Lifecycle ───────────────────────────────────────────────────
-
-    async def get_history(
-        self,
-        memory_id: str,
-        *,
-        max_versions: int = 20,
-        offset: int = 0,
-        project_id: str | None = None,
-    ) -> HistoryResult:
-        """Get the version history of a memory.
-
-        Args:
-            memory_id: ID of the memory to fetch history for.
-            max_versions: Maximum number of versions to return (default 20).
-            offset: Pagination offset (default 0).
-            project_id: Project identifier for campaign enrollment verification.
-        """
-        data = await self._call("get_memory_history", {
-            "memory_id": memory_id,
-            "max_versions": max_versions,
-            "offset": offset,
-            "project_id": project_id,
-        })
-        return HistoryResult.model_validate(data)
 
     async def report_contradiction(
         self,
@@ -633,29 +621,6 @@ class MemoryHubClient:
         return RelationshipInfo.model_validate(data)
 
     # ── Curation ────────────────────────────────────────────────────
-
-    async def suggest_merge(
-        self,
-        memory_a_id: str,
-        memory_b_id: str,
-        reasoning: str,
-        *,
-        project_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Suggest that two memories should be merged.
-
-        Args:
-            memory_a_id: ID of the first memory.
-            memory_b_id: ID of the second memory.
-            reasoning: Human-readable rationale for the merge suggestion.
-            project_id: Project identifier for campaign enrollment verification.
-        """
-        return await self._call("suggest_merge", {
-            "memory_a_id": memory_a_id,
-            "memory_b_id": memory_b_id,
-            "reasoning": reasoning,
-            "project_id": project_id,
-        })
 
     async def set_curation_rule(
         self,

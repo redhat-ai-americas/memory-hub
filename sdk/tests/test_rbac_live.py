@@ -226,15 +226,17 @@ async def test_history_own_memory(wjackson_client: MemoryHubClient):
     updated = await wjackson_client.update(memory_id, content=content_v2)
 
     # update creates a new version with a new ID; use it for history
-    history = await wjackson_client.get_history(updated.id)
-    assert history.memory_id == updated.id
-    assert history.total_versions >= 2, (
-        f"Expected at least 2 versions, got {history.total_versions}"
+    mem_with_history = await wjackson_client.read(
+        updated.id, include_versions=True, history_max_versions=100,
     )
-    assert len(history.versions) >= 2
+    vh = mem_with_history.version_history
+    assert vh["total_versions"] >= 2, (
+        f"Expected at least 2 versions, got {vh['total_versions']}"
+    )
+    assert len(vh["versions"]) >= 2
 
     # Versions should be ordered; verify both contents appear
-    version_contents = {v.content for v in history.versions}
+    version_contents = {v["content"] for v in vh["versions"]}
     assert content_v1 in version_contents, "v1 content missing from history"
     assert content_v2 in version_contents, "v2 content missing from history"
 
