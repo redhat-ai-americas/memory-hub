@@ -111,6 +111,50 @@ async def _resolve_openshift_user(opaque_token: str) -> str:
     return username
 
 
+async def _check_group_membership(opaque_token: str, username: str) -> None:
+    """Verify the user belongs to the required OpenShift group.
+
+    If ``settings.openshift_allowed_group`` is empty the check is skipped
+    (all authenticated users are allowed).  Otherwise the OpenShift Groups
+    API is queried with the user's opaque token and the username must appear
+    in the group's ``.users`` list.
+    """
+    group_name = settings.openshift_allowed_group
+    if not group_name:
+        return
+
+    groups_url = (
+        f"https://kubernetes.default.svc/apis/user.openshift.io/v1/groups/{group_name}"
+    )
+    try:
+        async with httpx.AsyncClient(verify=_openshift_tls_verify(), timeout=10.0) as client:
+            resp = await client.get(
+                groups_url,
+                headers={"Authorization": f"Bearer {opaque_token}"},
+            )
+    except httpx.RequestError as exc:
+        log.error("OpenShift group lookup network error: group=%s err=%s", group_name, exc)
+        raise OAuthError(502, "server_error", "Failed to verify group membership")
+
+    if resp.status_code != 200:
+        log.error(
+            "OpenShift group lookup failed: group=%s status=%d body=%s",
+            group_name,
+            resp.status_code,
+            resp.text[:200],
+        )
+        raise OAuthError(502, "server_error", "Failed to verify group membership")
+
+    members = resp.json().get("users") or []
+    if username not in members:
+        log.warning(
+            "User %s is not a member of required group %s", username, group_name
+        )
+        raise OAuthError(403, "access_denied", "User is not a member of the required group")
+
+    log.info("Group check passed: %s is member of %s", username, group_name)
+
+
 @router.get("/oauth/openshift/callback")
 async def openshift_callback(
     code: str = Query(...),
@@ -139,11 +183,14 @@ async def openshift_callback(
     # --- exchange OpenShift code for opaque token ---
     opaque_token = await _exchange_openshift_code(code)
 
-    # --- resolve OpenShift username (opaque token discarded after this) ---
+    # --- resolve OpenShift username ---
     username = await _resolve_openshift_user(opaque_token)
-    # opaque_token goes out of scope here — NEVER persisted
 
     log.info("Resolved OpenShift user: %s for session %s", username, state[:8])
+
+    # --- enforce group membership (if configured) ---
+    await _check_group_membership(opaque_token, username)
+    # opaque_token goes out of scope here — NEVER persisted
 
     # --- mint MemoryHub authorization code ---
     raw_code = secrets.token_urlsafe(32)  # 256-bit
