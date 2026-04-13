@@ -1,70 +1,94 @@
-# Next session: Remaining test debt (#81, #39)
+# Next session: Merge PKCE broker + Playwright e2e test (#81)
 
-Two test-debt issues remain after closing #95, #85, #177, #101, and #38 in the test-debt-focused session on 2026-04-13. Both require a deployed cluster.
+The PKCE broker flow (#75–#80) is implemented, deployed, and verified on the cluster. This session merges that work and ships the e2e test that exercises the full flow through a real browser.
 
-## #81 — auth: End-to-end PKCE flow integration test
+## What's on the branch
 
-**What:** A test script that drives the full OAuth2 PKCE flow against a deployed memoryhub-auth broker: `/authorize` → OpenShift login → `/token` → MCP `search_memory` with the resulting JWT.
+`feat/pkce-broker-flow` has 13 commits on top of main (112 tests, all passing):
 
-**Blockers:** Depends on #75–#80 (PKCE endpoints). Check their status before starting — if `/authorize` (#76) or `/oauth/openshift/callback` (#77) aren't merged, this test can't pass.
+| Commit | What |
+|--------|------|
+| 49ee8a6 | #75: auth_sessions table + OAuthClient PKCE columns |
+| e00b229 | #79: OAuthClient CR + broker env vars |
+| 18739ad | #80: Well-known metadata advertises PKCE |
+| 75cef45 | #76: GET /authorize endpoint |
+| e64643d | #77: GET /oauth/openshift/callback |
+| cd92e4e | #78: POST /token authorization_code grant + PKCE |
+| 6a8238e | Lint cleanup |
+| 1b4e534 | Review fixes: TLS verify, atomic code redemption, input validation |
+| 8521421 | httpx in requirements.txt |
+| 13d529f | CLAUDE.md IaC conventions + memoryhub-auth CLAUDE.md |
+| df2f013 | Alembic setup + initial migration |
+| 950e300 | Admin API: redirect_uris and public fields |
+| daf1f25 | deploy.sh: OAuth secret, OAuthClient CR, Alembic |
 
-**Approach:**
-1. Playwright (headless) to drive the OpenShift consent screen. The login form varies by cluster config (LDAP, htpasswd) — parametrize or use a test htpasswd user.
-2. File: `memoryhub-auth/tests/integration/test_pkce_e2e.py`
-3. After capturing the JWT, decode and verify claims: `sub`, `tenant_id`, `scopes`.
-4. Call MCP `search_memory` via HTTP POST with `Authorization: Bearer <jwt>`.
-5. Needs a running memoryhub-auth pod. Use `oc port-forward` for local runs or hit the deployed route.
+## Step 1: Merge to main
 
-**Key files to read first:**
-- Auth endpoints: `memoryhub-auth/src/routes/` (PKCE routes)
-- Auth config: `memoryhub-auth/src/config.py` (JWKS URI, issuer, audience)
-- MCP route: deployed at `/mcp/` via `memory-hub-mcp/deploy/openshift.yaml`
+The branch is ready. Review the retro at `retrospectives/2026-04-13_pkce-broker-flow/RETRO.md` if you want context on decisions made.
 
-**Scope:** Medium. Playwright driver for OpenShift login is the tricky part.
-
-## #39 — End-to-end pgvector similarity search through UI
-
-**What:** Verify the full vertical slice: UI search → BFF → embedding service → pgvector cosine distance → ranked results.
-
-**Blockers:** Needs memoryhub-ui deployed, the embedding service (all-MiniLM-L6-v2) running, and the MCP server connected to pgvector.
-
-**Approach:**
-1. This is a deployed-stack test — exercises the real embedding service, not MockEmbeddingService.
-2. Use `httpx` to hit the BFF search endpoint directly (no browser needed — the data path is what matters).
-3. Seed known memories via MCP, then search via BFF and verify:
-   - Results ranked by cosine similarity (not text fallback)
-   - Scores are real floats, not None
-   - Returned node IDs match seeded memories
-4. File: `memoryhub-ui/tests/integration/test_search_e2e.py`
-
-**Key files to read first:**
-- BFF routes: `memoryhub-ui/backend/src/routes.py` (search endpoint)
-- Embedding service config: `MEMORYHUB_EMBEDDING_URL` in deploy manifests
-
-**Scope:** Medium-low if the stack is already deployed. Straightforward HTTP calls.
-
-## Suggested order
-
-1. **#81 first** — tests the auth subsystem, prerequisite for real multi-user usage (#176). Skip to #39 if PKCE endpoints aren't merged yet.
-2. **#39 second** — simpler, good candidate for a post-deploy smoke test.
-
-## Session setup
-
-Both issues need a running cluster:
 ```bash
-source .env && oc login "$OC_SERVER" -u "$OC_USER" -p "$OC_PASSWORD" --insecure-skip-tls-verify
-oc whoami
-oc get pods -n memoryhub-db && oc get pods -n memory-hub-mcp
+git checkout main && git merge feat/pkce-broker-flow
 ```
 
-## What shipped in the 2026-04-13 test debt session
+## Step 2: Playwright e2e test (#81)
 
-| Issue | What landed |
-|-------|------------|
-| #95 | CI integration-tests job (pgvector + Valkey), `make test-integration` documented |
-| #101 | Closed — tests already existed from #46 |
-| #85 | Push broadcast integration tests, pydantic serialization roundtrip |
-| #177 | PR template structured test plan, search_with_focus + domain boost + ARRAY/GIN integration tests, SQLite conftest freeze |
-| #38 | Cleanup script + CronJob + CONTRIBUTING.md convention |
+### What it tests
 
-Integration suite: 24 → 47 tests across 4 files.
+The full PKCE broker flow end-to-end against the live cluster:
+1. Generate PKCE verifier/challenge pair
+2. `GET /authorize` with a registered public client
+3. Follow the 302 to OpenShift OAuth
+4. Drive the OpenShift htpasswd login form in a headless browser
+5. Follow the callback chain back to the client redirect_uri
+6. Extract the authorization code from the redirect
+7. `POST /token` with grant_type=authorization_code + code_verifier
+8. Decode the JWT and verify claims (sub, tenant_id, scopes)
+9. Call MCP `search_memory` with the Bearer token to prove it works
+
+### Cluster details
+
+- Auth server: `https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com`
+- OpenShift OAuth: `https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com`
+- OpenShift uses htpasswd auth — the login form has `inputUsername` and `inputPassword` fields
+- Test user credentials: use `$OC_USER` / `$OC_PASSWORD` from `.env`
+- MCP endpoint: `https://memory-hub-mcp-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/`
+
+### Prerequisites
+
+- A public OAuth client registered with redirect_uris. Create one via admin API:
+  ```bash
+  ADMIN_KEY=$(oc get secret auth-admin-key -n memoryhub-auth -o jsonpath='{.data.AUTH_ADMIN_KEY}' | base64 -d)
+  curl -sk -X POST -H "X-Admin-Key: $ADMIN_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"client_id":"e2e-test","client_name":"E2E Test Client","tenant_id":"default","default_scopes":["memory:read:user","memory:write:user"],"redirect_uris":["https://localhost:9999/callback"],"public":true}' \
+    https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/admin/clients
+  ```
+- Playwright installed: `pip install playwright && playwright install chromium`
+
+### File location
+
+`memoryhub-auth/tests/integration/test_pkce_e2e.py`
+
+This is an integration test, not a unit test — it hits real endpoints. Keep it separate from the unit test suite. Run with:
+```bash
+pytest memoryhub-auth/tests/integration/test_pkce_e2e.py -v --timeout=60
+```
+
+### Things to watch for
+
+- The OpenShift consent screen (`grantMethod: prompt`) shows on first login for a new OAuthClient. The test needs to handle both "consent already granted" and "consent needed" paths.
+- The callback redirect goes to `https://localhost:9999/callback` — Playwright should intercept this rather than expecting a server there.
+- TLS verification: the test runs from outside the cluster, so use `verify=False` for the test HTTP client (this is a test, not production code).
+- The `OC_USER` in `.env` must have access to the cluster. The test should skip gracefully if credentials aren't available.
+
+## Open issues to be aware of
+
+- #179: `openshift_allowed_group` declared but unenforced (Backlog)
+- #176: Multi-user usage tracking issue (this work is the prerequisite)
+
+## Cluster state
+
+- Auth server: `auth-server` deployment in `memoryhub-auth` (Running, freshly deployed)
+- OAuthClient CR: `memoryhub-auth-broker` (grantMethod=prompt)
+- DB: `memoryhub-pg-0` in `memoryhub-db`, Alembic at revision 001
+- MCP: `memory-hub-mcp` in `memory-hub-mcp` (Running)
