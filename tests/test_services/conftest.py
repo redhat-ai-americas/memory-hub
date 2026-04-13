@@ -3,6 +3,12 @@
 Provides the SQLite-compatible async session and embedding service used across
 all service-layer tests. The pgvector Vector column is swapped for a JSON-encoded
 TEXT column so the schema can be created without the pgvector extension.
+
+FREEZE NOTICE (#177): Do not add new SQLite monkey-patches to this file.
+New PostgreSQL-specific features (ARRAY columns, GIN indexes, custom operators,
+JSONB casts) must be tested against real PostgreSQL via tests/integration/.
+Run ``make test-integration`` to exercise those paths. If you find yourself
+reaching for a new patch here, write an integration test instead.
 """
 
 import json

@@ -60,8 +60,17 @@ Closes #
 
 ## Test plan
 
-<!-- How did you verify this works? Unit tests, integration tests,
-     manual cluster run, etc. Paste relevant output where useful. -->
+<!-- Which infrastructure boundaries does this PR exercise?
+     Check the option that best describes your test coverage. -->
+
+- [ ] **Unit tests only** — no infrastructure boundaries touched
+      (pure logic, no DB/Valkey/embedding service interaction)
+- [ ] **Integration tests included for:** <!-- list subsystems -->
+      `[ pgvector / Valkey / embedding service / auth / S3 ]`
+- [ ] **Integration tests deferred because:**
+      <!-- This should be rare. Justify why, and link the follow-up issue. -->
+
+<!-- General verification: -->
 
 - [ ] `pytest` passes locally (or the affected subset)
 - [ ] Manual verification against a running cluster (if applicable)

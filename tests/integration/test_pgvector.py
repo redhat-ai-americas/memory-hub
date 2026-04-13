@@ -14,7 +14,7 @@ Run these with the compose stack active:
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 pytestmark = pytest.mark.integration
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -694,4 +694,336 @@ async def test_update_memory_new_version_has_fresh_embedding(
     assert new_emb_dot_updated > new_emb_dot_original, (
         f"New embedding should be closer to updated content than original content. "
         f"dot(updated)={new_emb_dot_updated:.4f}, dot(original)={new_emb_dot_original:.4f}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 7. JSONB server defaults and PostgreSQL-specific column behavior
+# ---------------------------------------------------------------------------
+
+
+async def test_relationship_metadata_server_default_is_empty_dict(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """MemoryRelationship.metadata_ should default to {} via server_default, not None.
+
+    Uses a direct ORM insert with metadata_ omitted so SQLAlchemy lets the
+    server_default fire. Going through the service would pass metadata_=None
+    explicitly, which SQLAlchemy sends as NULL, bypassing the default.
+    """
+    import uuid as _uuid
+
+    from memoryhub_core.models.memory import MemoryRelationship
+
+    source, _ = await create_memory(
+        _make("source node for jsonb default test"),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+    target, _ = await create_memory(
+        _make("target node for jsonb default test"),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+
+    # Insert directly, omitting metadata_ so the server_default fires.
+    rel = MemoryRelationship(
+        id=_uuid.uuid4(),
+        source_id=source.id,
+        target_id=target.id,
+        relationship_type="derived_from",
+        created_by="jsonb-default-test",
+    )
+    async_session.add(rel)
+    await async_session.commit()
+
+    # Read back via raw SQL to see what PostgreSQL actually stored.
+    row = await async_session.execute(
+        text("SELECT metadata_ FROM memory_relationships WHERE id = :id"),
+        {"id": rel.id},
+    )
+    raw_metadata = row.scalar_one()
+
+    assert raw_metadata is not None, (
+        "metadata_ should be {} via server_default, not None"
+    )
+    assert raw_metadata == {}, (
+        f"Expected empty dict {{}}, got {raw_metadata!r}"
+    )
+
+
+async def test_memory_domains_server_default_is_empty_array(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """MemoryNode.domains should default to [] via server_default, not None.
+
+    Uses a direct ORM insert with domains omitted so SQLAlchemy lets the
+    server_default fire. The service layer always passes domains=data.domains
+    (None when unset), which SQLAlchemy sends as NULL, bypassing the default.
+    """
+    import uuid as _uuid
+
+    from memoryhub_core.models.memory import MemoryNode
+
+    embedding = await embedding_service.embed("memory for array default test")
+    node = MemoryNode(
+        id=_uuid.uuid4(),
+        content="memory for array default test",
+        stub="memory for array default test",
+        scope="user",
+        weight=0.9,
+        owner_id="test-user",
+        tenant_id=_TEST_TENANT_ID,
+        embedding=embedding,
+        # NOTE: domains intentionally omitted — server_default must fire
+    )
+    async_session.add(node)
+    await async_session.commit()
+
+    # Read back via raw SQL to see what PostgreSQL actually stored.
+    row = await async_session.execute(
+        text("SELECT domains FROM memory_nodes WHERE id = :id"),
+        {"id": node.id},
+    )
+    raw_domains = row.scalar_one()
+
+    assert raw_domains is not None, (
+        "domains should be [] via server_default '{}'::text[], not None"
+    )
+    assert raw_domains == [], (
+        f"Expected empty list [], got {raw_domains!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 8. Transaction rollback resilience
+# ---------------------------------------------------------------------------
+
+
+async def test_transaction_rollback_preserves_prior_commit(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """A failed insert must not corrupt previously committed rows.
+
+    Creates a memory successfully, then attempts an insert with a duplicate
+    primary key (guaranteed IntegrityError). After rollback the original
+    memory must still be readable.
+    """
+    from memoryhub_core.models.memory import MemoryNode
+
+    # Step 1: Create a memory through the normal service path and commit.
+    good_memory, _ = await create_memory(
+        _make("memory that must survive a rollback"),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+    await async_session.commit()
+
+    # Step 2: Attempt a raw ORM insert with a duplicate primary key.
+    duplicate = MemoryNode(
+        id=good_memory.id,  # intentional duplicate
+        content="this should fail",
+        stub="this should fail",
+        scope="user",
+        weight=0.5,
+        owner_id="rollback-test-user",
+        tenant_id=_TEST_TENANT_ID,
+        embedding=await embedding_service.embed("this should fail"),
+    )
+    async_session.add(duplicate)
+
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        await async_session.flush()
+
+    await async_session.rollback()
+
+    # Step 3: Verify the original row is intact after rollback.
+    stmt = select(MemoryNode).where(MemoryNode.id == good_memory.id)
+    result = await async_session.execute(stmt)
+    recovered = result.scalar_one_or_none()
+
+    assert recovered is not None, (
+        "Original memory vanished after rollback — transaction isolation failure"
+    )
+    assert recovered.content == "memory that must survive a rollback", (
+        f"Content mismatch after rollback: {recovered.content!r}"
+    )
+
+
+async def test_session_usable_after_rollback(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """The session must remain functional for new operations after a rollback."""
+    from sqlalchemy.exc import IntegrityError
+
+    from memoryhub_core.models.memory import MemoryNode
+
+    # Force a rollback via duplicate primary key.
+    first, _ = await create_memory(
+        _make("first memory before intentional error"),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+    await async_session.commit()
+
+    bad_node = MemoryNode(
+        id=first.id,
+        content="duplicate pk",
+        stub="duplicate pk",
+        scope="user",
+        weight=0.5,
+        owner_id="session-reuse-test",
+        tenant_id=_TEST_TENANT_ID,
+        embedding=await embedding_service.embed("duplicate pk"),
+    )
+    async_session.add(bad_node)
+
+    with pytest.raises(IntegrityError):
+        await async_session.flush()
+
+    await async_session.rollback()
+
+    # The session should still work for a new create.
+    second, _ = await create_memory(
+        _make("second memory after rollback"),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+    assert second is not None, "Session was unusable after rollback"
+    assert second.content == "second memory after rollback"
+
+
+# ---------------------------------------------------------------------------
+# 9. ARRAY column with GIN index (domains)
+# ---------------------------------------------------------------------------
+
+
+async def test_array_contains_query_uses_gin_index(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """The @> (array contains) operator on domains exercises the GIN index."""
+    # Create memories with distinct domain tags.
+    react_mem, _ = await create_memory(
+        MemoryNodeCreate(
+            content="React component lifecycle management",
+            scope=MemoryScope.USER,
+            weight=0.8,
+            owner_id="domain-test-user",
+            domains=["React", "JavaScript"],
+        ),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+    spring_mem, _ = await create_memory(
+        MemoryNodeCreate(
+            content="Spring Boot dependency injection patterns",
+            scope=MemoryScope.USER,
+            weight=0.8,
+            owner_id="domain-test-user",
+            domains=["Spring Boot", "Java"],
+        ),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+    both_mem, _ = await create_memory(
+        MemoryNodeCreate(
+            content="Full-stack app with React frontend and Spring backend",
+            scope=MemoryScope.USER,
+            weight=0.8,
+            owner_id="domain-test-user",
+            domains=["React", "Spring Boot"],
+        ),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+
+    # Query: memories whose domains contain "React".
+    stmt = text(
+        "SELECT id FROM memory_nodes "
+        "WHERE domains @> ARRAY[:domain]::text[] "
+        "AND tenant_id = :tid"
+    )
+    result = await async_session.execute(
+        stmt, {"domain": "React", "tid": _TEST_TENANT_ID}
+    )
+    react_ids = {row[0] for row in result.fetchall()}
+
+    assert react_mem.id in react_ids, "React memory missing from @> 'React' query"
+    assert both_mem.id in react_ids, "Both-domains memory missing from @> 'React' query"
+    assert spring_mem.id not in react_ids, (
+        "Spring-only memory should not appear in @> 'React' query"
+    )
+
+    # Query: memories whose domains contain "Spring Boot".
+    result = await async_session.execute(
+        stmt, {"domain": "Spring Boot", "tid": _TEST_TENANT_ID}
+    )
+    spring_ids = {row[0] for row in result.fetchall()}
+
+    assert spring_mem.id in spring_ids, "Spring memory missing from @> 'Spring Boot' query"
+    assert both_mem.id in spring_ids, "Both-domains memory missing from @> 'Spring Boot' query"
+    assert react_mem.id not in spring_ids, (
+        "React-only memory should not appear in @> 'Spring Boot' query"
+    )
+
+
+async def test_array_contains_multiple_domains(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """Querying for memories that contain ALL of multiple domains."""
+    multi_mem, _ = await create_memory(
+        MemoryNodeCreate(
+            content="CORS configuration for React + Spring Boot apps",
+            scope=MemoryScope.USER,
+            weight=0.8,
+            owner_id="multi-domain-user",
+            domains=["React", "Spring Boot", "CORS"],
+        ),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+    partial_mem, _ = await create_memory(
+        MemoryNodeCreate(
+            content="React state management with Redux",
+            scope=MemoryScope.USER,
+            weight=0.8,
+            owner_id="multi-domain-user",
+            domains=["React", "Redux"],
+        ),
+        async_session,
+        embedding_service,
+        skip_curation=True,
+    )
+
+    # Query: memories containing BOTH "React" AND "CORS".
+    stmt = text(
+        "SELECT id FROM memory_nodes "
+        "WHERE domains @> ARRAY['React', 'CORS']::text[] "
+        "AND tenant_id = :tid"
+    )
+    result = await async_session.execute(stmt, {"tid": _TEST_TENANT_ID})
+    ids = {row[0] for row in result.fetchall()}
+
+    assert multi_mem.id in ids, (
+        "Memory with ['React', 'Spring Boot', 'CORS'] should match @> ['React', 'CORS']"
+    )
+    assert partial_mem.id not in ids, (
+        "Memory with ['React', 'Redux'] should NOT match @> ['React', 'CORS']"
     )
