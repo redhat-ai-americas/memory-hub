@@ -1,0 +1,17 @@
+# OAuthClient CR — registers memoryhub-auth as an OAuth client of OpenShift.
+# This is a cluster-scoped resource; requires cluster-admin to apply.
+# Apply once: oc apply -f deploy/oauthclient.yaml
+apiVersion: oauth.openshift.io/v1
+kind: OAuthClient
+metadata:
+  name: memoryhub-auth-broker
+# Secret is stored in a K8s Secret and read by the broker at startup.
+# Generate: openssl rand -base64 32 | tr -d '\n'
+# Create: oc create secret generic openshift-oauth-client-secret \
+#   --from-literal=AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET="<value>" \
+#   -n memoryhub-auth
+secret: PLACEHOLDER-SEE-COMMENTS-ABOVE
+redirectURIs:
+  - https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/oauth/openshift/callback
+grantMethod: prompt
+accessTokenMaxAgeSeconds: 600

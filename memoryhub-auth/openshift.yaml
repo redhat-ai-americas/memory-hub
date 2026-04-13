@@ -104,6 +104,21 @@ spec:
             secretKeyRef:
               name: memoryhub-pg-credentials
               key: POSTGRES_PASSWORD
+        - name: AUTH_ISSUER
+          value: "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com"
+        - name: AUTH_OPENSHIFT_OAUTH_AUTHORIZE_URL
+          value: "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/oauth/authorize"
+        - name: AUTH_OPENSHIFT_OAUTH_TOKEN_URL
+          value: "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/oauth/token"
+        - name: AUTH_OPENSHIFT_USER_INFO_URL
+          value: "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/apis/user.openshift.io/v1/users/~"
+        - name: AUTH_OPENSHIFT_OAUTH_CLIENT_ID
+          value: "memoryhub-auth-broker"
+        - name: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: openshift-oauth-client-secret
+              key: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET
         resources:
           limits:
             memory: "256Mi"

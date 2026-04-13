@@ -35,6 +35,22 @@ class AuthSettings(BaseSettings):
     # Local dev: auto-generate and cache keys here
     keys_dir: str = "./keys"
 
+    # OpenShift OAuth broker settings
+    openshift_oauth_authorize_url: str = ""
+    openshift_oauth_token_url: str = ""
+    openshift_user_info_url: str = "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/apis/user.openshift.io/v1/users/~"
+    openshift_oauth_client_id: str = "memoryhub-auth-broker"
+    openshift_oauth_client_secret: str = ""
+    openshift_allowed_group: str = ""  # empty = allow all authenticated users
+
+    # Broker defaults for human users
+    default_tenant_id: str = "default"
+    default_human_scopes: list[str] = ["memory:read:user", "memory:write:user"]
+
+    # Session TTLs
+    auth_session_pending_ttl: int = 300  # 5 minutes
+    auth_session_ready_ttl: int = 600  # 10 minutes
+
     @property
     def async_db_url(self) -> str:
         return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
