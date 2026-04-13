@@ -1,0 +1,109 @@
+---
+# Weekly CronJob to soft-delete test data from the MemoryHub database.
+# Runs every Sunday at 03:00 UTC.
+#
+# Matches the same patterns as scripts/cleanup-test-data.py:
+#   - content starting with "[test]" (SDK integration test convention)
+#   - known test owner_ids from integration test fixtures
+#
+# Deploy: oc apply -f deploy/cleanup/cronjob.yaml -n memoryhub-db
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: memoryhub-test-data-cleanup
+  labels:
+    app.kubernetes.io/name: memoryhub-test-data-cleanup
+    app.kubernetes.io/component: maintenance
+    app.kubernetes.io/part-of: memoryhub
+spec:
+  schedule: "0 3 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: cleanup
+              image: registry.redhat.io/rhel9/postgresql-16:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  echo "=== MemoryHub test data cleanup ==="
+                  echo "Target: ${PGHOST}:${PGPORT}/${PGDATABASE}"
+
+                  # Count before
+                  BEFORE=$(psql -tA -c "SELECT count(*) FROM memory_nodes WHERE deleted_at IS NULL")
+                  TEST_COUNT=$(psql -tA -c "
+                    SELECT count(*) FROM memory_nodes
+                    WHERE deleted_at IS NULL
+                    AND (
+                      content ILIKE '[test]%'
+                      OR stub ILIKE '[test]%'
+                      OR owner_id IN (
+                        'test-user', 'dup-test-user', 'similarity-score-test',
+                        'seed-test-user', 'rollback-test-user', 'session-reuse-test',
+                        'domain-test-user', 'near-dup-user', 'similarity-direct-test',
+                        'seed-idempotency-user', 'multi-domain-user', 'e2e-test'
+                      )
+                    )
+                  ")
+
+                  echo "Active memories: ${BEFORE}"
+                  echo "Test data found: ${TEST_COUNT}"
+
+                  if [ "${TEST_COUNT}" -eq 0 ]; then
+                    echo "Nothing to clean up."
+                    exit 0
+                  fi
+
+                  # Soft-delete: set deleted_at and clear is_current
+                  DELETED=$(psql -tA -c "
+                    UPDATE memory_nodes
+                    SET deleted_at = NOW(), is_current = false
+                    WHERE deleted_at IS NULL
+                    AND (
+                      content ILIKE '[test]%'
+                      OR stub ILIKE '[test]%'
+                      OR owner_id IN (
+                        'test-user', 'dup-test-user', 'similarity-score-test',
+                        'seed-test-user', 'rollback-test-user', 'session-reuse-test',
+                        'domain-test-user', 'near-dup-user', 'similarity-direct-test',
+                        'seed-idempotency-user', 'multi-domain-user', 'e2e-test'
+                      )
+                    )
+                  ")
+
+                  echo "Soft-deleted: ${DELETED} rows"
+              env:
+                - name: PGHOST
+                  value: memoryhub-pg.memoryhub-db.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: memoryhub-pg-credentials
+                      key: POSTGRES_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: memoryhub-pg-credentials
+                      key: POSTGRES_PASSWORD
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: memoryhub-pg-credentials
+                      key: POSTGRES_DB
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi

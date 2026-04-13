@@ -1,96 +1,70 @@
-# Next session context
+# Next session: Remaining test debt (#81, #39)
 
-## Where things stand (as of 2026-04-11)
+Two test-debt issues remain after closing #95, #85, #177, #101, and #38 in the test-debt-focused session on 2026-04-13. Both require a deployed cluster.
 
-### Repo + CI
-- Main includes uncommitted #120 work (two-tier storage). Commit and PR before starting new work.
-- No open PRs.
-- 70 open issues (68 + #173 suggest_merge consolidation + #174 get_memory_history consolidation), 65 items in Backlog, 35 Done on the project board.
-- SDK v0.4.0, CLI v0.3.0.
+## #81 — auth: End-to-end PKCE flow integration test
 
-### Cluster
-- Sandbox `cluster-n7pd5.n7pd5.sandbox5167.opentlc.com` healthy.
-- MCP pod running. DB pod running in memoryhub-db.
-- MinIO manifests created in `deploy/minio/` but NOT yet deployed. Deploy before testing #120 end-to-end.
-- Migrations 001-010 applied. No new migration needed for #120 (schema already supports storage_type/content_ref).
+**What:** A test script that drives the full OAuth2 PKCE flow against a deployed memoryhub-auth broker: `/authorize` → OpenShift login → `/token` → MCP `search_memory` with the resulting JWT.
 
-### Recent work (this session)
-- #120 (two-tier storage with semantic chunking) — implemented but not yet committed/merged
-  - S3 adapter: `src/memoryhub_core/storage/s3.py` (async minio wrapper)
-  - Chunker: `src/memoryhub_core/storage/chunker.py` (paragraph/sentence splitting, ~256 token chunks)
-  - Service layer: `create_memory`, `update_memory`, `delete_memory` all accept optional `s3_adapter`
-  - MCP tools: `read_memory` gains `hydrate` parameter, write/update/delete pass S3 adapter through
-  - Search: chunk hits include `parent_hint` guiding agent to full content
-  - No new MCP tool added — consolidated into existing `read_memory` per Anthropic tool design guidance
-  - Design doc `docs/storage-layer.md` updated: all 5 TBDs closed
-  - MinIO manifests: `deploy/minio/` (deployment, service, PVC, kustomization)
-  - Tests: 266 root tests passing (20 new for S3/chunker, 10 new for service layer)
-  - Pre-existing bug fixed: `scope_id` was dropped in `update_memory` (missing from node constructor)
-- #173 filed — Consolidate `suggest_merge` into `create_relationship` (Backlog)
-- #174 filed — Consolidate `get_memory_history` into `read_memory` (Backlog)
-- Tool audit completed — 15 tools total, two consolidation opportunities identified
+**Blockers:** Depends on #75–#80 (PKCE endpoints). Check their status before starting — if `/authorize` (#76) or `/oauth/openshift/callback` (#77) aren't merged, this test can't pass.
 
-### Remaining #120 follow-ups
-- Deploy MinIO to cluster and test end-to-end
-- Call `ensure_bucket()` at MCP server startup (lifespan hook) rather than deferring to first write
-- Pin MinIO image tag in `deploy/minio/deployment.yaml`
-- Periodic S3 reaper for expired versions (out of scope for initial PR)
+**Approach:**
+1. Playwright (headless) to drive the OpenShift consent screen. The login form varies by cluster config (LDAP, htpasswd) — parametrize or use a test htpasswd user.
+2. File: `memoryhub-auth/tests/integration/test_pkce_e2e.py`
+3. After capturing the JWT, decode and verify claims: `sub`, `tenant_id`, `scopes`.
+4. Call MCP `search_memory` via HTTP POST with `Authorization: Bearer <jwt>`.
+5. Needs a running memoryhub-auth pod. Use `oc port-forward` for local runs or hit the deployed route.
 
-## Session goal: #168 — Conversation thread persistence
+**Key files to read first:**
+- Auth endpoints: `memoryhub-auth/src/routes/` (PKCE routes)
+- Auth config: `memoryhub-auth/src/config.py` (JWKS URI, issuer, audience)
+- MCP route: deployed at `/mcp/` via `memory-hub-mcp/deploy/openshift.yaml`
 
-### What it is
-Design and implement conversation thread persistence as a first-class governed subsystem. Extends MemoryHub from extracted observations (memories) to raw conversation threads — with the same governance guarantees (scope isolation, tenant isolation, RBAC, audit trails, retention policies).
+**Scope:** Medium. Playwright driver for OpenShift login is the tricky part.
 
-### Research done
-- `research/conversation-persistence-survey.md` completed 2026-04-10
-- Key finding: governed conversation persistence is genuine whitespace. No framework provides thread-level RBAC, auditable conversation-to-memory pipelines, retention policy enforcement with cascade to extracted memories, or cross-agent handoff governance.
-- EU AI Act (August 2026 deadline for high-risk systems) makes audit trails from conversation to memory to decision mandatory.
+## #39 — End-to-end pgvector similarity search through UI
 
-### Design doc needed
-- `docs/conversation-persistence.md` — author as part of this issue
-- Should cover: data model (Thread entity), MCP tools (start_thread, append_message, read_thread, etc.), governance model, integration with existing subsystems
-- Read the research survey and #168 issue first
+**What:** Verify the full vertical slice: UI search → BFF → embedding service → pgvector cosine distance → ranked results.
 
-### Open design questions from #168
-1. Thread entity: new table vs. reusing memory_nodes with a special branch_type?
-2. Message ordering: sequence numbers vs. timestamps?
-3. Extraction pipeline: how do conversations produce memories? Manual, automatic, or hybrid?
-4. Retention cascade: when a thread expires, what happens to memories extracted from it?
-5. Cross-agent handoff: how does one agent transfer a conversation to another with proper RBAC?
-6. Tool consolidation: how many new tools does this need? Follow Anthropic's guidance — fewer, more capable tools.
+**Blockers:** Needs memoryhub-ui deployed, the embedding service (all-MiniLM-L6-v2) running, and the MCP server connected to pgvector.
 
-## Things to know before touching anything
+**Approach:**
+1. This is a deployed-stack test — exercises the real embedding service, not MockEmbeddingService.
+2. Use `httpx` to hit the BFF search endpoint directly (no browser needed — the data path is what matters).
+3. Seed known memories via MCP, then search via BFF and verify:
+   - Results ranked by cosine similarity (not text fallback)
+   - Scores are real floats, not None
+   - Returned node IDs match seeded memories
+4. File: `memoryhub-ui/tests/integration/test_search_e2e.py`
 
-### MemoryHub MCP session
-- Read `~/.config/memoryhub/api-key` at session start.
-- Deploy is safe mid-session.
+**Key files to read first:**
+- BFF routes: `memoryhub-ui/backend/src/routes.py` (search endpoint)
+- Embedding service config: `MEMORYHUB_EMBEDDING_URL` in deploy manifests
 
-### Cluster
-```
-Cluster:       cluster-n7pd5.n7pd5.sandbox5167.opentlc.com (OpenTLC sandbox)
-Namespaces:    memory-hub-mcp, memoryhub-auth, memoryhub-db
-```
+**Scope:** Medium-low if the stack is already deployed. Straightforward HTTP calls.
 
-### Cluster login
+## Suggested order
+
+1. **#81 first** — tests the auth subsystem, prerequisite for real multi-user usage (#176). Skip to #39 if PKCE endpoints aren't merged yet.
+2. **#39 second** — simpler, good candidate for a post-deploy smoke test.
+
+## Session setup
+
+Both issues need a running cluster:
 ```bash
-oc whoami --show-server
 source .env && oc login "$OC_SERVER" -u "$OC_USER" -p "$OC_PASSWORD" --insecure-skip-tls-verify
+oc whoami
+oc get pods -n memoryhub-db && oc get pods -n memory-hub-mcp
 ```
 
-### Alembic migrations
-Migrations live in `alembic/versions/`. Current head is migration 010 (`domains`). Migrations are NOT auto-run on server startup — apply manually via port-forward:
-```bash
-oc port-forward svc/memoryhub-pg 15432:5432 -n memoryhub-db &
-MEMORYHUB_DB_HOST=localhost MEMORYHUB_DB_PORT=15432 MEMORYHUB_DB_NAME=memoryhub \
-  MEMORYHUB_DB_USER=memoryhub MEMORYHUB_DB_PASSWORD=memoryhub-dev-password \
-  .venv/bin/alembic upgrade head
-```
+## What shipped in the 2026-04-13 test debt session
 
-### Merge flow
-- Self-review: `gh pr merge <num> --admin --rebase --delete-branch`
-- Note: branch protection currently requires 1 approving review; no other approvers on the repo yet, so admin override or temporarily lowering the requirement is needed for solo merges.
+| Issue | What landed |
+|-------|------------|
+| #95 | CI integration-tests job (pgvector + Valkey), `make test-integration` documented |
+| #101 | Closed — tests already existed from #46 |
+| #85 | Push broadcast integration tests, pydantic serialization roundtrip |
+| #177 | PR template structured test plan, search_with_focus + domain boost + ARRAY/GIN integration tests, SQLite conftest freeze |
+| #38 | Cleanup script + CronJob + CONTRIBUTING.md convention |
 
-### Commits
-- `subsystem: Imperative summary`
-- `Assisted-by: Claude Code (Opus 4.6)` trailer
-- Never `Co-authored-by:` or `Signed-off-by:`
+Integration suite: 24 → 47 tests across 4 files.

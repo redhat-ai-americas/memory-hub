@@ -159,6 +159,21 @@ Two takeaways:
 
 The full mock-vs-real boundary audit is in the [#58 retrospective](retrospectives/2026-04-07_session-focus-vector-58/RETRO.md) under "Patterns."
 
+## Test data identification and cleanup
+
+When integration tests or manual testing run against a live deployment, they leave test data in the database. To keep dashboards and search results clean, **all test data must be identifiable** so automated cleanup can find it.
+
+**Required convention:** prefix test memory content with `[test]` — e.g., `[test] RBAC scope isolation a1b2c3`. The SDK helper `_test_content()` in `sdk/tests/test_rbac_live.py` does this automatically.
+
+**Known test owner_ids:** integration test fixtures use owner_ids like `test-user`, `dup-test-user`, `domain-test-user`, etc. The full list lives in `scripts/cleanup-test-data.py`.
+
+**Cleanup tooling:**
+
+- **Local:** `python scripts/cleanup-test-data.py` (dry-run by default, pass `--execute` to soft-delete)
+- **Cluster:** `deploy/cleanup/cronjob.yaml` runs weekly on Sundays at 03:00 UTC
+
+Both tools soft-delete matching rows (set `deleted_at`, clear `is_current`). They do not hard-delete — that's reserved for the admin API (#45).
+
 ## Documentation expectations
 
 - **Update docs in the same PR as the code change.** A new feature with a stale design doc is worse than a new feature with no doc.
