@@ -44,6 +44,17 @@ metadata:
 #         --from-literal=AUTH_ADMIN_KEY="$(cat /tmp/ak.txt)" \
 #         -n memoryhub-auth
 ---
+# Combined CA bundle — OpenShift injects the service-signing CA into this
+# ConfigMap.  The init container concatenates it with the cluster CA to
+# produce a bundle that covers both kubernetes.default.svc (cluster CA)
+# and oauth-openshift.openshift-authentication.svc (service CA).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-ca-bundle
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -60,6 +71,21 @@ spec:
       annotations:
         alpha.image.policy.openshift.io/resolve-names: '*'
     spec:
+      initContainers:
+      - name: combine-ca
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        command: ['sh', '-c']
+        args:
+        - |
+          cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+              /etc/pki/service-ca/service-ca.crt \
+              > /etc/pki/combined-ca/ca-bundle.crt
+        volumeMounts:
+        - name: service-ca
+          mountPath: /etc/pki/service-ca
+          readOnly: true
+        - name: combined-ca
+          mountPath: /etc/pki/combined-ca
       containers:
       - name: auth-server
         image: auth-server:latest
@@ -79,6 +105,10 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
+        volumeMounts:
+        - name: combined-ca
+          mountPath: /etc/pki/combined-ca
+          readOnly: true
         envFrom:
         - secretRef:
             name: memoryhub-pg-credentials
@@ -104,16 +134,22 @@ spec:
             secretKeyRef:
               name: memoryhub-pg-credentials
               key: POSTGRES_PASSWORD
+        # Cluster-specific values — deploy.sh replaces these placeholders
+        # via sed at apply time.  The placeholders must not be valid URLs
+        # so a missed substitution fails loudly on startup.
         - name: AUTH_ISSUER
-          value: "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com"
+          value: "__AUTH_ISSUER__"
         - name: AUTH_OPENSHIFT_OAUTH_AUTHORIZE_URL
-          value: "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/oauth/authorize"
+          value: "__OAUTH_AUTHORIZE_URL__"
+        # Server-side calls use internal service URLs (cluster-generic)
         - name: AUTH_OPENSHIFT_OAUTH_TOKEN_URL
-          value: "https://oauth-openshift.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/oauth/token"
+          value: "https://oauth-openshift.openshift-authentication.svc/oauth/token"
         - name: AUTH_OPENSHIFT_USER_INFO_URL
           value: "https://kubernetes.default.svc/apis/user.openshift.io/v1/users/~"
         - name: AUTH_OPENSHIFT_TLS_VERIFY
-          value: "false"
+          value: "true"
+        - name: AUTH_OPENSHIFT_CA_BUNDLE
+          value: "/etc/pki/combined-ca/ca-bundle.crt"
         - name: AUTH_OPENSHIFT_OAUTH_CLIENT_ID
           value: "memoryhub-auth-broker"
         - name: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET
@@ -128,6 +164,12 @@ spec:
           requests:
             memory: "128Mi"
             cpu: "100m"
+      volumes:
+      - name: service-ca
+        configMap:
+          name: service-ca-bundle
+      - name: combined-ca
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

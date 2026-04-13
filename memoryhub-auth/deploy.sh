@@ -9,12 +9,14 @@ set -euo pipefail
 PROJECT="${1:-memoryhub-auth}"
 
 # Manifest is rewritten through sed to embed the project-qualified registry
-# path. Secrets (auth-rsa-keys, auth-admin-key) are managed out-of-band --
+# path and cluster-specific URLs.  Secrets are managed out-of-band --
 # they're documented in openshift.yaml comments and created by this script
 # before the apply -- so the manifest itself contains no Secret stanzas and
 # the apply pipeline is just sed + oc apply.
 apply_manifest() {
-    sed "s|image: auth-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/auth-server:latest|g" openshift.yaml | \
+    sed "s|image: auth-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/auth-server:latest|g; \
+         s|__AUTH_ISSUER__|${AUTH_ISSUER_URL}|g; \
+         s|__OAUTH_AUTHORIZE_URL__|${OAUTH_AUTHORIZE_URL}|g" openshift.yaml | \
         oc apply -f - -n "$PROJECT"
 }
 
@@ -28,6 +30,25 @@ echo ""
 if ! oc whoami &>/dev/null; then
     echo "Error: Not logged in to OpenShift. Please run 'oc login' first."
     exit 1
+fi
+
+# Derive cluster-specific URLs (used by apply_manifest via sed)
+echo "→ Resolving cluster URLs..."
+OAUTH_HOST=$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' 2>/dev/null)
+if [ -z "$OAUTH_HOST" ]; then
+    echo "Error: Cannot resolve OpenShift OAuth route. Is this an OpenShift 4 cluster?"
+    exit 1
+fi
+OAUTH_AUTHORIZE_URL="https://${OAUTH_HOST}/oauth/authorize"
+echo "  OAuth authorize: $OAUTH_AUTHORIZE_URL"
+# AUTH_ISSUER_URL — try to resolve now (Route may already exist from a
+# previous deploy).  If not, it's resolved after the first apply creates
+# the Route, and the re-apply after the build embeds the real value.
+ROUTE_HOST=$(oc get route auth-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+if [ -n "$ROUTE_HOST" ]; then
+    AUTH_ISSUER_URL="https://${ROUTE_HOST}"
+else
+    AUTH_ISSUER_URL="__AUTH_ISSUER__"
 fi
 
 # Create project if it doesn't exist
@@ -140,12 +161,23 @@ fi
 
 oc start-build auth-server --from-dir="$BUILD_DIR" --follow -n "$PROJECT"
 
+# Resolve AUTH_ISSUER_URL now that the Route exists (created by the first apply).
+ROUTE_HOST=$(oc get route auth-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+if [ -n "$ROUTE_HOST" ]; then
+    AUTH_ISSUER_URL="https://${ROUTE_HOST}"
+    echo "  Auth issuer: $AUTH_ISSUER_URL"
+else
+    echo "Warning: Could not resolve auth-server Route — AUTH_ISSUER will be a placeholder"
+    AUTH_ISSUER_URL="__AUTH_ISSUER__"
+fi
+
 # Re-apply manifest to re-resolve the :latest imagestream tag against the
-# digest the build just pushed. The Deployment carries
-# `alpha.image.policy.openshift.io/resolve-names: '*'`, which rewrites the
-# tag to a concrete digest at apply time and never re-resolves on its own.
-# Without this re-apply, the next rollout would spin up a pod on the digest
-# :latest pointed at *before* the build (#88, manifestation 3/4).
+# digest the build just pushed AND embed the issuer URL.  The Deployment
+# carries `alpha.image.policy.openshift.io/resolve-names: '*'`, which
+# rewrites the tag to a concrete digest at apply time and never re-resolves
+# on its own.  Without this re-apply, the next rollout would spin up a pod
+# on the digest :latest pointed at *before* the build (#88, manifestation
+# 3/4).
 echo "→ Re-applying manifest to re-resolve image digest..."
 apply_manifest
 
@@ -153,19 +185,6 @@ apply_manifest
 echo "→ Deploying application..."
 oc rollout restart deployment/auth-server -n "$PROJECT" 2>/dev/null || true
 oc rollout status deployment/auth-server -n "$PROJECT" --timeout=300s
-
-# Get route and set issuer
-ROUTE_HOST=$(oc get route auth-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-
-if [ -n "$ROUTE_HOST" ]; then
-    ISSUER_URL="https://${ROUTE_HOST}"
-    echo "→ Setting AUTH_ISSUER to $ISSUER_URL..."
-    oc set env deployment/auth-server AUTH_ISSUER="$ISSUER_URL" -n "$PROJECT"
-    # Wait for the rollout triggered by the env change. Both this rollout
-    # and the previous one resolve against the post-re-apply digest, so the
-    # final running image must equal the imagestream :latest digest.
-    oc rollout status deployment/auth-server -n "$PROJECT" --timeout=120s
-fi
 
 # Verify the running pod is on the just-pushed digest. This must come AFTER
 # both rollouts complete (the initial restart and the env-triggered second
@@ -196,14 +215,14 @@ echo ""
 echo "========================================="
 echo "Deployment Complete!"
 echo "========================================="
-if [ -n "$ROUTE_HOST" ]; then
-    echo "Auth Server URL: https://${ROUTE_HOST}"
+if [ "$AUTH_ISSUER_URL" != "__AUTH_ISSUER__" ]; then
+    echo "Auth Server URL: $AUTH_ISSUER_URL"
     echo ""
     echo "Test with:"
-    echo "  curl -s https://${ROUTE_HOST}/healthz"
-    echo "  curl -s https://${ROUTE_HOST}/.well-known/oauth-authorization-server | python3 -m json.tool"
-    echo "  curl -s https://${ROUTE_HOST}/.well-known/jwks.json | python3 -m json.tool"
+    echo "  curl -s ${AUTH_ISSUER_URL}/healthz"
+    echo "  curl -s ${AUTH_ISSUER_URL}/.well-known/oauth-authorization-server | python3 -m json.tool"
+    echo "  curl -s ${AUTH_ISSUER_URL}/.well-known/jwks.json | python3 -m json.tool"
 else
-    echo "Warning: Could not retrieve route URL"
+    echo "Warning: Could not resolve auth-server Route URL"
 fi
 echo "========================================="
