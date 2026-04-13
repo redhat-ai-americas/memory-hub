@@ -150,6 +150,10 @@ spec:
           value: "true"
         - name: AUTH_OPENSHIFT_CA_BUNDLE
           value: "/etc/pki/combined-ca/ca-bundle.crt"
+        # Group-based access control — leave empty to allow all
+        # authenticated OpenShift users, or set to a group name to restrict.
+        - name: AUTH_OPENSHIFT_ALLOWED_GROUP
+          value: "memoryhub-users"
         - name: AUTH_OPENSHIFT_OAUTH_CLIENT_ID
           value: "memoryhub-auth-broker"
         - name: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET
