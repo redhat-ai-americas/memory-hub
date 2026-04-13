@@ -199,6 +199,36 @@ class TestCallbackValidation:
 
 
 # ---------------------------------------------------------------------------
+# b64-encoded username helpers
+# ---------------------------------------------------------------------------
+
+
+class TestDecodeGroupMember:
+    """Unit tests for _decode_group_member and _user_in_group_members."""
+
+    def test_plain_username(self):
+        from src.routes.openshift_callback import _decode_group_member
+        assert _decode_group_member("rdwj") == "rdwj"
+
+    def test_b64_encoded_username(self):
+        from src.routes.openshift_callback import _decode_group_member
+        # "kube:admin" base64-encoded
+        assert _decode_group_member("b64:a3ViZTphZG1pbg==") == "kube:admin"
+
+    def test_invalid_b64_returns_original(self):
+        from src.routes.openshift_callback import _decode_group_member
+        assert _decode_group_member("b64:!!!invalid!!!") == "b64:!!!invalid!!!"
+
+    def test_user_in_mixed_members(self):
+        from src.routes.openshift_callback import _user_in_group_members
+        members = ["b64:a3ViZTphZG1pbg==", "rdwj", "alice"]
+        assert _user_in_group_members("kube:admin", members)
+        assert _user_in_group_members("rdwj", members)
+        assert _user_in_group_members("alice", members)
+        assert not _user_in_group_members("bob", members)
+
+
+# ---------------------------------------------------------------------------
 # Group membership checks — unit tests for _check_group_membership
 # ---------------------------------------------------------------------------
 
@@ -252,6 +282,23 @@ class TestCheckGroupMembership:
         call_args = mock_client_instance.get.call_args
         assert "memoryhub-users" in call_args[0][0]
         assert call_args[1]["headers"]["Authorization"] == "Bearer opaque-token"
+
+    async def test_user_in_group_b64_encoded(self, monkeypatch):
+        """Group API returns b64-encoded username (colon in name) — succeeds."""
+        monkeypatch.setattr(settings, "openshift_allowed_group", "memoryhub-users")
+        from src.routes.openshift_callback import _check_group_membership
+
+        # OpenShift encodes "kube:admin" as "b64:a3ViZTphZG1pbg==" in groups
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get.return_value = _mock_group_response(
+            200, ["b64:a3ViZTphZG1pbg==", "rdwj"]
+        )
+        mock_client_ctx = AsyncMock()
+        mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.routes.openshift_callback.httpx.AsyncClient", return_value=mock_client_ctx):
+            await _check_group_membership("opaque-token", "kube:admin")
 
     async def test_user_not_in_group_raises_403(self, monkeypatch):
         """Group API returns 200 but user is NOT in .users — 403."""

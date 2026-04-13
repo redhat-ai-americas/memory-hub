@@ -5,6 +5,7 @@ token, resolves the OpenShift username, mints a MemoryHub authorization code,
 and redirects the user back to the original client (e.g., LibreChat).
 """
 
+import base64
 import hashlib
 import logging
 import os
@@ -111,6 +112,26 @@ async def _resolve_openshift_user(opaque_token: str) -> str:
     return username
 
 
+def _decode_group_member(entry: str) -> str:
+    """Decode an OpenShift group member entry.
+
+    OpenShift encodes usernames containing ':' with a ``b64:`` prefix in
+    the Group ``.users`` list (e.g. ``b64:a3ViZTphZG1pbg==`` for
+    ``kube:admin``).  Plain usernames are returned as-is.
+    """
+    if entry.startswith("b64:"):
+        try:
+            return base64.b64decode(entry[4:]).decode("utf-8")
+        except Exception:
+            return entry
+    return entry
+
+
+def _user_in_group_members(username: str, members: list[str]) -> bool:
+    """Check if *username* appears in *members*, decoding b64-prefixed entries."""
+    return any(_decode_group_member(m) == username for m in members)
+
+
 async def _check_group_membership(opaque_token: str, username: str) -> None:
     """Verify the user belongs to the required OpenShift group.
 
@@ -146,7 +167,7 @@ async def _check_group_membership(opaque_token: str, username: str) -> None:
         raise OAuthError(502, "server_error", "Failed to verify group membership")
 
     members = resp.json().get("users") or []
-    if username not in members:
+    if not _user_in_group_members(username, members):
         log.warning(
             "User %s is not a member of required group %s", username, group_name
         )
