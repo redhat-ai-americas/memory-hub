@@ -2,6 +2,13 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [0.4.0] — 2026-04-14
+
+- **Admin subcommands (#186)**: Added `memoryhub admin` command group with
+  `create-agent`, `list-agents`, `rotate-secret`, and `disable-agent` for
+  self-serve agent provisioning via the auth service REST API.
+- **`--version` flag**: `memoryhub --version` now prints the installed version.
+
 ## [0.3.0] — 2026-04-09
 
 - **Campaign & domain parameter support (#164)**: Added `--project-id` flag to

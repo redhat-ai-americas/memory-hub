@@ -4,7 +4,7 @@ Centralized, governed memory for AI agents.
 
 MemoryHub provides a persistent memory layer for AI agents running on OpenShift AI, with scope-based access control, multi-tenant isolation, and an immutable audit trail. It works with any agent framework — LlamaStack, LangChain, Claude Code, Cursor, and more.
 
-**Status:** Alpha (v0.5.0). Core operations are stable; curation and relationship APIs may evolve.
+**Status:** Alpha (v0.5.1). Core operations are stable; curation and relationship APIs may evolve.
 
 ## Installation
 

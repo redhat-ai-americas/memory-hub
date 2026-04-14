@@ -30,6 +30,12 @@ memoryhub write "Use vLLM for embeddings" --project-id my-project --domain ML
 # Set up project-level memory loading
 memoryhub config init
 memoryhub config regenerate
+
+# Admin: provision and manage agents
+memoryhub admin create-agent my-agent --scopes user,project
+memoryhub admin list-agents
+memoryhub admin rotate-secret my-agent
+memoryhub admin disable-agent my-agent
 ```
 
 The `--project-id` flag enables campaign-scoped memory access. When your project is enrolled in campaigns via `.memoryhub.yaml`, the CLI auto-loads the project identifier from config, so you can omit the flag in most cases. Use `--domain` to tag writes or boost domain-matching results in search.

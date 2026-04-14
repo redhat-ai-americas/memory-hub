@@ -2,6 +2,20 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.5.1] — 2026-04-14
+
+- **Edge-case fix**: Normalize empty URL string (`""`) to `None` to avoid
+  transport errors when only `api_key` is provided.
+
+## [0.5.0] — 2026-04-12
+
+- **API key backward-compat shim (#184)**: `api_key` and `server_url`
+  constructor arguments accepted alongside the canonical `url` parameter.
+- **Cache-optimized assembly (#175)**: `search()` returns results in a
+  stable order that maximizes KV cache hit rates when injected into prompts.
+- **Tool consolidation (#173, #174)**: `suggest_merge` and
+  `get_memory_history` merged into existing tools.
+
 ## [0.4.0] — 2026-04-09
 
 - **Campaign & domain parameter support (#164)**: Added `project_id` to all 11
