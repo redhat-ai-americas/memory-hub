@@ -69,6 +69,10 @@ def _make_client() -> MemoryHubClient:
     )
 
 
+def _make_api_key_client() -> MemoryHubClient:
+    return MemoryHubClient(url="https://fake.example.com/mcp/", api_key="mh-dev-test")
+
+
 @pytest.fixture
 async def client():
     """Return a (MemoryHubClient, mock_mcp) pair with _mcp pre-injected."""
@@ -109,6 +113,157 @@ def test_from_env_missing_vars(monkeypatch):
     assert "MEMORYHUB_AUTH_URL" in msg
     assert "MEMORYHUB_CLIENT_ID" in msg
     assert "MEMORYHUB_CLIENT_SECRET" in msg
+
+
+# ── api_key backward-compat (#184) ──────────────────────────────────────────
+
+
+def test_api_key_constructor():
+    c = _make_api_key_client()
+    assert c._api_key == "mh-dev-test"
+    assert c._auth is None
+    assert c._url == "https://fake.example.com/mcp/"
+
+
+def test_server_url_alias():
+    c = MemoryHubClient(server_url="https://fake.example.com/mcp/", api_key="mh-dev-test")
+    assert c._url == "https://fake.example.com/mcp/"
+
+
+def test_url_and_server_url_match():
+    c = MemoryHubClient(
+        url="https://fake.example.com/mcp/",
+        server_url="https://fake.example.com/mcp/",
+        api_key="mh-dev-test",
+    )
+    assert c._url == "https://fake.example.com/mcp/"
+
+
+def test_url_and_server_url_conflict():
+    with pytest.raises(ValueError, match="conflict"):
+        MemoryHubClient(
+            url="https://a.example.com/mcp/",
+            server_url="https://b.example.com/mcp/",
+            api_key="mh-dev-test",
+        )
+
+
+def test_api_key_with_oauth_raises():
+    with pytest.raises(ValueError, match="Cannot combine"):
+        MemoryHubClient(
+            url="https://fake.example.com/mcp/",
+            api_key="mh-dev-test",
+            auth_url="https://auth.example.com",
+        )
+
+
+def test_no_auth_raises():
+    with pytest.raises(MemoryHubError, match="required"):
+        MemoryHubClient(url="https://fake.example.com/mcp/")
+
+
+def test_partial_oauth_raises():
+    with pytest.raises(MemoryHubError, match="Incomplete OAuth") as exc_info:
+        MemoryHubClient(
+            url="https://fake.example.com/mcp/",
+            auth_url="https://auth.example.com",
+        )
+    msg = str(exc_info.value)
+    assert "client_id" in msg
+    assert "client_secret" in msg
+
+
+def test_no_url_raises():
+    with pytest.raises(MemoryHubError, match="url"):
+        MemoryHubClient(api_key="mh-dev-test")
+
+
+def test_empty_api_key_treated_as_none():
+    """Empty string api_key is normalized to None (same as from_env)."""
+    with pytest.raises(MemoryHubError, match="required"):
+        MemoryHubClient(url="https://fake.example.com/mcp/", api_key="")
+
+
+async def test_api_key_calls_register_session():
+    """API key mode calls register_session on connect."""
+    c = _make_api_key_client()
+
+    mock_instance = AsyncMock()
+    mock_instance.call_tool.return_value = FakeCallToolResult(
+        structured_content={"user_id": "test", "message": "ok"}
+    )
+
+    with patch("memoryhub.client.Client", return_value=mock_instance) as MockClient:
+        async with c:
+            pass
+
+    # Client should NOT receive auth kwarg in API key mode
+    _, ctor_kwargs = MockClient.call_args
+    assert "auth" not in ctor_kwargs
+
+    # register_session should be called with the api key
+    mock_instance.call_tool.assert_awaited_once_with(
+        "register_session", {"api_key": "mh-dev-test"}, raise_on_error=False
+    )
+
+
+async def test_oauth_does_not_call_register_session():
+    """OAuth mode does not call register_session on connect."""
+    c = _make_client()
+
+    mock_instance = AsyncMock()
+
+    with patch("memoryhub.client.Client", return_value=mock_instance) as MockClient:
+        async with c:
+            pass
+
+    # Client should receive auth kwarg in OAuth mode
+    _, ctor_kwargs = MockClient.call_args
+    assert "auth" in ctor_kwargs
+
+    # register_session should NOT be called
+    mock_instance.call_tool.assert_not_awaited()
+
+
+_ALL_ENV_VARS = (
+    "MEMORYHUB_URL", "MEMORYHUB_AUTH_URL", "MEMORYHUB_CLIENT_ID",
+    "MEMORYHUB_CLIENT_SECRET", "MEMORYHUB_API_KEY", "MEMORYHUB_SERVER_URL",
+)
+
+
+def test_from_env_api_key(monkeypatch):
+    for var in _ALL_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    monkeypatch.setenv("MEMORYHUB_API_KEY", "mh-dev-test")
+    monkeypatch.setenv("MEMORYHUB_URL", "https://mcp.example.com/mcp/")
+
+    c = MemoryHubClient.from_env()
+    assert c._api_key == "mh-dev-test"
+    assert c._auth is None
+    assert c._url == "https://mcp.example.com/mcp/"
+
+
+def test_from_env_server_url(monkeypatch):
+    for var in _ALL_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    monkeypatch.setenv("MEMORYHUB_API_KEY", "mh-dev-test")
+    monkeypatch.setenv("MEMORYHUB_SERVER_URL", "https://mcp.example.com/mcp/")
+
+    c = MemoryHubClient.from_env()
+    assert c._url == "https://mcp.example.com/mcp/"
+    assert c._api_key == "mh-dev-test"
+
+
+def test_from_env_api_key_no_url(monkeypatch):
+    for var in _ALL_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    monkeypatch.setenv("MEMORYHUB_API_KEY", "mh-dev-test")
+
+    with pytest.raises(MemoryHubError, match="MEMORYHUB_URL"):
+        MemoryHubClient.from_env()
 
 
 # ── search ───────────────────────────────────────────────────────────────────

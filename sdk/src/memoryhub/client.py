@@ -89,16 +89,23 @@ class MemoryHubClient:
     """Typed Python client for MemoryHub.
 
     Wraps MemoryHub's MCP tools as async Python methods with transparent
-    OAuth 2.1 authentication. The developer never sees MCP protocol,
-    JWT tokens, or transport details.
+    authentication. The developer never sees MCP protocol, JWT tokens,
+    or transport details.
 
     Usage::
 
+        # OAuth 2.1 mode:
         client = MemoryHubClient(
             url="https://mcp-server.apps.example.com/mcp/",
             auth_url="https://auth-server.apps.example.com",
             client_id="my-client",
             client_secret="my-secret",
+        )
+
+        # API key mode (backward-compatible):
+        client = MemoryHubClient(
+            url="https://mcp-server.apps.example.com/mcp/",
+            api_key="mh-dev-abc123",
         )
 
         async with client:
@@ -107,20 +114,37 @@ class MemoryHubClient:
 
     def __init__(
         self,
-        url: str,
-        auth_url: str,
-        client_id: str,
-        client_secret: str,
+        url: str | None = None,
+        auth_url: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
         *,
+        api_key: str | None = None,
+        server_url: str | None = None,
         project_config: ProjectConfig | None = None,
     ) -> None:
         """Construct a MemoryHubClient.
+
+        Supports two authentication modes:
+
+        **OAuth 2.1** (recommended): Provide ``url``, ``auth_url``,
+        ``client_id``, and ``client_secret``. The client obtains and
+        refreshes tokens automatically.
+
+        **API key** (backward-compatible): Provide ``url`` (or
+        ``server_url``) and ``api_key``. The client calls
+        ``register_session`` on connect to authenticate.
 
         Args:
             url: Streamable-HTTP endpoint of the MemoryHub MCP server.
             auth_url: Base URL of the OAuth 2.1 auth service.
             client_id: OAuth client ID.
             client_secret: OAuth client secret.
+            api_key: Legacy API key for ``register_session`` auth.
+                Cannot be combined with OAuth parameters.
+            server_url: Alias for ``url`` (backward-compatible).
+                If both ``url`` and ``server_url`` are provided they
+                must match.
             project_config: Optional project-level config. When omitted,
                 all-defaults :class:`ProjectConfig` is used; the
                 ``retrieval_defaults`` section is applied to outbound
@@ -128,12 +152,65 @@ class MemoryHubClient:
                 explicit value. Use :func:`memoryhub.load_project_config`
                 or :meth:`from_env` to auto-discover ``.memoryhub.yaml``.
         """
-        self._url = url
-        self._auth = MemoryHubAuth(
-            auth_url=auth_url,
-            client_id=client_id,
-            client_secret=client_secret,
-        )
+        # Normalize empty strings to None so that
+        # MemoryHubClient(api_key="") behaves the same as from_env
+        if api_key is not None and not api_key:
+            api_key = None
+        if server_url is not None and not server_url:
+            server_url = None
+
+        # Resolve URL: url and server_url are aliases
+        if url is not None and server_url is not None and url != server_url:
+            raise ValueError(
+                f"url ({url!r}) and server_url ({server_url!r}) conflict; "
+                "provide one or ensure they match"
+            )
+        effective_url = url or server_url
+        if not effective_url:
+            raise MemoryHubError("url (or server_url) is required")
+        self._url = effective_url
+
+        # Resolve auth mode
+        oauth_params = (auth_url, client_id, client_secret)
+        has_any_oauth = any(p is not None for p in oauth_params)
+        has_all_oauth = all(p is not None for p in oauth_params)
+
+        if api_key is not None and has_any_oauth:
+            raise ValueError(
+                "Cannot combine api_key with OAuth parameters "
+                "(auth_url, client_id, client_secret)"
+            )
+
+        if api_key is not None:
+            # API key mode
+            self._api_key: str | None = api_key
+            self._auth: MemoryHubAuth | None = None
+        elif has_all_oauth:
+            # OAuth mode
+            self._api_key = None
+            self._auth = MemoryHubAuth(
+                auth_url=auth_url,  # type: ignore[arg-type]
+                client_id=client_id,  # type: ignore[arg-type]
+                client_secret=client_secret,  # type: ignore[arg-type]
+            )
+        elif has_any_oauth:
+            # Partial OAuth — tell the caller what's missing
+            missing = []
+            if auth_url is None:
+                missing.append("auth_url")
+            if client_id is None:
+                missing.append("client_id")
+            if client_secret is None:
+                missing.append("client_secret")
+            raise MemoryHubError(
+                f"Incomplete OAuth configuration, missing: {', '.join(missing)}"
+            )
+        else:
+            raise MemoryHubError(
+                "Either api_key or OAuth parameters "
+                "(auth_url, client_id, client_secret) are required"
+            )
+
         self._mcp: Client | None = None
         self._project_config = project_config or ProjectConfig()
         # #62 push pipeline state. The handler is constructed lazily in
@@ -162,16 +239,42 @@ class MemoryHubClient:
                 and apply its ``retrieval_defaults`` to outbound search
                 calls. Set False to skip discovery entirely.
 
-        Reads: MEMORYHUB_URL, MEMORYHUB_AUTH_URL, MEMORYHUB_CLIENT_ID,
-        MEMORYHUB_CLIENT_SECRET.
+        Reads (API key mode): MEMORYHUB_API_KEY, plus MEMORYHUB_URL or
+        MEMORYHUB_SERVER_URL.
+
+        Reads (OAuth mode): MEMORYHUB_URL, MEMORYHUB_AUTH_URL,
+        MEMORYHUB_CLIENT_ID, MEMORYHUB_CLIENT_SECRET.
         """
-        missing = []
+        api_key = os.environ.get("MEMORYHUB_API_KEY", "")
+        server_url = os.environ.get("MEMORYHUB_SERVER_URL", "")
         url = os.environ.get("MEMORYHUB_URL", "")
+        effective_url = url or server_url
+
+        project_config: ProjectConfig | None = None
+        if config_path is not None:
+            project_config = load_project_config(config_path)
+        elif auto_discover_config:
+            project_config = load_project_config()
+
+        if api_key:
+            if not effective_url:
+                raise MemoryHubError(
+                    "MEMORYHUB_API_KEY is set but MEMORYHUB_URL "
+                    "(or MEMORYHUB_SERVER_URL) is missing"
+                )
+            return cls(
+                url=effective_url,
+                api_key=api_key,
+                project_config=project_config,
+            )
+
+        # OAuth mode
         auth_url = os.environ.get("MEMORYHUB_AUTH_URL", "")
         client_id = os.environ.get("MEMORYHUB_CLIENT_ID", "")
         client_secret = os.environ.get("MEMORYHUB_CLIENT_SECRET", "")
 
-        if not url:
+        missing = []
+        if not effective_url:
             missing.append("MEMORYHUB_URL")
         if not auth_url:
             missing.append("MEMORYHUB_AUTH_URL")
@@ -185,14 +288,8 @@ class MemoryHubClient:
                 f"Missing required environment variables: {', '.join(missing)}"
             )
 
-        project_config: ProjectConfig | None = None
-        if config_path is not None:
-            project_config = load_project_config(config_path)
-        elif auto_discover_config:
-            project_config = load_project_config()
-
         return cls(
-            url=url,
+            url=effective_url,
             auth_url=auth_url,
             client_id=client_id,
             client_secret=client_secret,
@@ -213,10 +310,19 @@ class MemoryHubClient:
                 self._message_handler.register(cb)
             message_handler = self._message_handler
 
+        kwargs: dict[str, Any] = {}
+        if self._auth is not None:
+            kwargs["auth"] = self._auth
+
         self._mcp = Client(
-            self._url, auth=self._auth, message_handler=message_handler
+            self._url, message_handler=message_handler, **kwargs
         )
         await self._mcp.__aenter__()
+
+        # API key mode: authenticate via register_session after connecting
+        if self._api_key is not None:
+            await self._call("register_session", {"api_key": self._api_key})
+
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
