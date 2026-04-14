@@ -140,7 +140,7 @@ The enforcement architecture:
 
 | Tool | Authentication | Authorization |
 |------|---------------|---------------|
-| `register_session` | API key compatibility shim only — not the primary auth path | Sets up session-shim claims for tools that follow |
+| `register_session` | API key authentication (see API Key Authentication section) | Validates key against user registry, establishes session identity |
 | `write_memory` | Required | `authorize_write(claims, scope, owner_id)` |
 | `read_memory` | Required | `authorize_read(claims, memory)` |
 | `update_memory` | Required | `authorize_read` + `authorize_write` |
@@ -295,6 +295,42 @@ Scopes combine an **operation** with an optional **access tier**:
 
 The `authorize_read` and `authorize_write` functions (see Enforcement Architecture) check both the tier-level policy (who can access which scope) and the operational scope in the JWT. A service agent with `memory:read` but not `memory:write:user` can see user memories but cannot modify them.
 
+#### API key authentication
+
+API key authentication is the simplest auth path, designed for development, single-operator deployments, and MCP clients that lack native OAuth support (such as Claude Code's MCP integration today). An agent calls `register_session(api_key=...)` at the start of each conversation; the MCP server validates the key against the `memoryhub-users` ConfigMap and establishes a session identity.
+
+**User registry.** Users are defined in the `memoryhub-users` ConfigMap, mounted at `/config/users.json` inside the MCP server pod. Each entry specifies:
+
+```json
+{
+  "user_id": "wjackson",
+  "name": "Wes Jackson",
+  "api_key": "mh-dev-<unique-suffix>",
+  "scopes": ["user", "project", "role", "organizational", "enterprise"]
+}
+```
+
+The `scopes` array controls which memory tiers the user can access. `identity_type` defaults to `"user"` when omitted; set it to `"service"` for autonomous agents like the curator.
+
+**Configuration sources** (checked in order):
+1. `MEMORYHUB_USERS_JSON` env var — inline JSON (testing/CI)
+2. `MEMORYHUB_USERS_FILE` env var — path to JSON file
+3. `/config/users.json` — OpenShift ConfigMap mount (production default)
+
+**Security properties:**
+- Keys are stored as plaintext in the ConfigMap (not hashed). This is acceptable for dev clusters but not for production multi-tenant deployments — use OAuth 2.1 for those.
+- One session per MCP connection. The key is validated once; subsequent tool calls use the cached session identity.
+- No token expiration. The session lives as long as the MCP connection.
+
+**Upgrade path to OAuth 2.1.** API key auth and OAuth 2.1 coexist. The MCP server accepts both: JWT-authenticated requests are validated by FastMCP's `JWTVerifier`, while `register_session` calls go through the ConfigMap lookup. Organizations upgrading to OAuth 2.1 can:
+
+1. Create OAuth clients for each user/agent via the auth service admin API
+2. Update SDK consumers to use `MemoryHubClient(url=..., auth_url=..., client_id=..., client_secret=...)`
+3. Remove the `memoryhub-users` ConfigMap once all consumers have migrated
+4. Optionally disable `register_session` by removing it from the tool list in `main.py`
+
+No flag or env var is needed to "enable" API key auth — it is always available as long as the ConfigMap exists. The coexistence is seamless because the service-layer enforcement (`get_claims_from_context()` in `core/authz.py`) produces the same claim shape from both auth paths.
+
 #### Grant types
 
 Three OAuth 2.1 grant types serve different client populations:
@@ -395,7 +431,7 @@ async def search_memory(query: str, ...) -> dict:
     # All queries filtered by tenant_id + scope authorization
 ```
 
-This replaces the current `register_session` / `require_auth()` / `get_authenticated_owner()` pattern entirely. Auth happens at the transport layer before any tool code executes. The `register_session` tool is retained as a **compatibility shim** for MCP clients that cannot send HTTP Authorization headers (due to client bugs or limitations) — it accepts an API key, performs the token exchange internally, and stores the resulting identity for the session.
+This replaces the current `register_session` / `require_auth()` / `get_authenticated_owner()` pattern entirely. Auth happens at the transport layer before any tool code executes. The `register_session` tool provides **API key authentication** for MCP clients that do not perform the OAuth flow (such as Claude Code, which uses `register_session` at the start of each conversation). It validates the key against the user registry, establishes a session identity, and all subsequent tool calls use the cached claims. See the API Key Authentication section for the full details, upgrade path, and security properties.
 
 #### Client integration patterns
 
@@ -406,7 +442,7 @@ This replaces the current `register_session` / `require_auth()` / `get_authentic
 ```python
 from memoryhub import MemoryHubClient
 
-# API key auth (client_credentials grant)
+# API key auth (register_session flow)
 client = MemoryHubClient(
     url="https://memoryhub.apps.example.com",
     api_key="<your-api-key>",
