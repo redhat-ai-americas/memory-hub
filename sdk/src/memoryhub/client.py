@@ -152,6 +152,8 @@ class MemoryHubClient:
         # MemoryHubClient(api_key="") behaves the same as from_env
         if api_key is not None and not api_key:
             api_key = None
+        if url is not None and not url:
+            url = None
         if server_url is not None and not server_url:
             server_url = None
 

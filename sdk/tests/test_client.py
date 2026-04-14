@@ -186,6 +186,12 @@ def test_empty_api_key_treated_as_none():
         MemoryHubClient(url="https://fake.example.com/mcp/", api_key="")
 
 
+def test_empty_url_falls_back_to_server_url():
+    """Empty string url is falsy, so server_url takes precedence."""
+    c = MemoryHubClient(url="", server_url="https://fake.example.com/mcp/", api_key="mh-dev-test")
+    assert c._url == "https://fake.example.com/mcp/"
+
+
 async def test_api_key_calls_register_session():
     """API key mode calls register_session on connect."""
     c = _make_api_key_client()
