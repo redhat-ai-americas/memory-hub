@@ -1,45 +1,44 @@
-# Next session
+# Next Session Plan
 
-## What was completed (2026-04-13)
+## Priority: SDK backward-compat + API key auth formalization + vLLM validation
 
-- **#173/#174 MCP tool consolidation** (PR #181 merged):
-  - `suggest_merge` absorbed into `create_relationship` (agents use `conflicts_with` + merge metadata)
-  - `get_memory_history` absorbed into `read_memory` (new `history_offset`, `history_max_versions` params)
-  - MCP tool count reduced from 15 to 13 (-604 lines net)
-  - SDK updated: removed `suggest_merge()` and `get_history()`, added pagination to `read()`
-  - Deployed, exercised on live cluster, verified with mcp-test-mcp
-- Previous session: TLS hardening, group enforcement (#179/#180), retro written
+### 1. SDK backward-compat api_key shim (#184)
+
+A downstream project (fips-agents scaffolded template) is broken because memoryhub SDK v0.4.0 switched to OAuth2 client_credentials, removing the `api_key` parameter and renaming `server_url` to `url`. The agreed approach is Option C: add a backward-compat shim in the SDK AND update the downstream template.
+
+**SDK changes (sdk/src/memoryhub/client.py):**
+- Accept `api_key=` and `server_url=` as convenience aliases
+- When `api_key` is provided and OAuth params are absent, skip OAuth token management and use `register_session` flow instead
+- `server_url` maps to `url`
+
+**Downstream changes (fips-agents repo):**
+- Update `memory.py` constructor call
+- Update `.memoryhub.yaml` format
+- Update `/add-memory` slash command
+
+### 2. Formalize API key auth docs (#183)
+
+No code changes — documentation and positioning only:
+- Name "API key authentication" explicitly in docs
+- Document the `memoryhub-users` ConfigMap as the user registry
+- Document the env var toggle and the upgrade path to OAuth 2.1
+- Update docs/governance.md auth section
+
+### 3. Validate compilation epoch assumptions against real vLLM (#185)
+
+Deploy a test workload against the cluster's vLLM endpoint with MemoryHub memory injection. Measure actual cache hit rates with identical memory sets, append-only growth, and recompilation scenarios. Validate the 16-token block granularity and the should_recompile threshold (30% / 5 entries).
+
+## Context from this session
+
+- #175 (cache-optimized assembly) shipped and deployed — compilation epochs with Valkey state, `raw_results` opt-out, `compilation_hash`/`compilation_epoch`/`appendix_count` in responses
+- README rewritten with governance-first value proposition
+- All test debt resolved: 254 MCP + 288 unit + 55 integration = 597 tests, 0 failures
+- Integration test compose stack verified working (podman machine + podman-compose)
+- #176 (first 3 users) deprioritized ~1 week — do not surface as "what to work on next"
+- `should_recompile` threshold kept as-is (option A); #185 validates assumptions
 
 ## Cluster state
 
-- Auth server: Running in `memoryhub-auth`, TLS hardened, group enforcement active (`memoryhub-users`)
-- DB: `memoryhub-pg-0` in `memoryhub-db`
-- MCP: Running in `memory-hub-mcp` (**13 tools** after consolidation)
-- `memoryhub-users` group on cluster: `kube:admin` (b64-encoded), `rdwj`
-
-## What to pick up next
-
-### Option A: #175 — Cache-optimized memory assembly in search_memory
-`search_memory` currently returns raw results. This issue adds intelligent response assembly — pre-composing the results into a format optimized for agent context injection. Aligns with the Anthropic tool design article's "returning meaningful context" principle. This is a concrete feature that improves the daily agent experience.
-
-### Option B: #176 — First 3 real users milestone
-Get 3 real users actively consuming MemoryHub. This is a milestone/meta-issue. Would involve onboarding work: polishing the SDK install experience, ensuring the CLI is usable, documentation quality pass. Good for validation but broad scope.
-
-### Option C: Design work (#168, #169, #170, #171)
-Four design issues are queued, all `needs-design`:
-- #168: Conversation thread persistence
-- #169: Context compaction services (ACE)
-- #170: Graph-enhanced memory retrieval
-- #171: Knowledge compilation
-
-Research surveys are done for #168 and #169. These are strategic but don't ship code.
-
-### Option D: Bug/cleanup backlog
-- #119: Translate embedder errors into structured tool responses (improves agent error recovery)
-- #84: Handle embedding service 413 on long content (needs design)
-- #102: BFF history walker follow-up (now partially addressed by #174 consolidation at MCP layer; BFF still uses its own unpaginated walker)
-- #178: Add deployment state verification to session startup (infra)
-
-### Recommendation
-
-**#175 (cache-optimized memory assembly)** is the highest-leverage next step — it directly improves how every agent consumes search results and builds on the tool consolidation momentum. After that, #119 (embedder error messages) is a quick win for agent ergonomics.
+- MCP server: build 23, pod `memory-hub-mcp-69f8ffc58-kg2dh`, image sha256:76ca05dd...
+- Cache-optimized assembly verified live (compilation_epoch: 1, compilation_hash present)
+- DB: memoryhub-db namespace, migrations in sync
