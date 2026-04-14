@@ -17,6 +17,7 @@ Results are written to research/vllm-prefix-cache-validation/results-<timestamp>
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import hashlib
 import json
@@ -43,6 +44,16 @@ from memoryhub import MemoryHubClient  # noqa: E402
 
 # Unique per-run ID so temp memories don't collide with curation rules
 RUN_ID = _uuid.uuid4().hex[:12]
+
+BASELINE_SCENARIOS = ["stable_prefix", "append_only", "recompile", "block_granularity", "threshold_analysis"]
+FOLLOWUP_SCENARIOS = [
+    "byte_stability_fix",
+    "immediate_recompile",
+    "block_size_32",
+    "eviction_pressure",
+    "cross_query_sharing",
+]
+ALL_SCENARIOS = BASELINE_SCENARIOS + FOLLOWUP_SCENARIOS
 
 MODEL = "RedHatAI/granite-3.3-8b-instruct"
 SEARCH_QUERY = "project conventions deployment patterns"
@@ -421,6 +432,291 @@ def analyze_threshold(results: dict) -> dict:
     }
 
 
+async def run_byte_stability_fix(client, vllm, metrics, temp_ids) -> dict:
+    """Validate that a byte-stable get_injection_block() restores append-only cache benefit.
+
+    Prerequisite: get_injection_block() must render compiled and appendix
+    as separately stable text segments. Run AFTER applying that fix.
+    """
+    log("=== Follow-Up: Byte Stability Fix ===")
+    log("  This scenario requires the byte-stability fix to get_injection_block().")
+    log("  See findings.md recommendation #1.")
+
+    sr1, block_v1 = await _search_block(client)
+    epoch_before = sr1.compilation_epoch  # noqa: F841
+    question = "What are the key architectural decisions?"
+    user_v1 = _make_user_msg(block_v1, question)
+
+    # Warm cache
+    log("  Warming cache...")
+    for _ in range(2):
+        await vllm.chat(SYSTEM_MSG, user_v1)
+    await asyncio.sleep(0.5)
+
+    # Write 2 memories (below recompile threshold)
+    append_contents = [
+        f"[VALIDATION-{RUN_ID}] Byte-stability test: service mesh requires mTLS between all pods in the data plane.",
+        f"[VALIDATION-{RUN_ID}] Byte-stability test: feature flags use"
+        " LaunchDarkly SDK with server-side evaluation only.",
+    ]
+    for content in append_contents:
+        result = await client.write(
+            content,
+            scope="user",
+            weight=0.3,
+            metadata={"validation": True, "scenario": "byte_stability", "run_id": RUN_ID},
+        )
+        temp_ids.append(result.memory.id)
+
+    await asyncio.sleep(2)
+    sr2, block_v2 = await _search_block(client)
+
+    # Key check: does block_v2 start with the exact bytes of block_v1?
+    compiled_prefix_preserved = block_v2.startswith(block_v1)
+    log(f"  Compiled prefix byte-stable: {compiled_prefix_preserved}")
+    log(f"  block_v1: {len(block_v1)} chars, block_v2: {len(block_v2)} chars")
+
+    user_v2 = _make_user_msg(block_v2, question)
+    d, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_v2)
+    ct = d["cached_tokens"]
+    pt = d["prompt_tokens"]
+    pct = f"{d['per_request_hit_rate']:.2%}" if d["per_request_hit_rate"] is not None else "n/a"
+    log(f"  Append request: {ct}/{pt} cached ({pct})")
+
+    passed = compiled_prefix_preserved and (d.get("per_request_hit_rate") or 0) > 0.5
+    return {
+        "hypothesis": "Byte-stable compiled section preserves prefix cache on append",
+        "status": "PASS" if passed else "FAIL",
+        "compiled_prefix_preserved": compiled_prefix_preserved,
+        "block_v1_chars": len(block_v1),
+        "block_v2_chars": len(block_v2),
+        "request": d,
+        "summary": {
+            "hit_rate": d.get("per_request_hit_rate") or d["hit_rate"],
+            "pass": passed,
+        },
+    }
+
+
+async def run_immediate_recompile(client, vllm, metrics, temp_ids) -> dict:
+    """Validate that min_appendix=1 (immediate recompile) is better than appendix mode.
+
+    Prerequisite: set min_appendix=1 in compilation config.
+    """
+    log("=== Follow-Up: Immediate Recompile ===")
+    log("  This scenario requires min_appendix=1 in compilation config.")
+
+    sr1, block_v1 = await _search_block(client)
+    question = "Explain the monitoring and alerting setup."
+    user_v1 = _make_user_msg(block_v1, question)
+
+    log("  Warming cache...")
+    for _ in range(2):
+        await vllm.chat(SYSTEM_MSG, user_v1)
+    await asyncio.sleep(0.5)
+
+    # Write 1 memory -- should trigger immediate recompile if min_appendix=1
+    result = await client.write(
+        f"[VALIDATION-{RUN_ID}] Immediate recompile test: alerting"
+        " thresholds must be defined in code, not configured manually.",
+        scope="user",
+        weight=0.5,
+        metadata={"validation": True, "scenario": "immediate_recompile", "run_id": RUN_ID},
+    )
+    temp_ids.append(result.memory.id)
+    await asyncio.sleep(2)
+
+    sr2, block_v2 = await _search_block(client)
+    epoch_changed = (sr2.compilation_epoch or 0) > (sr1.compilation_epoch or 0)
+    appendix_zero = (sr2.appendix_count or 0) == 0
+    log(f"  Epoch changed: {epoch_changed}, appendix: {sr2.appendix_count}")
+
+    user_v2 = _make_user_msg(block_v2, question)
+    requests_data = []
+    for i in range(4):
+        label = "post_write_miss" if i == 0 else f"post_write_warm_{i}"
+        d, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_v2)
+        ct = d["cached_tokens"]
+        pt = d["prompt_tokens"]
+        pct = f"{d['per_request_hit_rate']:.2%}" if d["per_request_hit_rate"] is not None else "n/a"
+        log(f"  Request {i + 1} ({label}): {ct}/{pt} cached ({pct})")
+        requests_data.append({"label": label, **d})
+
+    warm_rates = [r.get("per_request_hit_rate") or r["hit_rate"] for r in requests_data[1:]]
+    mean_warm = sum(warm_rates) / len(warm_rates) if warm_rates else 0
+    passed = epoch_changed and appendix_zero and mean_warm > 0.9
+
+    return {
+        "hypothesis": "Immediate recompile (min_appendix=1) restores cache after 1 miss",
+        "status": "PASS" if passed else "FAIL",
+        "epoch_changed": epoch_changed,
+        "appendix_zero": appendix_zero,
+        "requests": requests_data,
+        "summary": {"post_write_warm_mean": mean_warm, "pass": passed},
+    }
+
+
+async def run_block_size_32(client, vllm, metrics) -> dict:
+    """Compare cache behavior with block_size=32 vs baseline block_size=16.
+
+    Prerequisite: redeploy vLLM with --block-size 32.
+    """
+    log("=== Follow-Up: Block Size 32 ===")
+    log("  This scenario requires vLLM deployed with --block-size 32.")
+
+    sr, block = await _search_block(client)
+    user_msg = _make_user_msg(block, "Summarize the key project conventions.")
+
+    requests_data = []
+    for i in range(5):
+        label = "cold_start" if i == 0 else f"warm_{i}"
+        d, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_msg)
+        ct = d["cached_tokens"]
+        pt = d["prompt_tokens"]
+        pct = f"{d['per_request_hit_rate']:.2%}" if d["per_request_hit_rate"] is not None else "n/a"
+        log(f"  Request {i + 1} ({label}): {ct}/{pt} cached ({pct})")
+        requests_data.append({"label": label, **d})
+
+    warm_rates = [r.get("per_request_hit_rate") or r["hit_rate"] for r in requests_data[1:]]
+    mean_warm = sum(warm_rates) / len(warm_rates) if warm_rates else 0
+    pt = requests_data[1]["prompt_tokens"] if len(requests_data) > 1 else 0
+    ct = requests_data[1].get("cached_tokens") or 0
+    partial_block_waste = pt - ct if pt and ct else 0
+
+    return {
+        "hypothesis": "Block size 32 performs comparably to block size 16",
+        "status": "PASS" if mean_warm > 0.9 else "FAIL",
+        "requests": requests_data,
+        "summary": {
+            "warm_hit_rate_mean": mean_warm,
+            "partial_block_waste_tokens": partial_block_waste,
+            "pass": mean_warm > 0.9,
+        },
+    }
+
+
+async def run_eviction_pressure(client, vllm, metrics) -> dict:
+    """Measure cache eviction behavior under memory pressure.
+
+    Prerequisite: optionally redeploy vLLM with --num-gpu-blocks-override
+    at ~50% of profiled capacity.
+    """
+    log("=== Follow-Up: Eviction Pressure ===")
+
+    sr, block = await _search_block(client)
+    user_msg = _make_user_msg(block, "Summarize the key project conventions.")
+
+    # Warm cache
+    log("  Warming cache...")
+    await vllm.chat(SYSTEM_MSG, user_msg)
+    await vllm.chat(SYSTEM_MSG, user_msg)
+    await asyncio.sleep(0.5)
+
+    # Verify warm
+    d_warm, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_msg)
+    log(f"  Warm baseline: {d_warm.get('cached_tokens')}/{d_warm['prompt_tokens']} cached")
+
+    # Send unrelated prompts to pressure the cache
+    eviction_prompts = [f"Write a detailed essay about topic number {i}: {' '.join(['word'] * 200)}" for i in range(20)]
+    log("  Sending 20 unrelated prompts to pressure cache...")
+    preemptions_before = (await metrics.snapshot()).prefix_cache_queries  # noqa: F841
+    for i, prompt in enumerate(eviction_prompts):
+        await vllm.chat(SYSTEM_MSG, prompt)
+        if (i + 1) % 5 == 0:
+            log(f"    Sent {i + 1}/20")
+
+    # Re-check our original prompt
+    d_post, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_msg)
+    post_ct = d_post.get("cached_tokens")
+    post_pt = d_post["prompt_tokens"]
+    log(f"  Post-pressure: {post_ct}/{post_pt} cached")
+
+    survived = (post_ct or 0) > (post_pt * 0.5) if post_pt else False
+    return {
+        "hypothesis": "Cached blocks survive moderate eviction pressure",
+        "status": "PASS" if survived else "FAIL",
+        "warm_baseline": d_warm,
+        "post_pressure": d_post,
+        "eviction_prompts_sent": len(eviction_prompts),
+        "summary": {
+            "warm_cached_tokens": d_warm.get("cached_tokens"),
+            "post_pressure_cached_tokens": post_ct,
+            "blocks_survived": survived,
+        },
+    }
+
+
+async def run_cross_query_sharing(client, vllm, metrics) -> dict:
+    """Test whether different search queries with overlapping results share cache."""
+    log("=== Follow-Up: Cross-Query Cache Sharing ===")
+
+    # Query A
+    sr_a = await client.search(
+        "project conventions and coding standards",
+        max_results=15,
+        mode="full_only",
+        max_response_tokens=20000,
+    )
+    block_a = MemoryHubClient.get_injection_block(sr_a)
+    user_a = _make_user_msg(block_a, "Summarize the conventions.")
+
+    # Query B
+    sr_b = await client.search(
+        "deployment patterns and infrastructure",
+        max_results=15,
+        mode="full_only",
+        max_response_tokens=20000,
+    )
+    block_b = MemoryHubClient.get_injection_block(sr_b)
+    user_b = _make_user_msg(block_b, "Summarize the deployment approach.")
+
+    # Measure overlap
+    common_prefix_len = 0
+    for a, b in zip(block_a, block_b, strict=False):
+        if a == b:
+            common_prefix_len += 1
+        else:
+            break
+    log(f"  Block A: {len(block_a)} chars, Block B: {len(block_b)} chars")
+    log(f"  Common prefix: {common_prefix_len} chars")
+
+    # Check memory ID overlap
+    ids_a = {m.id for m in sr_a.results}
+    ids_b = {m.id for m in sr_b.results}
+    overlap = ids_a & ids_b
+    log(f"  Memory overlap: {len(overlap)}/{len(ids_a)} IDs shared")
+
+    # Warm with query A
+    log("  Warming cache with query A...")
+    await vllm.chat(SYSTEM_MSG, user_a)
+    await vllm.chat(SYSTEM_MSG, user_a)
+    await asyncio.sleep(0.5)
+
+    # Send query B -- does the shared prefix hit?
+    log("  Sending query B (different query, potentially overlapping memories)...")
+    d, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_b)
+    ct = d.get("cached_tokens")
+    pt = d["prompt_tokens"]
+    pct = f"{d['per_request_hit_rate']:.2%}" if d["per_request_hit_rate"] is not None else "n/a"
+    log(f"  Cross-query request: {ct}/{pt} cached ({pct})")
+
+    return {
+        "hypothesis": "Different queries with overlapping memories share prefix cache",
+        "status": "ANALYSIS",
+        "block_a_chars": len(block_a),
+        "block_b_chars": len(block_b),
+        "common_prefix_chars": common_prefix_len,
+        "memory_overlap_count": len(overlap),
+        "memory_overlap_ids": sorted(overlap),
+        "request": d,
+        "summary": {
+            "common_prefix_chars": common_prefix_len,
+            "memory_overlap_ratio": len(overlap) / len(ids_a) if ids_a else 0,
+            "cross_query_hit_rate": d.get("per_request_hit_rate") or d["hit_rate"],
+        },
+    }
+
+
 def write_results(results: dict) -> None:
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     out_dir = PROJECT_ROOT / "research" / "vllm-prefix-cache-validation"
@@ -432,11 +728,37 @@ def write_results(results: dict) -> None:
 
 def print_summary(results: dict) -> None:
     log("\n=== Summary ===")
-    for name in ["stable_prefix", "append_only", "recompile", "block_granularity", "threshold_analysis"]:
-        log(f"  {name}: {results.get(name, {}).get('status', 'MISSING')}")
+    for name in ALL_SCENARIOS:
+        if name in results:
+            log(f"  {name}: {results[name].get('status', 'MISSING')}")
 
 
 async def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--scenario",
+        choices=ALL_SCENARIOS,
+        help="Run a single scenario instead of the full baseline suite",
+    )
+    parser.add_argument(
+        "--list-scenarios",
+        action="store_true",
+        help="List available scenarios and exit",
+    )
+    args = parser.parse_args()
+
+    if args.list_scenarios:
+        print("Baseline scenarios (run by default):")
+        for s in BASELINE_SCENARIOS:
+            print(f"  {s}")
+        print("\nFollow-up scenarios (run with --scenario <name>):")
+        for s in FOLLOWUP_SCENARIOS:
+            print(f"  {s}")
+        return
+
     vllm_url = os.environ["VLLM_URL"]
     memoryhub_url = os.environ["MEMORYHUB_URL"]
     api_key = os.environ["MEMORYHUB_API_KEY"]
@@ -457,14 +779,31 @@ async def main() -> None:
 
     temp_memory_ids: list[str] = []
     client = MemoryHubClient(url=memoryhub_url, api_key=api_key)
+    scenarios_to_run = [args.scenario] if args.scenario else BASELINE_SCENARIOS
 
     try:
         async with client:
-            results["stable_prefix"] = await run_stable_prefix(client, vllm, mc)
-            results["append_only"] = await run_append_only(client, vllm, mc, temp_memory_ids)
-            results["recompile"] = await run_recompile(client, vllm, mc, temp_memory_ids)
-            results["block_granularity"] = await run_block_granularity(client, vllm, mc)
-            results["threshold_analysis"] = analyze_threshold(results)
+            if "stable_prefix" in scenarios_to_run:
+                results["stable_prefix"] = await run_stable_prefix(client, vllm, mc)
+            if "append_only" in scenarios_to_run:
+                results["append_only"] = await run_append_only(client, vllm, mc, temp_memory_ids)
+            if "recompile" in scenarios_to_run:
+                results["recompile"] = await run_recompile(client, vllm, mc, temp_memory_ids)
+            if "block_granularity" in scenarios_to_run:
+                results["block_granularity"] = await run_block_granularity(client, vllm, mc)
+            if "threshold_analysis" in scenarios_to_run:
+                results["threshold_analysis"] = analyze_threshold(results)
+            # Follow-up scenarios
+            if "byte_stability_fix" in scenarios_to_run:
+                results["byte_stability_fix"] = await run_byte_stability_fix(client, vllm, mc, temp_memory_ids)
+            if "immediate_recompile" in scenarios_to_run:
+                results["immediate_recompile"] = await run_immediate_recompile(client, vllm, mc, temp_memory_ids)
+            if "block_size_32" in scenarios_to_run:
+                results["block_size_32"] = await run_block_size_32(client, vllm, mc)
+            if "eviction_pressure" in scenarios_to_run:
+                results["eviction_pressure"] = await run_eviction_pressure(client, vllm, mc)
+            if "cross_query_sharing" in scenarios_to_run:
+                results["cross_query_sharing"] = await run_cross_query_sharing(client, vllm, mc)
     finally:
         if temp_memory_ids:
             async with client:

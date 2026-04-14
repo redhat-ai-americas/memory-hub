@@ -1,7 +1,7 @@
 # vLLM Prefix Cache Validation — Test Plan
 
 **Related issues:** #175 (cache-optimized memory assembly), #185 (vLLM validation)  
-**Status:** Draft
+**Status:** Active
 
 ## Background
 
@@ -44,6 +44,10 @@ Scraped from vLLM's `/metrics` Prometheus endpoint before and after each request
 **Block efficiency** = `delta_tokens_cache / (delta_tokens_cache + delta_tokens_computed)`.
 
 A 500 ms settle time is observed between receiving the HTTP response and scraping metrics, to allow vLLM's metric counters to flush.
+
+**Primary measurement (preferred):** Per-request `usage.prompt_tokens_details.cached_tokens` from the vLLM API response. Requires `--enable-prompt-tokens-details` on the server. This gives exact per-request cache hit data without noise from concurrent traffic, matching the approach OpenAI uses in their API.
+
+**Cross-check:** Prometheus metric deltas as described above.
 
 ## Test Scenarios
 
@@ -100,6 +104,77 @@ Observational — no explicit pass/fail. Documents the trade-off between appendi
 
 Output: a table of `appendix_size → block_efficiency` and the recompile recovery curve. This informs tuning the appendix threshold.
 
+## Follow-Up Scenarios
+
+These scenarios build on the baseline findings and target specific optimizations or deployment configurations. Run with `--scenario <name>` to execute individually.
+
+### BYTE_STABILITY_FIX
+
+**Prerequisite:** Fix `get_injection_block()` to render compiled and appendix as separately stable text segments (recommendation #1 from findings.md).
+
+**Purpose:** Validate that the fix restores the append-only cache benefit. With byte-stable compiled sections, appending should preserve prefix cache hits for the compiled portion.
+
+1. Fetch injection block, warm cache with 2 requests.
+2. Write 2 new memories (below recompile threshold).
+3. Fetch updated block — verify the compiled section bytes are identical to step 1.
+4. Send request with updated block.
+5. **Pass criteria:** cached tokens >= 80% of the compiled section's token count. The appendix tokens are computed fresh, but the compiled prefix hits cache.
+
+**Why it matters:** This is the scenario that validates the entire compilation epoch design. The baseline APPEND_ONLY scenario failed at 1.78% — this fix should bring it to ~80-90%.
+
+### IMMEDIATE_RECOMPILE
+
+**Prerequisite:** Set `min_appendix=1` in the compilation config.
+
+**Purpose:** Validate that immediate recompilation (on every memory change) is strictly better than appendix mode, given the byte-stability gap.
+
+1. Fetch injection block, warm cache with 2 requests.
+2. Write 1 new memory — should trigger immediate recompile (new epoch, appendix_count=0).
+3. Send request with recompiled block — expect miss.
+4. Send 3 more requests — expect hits.
+5. **Pass criteria:** Post-recompile warm hit rate >= 95%. Verify that the one-miss cost is identical to the appendix-mode cost (both ~98%), confirming no regression.
+
+**Comparison:** Run alongside the current `min_appendix=5` behavior to produce a side-by-side table.
+
+### BLOCK_SIZE_32
+
+**Prerequisite:** Redeploy vLLM with `--block-size 32`.
+
+**Purpose:** Measure whether larger cache blocks improve or degrade hit rates for MemoryHub's prompt shapes.
+
+1. Run STABLE_PREFIX with block_size=32.
+2. Compare: partial final block waste changes (`prompt_tokens mod 32` vs `mod 16`).
+3. Compare: hash computation overhead (half as many blocks to hash).
+4. **Pass criteria:** Warm hit rate >= 95%. Report the delta vs. baseline block_size=16.
+
+**Why it matters:** When deploying with llm-d across multiple vLLM pods, block size affects cross-instance cache sharing efficiency. Larger blocks mean fewer hashes to compare during routing.
+
+### EVICTION_PRESSURE
+
+**Prerequisite:** Redeploy vLLM with `--num-gpu-blocks-override N` (set to ~50% of profiled blocks).
+
+**Purpose:** Measure cache behavior under memory pressure to understand degradation characteristics.
+
+1. Run STABLE_PREFIX — warm cache.
+2. Send 20 unrelated prompts to fill the cache (force LRU eviction of our blocks).
+3. Re-send the original prompt — measure whether our blocks survived or were evicted.
+4. Monitor `vllm:num_preemptions_total` throughout.
+5. **Pass criteria:** None (observational). Report the eviction curve: how many unrelated prompts does it take to evict our cached blocks?
+
+**Why it matters:** In production, MemoryHub's cached blocks compete with other workloads for GPU memory. Understanding the eviction threshold informs capacity planning.
+
+### CROSS_QUERY_SHARING
+
+**Purpose:** Test whether different search queries returning overlapping memory sets share cache blocks.
+
+1. Search with query A ("project conventions") — get block A, warm cache.
+2. Search with query B ("deployment patterns") — get block B.
+3. Compare block A and block B: measure the character-level longest common prefix.
+4. Send request with block B.
+5. **Pass criteria:** If blocks share a prefix (same compilation epoch, same top memories), cached tokens should include the shared portion. If blocks differ from the start, expect a miss.
+
+**Why it matters:** In multi-agent deployments, different agents searching for different topics may get overlapping memory sets. Understanding whether the compilation epoch's deterministic ordering enables cross-query cache sharing informs whether a shared compilation epoch (per project, not per query) would be beneficial.
+
 ## How to Run
 
 ### Prerequisites
@@ -119,7 +194,14 @@ export MEMORYHUB_API_KEY="<your-api-key>"
 ### Execution
 
 ```bash
+# Run all baseline scenarios
 python scripts/validate-prefix-cache.py
+
+# Run a specific follow-up scenario
+python scripts/validate-prefix-cache.py --scenario BYTE_STABILITY_FIX
+
+# List available scenarios
+python scripts/validate-prefix-cache.py --list-scenarios
 ```
 
 The script runs all five scenarios in order. Progress and per-request metrics are logged to stdout. Final results are written to:
