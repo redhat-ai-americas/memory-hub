@@ -4,7 +4,24 @@ Centralized, governed memory for AI agents on OpenShift AI. MemoryHub gives ever
 
 It works with any agent framework that speaks MCP — Claude Code, kagenti-deployed agents (LangGraph, CrewAI, AG2, …), LlamaStack workflows, custom Python agents — and ships a typed Python SDK and a CLI for direct use.
 
-**Status (2026-04-07).** Core memory operations, OAuth 2.1 + JWT auth with service-layer RBAC, the dashboard UI, the published Python SDK, and the agent-memory-ergonomics work (search shape, session focus vector with cross-encoder reranking, project config + rule generation) are all shipped. The Kubernetes operator and the curator-as-background-agent layer are still on the roadmap. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem status table.
+## Why MemoryHub
+
+Agent memory is an inference cost problem disguised as a storage problem. Every agent request carries a context window dominated by injected memories — Manus reports a 100:1 input-to-output token ratio. The way those memories are assembled determines whether the LLM's KV cache can reuse prior computation or must recompute from scratch.
+
+**MemoryHub makes agent memory a cache asset, not a cache liability.** Every `search_memory` response is assembled in a deterministic, epoch-locked order designed for prefix cache hits across all major providers:
+
+| Provider | Mechanism | Savings on cache hit |
+|----------|-----------|---------------------|
+| Self-hosted (vLLM + llm-d) | Automatic Prefix Caching + cache-aware routing | 2x throughput, 152x TTFT improvement |
+| Anthropic Claude | Prompt caching | 90% cost reduction |
+| OpenAI | Automatic prefix matching | 50% cost reduction |
+| Google Gemini | Context caching | 75-90% cost reduction |
+
+The key insight: **the first agent pays full inference cost; subsequent agents with overlapping memory contexts get the cached prefix nearly free.** Ten agents sharing a project's memory context don't pay 10x — they pay ~1.9x (one full prefill + nine cache hits). This works without application-level coordination: MemoryHub produces deterministic token sequences, and the inference infrastructure (vLLM APC, llm-d routing, provider caching) handles the rest.
+
+Beyond cost, MemoryHub adds the governance layer that no other memory system provides: multi-tier scope isolation, version history with provenance branches, an immutable audit trail, policy-driven curation, and a path toward EU AI Act transparency compliance for memory operations. See `research/vllm-cache-optimization.md` for the full caching investigation and `research/context-compaction-survey.md` for the compaction strategy.
+
+**Status (2026-04-13).** Core memory operations, OAuth 2.1 + JWT auth with service-layer RBAC, the dashboard UI, the published Python SDK, the agent-memory-ergonomics work (search shape, session focus vector with cross-encoder reranking, project config + rule generation), and cache-optimized memory assembly with compilation epochs are all shipped. The Kubernetes operator and the curator-as-background-agent layer are still on the roadmap. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem status table.
 
 ## What's in this repo
 
