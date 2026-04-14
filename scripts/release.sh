@@ -7,8 +7,9 @@
 # Example: ./scripts/release.sh sdk 0.2.0 "Add search_memory and write_memory"
 #
 # Components:
-#   sdk  - MemoryHub Python SDK (sdk/)
-#   mcp  - MemoryHub MCP Server (memory-hub-mcp/)  [future]
+#   sdk            - MemoryHub Python SDK (sdk/)
+#   memoryhub-cli  - MemoryHub CLI (memoryhub-cli/)
+#   mcp            - MemoryHub MCP Server (memory-hub-mcp/)  [future]
 #
 
 set -e
@@ -26,7 +27,7 @@ if [ $# -ne 3 ]; then
     print_error "Usage: $0 <component> <version> <description>"
     echo "Example: $0 sdk 0.2.0 \"Add search_memory and write_memory\""
     echo
-    echo "Components: sdk"
+    echo "Components: sdk, memoryhub-cli"
     exit 1
 fi
 
@@ -40,13 +41,17 @@ case "$COMPONENT" in
         VERSION_FILE="sdk/src/memoryhub/__init__.py"
         PYPROJECT_FILE="sdk/pyproject.toml"
         ;;
+    memoryhub-cli)
+        VERSION_FILE="memoryhub-cli/src/memoryhub_cli/__init__.py"
+        PYPROJECT_FILE="memoryhub-cli/pyproject.toml"
+        ;;
     # mcp)
     #     VERSION_FILE="memory-hub-mcp/src/__init__.py"  # TODO: add when MCP server gets PyPI releases
     #     PYPROJECT_FILE="memory-hub-mcp/pyproject.toml"
     #     ;;
     *)
         print_error "Unknown component: $COMPONENT"
-        echo "Valid components: sdk, mcp"
+        echo "Valid components: sdk, memoryhub-cli"
         exit 1
         ;;
 esac
