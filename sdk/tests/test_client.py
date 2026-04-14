@@ -99,8 +99,10 @@ def test_from_env(monkeypatch):
 
 def test_from_env_missing_vars(monkeypatch):
     env_vars = (
-        "MEMORYHUB_URL", "MEMORYHUB_AUTH_URL",
-        "MEMORYHUB_CLIENT_ID", "MEMORYHUB_CLIENT_SECRET",
+        "MEMORYHUB_URL",
+        "MEMORYHUB_AUTH_URL",
+        "MEMORYHUB_CLIENT_ID",
+        "MEMORYHUB_CLIENT_SECRET",
     )
     for var in env_vars:
         monkeypatch.delenv(var, raising=False)
@@ -193,7 +195,7 @@ async def test_api_key_calls_register_session():
         structured_content={"user_id": "test", "message": "ok"}
     )
 
-    with patch("memoryhub.client.Client", return_value=mock_instance) as MockClient:
+    with patch("memoryhub.client.Client", return_value=mock_instance) as MockClient:  # noqa: N806
         async with c:
             pass
 
@@ -213,7 +215,7 @@ async def test_oauth_does_not_call_register_session():
 
     mock_instance = AsyncMock()
 
-    with patch("memoryhub.client.Client", return_value=mock_instance) as MockClient:
+    with patch("memoryhub.client.Client", return_value=mock_instance) as MockClient:  # noqa: N806
         async with c:
             pass
 
@@ -226,8 +228,12 @@ async def test_oauth_does_not_call_register_session():
 
 
 _ALL_ENV_VARS = (
-    "MEMORYHUB_URL", "MEMORYHUB_AUTH_URL", "MEMORYHUB_CLIENT_ID",
-    "MEMORYHUB_CLIENT_SECRET", "MEMORYHUB_API_KEY", "MEMORYHUB_SERVER_URL",
+    "MEMORYHUB_URL",
+    "MEMORYHUB_AUTH_URL",
+    "MEMORYHUB_CLIENT_ID",
+    "MEMORYHUB_CLIENT_SECRET",
+    "MEMORYHUB_API_KEY",
+    "MEMORYHUB_SERVER_URL",
 )
 
 
@@ -390,9 +396,7 @@ def test_from_env_auto_discovers_config(monkeypatch, tmp_path):
     monkeypatch.setenv("MEMORYHUB_AUTH_URL", "https://auth.example.com")
     monkeypatch.setenv("MEMORYHUB_CLIENT_ID", "my-client")
     monkeypatch.setenv("MEMORYHUB_CLIENT_SECRET", "s3cr3t")
-    (tmp_path / ".memoryhub.yaml").write_text(
-        "retrieval_defaults:\n  max_results: 42\n"
-    )
+    (tmp_path / ".memoryhub.yaml").write_text("retrieval_defaults:\n  max_results: 42\n")
     monkeypatch.chdir(tmp_path)
 
     c = MemoryHubClient.from_env()
@@ -406,9 +410,7 @@ def test_from_env_can_opt_out_of_auto_discover(monkeypatch, tmp_path):
     monkeypatch.setenv("MEMORYHUB_AUTH_URL", "https://auth.example.com")
     monkeypatch.setenv("MEMORYHUB_CLIENT_ID", "my-client")
     monkeypatch.setenv("MEMORYHUB_CLIENT_SECRET", "s3cr3t")
-    (tmp_path / ".memoryhub.yaml").write_text(
-        "retrieval_defaults:\n  max_results: 42\n"
-    )
+    (tmp_path / ".memoryhub.yaml").write_text("retrieval_defaults:\n  max_results: 42\n")
     monkeypatch.chdir(tmp_path)
 
     c = MemoryHubClient.from_env(auto_discover_config=False)
@@ -591,9 +593,7 @@ async def test_search_nested_branches_round_trip(client):
 
 async def test_read(client):
     c, mock_mcp = client
-    mock_mcp.call_tool.return_value = FakeCallToolResult(
-        structured_content=MINIMAL_MEMORY
-    )
+    mock_mcp.call_tool.return_value = FakeCallToolResult(structured_content=MINIMAL_MEMORY)
 
     result = await c.read("mem-001")
 
@@ -1056,31 +1056,42 @@ _CREATE_REL_RESPONSE = {
     "target_id": "b",
     "relationship_type": "related",
 }
+
+
 @pytest.mark.parametrize(
     "method,tool_name,call_kwargs,response",
     [
-        ("read", "read_memory",
-         {"memory_id": "mem-001"}, MINIMAL_MEMORY),
-        ("write", "write_memory",
-         {"content": "test"}, _WRITE_RESPONSE),
-        ("update", "update_memory",
-         {"memory_id": "mem-001", "content": "updated"},
-         {**MINIMAL_MEMORY, "version": 2}),
-        ("delete", "delete_memory",
-         {"memory_id": "mem-001"}, _DELETE_RESPONSE),
-        ("report_contradiction", "report_contradiction",
-         {"memory_id": "mem-001", "observed_behavior": "changed"},
-         _CONTRADICTION_RESPONSE),
-        ("get_similar", "get_similar_memories",
-         {"memory_id": "mem-001"}, {"results": []}),
-        ("get_relationships", "get_relationships",
-         {"node_id": "mem-001"}, _RELATIONSHIPS_RESPONSE),
-        ("create_relationship", "create_relationship",
-         _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
+        ("read", "read_memory", {"memory_id": "mem-001"}, MINIMAL_MEMORY),
+        ("write", "write_memory", {"content": "test"}, _WRITE_RESPONSE),
+        (
+            "update",
+            "update_memory",
+            {"memory_id": "mem-001", "content": "updated"},
+            {**MINIMAL_MEMORY, "version": 2},
+        ),
+        ("delete", "delete_memory", {"memory_id": "mem-001"}, _DELETE_RESPONSE),
+        (
+            "report_contradiction",
+            "report_contradiction",
+            {"memory_id": "mem-001", "observed_behavior": "changed"},
+            _CONTRADICTION_RESPONSE,
+        ),
+        ("get_similar", "get_similar_memories", {"memory_id": "mem-001"}, {"results": []}),
+        (
+            "get_relationships",
+            "get_relationships",
+            {"node_id": "mem-001"},
+            _RELATIONSHIPS_RESPONSE,
+        ),
+        ("create_relationship", "create_relationship", _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
     ],
 )
 async def test_project_id_forwarded_when_provided(
-    client, method, tool_name, call_kwargs, response,
+    client,
+    method,
+    tool_name,
+    call_kwargs,
+    response,
 ):
     """project_id is forwarded to the MCP tool when provided."""
     c, mock_mcp = client
@@ -1098,23 +1109,23 @@ async def test_project_id_forwarded_when_provided(
 @pytest.mark.parametrize(
     "method,call_kwargs,response",
     [
-        ("read",
-         {"memory_id": "mem-001"}, MINIMAL_MEMORY),
-        ("delete",
-         {"memory_id": "mem-001"}, _DELETE_RESPONSE),
-        ("report_contradiction",
-         {"memory_id": "mem-001", "observed_behavior": "changed"},
-         _CONTRADICTION_RESPONSE),
-        ("get_similar",
-         {"memory_id": "mem-001"}, {"results": []}),
-        ("get_relationships",
-         {"node_id": "mem-001"}, _RELATIONSHIPS_RESPONSE),
-        ("create_relationship",
-         _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
+        ("read", {"memory_id": "mem-001"}, MINIMAL_MEMORY),
+        ("delete", {"memory_id": "mem-001"}, _DELETE_RESPONSE),
+        (
+            "report_contradiction",
+            {"memory_id": "mem-001", "observed_behavior": "changed"},
+            _CONTRADICTION_RESPONSE,
+        ),
+        ("get_similar", {"memory_id": "mem-001"}, {"results": []}),
+        ("get_relationships", {"node_id": "mem-001"}, _RELATIONSHIPS_RESPONSE),
+        ("create_relationship", _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
     ],
 )
 async def test_project_id_omitted_when_none(
-    client, method, call_kwargs, response,
+    client,
+    method,
+    call_kwargs,
+    response,
 ):
     """project_id is stripped from payload when not provided."""
     c, mock_mcp = client
@@ -1244,9 +1255,7 @@ async def test_on_memory_updated_callback_fires_for_memoryhub_uri():
             await c._message_handler.on_resource_updated(
                 mt.ResourceUpdatedNotification(
                     method="notifications/resources/updated",
-                    params=mt.ResourceUpdatedNotificationParams(
-                        uri="memoryhub://memory/abc-123"
-                    ),
+                    params=mt.ResourceUpdatedNotificationParams(uri="memoryhub://memory/abc-123"),
                 )
             )
 
@@ -1277,9 +1286,7 @@ async def test_callback_ignores_non_memoryhub_uris():
             await c._message_handler.on_resource_updated(
                 mt.ResourceUpdatedNotification(
                     method="notifications/resources/updated",
-                    params=mt.ResourceUpdatedNotificationParams(
-                        uri="file:///etc/passwd"
-                    ),
+                    params=mt.ResourceUpdatedNotificationParams(uri="file:///etc/passwd"),
                 )
             )
 
@@ -1311,9 +1318,7 @@ async def test_multiple_callbacks_all_fire_in_registration_order():
             await c._message_handler.on_resource_updated(
                 mt.ResourceUpdatedNotification(
                     method="notifications/resources/updated",
-                    params=mt.ResourceUpdatedNotificationParams(
-                        uri="memoryhub://memory/x"
-                    ),
+                    params=mt.ResourceUpdatedNotificationParams(uri="memoryhub://memory/x"),
                 )
             )
 
@@ -1347,9 +1352,7 @@ async def test_callback_exception_does_not_block_others():
             await c._message_handler.on_resource_updated(
                 mt.ResourceUpdatedNotification(
                     method="notifications/resources/updated",
-                    params=mt.ResourceUpdatedNotificationParams(
-                        uri="memoryhub://memory/x"
-                    ),
+                    params=mt.ResourceUpdatedNotificationParams(uri="memoryhub://memory/x"),
                 )
             )
 
@@ -1384,9 +1387,7 @@ async def test_pre_connect_callback_replays_into_handler():
             await c._message_handler.on_resource_updated(
                 mt.ResourceUpdatedNotification(
                     method="notifications/resources/updated",
-                    params=mt.ResourceUpdatedNotificationParams(
-                        uri="memoryhub://memory/x"
-                    ),
+                    params=mt.ResourceUpdatedNotificationParams(uri="memoryhub://memory/x"),
                 )
             )
 

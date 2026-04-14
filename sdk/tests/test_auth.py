@@ -55,9 +55,7 @@ async def test_initial_token_fetch(monkeypatch):
     mock_post = _mock_post_response(200, {"access_token": token, "refresh_token": "rt-1"})
 
     with patch("memoryhub.auth.httpx.AsyncClient") as mock_client_cls:
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(post=mock_post)
-        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         auth = _make_auth()
@@ -77,9 +75,7 @@ async def test_token_cached_when_valid(monkeypatch):
     mock_post = _mock_post_response(200, {"access_token": token})
 
     with patch("memoryhub.auth.httpx.AsyncClient") as mock_client_cls:
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(post=mock_post)
-        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         auth = _make_auth()
@@ -112,9 +108,7 @@ async def test_token_refreshed_when_expired():
     )
 
     with patch("memoryhub.auth.httpx.AsyncClient") as mock_client_cls:
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(post=mock_post)
-        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         result = await auth._ensure_token()
@@ -150,9 +144,7 @@ async def test_refresh_fallback_to_client_credentials():
     )
 
     with patch("memoryhub.auth.httpx.AsyncClient") as mock_client_cls:
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(post=mock_post)
-        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         result = await auth._ensure_token()
@@ -176,9 +168,7 @@ async def test_auth_error_on_failed_credentials():
     mock_post = AsyncMock(return_value=fail_resp)
 
     with patch("memoryhub.auth.httpx.AsyncClient") as mock_client_cls:
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(post=mock_post)
-        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         auth = _make_auth()
@@ -228,18 +218,18 @@ async def test_auth_flow_injects_bearer_header():
     token = _make_token()
     ok_resp = MagicMock(spec=httpx.Response)
     ok_resp.status_code = 200
-    mock_post = AsyncMock(return_value=MagicMock(
-        status_code=200,
-        json=MagicMock(return_value={"access_token": token}),
-        headers={"content-type": "application/json"},
-    ))
+    mock_post = AsyncMock(
+        return_value=MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"access_token": token}),
+            headers={"content-type": "application/json"},
+        )
+    )
 
     request = httpx.Request("GET", "https://memoryhub.example.com/memories")
 
     with patch("memoryhub.auth.httpx.AsyncClient") as mock_client_cls:
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(post=mock_post)
-        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         auth = _make_auth()
@@ -274,9 +264,7 @@ async def test_auth_flow_retries_on_401():
     unauthorized.status_code = 401
 
     with patch("memoryhub.auth.httpx.AsyncClient") as mock_client_cls:
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(post=mock_post)
-        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         auth = _make_auth()

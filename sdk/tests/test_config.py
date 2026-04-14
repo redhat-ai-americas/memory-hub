@@ -11,7 +11,6 @@ from memoryhub.config import (
     ConfigError,
     MemoryLoadingConfig,
     ProjectConfig,
-    RetrievalDefaults,
     find_project_config,
     load_project_config,
 )

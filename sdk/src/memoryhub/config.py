@@ -59,7 +59,9 @@ class MemoryLoadingConfig(BaseModel):
 
     # Cache optimization (#175) — controls how memories are assembled into the
     # injection block and how the server maintains compilation stability.
-    injection_position: Literal["user_message_prefix", "system_prompt_suffix"] = "user_message_prefix"
+    injection_position: Literal["user_message_prefix", "system_prompt_suffix"] = (
+        "user_message_prefix"
+    )
     sort_order: Literal["weight_desc", "relevance"] = "weight_desc"
     append_only_growth: bool = True
     include_metadata_in_injection: bool = False

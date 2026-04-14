@@ -70,9 +70,7 @@ class _MemoryHubMessageHandler(MessageHandler):
     def register(self, callback: MemoryUpdatedCallback) -> None:
         self._callbacks.append(callback)
 
-    async def on_resource_updated(
-        self, message: mt.ResourceUpdatedNotification
-    ) -> None:
+    async def on_resource_updated(self, message: mt.ResourceUpdatedNotification) -> None:
         uri = str(message.params.uri)
         if not uri.startswith("memoryhub://memory/"):
             return
@@ -80,9 +78,7 @@ class _MemoryHubMessageHandler(MessageHandler):
             try:
                 await callback(uri)
             except Exception as exc:
-                logger.warning(
-                    "memory-update callback raised; continuing: %s", exc
-                )
+                logger.warning("memory-update callback raised; continuing: %s", exc)
 
 
 class MemoryHubClient:
@@ -177,8 +173,7 @@ class MemoryHubClient:
 
         if api_key is not None and has_any_oauth:
             raise ValueError(
-                "Cannot combine api_key with OAuth parameters "
-                "(auth_url, client_id, client_secret)"
+                "Cannot combine api_key with OAuth parameters (auth_url, client_id, client_secret)"
             )
 
         if api_key is not None:
@@ -202,9 +197,7 @@ class MemoryHubClient:
                 missing.append("client_id")
             if client_secret is None:
                 missing.append("client_secret")
-            raise MemoryHubError(
-                f"Incomplete OAuth configuration, missing: {', '.join(missing)}"
-            )
+            raise MemoryHubError(f"Incomplete OAuth configuration, missing: {', '.join(missing)}")
         else:
             raise MemoryHubError(
                 "Either api_key or OAuth parameters "
@@ -284,9 +277,7 @@ class MemoryHubClient:
             missing.append("MEMORYHUB_CLIENT_SECRET")
 
         if missing:
-            raise MemoryHubError(
-                f"Missing required environment variables: {', '.join(missing)}"
-            )
+            raise MemoryHubError(f"Missing required environment variables: {', '.join(missing)}")
 
         return cls(
             url=effective_url,
@@ -314,9 +305,7 @@ class MemoryHubClient:
         if self._auth is not None:
             kwargs["auth"] = self._auth
 
-        self._mcp = Client(
-            self._url, message_handler=message_handler, **kwargs
-        )
+        self._mcp = Client(self._url, message_handler=message_handler, **kwargs)
         await self._mcp.__aenter__()
 
         # API key mode: authenticate via register_session after connecting
@@ -365,8 +354,11 @@ class MemoryHubClient:
                 raise PermissionDeniedError(tool_name, msg)
             if "already exists" in msg_lower or "already deleted" in msg_lower:
                 raise ConflictError(tool_name, msg)
-            if (msg_lower.startswith("invalid ") or " must be " in msg_lower
-                    or "cannot be empty" in msg_lower):
+            if (
+                msg_lower.startswith("invalid ")
+                or " must be " in msg_lower
+                or "cannot be empty" in msg_lower
+            ):
                 raise ValidationError(tool_name, msg)
             raise ToolError(tool_name, msg or "Unknown error (empty response)")
 
@@ -581,17 +573,20 @@ class MemoryHubClient:
             project_id: Project identifier for campaign enrollment verification.
             domains: Domain tags for the memory, e.g. ['React', 'Spring Boot'].
         """
-        data = await self._call("write_memory", {
-            "content": content,
-            "scope": scope,
-            "owner_id": owner_id,
-            "weight": weight,
-            "parent_id": parent_id,
-            "branch_type": branch_type,
-            "metadata": metadata,
-            "project_id": project_id,
-            "domains": domains,
-        })
+        data = await self._call(
+            "write_memory",
+            {
+                "content": content,
+                "scope": scope,
+                "owner_id": owner_id,
+                "weight": weight,
+                "parent_id": parent_id,
+                "branch_type": branch_type,
+                "metadata": metadata,
+                "project_id": project_id,
+                "domains": domains,
+            },
+        )
         return WriteResult.model_validate(data)
 
     async def update(
@@ -617,17 +612,18 @@ class MemoryHubClient:
             domains: Domain tags for the memory, e.g. ['React', 'Spring Boot'].
         """
         if content is None and weight is None and metadata is None:
-            raise ValueError(
-                "update() requires at least one of: content, weight, metadata"
-            )
-        data = await self._call("update_memory", {
-            "memory_id": memory_id,
-            "content": content,
-            "weight": weight,
-            "metadata": metadata,
-            "project_id": project_id,
-            "domains": domains,
-        })
+            raise ValueError("update() requires at least one of: content, weight, metadata")
+        data = await self._call(
+            "update_memory",
+            {
+                "memory_id": memory_id,
+                "content": content,
+                "weight": weight,
+                "metadata": metadata,
+                "project_id": project_id,
+                "domains": domains,
+            },
+        )
         return Memory.model_validate(data)
 
     async def delete(self, memory_id: str, *, project_id: str | None = None) -> DeleteResult:
@@ -637,10 +633,13 @@ class MemoryHubClient:
             memory_id: ID of the memory to delete.
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call("delete_memory", {
-            "memory_id": memory_id,
-            "project_id": project_id,
-        })
+        data = await self._call(
+            "delete_memory",
+            {
+                "memory_id": memory_id,
+                "project_id": project_id,
+            },
+        )
         return DeleteResult.model_validate(data)
 
     # ── Lifecycle ───────────────────────────────────────────────────
@@ -661,12 +660,15 @@ class MemoryHubClient:
             confidence: Reporter's confidence in the contradiction (0.0-1.0, default 0.7).
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call("report_contradiction", {
-            "memory_id": memory_id,
-            "observed_behavior": observed_behavior,
-            "confidence": confidence,
-            "project_id": project_id,
-        })
+        data = await self._call(
+            "report_contradiction",
+            {
+                "memory_id": memory_id,
+                "observed_behavior": observed_behavior,
+                "confidence": confidence,
+                "project_id": project_id,
+            },
+        )
         return ContradictionResult.model_validate(data)
 
     # ── Similarity & relationships ──────────────────────────────────
@@ -689,13 +691,16 @@ class MemoryHubClient:
             offset: Pagination offset (default 0).
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call("get_similar_memories", {
-            "memory_id": memory_id,
-            "threshold": threshold,
-            "max_results": max_results,
-            "offset": offset,
-            "project_id": project_id,
-        })
+        data = await self._call(
+            "get_similar_memories",
+            {
+                "memory_id": memory_id,
+                "threshold": threshold,
+                "max_results": max_results,
+                "offset": offset,
+                "project_id": project_id,
+            },
+        )
         results = data.get("results", [])
         return [Memory.model_validate(r) for r in results]
 
@@ -717,13 +722,16 @@ class MemoryHubClient:
             include_provenance: If True, include provenance metadata on each edge.
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call("get_relationships", {
-            "node_id": node_id,
-            "relationship_type": relationship_type,
-            "direction": direction,
-            "include_provenance": include_provenance,
-            "project_id": project_id,
-        })
+        data = await self._call(
+            "get_relationships",
+            {
+                "node_id": node_id,
+                "relationship_type": relationship_type,
+                "direction": direction,
+                "include_provenance": include_provenance,
+                "project_id": project_id,
+            },
+        )
         return RelationshipsResult.model_validate(data)
 
     async def create_relationship(
@@ -744,13 +752,16 @@ class MemoryHubClient:
             metadata: Arbitrary metadata for the relationship edge.
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call("create_relationship", {
-            "source_id": source_id,
-            "target_id": target_id,
-            "relationship_type": relationship_type,
-            "metadata": metadata,
-            "project_id": project_id,
-        })
+        data = await self._call(
+            "create_relationship",
+            {
+                "source_id": source_id,
+                "target_id": target_id,
+                "relationship_type": relationship_type,
+                "metadata": metadata,
+                "project_id": project_id,
+            },
+        )
         return RelationshipInfo.model_validate(data)
 
     # ── Curation ────────────────────────────────────────────────────
@@ -767,15 +778,18 @@ class MemoryHubClient:
         priority: int = 10,
     ) -> CurationRuleResult:
         """Create or update a curation rule."""
-        data = await self._call("set_curation_rule", {
-            "name": name,
-            "tier": tier,
-            "action": action,
-            "config": config,
-            "scope_filter": scope_filter,
-            "enabled": enabled,
-            "priority": priority,
-        })
+        data = await self._call(
+            "set_curation_rule",
+            {
+                "name": name,
+                "tier": tier,
+                "action": action,
+                "config": config,
+                "scope_filter": scope_filter,
+                "enabled": enabled,
+                "priority": priority,
+            },
+        )
         return CurationRuleResult.model_validate(data)
 
     # ── Session focus (#61) ─────────────────────────────────────────
@@ -804,10 +818,13 @@ class MemoryHubClient:
             A dict with ``session_id``, ``user_id``, ``project``, ``focus``,
             ``expires_at``, and ``message``.
         """
-        return await self._call("set_session_focus", {
-            "focus": focus,
-            "project": project,
-        })
+        return await self._call(
+            "set_session_focus",
+            {
+                "focus": focus,
+                "project": project,
+            },
+        )
 
     async def get_focus_history(
         self,
@@ -834,11 +851,14 @@ class MemoryHubClient:
             ``total_sessions``, and ``histogram`` (list of ``{focus, count}``
             sorted by count descending, ties alphabetical).
         """
-        return await self._call("get_focus_history", {
-            "project": project,
-            "start_date": start_date,
-            "end_date": end_date,
-        })
+        return await self._call(
+            "get_focus_history",
+            {
+                "project": project,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+        )
 
     # ── Push notifications (#62, Pattern E) ─────────────────────────
 
@@ -919,35 +939,45 @@ class MemoryHubClient:
 
     def search_sync(self, query: str, **kwargs) -> SearchResult:
         """Synchronous wrapper for search()."""
+
         async def _do():
             async with self:
                 return await self.search(query, **kwargs)
+
         return self._run_sync(_do())
 
     def read_sync(self, memory_id: str, **kwargs) -> Memory:
         """Synchronous wrapper for read()."""
+
         async def _do():
             async with self:
                 return await self.read(memory_id, **kwargs)
+
         return self._run_sync(_do())
 
     def write_sync(self, content: str, **kwargs) -> WriteResult:
         """Synchronous wrapper for write()."""
+
         async def _do():
             async with self:
                 return await self.write(content, **kwargs)
+
         return self._run_sync(_do())
 
     def update_sync(self, memory_id: str, **kwargs) -> Memory:
         """Synchronous wrapper for update()."""
+
         async def _do():
             async with self:
                 return await self.update(memory_id, **kwargs)
+
         return self._run_sync(_do())
 
     def delete_sync(self, memory_id: str) -> DeleteResult:
         """Synchronous wrapper for delete()."""
+
         async def _do():
             async with self:
                 return await self.delete(memory_id)
+
         return self._run_sync(_do())

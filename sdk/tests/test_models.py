@@ -165,11 +165,14 @@ def test_write_result_parse():
     assert "near_duplicate" in result.curation.flags
 
 
-@pytest.mark.parametrize("blocked,similar_count,flags", [
-    (False, 0, []),
-    (True, 3, ["near_duplicate", "high_overlap"]),
-    (False, 1, ["near_duplicate"]),
-])
+@pytest.mark.parametrize(
+    "blocked,similar_count,flags",
+    [
+        (False, 0, []),
+        (True, 3, ["near_duplicate", "high_overlap"]),
+        (False, 1, ["near_duplicate"]),
+    ],
+)
 def test_curation_info_variants(blocked, similar_count, flags):
     """CurationInfo handles various blocked/similar_count/flags combinations."""
     info = CurationInfo(blocked=blocked, similar_count=similar_count, flags=flags)
@@ -231,11 +234,14 @@ def test_history_result_parse():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("contradiction_count,revision_triggered,message", [
-    (1, False, "Contradiction recorded."),
-    (5, True, "Threshold reached — revision queued."),
-    (0, False, ""),
-])
+@pytest.mark.parametrize(
+    "contradiction_count,revision_triggered,message",
+    [
+        (1, False, "Contradiction recorded."),
+        (5, True, "Threshold reached — revision queued."),
+        (0, False, ""),
+    ],
+)
 def test_contradiction_result_parse(contradiction_count, revision_triggered, message):
     """Parse contradiction report with various trigger states."""
     payload = {

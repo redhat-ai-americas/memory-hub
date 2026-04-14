@@ -40,10 +40,7 @@ if _missing:
     pytestmark = [
         pytestmark,
         pytest.mark.skip(
-            reason=(
-                "Live RBAC tests require env vars: "
-                + ", ".join(_missing)
-            ),
+            reason=("Live RBAC tests require env vars: " + ", ".join(_missing)),
         ),
     ]
 
@@ -109,8 +106,7 @@ async def test_authenticated_search(wjackson_client: MemoryHubClient):
     for mem in result.results:
         if mem.scope == "user":
             assert mem.owner_id == "wjackson", (
-                f"User-scope memory {mem.id} has owner_id={mem.owner_id!r}, "
-                "expected 'wjackson'"
+                f"User-scope memory {mem.id} has owner_id={mem.owner_id!r}, expected 'wjackson'"
             )
 
 
@@ -119,7 +115,9 @@ async def test_write_and_read_user_scope(wjackson_client: MemoryHubClient):
     content = _test_content("write-read-roundtrip")
 
     write_result = await wjackson_client.write(
-        content=content, scope="user", owner_id="wjackson",
+        content=content,
+        scope="user",
+        owner_id="wjackson",
     )
     memory = write_result.memory
     assert memory.content == content
@@ -137,7 +135,9 @@ async def test_update_own_memory(wjackson_client: MemoryHubClient):
     """Write a memory then update it; version should increment."""
     original = _test_content("update-original")
     write_result = await wjackson_client.write(
-        content=original, scope="user", owner_id="wjackson",
+        content=original,
+        scope="user",
+        owner_id="wjackson",
     )
     memory_id = write_result.memory.id
     assert write_result.memory.version == 1
@@ -160,7 +160,9 @@ async def test_cross_user_read_denied(
     """
     content = _test_content("cross-user-isolation")
     write_result = await wjackson_client.write(
-        content=content, scope="user", owner_id="wjackson",
+        content=content,
+        scope="user",
+        owner_id="wjackson",
     )
     wjackson_memory_id = write_result.memory.id
 
@@ -169,9 +171,15 @@ async def test_cross_user_read_denied(
         await curator_client.read(wjackson_memory_id)
 
     error_text = str(exc_info.value).lower()
-    assert any(term in error_text for term in (
-        "authorized", "denied", "not found", "error",
-    )), f"Expected authorization error, got: {exc_info.value}"
+    assert any(
+        term in error_text
+        for term in (
+            "authorized",
+            "denied",
+            "not found",
+            "error",
+        )
+    ), f"Expected authorization error, got: {exc_info.value}"
 
 
 async def test_search_scope_filtering(wjackson_client: MemoryHubClient):
@@ -179,7 +187,9 @@ async def test_search_scope_filtering(wjackson_client: MemoryHubClient):
     # Write a memory so there's at least one result
     content = _test_content("scope-filter-check")
     await wjackson_client.write(
-        content=content, scope="user", owner_id="wjackson",
+        content=content,
+        scope="user",
+        owner_id="wjackson",
     )
 
     result = await wjackson_client.search("scope-filter-check", scope="user")
@@ -205,20 +215,30 @@ async def test_write_organizational_denied_for_user(
     content = _test_content("org-scope-denied")
     with pytest.raises(Exception) as exc_info:
         await wjackson_client.write(
-            content=content, scope="organizational", owner_id="wjackson",
+            content=content,
+            scope="organizational",
+            owner_id="wjackson",
         )
 
     error_text = str(exc_info.value).lower()
-    assert any(term in error_text for term in (
-        "authorized", "denied", "not authorized", "error",
-    )), f"Expected authorization error, got: {exc_info.value}"
+    assert any(
+        term in error_text
+        for term in (
+            "authorized",
+            "denied",
+            "not authorized",
+            "error",
+        )
+    ), f"Expected authorization error, got: {exc_info.value}"
 
 
 async def test_history_own_memory(wjackson_client: MemoryHubClient):
     """Write and update a memory, then verify history shows both versions."""
     content_v1 = _test_content("history-v1")
     write_result = await wjackson_client.write(
-        content=content_v1, scope="user", owner_id="wjackson",
+        content=content_v1,
+        scope="user",
+        owner_id="wjackson",
     )
     memory_id = write_result.memory.id
 
@@ -227,12 +247,12 @@ async def test_history_own_memory(wjackson_client: MemoryHubClient):
 
     # update creates a new version with a new ID; use it for history
     mem_with_history = await wjackson_client.read(
-        updated.id, include_versions=True, history_max_versions=100,
+        updated.id,
+        include_versions=True,
+        history_max_versions=100,
     )
     vh = mem_with_history.version_history
-    assert vh["total_versions"] >= 2, (
-        f"Expected at least 2 versions, got {vh['total_versions']}"
-    )
+    assert vh["total_versions"] >= 2, f"Expected at least 2 versions, got {vh['total_versions']}"
     assert len(vh["versions"]) >= 2
 
     # Versions should be ordered; verify both contents appear
@@ -252,6 +272,14 @@ async def test_invalid_credentials_rejected():
 
     # Verify the error is auth-related, not a random failure
     error_text = str(exc_info.value).lower()
-    assert any(term in error_text for term in (
-        "authentication", "unauthorized", "invalid", "denied", "401", "credentials",
-    )), f"Expected auth error, got: {exc_info.value}"
+    assert any(
+        term in error_text
+        for term in (
+            "authentication",
+            "unauthorized",
+            "invalid",
+            "denied",
+            "401",
+            "credentials",
+        )
+    ), f"Expected auth error, got: {exc_info.value}"
