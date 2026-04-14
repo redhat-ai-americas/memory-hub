@@ -1,11 +1,15 @@
 """Semantic search across accessible memories via pgvector.
 
 The primary discovery mechanism for agents -- no need to know memory IDs
-upfront. Results are a mix of full content (high-weight matches) and stubs
-(lower-weight matches), keeping responses token-efficient.
+upfront. Results are returned in cache-optimized order by default (stable
+ordering for KV cache efficiency), with a ``raw_results`` flag to opt into
+legacy similarity-ranked output. Result detail is a mix of full content
+(high-weight matches) and stubs (lower-weight matches), keeping responses
+token-efficient.
 """
 
 import json
+import logging
 from typing import Annotated, Any, Literal
 
 from fastmcp import Context
@@ -14,8 +18,18 @@ from pydantic import Field
 
 from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
 from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.compilation import (
+    CompilationEpoch,
+    apply_compilation,
+    compile_memory_set,
+    should_recompile,
+)
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
+from memoryhub_core.services.valkey_client import (
+    ValkeyUnavailableError,
+    get_valkey_client,
+)
 from memoryhub_core.services.memory import (
     count_search_matches,
     search_memories,
@@ -36,6 +50,8 @@ from src.tools._deps import (
     get_reranker_service,
     release_db_session,
 )
+
+logger = logging.getLogger(__name__)
 
 VALID_SCOPES = {s.value for s in MemoryScope}
 
@@ -58,6 +74,7 @@ def _to_stub(read: MemoryNodeRead) -> MemoryNodeStub:
         has_children=read.has_children,
         has_rationale=read.has_rationale,
         domains=read.domains,
+        created_at=read.created_at,
     )
 
 
@@ -123,6 +140,109 @@ def _format_entry(
             branch_entries.append(branch_entry)
         entry["branches"] = branch_entries
     return entry, _estimate_tokens(entry)
+
+
+def _format_entry_cached(
+    item: MemoryNodeRead | MemoryNodeStub,
+    nested_branches: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+    is_appendix: bool = False,
+) -> tuple[dict[str, Any], int]:
+    """Build cache-optimized entry -- no relevance_score, adds is_appendix."""
+    entry = item.model_dump(mode="json")
+    entry["result_type"] = "full" if isinstance(item, MemoryNodeRead) else "stub"
+    entry["is_appendix"] = is_appendix
+    if item.branch_type == "chunk" and item.parent_id is not None:
+        entry["parent_hint"] = (
+            f"This is a chunk of a larger memory. Call "
+            f"read_memory('{item.parent_id}', hydrate=true) for full content."
+        )
+    if nested_branches:
+        branch_entries: list[dict[str, Any]] = []
+        for branch_item, _score in nested_branches:
+            branch_entry = branch_item.model_dump(mode="json")
+            branch_entry["result_type"] = (
+                "full" if isinstance(branch_item, MemoryNodeRead) else "stub"
+            )
+            branch_entries.append(branch_entry)
+        entry["branches"] = branch_entries
+    return entry, _estimate_tokens(entry)
+
+
+async def _apply_cache_optimized_ordering(
+    results: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+    tenant_id: str,
+    owner_id: str,
+) -> dict[str, Any] | None:
+    """Apply compilation-epoch ordering for cache-stable responses.
+
+    Returns a dict with:
+      - ordered_results: list of (item, score, is_appendix) triples
+      - compilation_hash: str
+      - compilation_epoch: int
+      - appendix_count: int
+
+    Returns None if results are empty. Falls back to deterministic sort
+    (no Valkey state) if Valkey is unavailable.
+    """
+    if not results:
+        return None
+
+    valkey = get_valkey_client()
+
+    try:
+        existing_data = await valkey.read_compilation(tenant_id, owner_id)
+    except ValkeyUnavailableError:
+        logger.warning("Valkey unavailable; falling back to deterministic sort")
+        existing_data = None
+
+    if existing_data is not None:
+        epoch = CompilationEpoch.from_dict(existing_data)
+        compiled, appendix = apply_compilation(results, epoch)
+
+        if should_recompile(len(compiled), len(appendix)):
+            new_epoch = compile_memory_set(results, epoch=epoch.epoch + 1)
+            try:
+                await valkey.write_compilation(
+                    tenant_id, owner_id, new_epoch.to_dict()
+                )
+            except ValkeyUnavailableError:
+                logger.warning("Valkey unavailable; recompile not persisted")
+            ordered = [(item, score, False) for item, score in results]
+            id_order = {mid: i for i, mid in enumerate(new_epoch.ordered_ids)}
+            ordered.sort(key=lambda t: id_order.get(str(t[0].id), len(id_order)))
+            return {
+                "ordered_results": ordered,
+                "compilation_hash": new_epoch.compilation_hash,
+                "compilation_epoch": new_epoch.epoch,
+                "appendix_count": 0,
+            }
+
+        # Normal case: compiled in epoch order, appendix at end
+        ordered = [(item, score, False) for item, score in compiled]
+        ordered.extend((item, score, True) for item, score in appendix)
+        return {
+            "ordered_results": ordered,
+            "compilation_hash": epoch.compilation_hash,
+            "compilation_epoch": epoch.epoch,
+            "appendix_count": len(appendix),
+        }
+
+    # No existing compilation -- create the first one
+    new_epoch = compile_memory_set(results, epoch=1)
+    try:
+        await valkey.write_compilation(tenant_id, owner_id, new_epoch.to_dict())
+    except ValkeyUnavailableError:
+        logger.warning("Valkey unavailable; initial compilation not persisted")
+
+    ordered = [(item, score, False) for item, score in results]
+    id_order = {mid: i for i, mid in enumerate(new_epoch.ordered_ids)}
+    ordered.sort(key=lambda t: id_order.get(str(t[0].id), len(id_order)))
+    return {
+        "ordered_results": ordered,
+        "compilation_hash": new_epoch.compilation_hash,
+        "compilation_epoch": new_epoch.epoch,
+        "appendix_count": 0,
+    }
 
 
 @mcp.tool(
@@ -293,22 +413,47 @@ async def search_memory(
             ),
         ),
     ] = None,
+    raw_results: Annotated[
+        bool,
+        Field(
+            description=(
+                "When True, skip cache-optimized assembly and return results "
+                "ranked by similarity score (legacy behavior). Default False "
+                "returns results in a stable, deterministic order optimized "
+                "for KV cache efficiency when injected into prompts."
+            ),
+        ),
+    ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Search memories using semantic similarity. Returns ranked results as a mix of
-    full content (high-weight) and lightweight stubs (lower-weight). Use read_memory
-    to expand stubs that look interesting.
+    """Search memories using semantic similarity.
+
+    By default, results are returned in cache-optimized order: a stable,
+    deterministic ordering driven by compilation epochs (#175) that maximizes
+    KV cache hit rates when the response is injected into prompts. New
+    memories since the last compilation appear in an appendix section
+    (is_appendix=True). Set raw_results=True to revert to legacy
+    similarity-ranked output with relevance_score per entry.
 
     Response fields:
-      - results: the page of ranked matches (size <= max_results, possibly less
-        when branches were omitted by the default branch-handling rule). Each
-        entry has result_type ('full' or 'stub'), relevance_score, and -- when
-        include_branches=True -- a 'branches' list of nested branch entries.
+      - results: the page of matches (size <= max_results, possibly less
+        when branches were omitted by the default branch-handling rule).
+        In cache-optimized mode (default), each entry has result_type
+        ('full' or 'stub') and is_appendix (bool). In raw mode, each
+        entry has result_type and relevance_score (float). Both modes
+        support 'branches' (when include_branches=True).
       - total_matching: total count of memories matching the filter set
         (scope/owner/current_only/RBAC), independent of max_results and of any
         in-memory branch omission. Use this to display "showing N of M".
       - has_more: true when total_matching > len(results); indicates that
         narrowing filters or paging would reveal additional matches.
+      - compilation_hash (cache-optimized mode only): SHA-256 of the
+        compilation epoch's ordered ID list; stable across calls until
+        recompilation.
+      - compilation_epoch (cache-optimized mode only): integer epoch
+        counter; increments on recompilation.
+      - appendix_count (cache-optimized mode only): number of results
+        that are new since the last compilation.
       - pivot_suggested (only when 'focus' was set): true if the immediate
         query embedding sits far from the session focus vector, indicating
         the user has likely pivoted off-topic. Agents should consider
@@ -319,7 +464,8 @@ async def search_memory(
     Sizing controls:
       - mode controls full-vs-stub detail per result.
       - max_response_tokens caps total response size; results past the budget
-        degrade to stubs in similarity order.
+        degrade to stubs in similarity order (raw) or compilation order
+        (cache-optimized).
       - include_branches controls whether branches whose parent is also in the
         result set are dropped (default) or nested under their parent.
 
@@ -506,6 +652,21 @@ async def search_memory(
                 for item, score in results
             ]
 
+        # --- Cache-optimized assembly (default, #175) ---
+        # When raw_results is False (the default), reorder results by
+        # compilation epoch for cache-stable prompt injection. Runs after
+        # mode='index' so stubs are used in the compilation ordering.
+        compilation_meta: dict[str, Any] | None = None
+        cache_optimized = not raw_results
+        if cache_optimized and results:
+            # owner_id for compilation scope: the effective owner from the
+            # tool parameter (already resolved above — None means "all
+            # owners", which we key as "*" for the compilation hash).
+            compilation_owner = owner_id if owner_id is not None else "*"
+            compilation_meta = await _apply_cache_optimized_ordering(
+                results, tenant, compilation_owner
+            )
+
         # Branch handling: identify branches whose parent is also in the result
         # set. Default behavior drops them; include_branches=True nests them
         # under the parent in a 'branches' field.
@@ -524,65 +685,113 @@ async def search_memory(
             else:
                 top_level.append((item, score))
 
-        # Token-budget packing. Walk results in similarity order; full-form
-        # entries that exceed the remaining budget (and everything after them)
-        # are degraded to stub form. Stubs are still included so the agent
-        # never silently misses a match.
+        # Filter branches from compilation-ordered results so they aren't
+        # duplicated as both nested and top-level.
+        if compilation_meta is not None:
+            branch_ids = result_id_set - {str(item.id) for item, _ in top_level}
+            compilation_meta["ordered_results"] = [
+                (item, score, is_app)
+                for item, score, is_app in compilation_meta["ordered_results"]
+                if str(item.id) not in branch_ids
+            ]
+
+        # Token-budget packing. Walk results in order; full-form entries
+        # that exceed the remaining budget (and everything after them)
+        # are degraded to stub form. Stubs are always included so the
+        # agent never silently misses a match.
         budget = max_response_tokens
         budget_exhausted = False
         formatted: list[dict[str, Any]] = []
-        for item, relevance_score in top_level:
-            child_branches = nested_by_parent.get(str(item.id), [])
 
-            if budget_exhausted:
-                # Already over budget -- everything from here on is stub form.
-                output_item = (
-                    _to_stub(item) if isinstance(item, MemoryNodeRead) else item
-                )
-                output_branches = [
-                    (
-                        (_to_stub(b) if isinstance(b, MemoryNodeRead) else b),
-                        s,
-                    )
-                    for b, s in child_branches
-                ]
-                entry, cost = _format_entry(
-                    output_item, relevance_score, output_branches
-                )
-                formatted.append(entry)
-                budget = max(0, budget - cost)
-                continue
+        if compilation_meta is not None:
+            # Cache-optimized: iterate compilation-ordered results
+            for item, _score, is_appendix in compilation_meta["ordered_results"]:
+                child_branches = nested_by_parent.get(str(item.id), [])
 
-            # Try the full form first.
-            entry, cost = _format_entry(item, relevance_score, child_branches)
-            if isinstance(item, MemoryNodeStub) or cost <= budget:
-                # Either it's already a stub (no degradation possible) or it
-                # fits the budget. Either way, include as-is.
-                formatted.append(entry)
-                budget = max(0, budget - cost)
-            else:
-                # Too expensive: degrade this entry and switch to exhausted mode
-                # so subsequent entries are also stubbed.
-                budget_exhausted = True
-                stub_item = _to_stub(item)
-                stub_branches = [
-                    (
-                        (_to_stub(b) if isinstance(b, MemoryNodeRead) else b),
-                        s,
+                if budget_exhausted:
+                    output_item = (
+                        _to_stub(item) if isinstance(item, MemoryNodeRead) else item
                     )
-                    for b, s in child_branches
-                ]
-                stub_entry, stub_cost = _format_entry(
-                    stub_item, relevance_score, stub_branches
-                )
-                formatted.append(stub_entry)
-                budget = max(0, budget - stub_cost)
+                    output_branches = [
+                        ((_to_stub(b) if isinstance(b, MemoryNodeRead) else b), s)
+                        for b, s in child_branches
+                    ]
+                    entry, cost = _format_entry_cached(
+                        output_item, output_branches, is_appendix
+                    )
+                    formatted.append(entry)
+                    budget = max(0, budget - cost)
+                    continue
+
+                entry, cost = _format_entry_cached(item, child_branches, is_appendix)
+                if isinstance(item, MemoryNodeStub) or cost <= budget:
+                    formatted.append(entry)
+                    budget = max(0, budget - cost)
+                else:
+                    budget_exhausted = True
+                    stub_item = _to_stub(item)
+                    stub_branches = [
+                        ((_to_stub(b) if isinstance(b, MemoryNodeRead) else b), s)
+                        for b, s in child_branches
+                    ]
+                    stub_entry, stub_cost = _format_entry_cached(
+                        stub_item, stub_branches, is_appendix
+                    )
+                    formatted.append(stub_entry)
+                    budget = max(0, budget - stub_cost)
+        else:
+            # Raw results: existing similarity-ranked behavior
+            for item, relevance_score in top_level:
+                child_branches = nested_by_parent.get(str(item.id), [])
+
+                if budget_exhausted:
+                    output_item = (
+                        _to_stub(item) if isinstance(item, MemoryNodeRead) else item
+                    )
+                    output_branches = [
+                        (
+                            (_to_stub(b) if isinstance(b, MemoryNodeRead) else b),
+                            s,
+                        )
+                        for b, s in child_branches
+                    ]
+                    entry, cost = _format_entry(
+                        output_item, relevance_score, output_branches
+                    )
+                    formatted.append(entry)
+                    budget = max(0, budget - cost)
+                    continue
+
+                # Try the full form first.
+                entry, cost = _format_entry(item, relevance_score, child_branches)
+                if isinstance(item, MemoryNodeStub) or cost <= budget:
+                    formatted.append(entry)
+                    budget = max(0, budget - cost)
+                else:
+                    budget_exhausted = True
+                    stub_item = _to_stub(item)
+                    stub_branches = [
+                        (
+                            (_to_stub(b) if isinstance(b, MemoryNodeRead) else b),
+                            s,
+                        )
+                        for b, s in child_branches
+                    ]
+                    stub_entry, stub_cost = _format_entry(
+                        stub_item, relevance_score, stub_branches
+                    )
+                    formatted.append(stub_entry)
+                    budget = max(0, budget - stub_cost)
 
         response = {
             "results": formatted,
             "total_matching": total_matching,
             "has_more": total_matching > len(formatted),
         }
+        if compilation_meta is not None:
+            response["compilation_hash"] = compilation_meta["compilation_hash"]
+            response["compilation_epoch"] = compilation_meta["compilation_epoch"]
+            response["appendix_count"] = compilation_meta["appendix_count"]
         if focus_meta is not None:
             # Surface only the agent-facing pivot fields by default. The
             # internal `used_reranker` and `fallback_reason` are useful

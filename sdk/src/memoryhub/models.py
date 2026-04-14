@@ -37,6 +37,7 @@ class Memory(BaseModel):
     relationships: list[dict[str, Any]] | None = None
     relevance_score: float | None = None
     result_type: str | None = None  # "full" or "stub"
+    is_appendix: bool | None = None  # True when result is cache-stable appendix (#175)
 
 
 class CurationInfo(BaseModel):
@@ -89,6 +90,10 @@ class SearchResult(BaseModel):
     pivot_suggested: bool | None = None
     pivot_reason: str | None = None
     focus_fallback_reason: str | None = None
+    # Cache-optimized assembly fields (#175)
+    compilation_hash: str | None = None
+    compilation_epoch: int | None = None
+    appendix_count: int | None = None
 
 
 class VersionEntry(BaseModel):

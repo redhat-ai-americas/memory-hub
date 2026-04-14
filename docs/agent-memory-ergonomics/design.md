@@ -347,20 +347,43 @@ This means memories injected into an agent's context are either a cache asset (s
 - Non-deterministic JSON serialization (different key ordering per run)
 - Dynamically removing tools from context between turns (changes early tokens)
 
+### Compilation epochs (#175, shipped)
+
+The open design question from the issue — how to handle mid-weight memory insertion — is resolved with **epoch-based ordering**:
+
+1. **First request**: `search_memory` sorts results by `weight DESC → created_at ASC → id ASC`, stores this ordering as "epoch 1" in Valkey (`memoryhub:compilation:<tenant>:<owner>`), and returns results in that order.
+
+2. **Subsequent requests**: Results are partitioned into "compiled" (IDs in the stored epoch, returned in their epoch-locked positions) and "appendix" (new memories since compilation, appended at the end). The cached prefix is preserved; only the appendix is new.
+
+3. **Auto-recompile**: When the appendix exceeds 30% of the compiled set (or 5 entries), a new epoch is compiled inline. One-time cache invalidation, then stable again.
+
+4. **Graceful degradation**: When Valkey is unavailable, results fall back to deterministic `weight DESC → created_at ASC → id ASC` sort — still stable, just no append-only guarantee.
+
+**This is the default behavior.** The `raw_results=True` parameter on `search_memory` opts into legacy similarity-ranked output with `relevance_score` per entry.
+
+In cache-optimized mode, the response includes:
+- `compilation_hash` — SHA-256 of the ordered ID list; changes when the epoch changes
+- `compilation_epoch` — integer counter, increments on recompilation
+- `appendix_count` — number of entries in the appendix
+- `is_appendix` per entry — `True` for new memories, `False` for compiled
+
+**Compaction composition**: Compilation epochs are natural compaction boundaries. When compaction prunes, merges, or archives memories, it triggers a recompilation — the new epoch becomes the fresh stable prefix. Pre-compaction pruning = removing memories from the compiled set before recompilation.
+
 ### Config extension (.memoryhub.yaml)
 
 ```yaml
 memory_loading:
   # ... existing fields ...
 
-  # Cache optimization (new)
+  # Cache optimization (#175)
   injection_position: user_message_prefix  # or: system_prompt_suffix (legacy)
   sort_order: weight_desc                  # stable canonical sort; never randomize
   append_only_growth: true                 # new memories append, don't re-sort
   include_metadata_in_injection: false     # no timestamps/IDs in the injected block
+  auto_recompile_threshold: 0.3            # appendix fraction that triggers recompilation
 ```
 
-These defaults should be the generated output for all new projects. Existing projects retain their current behavior until they regenerate via `memoryhub config regenerate`.
+These defaults are the generated output for all new projects. Existing projects retain their current behavior until they regenerate via `memoryhub config regenerate`.
 
 ### llm-d integration (OpenShift deployments)
 

@@ -303,6 +303,7 @@ class MemoryHubClient:
         project_id: str | None = None,
         domains: list[str] | None = None,
         domain_boost_weight: float | None = None,
+        raw_results: bool = False,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -348,6 +349,9 @@ class MemoryHubClient:
             project_id: Project identifier for campaign enrollment verification.
             domains: Domain tags to boost in results. Non-matching results still appear.
             domain_boost_weight: Strength of domain boost (0.0-1.0). Server default 0.3.
+            raw_results: When True, bypass cache-optimized assembly and return raw
+                per-request results. Default False lets the server return the
+                stable compiled block (see #175, cache-optimized memory assembly).
         """
         defaults = self._project_config.retrieval_defaults
         loading = self._project_config.memory_loading
@@ -373,6 +377,7 @@ class MemoryHubClient:
             "project_id": project_id,
             "domains": domains,
             "domain_boost_weight": domain_boost_weight,
+            "raw_results": raw_results,
         }
         # Only forward focus params when the caller actually supplied a
         # focus string. Sending session_focus_weight without focus would
@@ -383,6 +388,28 @@ class MemoryHubClient:
 
         data = await self._call("search_memory", payload)
         return SearchResult.model_validate(data)
+
+    @staticmethod
+    def get_injection_block(results: SearchResult) -> str:
+        """Render search results as a deterministic plain text block for prompt injection.
+
+        Produces a stable text representation with no per-request metadata
+        (no relevance scores, no timestamps, no request IDs). When the server
+        returns cache-optimized results, the text block is token-stable across
+        requests for the same memory set.
+
+        Returns empty string for empty results.
+        """
+        if not results.results:
+            return ""
+
+        blocks: list[str] = []
+        for memory in results.results:
+            if memory.result_type == "full" and hasattr(memory, "content") and memory.content:
+                blocks.append(memory.content)
+            elif hasattr(memory, "stub") and memory.stub:
+                blocks.append(memory.stub)
+        return "\n---\n".join(blocks)
 
     async def read(
         self,

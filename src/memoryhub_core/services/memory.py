@@ -845,6 +845,7 @@ async def search_memories(
                         branch_type=node.branch_type,
                         has_children=has_children,
                         has_rationale=has_rationale,
+                        created_at=node.created_at,
                     ),
                     relevance_score,
                 )
@@ -1211,6 +1212,7 @@ async def search_memories_with_focus(
                         branch_type=node.branch_type,
                         has_children=has_children,
                         has_rationale=has_rationale,
+                        created_at=node.created_at,
                     ),
                     relevance_score,
                 )

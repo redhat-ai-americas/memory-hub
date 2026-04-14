@@ -146,6 +146,9 @@ class _PatchedSearchCall:
         mock_session = AsyncMock()
         mock_gen = AsyncMock()
         fake_embedding_service = AsyncMock()
+        mock_valkey = AsyncMock()
+        mock_valkey.read_compilation = AsyncMock(return_value=None)
+        mock_valkey.write_compilation = AsyncMock()
 
         auth_mod._current_session = {
             "user_id": "wjackson",
@@ -175,6 +178,18 @@ class _PatchedSearchCall:
                     "src.tools.search_memory.count_search_matches",
                     new_callable=AsyncMock,
                     return_value=self.total_matching,
+                ),
+                patch(
+                    "src.tools.search_memory.get_valkey_client",
+                    return_value=mock_valkey,
+                ),
+                patch(
+                    "src.tools.search_memory.ROLE_ISOLATION_ENABLED",
+                    False,
+                ),
+                patch(
+                    "src.tools.search_memory.PROJECT_ISOLATION_ENABLED",
+                    False,
                 ),
             ):
                 return await search_memory(query="memory", **self.call_kwargs)
@@ -663,6 +678,9 @@ async def _run_focused_search(
     mock_gen = AsyncMock()
     fake_embedding_service = AsyncMock()
     fake_reranker = AsyncMock()
+    mock_valkey = AsyncMock()
+    mock_valkey.read_compilation = AsyncMock(return_value=None)
+    mock_valkey.write_compilation = AsyncMock()
 
     auth_mod._current_session = {
         "user_id": "wjackson",
@@ -701,6 +719,18 @@ async def _run_focused_search(
                 "src.tools.search_memory.count_search_matches",
                 new_callable=AsyncMock,
                 return_value=total_matching,
+            ),
+            patch(
+                "src.tools.search_memory.get_valkey_client",
+                return_value=mock_valkey,
+            ),
+            patch(
+                "src.tools.search_memory.ROLE_ISOLATION_ENABLED",
+                False,
+            ),
+            patch(
+                "src.tools.search_memory.PROJECT_ISOLATION_ENABLED",
+                False,
             ),
         ):
             return await search_memory(query="memory", **call_kwargs)
@@ -951,3 +981,241 @@ async def test_search_memory_focused_path_forwards_tenant_id():
     assert count_kwargs.get("tenant_id") == "tenant_a", (
         f"Expected tenant_id='tenant_a' in count_search_matches kwargs, got {count_kwargs}"
     )
+
+
+# ---------------------------------------------------------------------------
+# #175 — cache-optimized assembly
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_default_is_cache_optimized():
+    """Default behavior (raw_results not set) returns cache-optimized results
+    with compilation metadata and is_appendix flags instead of relevance_score."""
+    full1, score1 = _fake_full_result("memory about deployment", weight=0.9)
+    full2, score2 = _fake_full_result("memory about testing", weight=0.8)
+    result = await _patched_search_call(
+        page_results=[(full1, score1), (full2, score2)],
+        total_matching=2,
+    ).run()
+
+    # Response includes compilation metadata
+    assert "compilation_hash" in result
+    assert "compilation_epoch" in result
+    assert "appendix_count" in result
+    assert result["compilation_epoch"] == 1
+    assert result["appendix_count"] == 0
+
+    # Each entry has is_appendix, not relevance_score
+    assert len(result["results"]) == 2
+    for entry in result["results"]:
+        assert "is_appendix" in entry
+        assert entry["is_appendix"] is False
+        assert "relevance_score" not in entry
+
+
+@pytest.mark.asyncio
+async def test_raw_results_preserves_similarity_order():
+    """raw_results=True skips cache optimization and returns entries with
+    relevance_score in the original similarity order."""
+    full1, score1 = _fake_full_result("high score", weight=0.5, score=0.95)
+    full2, score2 = _fake_full_result("low score", weight=0.9, score=0.70)
+
+    result = await _patched_search_call(
+        page_results=[(full1, score1), (full2, score2)],
+        total_matching=2,
+        raw_results=True,
+    ).run()
+
+    # No compilation metadata
+    assert "compilation_hash" not in result
+    assert "compilation_epoch" not in result
+    assert "appendix_count" not in result
+
+    # Entries have relevance_score, not is_appendix
+    assert len(result["results"]) == 2
+    for entry in result["results"]:
+        assert "relevance_score" in entry
+        assert "is_appendix" not in entry
+
+    # Order preserved: first result has higher score
+    assert result["results"][0]["relevance_score"] > result["results"][1]["relevance_score"]
+
+
+@pytest.mark.asyncio
+async def test_appendix_entries_flagged():
+    """Memories not in the existing compilation epoch are flagged with
+    is_appendix=True; compiled memories have is_appendix=False."""
+    from datetime import datetime, timezone
+
+    from memoryhub_core.services.compilation import compile_memory_set
+
+    # Create 5 compiled memories + 1 new one. We need >= 5 compiled so
+    # should_recompile(5, 1) returns False (ratio check only fires when
+    # compiled_count < min_appendix=5).
+    compiled_mems = []
+    for i in range(5):
+        mem, score = _fake_full_result(
+            f"compiled memory {i}", weight=0.9 - i * 0.01, score=0.80
+        )
+        compiled_mems.append((mem, score))
+    new_mem, new_score = _fake_full_result(
+        "brand new memory", weight=0.5, score=0.90
+    )
+
+    # Build a compilation epoch that only includes the 5 existing memories
+    epoch = compile_memory_set(
+        compiled_mems,
+        epoch=1,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    epoch_data = epoch.to_dict()
+
+    # Set up Valkey mock to return the existing compilation
+    mock_valkey = AsyncMock()
+    mock_valkey.read_compilation = AsyncMock(return_value=epoch_data)
+    mock_valkey.write_compilation = AsyncMock()
+
+    all_results = compiled_mems + [(new_mem, new_score)]
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch(
+                "src.tools.search_memory.release_db_session",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=all_results,
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=len(all_results),
+            ),
+            patch(
+                "src.tools.search_memory.get_valkey_client",
+                return_value=mock_valkey,
+            ),
+        ):
+            result = await search_memory(query="memory")
+    finally:
+        auth_mod._current_session = None
+
+    assert len(result["results"]) == 6
+    assert result["appendix_count"] == 1
+
+    # Find entries by content to check flags
+    entries_by_content = {}
+    for entry in result["results"]:
+        if "content" in entry:
+            entries_by_content[entry["content"]] = entry
+
+    # All compiled memories should have is_appendix=False
+    for i in range(5):
+        assert entries_by_content[f"compiled memory {i}"]["is_appendix"] is False
+
+    # The new memory should have is_appendix=True
+    assert entries_by_content["brand new memory"]["is_appendix"] is True
+
+
+@pytest.mark.asyncio
+async def test_valkey_unavailable_falls_back():
+    """When Valkey is unreachable, cache optimization still works via
+    deterministic sort fallback. Results are sorted by weight desc."""
+    from memoryhub_core.services.valkey_client import ValkeyUnavailableError
+
+    full_high, score_high = _fake_full_result("high weight", weight=0.9, score=0.7)
+    full_low, score_low = _fake_full_result("low weight", weight=0.3, score=0.95)
+
+    # Mock a Valkey that fails on read
+    mock_valkey = AsyncMock()
+    mock_valkey.read_compilation = AsyncMock(
+        side_effect=ValkeyUnavailableError("connection refused")
+    )
+    mock_valkey.write_compilation = AsyncMock(
+        side_effect=ValkeyUnavailableError("connection refused")
+    )
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch(
+                "src.tools.search_memory.release_db_session",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=[(full_high, score_high), (full_low, score_low)],
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=2,
+            ),
+            patch(
+                "src.tools.search_memory.get_valkey_client",
+                return_value=mock_valkey,
+            ),
+        ):
+            result = await search_memory(query="memory")
+    finally:
+        auth_mod._current_session = None
+
+    # Should still return compilation metadata from the fallback
+    assert "compilation_hash" in result
+    assert "compilation_epoch" in result
+    assert result["compilation_epoch"] == 1
+    assert result["appendix_count"] == 0
+
+    # Results should be in deterministic order (weight desc)
+    assert len(result["results"]) == 2
+    assert result["results"][0]["weight"] > result["results"][1]["weight"]
+
+    # Each entry has is_appendix (all False since it's a fresh compilation)
+    for entry in result["results"]:
+        assert entry["is_appendix"] is False
+
+
+@pytest.mark.asyncio
+async def test_raw_results_parameter_has_default():
+    """Verify the raw_results parameter exists and defaults to False."""
+    sig = inspect.signature(search_memory)
+    params = sig.parameters
+    assert "raw_results" in params
+    assert params["raw_results"].default is False

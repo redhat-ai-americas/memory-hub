@@ -139,6 +139,7 @@ class MemoryNodeStub(BaseModel):
     has_children: bool = False
     has_rationale: bool = False
     domains: list[str] | None = None
+    created_at: datetime | None = None  # needed for cache-optimized sort ordering (#175)
 
 
 class RelationshipCreate(BaseModel):

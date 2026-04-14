@@ -14,6 +14,10 @@ Four key prefixes back #61 (session focus history as a usage signal) and
 - ``memoryhub:active_sessions`` — set of session_ids with live subscribers.
   Populated when an agent calls ``register_session``; depopulated on session
   close. Enumerated by the #62 broadcast helper to decide who to push to.
+- ``memoryhub:compilation:<tenant_id>:<owner_id>`` — hash containing a
+  compilation epoch for cache-optimized memory assembly (#175). Stores
+  ``epoch``, ``ordered_ids`` (pipe-delimited), ``compilation_hash``,
+  ``compiled_at``. 7-day TTL refreshed on read.
 - ``memoryhub:broadcast:<session_id>`` — per-session reliable queue.
   ``broadcast_to_sessions`` LPUSHes JSON-serialized notifications here; the
   memoryhub subscriber loop BRPOPs from it and forwards to the client via
@@ -80,6 +84,10 @@ def _history_key(project: str, day: date) -> str:
 
 def _broadcast_key(session_id: str) -> str:
     return f"memoryhub:broadcast:{session_id}"
+
+
+def _compilation_key(tenant_id: str, owner_id: str) -> str:
+    return f"memoryhub:compilation:{tenant_id}:{owner_id}"
 
 
 class ValkeyClient:
@@ -372,6 +380,86 @@ class ValkeyClient:
             return None
         _key, message = result
         return message
+
+    # ---- Compilation epoch state (#175) -------------------------------------
+
+    async def write_compilation(
+        self,
+        tenant_id: str,
+        owner_id: str,
+        epoch_data: dict[str, str],
+        ttl_seconds: int | None = None,
+    ) -> None:
+        """Persist a compilation epoch as a Valkey hash.
+
+        ``epoch_data`` is the dict returned by ``CompilationEpoch.to_dict()``.
+        The key carries a long TTL (default 7 days) refreshed on every read
+        so active compilations stay warm indefinitely.
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable.
+        """
+        ttl = ttl_seconds if ttl_seconds is not None else self._settings.compilation_ttl_seconds
+        key = _compilation_key(tenant_id, owner_id)
+        try:
+            client = await self._get_client()
+            async with client.pipeline(transaction=True) as pipe:
+                pipe.delete(key)
+                pipe.hset(key, mapping=epoch_data)
+                pipe.expire(key, ttl)
+                await pipe.execute()
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to write compilation for {tenant_id}/{owner_id}: {exc}"
+            ) from exc
+
+    async def read_compilation(
+        self,
+        tenant_id: str,
+        owner_id: str,
+    ) -> dict[str, str] | None:
+        """Read the current compilation epoch, refreshing TTL on hit.
+
+        Returns the raw hash dict (callers reconstruct ``CompilationEpoch``
+        via ``from_dict``), or ``None`` if no compilation exists.
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable.
+        """
+        key = _compilation_key(tenant_id, owner_id)
+        try:
+            client = await self._get_client()
+            data = await client.hgetall(key)
+            if not data:
+                return None
+            # Refresh TTL so active compilations stay warm.
+            await client.expire(
+                key, self._settings.compilation_ttl_seconds
+            )
+            return data
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to read compilation for {tenant_id}/{owner_id}: {exc}"
+            ) from exc
+
+    async def delete_compilation(
+        self,
+        tenant_id: str,
+        owner_id: str,
+    ) -> None:
+        """Remove a compilation epoch (manual reset or post-compaction cleanup).
+
+        Raises:
+            ValkeyUnavailableError: if the backend is unreachable.
+        """
+        key = _compilation_key(tenant_id, owner_id)
+        try:
+            client = await self._get_client()
+            await client.delete(key)
+        except RedisError as exc:
+            raise ValkeyUnavailableError(
+                f"Failed to delete compilation for {tenant_id}/{owner_id}: {exc}"
+            ) from exc
 
     async def close(self) -> None:
         """Close the underlying client, if any."""

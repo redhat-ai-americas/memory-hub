@@ -228,3 +228,55 @@ def test_find_project_config_returns_none_when_absent(tmp_path: Path, monkeypatc
     # tmp_path is returned.
     if found is not None:
         assert tmp_path not in found.parents
+
+
+# ── Cache optimization fields (#175) ─────────────────────────────────────────
+
+
+def test_config_cache_fields_default():
+    """New #175 cache-optimization fields have the expected defaults."""
+    ml = MemoryLoadingConfig()
+
+    assert ml.injection_position == "user_message_prefix"
+    assert ml.sort_order == "weight_desc"
+    assert ml.append_only_growth is True
+    assert ml.include_metadata_in_injection is False
+    assert ml.auto_recompile_threshold == 0.3
+
+
+def test_config_cache_fields_round_trip(tmp_path):
+    """Cache fields can be set via YAML and round-trip cleanly."""
+    cfg = tmp_path / CONFIG_FILENAME
+    cfg.write_text(
+        """
+memory_loading:
+  injection_position: system_prompt_suffix
+  sort_order: relevance
+  append_only_growth: false
+  include_metadata_in_injection: true
+  auto_recompile_threshold: 0.5
+"""
+    )
+
+    pc = load_project_config(cfg)
+    ml = pc.memory_loading
+
+    assert ml.injection_position == "system_prompt_suffix"
+    assert ml.sort_order == "relevance"
+    assert ml.append_only_growth is False
+    assert ml.include_metadata_in_injection is True
+    assert ml.auto_recompile_threshold == 0.5
+
+
+def test_config_cache_auto_recompile_threshold_bounds(tmp_path):
+    """auto_recompile_threshold must be 0.0-1.0."""
+    cfg = tmp_path / CONFIG_FILENAME
+    cfg.write_text(
+        """
+memory_loading:
+  auto_recompile_threshold: 1.5
+"""
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_project_config(cfg)
+    assert "auto_recompile_threshold" in exc_info.value.detail

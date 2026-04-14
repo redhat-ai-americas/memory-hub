@@ -1236,3 +1236,116 @@ async def test_pre_connect_callback_replays_into_handler():
             )
 
     assert received == ["memoryhub://memory/x"]
+
+
+# ── search raw_results (#175) ─────────────────────────────────────────────────
+
+
+async def test_search_forwards_raw_results_false_by_default(client):
+    """raw_results=False (default) is included in the forwarded payload."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("any")
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["raw_results"] is False
+
+
+async def test_search_forwards_raw_results_true(client):
+    """raw_results=True propagates to the MCP tool payload."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("any", raw_results=True)
+
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded["raw_results"] is True
+
+
+# ── get_injection_block (#175) ────────────────────────────────────────────────
+
+
+def _make_memory(
+    *,
+    id: str = "mem-001",
+    content: str = "some content",
+    stub: str | None = None,
+    result_type: str | None = "full",
+) -> Memory:
+    return Memory(
+        id=id,
+        content=content,
+        stub=stub,
+        result_type=result_type,
+        scope="user",
+        owner_id="wjackson",
+    )
+
+
+def test_get_injection_block_empty_results():
+    """Empty results list returns an empty string."""
+    result = SearchResult(results=[], total_matching=0, has_more=False)
+    assert MemoryHubClient.get_injection_block(result) == ""
+
+
+def test_get_injection_block_renders_content():
+    """Full memories are rendered using their content field."""
+    memories = [
+        _make_memory(id="m1", content="Use Podman, not Docker.", result_type="full"),
+        _make_memory(id="m2", content="FIPS compliance required.", result_type="full"),
+    ]
+    result = SearchResult(results=memories, total_matching=2, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert "Use Podman, not Docker." in block
+    assert "FIPS compliance required." in block
+    assert "\n---\n" in block
+
+
+def test_get_injection_block_stubs():
+    """Stub-type memories use the stub text, not content."""
+    memories = [
+        _make_memory(
+            id="m1",
+            content="[full content not returned]",
+            stub="Short summary of the memory.",
+            result_type="stub",
+        ),
+    ]
+    result = SearchResult(results=memories, total_matching=1, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert block == "Short summary of the memory."
+
+
+def test_get_injection_block_mixed():
+    """Full and stub entries are both included."""
+    memories = [
+        _make_memory(id="m1", content="Full content here.", result_type="full"),
+        _make_memory(
+            id="m2",
+            content="[omitted]",
+            stub="Stub text.",
+            result_type="stub",
+        ),
+    ]
+    result = SearchResult(results=memories, total_matching=2, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert "Full content here." in block
+    assert "Stub text." in block
+
+
+def test_get_injection_block_single_entry_no_separator():
+    """Single memory produces no separator."""
+    memories = [_make_memory(id="m1", content="Only one.", result_type="full")]
+    result = SearchResult(results=memories, total_matching=1, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert block == "Only one."
+    assert "---" not in block

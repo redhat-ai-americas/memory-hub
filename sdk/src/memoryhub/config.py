@@ -57,6 +57,14 @@ class MemoryLoadingConfig(BaseModel):
     push_filter_weight: float = Field(default=0.6, ge=0.0, le=1.0)
     push_transport: Literal["queue", "pubsub"] = "queue"
 
+    # Cache optimization (#175) — controls how memories are assembled into the
+    # injection block and how the server maintains compilation stability.
+    injection_position: Literal["user_message_prefix", "system_prompt_suffix"] = "user_message_prefix"
+    sort_order: Literal["weight_desc", "relevance"] = "weight_desc"
+    append_only_growth: bool = True
+    include_metadata_in_injection: bool = False
+    auto_recompile_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+
 
 class RetrievalDefaults(BaseModel):
     """Default arguments applied to outbound ``search_memory`` calls.
