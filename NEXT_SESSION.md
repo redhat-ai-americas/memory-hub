@@ -1,20 +1,13 @@
 # Next Session Plan
 
-## Priority: SDK backward-compat + API key auth formalization + vLLM validation
+## Priority: API key auth formalization + vLLM validation
 
-### 1. SDK backward-compat api_key shim (#184)
+### 1. SDK backward-compat api_key shim (#184) — DONE
 
-A downstream project (fips-agents scaffolded template) is broken because memoryhub SDK v0.4.0 switched to OAuth2 client_credentials, removing the `api_key` parameter and renaming `server_url` to `url`. The agreed approach is Option C: add a backward-compat shim in the SDK AND update the downstream template.
-
-**SDK changes (sdk/src/memoryhub/client.py):**
-- Accept `api_key=` and `server_url=` as convenience aliases
-- When `api_key` is provided and OAuth params are absent, skip OAuth token management and use `register_session` flow instead
-- `server_url` maps to `url`
-
-**Downstream changes (fips-agents repo):**
-- Update `memory.py` constructor call
-- Update `.memoryhub.yaml` format
-- Update `/add-memory` slash command
+Shipped in sdk v0.5.0. `api_key=` and `server_url=` are now accepted as
+convenience aliases. When `api_key` is provided, the SDK calls
+`register_session` on connect instead of using OAuth. Downstream
+fips-agents template still needs updating (separate repo).
 
 ### 2. Formalize API key auth docs (#183)
 
@@ -30,6 +23,7 @@ Deploy a test workload against the cluster's vLLM endpoint with MemoryHub memory
 
 ## Context from this session
 
+- #184 (api_key backward-compat shim) shipped in sdk v0.5.0
 - #175 (cache-optimized assembly) shipped and deployed — compilation epochs with Valkey state, `raw_results` opt-out, `compilation_hash`/`compilation_epoch`/`appendix_count` in responses
 - README rewritten with governance-first value proposition
 - All test debt resolved: 254 MCP + 288 unit + 55 integration = 597 tests, 0 failures
