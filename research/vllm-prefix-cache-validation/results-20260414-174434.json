@@ -1,0 +1,213 @@
+{
+  "timestamp_utc": "2026-04-14T17:43:52.654259+00:00",
+  "vllm_url": "https://granite-3-3-8b-instruct-granite-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com",
+  "vllm_version": "0.19.0",
+  "model": "RedHatAI/granite-3.3-8b-instruct",
+  "stable_prefix": {
+    "hypothesis": "Identical memory injection blocks produce >90% prefix cache hit rates",
+    "status": "PASS",
+    "injection_block_chars": 3756,
+    "injection_block_hash": "255e3993bff497d6ba245fa5a0aa01fe65dbfa6e42d5b7d32a3b800ec2d5fa74",
+    "compilation_epoch": 12,
+    "compilation_hash": "2a7680321d2d6ae10c357c5d80c48be839685d9bc9ff2fef32c8011de758a40f",
+    "requests": [
+      {
+        "request_num": 1,
+        "label": "cold_start",
+        "queries": 879.0,
+        "hits": 0.0,
+        "hit_rate": 0.0,
+        "tokens_cache_hit": 0.0,
+        "tokens_computed": 879.0,
+        "prompt_tokens": 879,
+        "cached_tokens": null,
+        "per_request_hit_rate": null
+      },
+      {
+        "request_num": 2,
+        "label": "warm_1",
+        "queries": 879.0,
+        "hits": 864.0,
+        "hit_rate": 0.9829351535836177,
+        "tokens_cache_hit": 864.0,
+        "tokens_computed": 15.0,
+        "prompt_tokens": 879,
+        "cached_tokens": 864,
+        "per_request_hit_rate": 0.9829351535836177
+      },
+      {
+        "request_num": 3,
+        "label": "warm_2",
+        "queries": 879.0,
+        "hits": 864.0,
+        "hit_rate": 0.9829351535836177,
+        "tokens_cache_hit": 864.0,
+        "tokens_computed": 15.0,
+        "prompt_tokens": 879,
+        "cached_tokens": 864,
+        "per_request_hit_rate": 0.9829351535836177
+      },
+      {
+        "request_num": 4,
+        "label": "warm_3",
+        "queries": 879.0,
+        "hits": 864.0,
+        "hit_rate": 0.9829351535836177,
+        "tokens_cache_hit": 864.0,
+        "tokens_computed": 15.0,
+        "prompt_tokens": 879,
+        "cached_tokens": 864,
+        "per_request_hit_rate": 0.9829351535836177
+      },
+      {
+        "request_num": 5,
+        "label": "warm_4",
+        "queries": 879.0,
+        "hits": 864.0,
+        "hit_rate": 0.9829351535836177,
+        "tokens_cache_hit": 864.0,
+        "tokens_computed": 15.0,
+        "prompt_tokens": 879,
+        "cached_tokens": 864,
+        "per_request_hit_rate": 0.9829351535836177
+      }
+    ],
+    "summary": {
+      "cold_hit_rate": 0.0,
+      "warm_hit_rate_mean": 0.9829351535836177,
+      "warm_hit_rate_min": 0.9829351535836177,
+      "pass": true
+    }
+  },
+  "append_only": {
+    "hypothesis": "Adding appendix memories preserves compiled prefix cache hits",
+    "status": "FAIL",
+    "block_v1_chars": 3756,
+    "block_v2_chars": 3797,
+    "prefix_preserved": false,
+    "appendix_count": 2,
+    "epoch_before": 12,
+    "epoch_after": 12,
+    "requests": [
+      {
+        "label": "with_appendix",
+        "queries": 897.0,
+        "hits": 16.0,
+        "hit_rate": 0.017837235228539576,
+        "tokens_cache_hit": 16.0,
+        "tokens_computed": 881.0,
+        "prompt_tokens": 897,
+        "cached_tokens": 16,
+        "per_request_hit_rate": 0.017837235228539576
+      },
+      {
+        "label": "repeat_appendix",
+        "queries": 897.0,
+        "hits": 896.0,
+        "hit_rate": 0.9988851727982163,
+        "tokens_cache_hit": 897.0,
+        "tokens_computed": 1.0,
+        "prompt_tokens": 897,
+        "cached_tokens": 896,
+        "per_request_hit_rate": 0.9988851727982163
+      }
+    ],
+    "summary": {
+      "append_hit_rate": 0.017837235228539576,
+      "repeat_hit_rate": 0.9988851727982163,
+      "pass": false
+    }
+  },
+  "recompile": {
+    "hypothesis": "Recompilation causes one-time miss, then cache-hits resume",
+    "status": "PASS",
+    "epoch_before": 12,
+    "epoch_after": 13,
+    "epoch_incremented": true,
+    "appendix_after_recompile": 0,
+    "block_changed": true,
+    "requests": [
+      {
+        "label": "recompile_miss",
+        "queries": 824.0,
+        "hits": 16.0,
+        "hit_rate": 0.019417475728155338,
+        "tokens_cache_hit": 16.0,
+        "tokens_computed": 808.0,
+        "prompt_tokens": 824,
+        "cached_tokens": 16,
+        "per_request_hit_rate": 0.019417475728155338
+      },
+      {
+        "label": "post_recompile_1",
+        "queries": 824.0,
+        "hits": 816.0,
+        "hit_rate": 0.9902912621359223,
+        "tokens_cache_hit": 816.0,
+        "tokens_computed": 8.0,
+        "prompt_tokens": 824,
+        "cached_tokens": 816,
+        "per_request_hit_rate": 0.9902912621359223
+      },
+      {
+        "label": "post_recompile_2",
+        "queries": 824.0,
+        "hits": 816.0,
+        "hit_rate": 0.9902912621359223,
+        "tokens_cache_hit": 816.0,
+        "tokens_computed": 8.0,
+        "prompt_tokens": 824,
+        "cached_tokens": 816,
+        "per_request_hit_rate": 0.9902912621359223
+      },
+      {
+        "label": "post_recompile_3",
+        "queries": 824.0,
+        "hits": 816.0,
+        "hit_rate": 0.9902912621359223,
+        "tokens_cache_hit": 816.0,
+        "tokens_computed": 8.0,
+        "prompt_tokens": 824,
+        "cached_tokens": 816,
+        "per_request_hit_rate": 0.9902912621359223
+      }
+    ],
+    "summary": {
+      "recompile_hit_rate": 0.019417475728155338,
+      "post_recompile_mean": 0.9902912621359223,
+      "pass": true
+    }
+  },
+  "block_granularity": {
+    "hypothesis": "Cache matching is 16-token block-aligned; shared prefix caches",
+    "status": "PASS",
+    "prefix_chars": 3417,
+    "q1_chars": 58,
+    "q2_chars": 54,
+    "total_prompt_tokens": 827,
+    "request": {
+      "queries": 827.0,
+      "hits": 800.0,
+      "hit_rate": 0.9673518742442564,
+      "tokens_cache_hit": 800.0,
+      "tokens_computed": 27.0,
+      "prompt_tokens": 827,
+      "cached_tokens": 800,
+      "per_request_hit_rate": 0.9673518742442564
+    },
+    "summary": {
+      "shared_prefix_hit_rate": 0.9673518742442564,
+      "cached_tokens": 800,
+      "prompt_tokens": 827,
+      "pass": true
+    }
+  },
+  "threshold_analysis": {
+    "hypothesis": "30%/5-entry recompile threshold is appropriate",
+    "status": "ANALYSIS",
+    "append_waste_per_request": 0.9821627647714605,
+    "recompile_one_time_cost": 0.9805825242718447,
+    "breakeven_requests": 0.9983910604674741,
+    "recommendation": "Appendix mode wastes ~98% of tokens per request. Recompilation costs ~98% once. Break-even at ~1.0 requests. Current threshold may be too high -- consider recompiling sooner."
+  }
+}

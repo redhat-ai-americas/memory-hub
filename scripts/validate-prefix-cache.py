@@ -133,19 +133,37 @@ def _make_user_msg(block: str, question: str) -> str:
 
 
 async def _measure(vllm: VLLMClient, metrics: MetricsCollector, system: str, user: str) -> tuple[dict, dict]:
-    """Send one chat request and return (metrics_delta, chat_response)."""
+    """Send one chat request and return (metrics_delta, chat_response).
+
+    The delta includes per-request ``cached_tokens`` from the vLLM API
+    response (requires ``--enable-prompt-tokens-details`` on the server).
+    When available, ``cached_tokens`` is the authoritative per-request
+    measurement; the Prometheus delta is a cross-check.
+    """
     before = await metrics.snapshot()
     resp = await vllm.chat(system, user)
     await asyncio.sleep(0.5)
     after = await metrics.snapshot()
-    return MetricsCollector.delta(before, after), resp
+    delta = MetricsCollector.delta(before, after)
+
+    # Extract per-request cached_tokens from the API response
+    usage = resp.get("usage", {})
+    details = usage.get("prompt_tokens_details") or {}
+    cached = details.get("cached_tokens")
+    prompt_tokens = usage.get("prompt_tokens", 0)
+    delta["prompt_tokens"] = prompt_tokens
+    delta["cached_tokens"] = cached
+    if cached is not None and prompt_tokens > 0:
+        delta["per_request_hit_rate"] = cached / prompt_tokens
+    else:
+        delta["per_request_hit_rate"] = None
+
+    return delta, resp
 
 
 async def _search_block(client: MemoryHubClient):
     """Search and return (SearchResult, injection_block)."""
-    sr = await client.search(
-        SEARCH_QUERY, max_results=15, mode="full_only", max_response_tokens=20000
-    )
+    sr = await client.search(SEARCH_QUERY, max_results=15, mode="full_only", max_response_tokens=20000)
     return sr, MemoryHubClient.get_injection_block(sr)
 
 
@@ -164,12 +182,14 @@ async def run_stable_prefix(client, vllm, metrics) -> dict:
     for i in range(5):
         label = "cold_start" if i == 0 else f"warm_{i}"
         d, resp = await _measure(vllm, metrics, SYSTEM_MSG, user_msg)
-        log(f"  Request {i + 1} ({label}): queries={d['queries']}, hits={d['hits']}, hit_rate={d['hit_rate']:.2%}")
-        requests_data.append(
-            {"request_num": i + 1, "label": label, **d, "prompt_tokens": resp["usage"]["prompt_tokens"]}
-        )
+        ct = d["cached_tokens"]
+        pt = d["prompt_tokens"]
+        pct = f"{d['per_request_hit_rate']:.2%}" if d["per_request_hit_rate"] is not None else "n/a"
+        log(f"  Request {i + 1} ({label}): {ct}/{pt} cached ({pct}), prom_hit_rate={d['hit_rate']:.2%}")
+        requests_data.append({"request_num": i + 1, "label": label, **d})
 
-    warm_rates = [r["hit_rate"] for r in requests_data[1:]]
+    # Prefer per-request hit rate when available; fall back to Prometheus delta
+    warm_rates = [r.get("per_request_hit_rate") or r["hit_rate"] for r in requests_data[1:]]
     mean_warm = sum(warm_rates) / len(warm_rates) if warm_rates else 0
     passed = mean_warm > 0.8
     return {
@@ -232,16 +252,19 @@ async def run_append_only(client, vllm, metrics, temp_ids) -> dict:
     user_v2 = _make_user_msg(block_v2, question)
 
     d_append, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_v2)
-    log(
-        f"  Append request: queries={d_append['queries']}, hits={d_append['hits']}, hit_rate={d_append['hit_rate']:.2%}"
-    )
+    ca = d_append["cached_tokens"]
+    pa = d_append["prompt_tokens"]
+    log(f"  Append request: {ca}/{pa} cached, prom_hit_rate={d_append['hit_rate']:.2%}")
 
     d_repeat, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_v2)
-    log(
-        f"  Repeat request: queries={d_repeat['queries']}, hits={d_repeat['hits']}, hit_rate={d_repeat['hit_rate']:.2%}"
-    )
+    cr = d_repeat["cached_tokens"]
+    pr = d_repeat["prompt_tokens"]
+    log(f"  Repeat request: {cr}/{pr} cached, prom_hit_rate={d_repeat['hit_rate']:.2%}")
 
-    passed = d_append["hit_rate"] > 0.3 and d_repeat["hit_rate"] > 0.8
+    # Use per-request hit rate when available
+    a_rate = d_append.get("per_request_hit_rate") or d_append["hit_rate"]
+    r_rate = d_repeat.get("per_request_hit_rate") or d_repeat["hit_rate"]
+    passed = a_rate > 0.3 and r_rate > 0.8
     return {
         "hypothesis": "Adding appendix memories preserves compiled prefix cache hits",
         "status": "PASS" if passed else "FAIL",
@@ -252,7 +275,7 @@ async def run_append_only(client, vllm, metrics, temp_ids) -> dict:
         "epoch_before": epoch_before,
         "epoch_after": sr2.compilation_epoch,
         "requests": [{"label": "with_appendix", **d_append}, {"label": "repeat_appendix", **d_repeat}],
-        "summary": {"append_hit_rate": d_append["hit_rate"], "repeat_hit_rate": d_repeat["hit_rate"], "pass": passed},
+        "summary": {"append_hit_rate": a_rate, "repeat_hit_rate": r_rate, "pass": passed},
     }
 
 
@@ -270,14 +293,10 @@ async def run_recompile(client, vllm, metrics, temp_ids) -> dict:
 
     # Content must match the search query AND be distinct from each other
     recompile_contents = [
-        f"[VALIDATION-{RUN_ID}] Convention: CI pipelines must run"
-        " integration tests against staging before promotion.",
-        f"[VALIDATION-{RUN_ID}] Deployment: canary releases gate"
-        " on error-rate SLO for 15 min before full rollout.",
-        f"[VALIDATION-{RUN_ID}] Convention: every service publishes"
-        " an OpenAPI spec alongside its deployment manifest.",
-        f"[VALIDATION-{RUN_ID}] Deployment: Helm values files split"
-        " per environment with a shared base chart.",
+        f"[VALIDATION-{RUN_ID}] Convention: CI pipelines must run integration tests against staging before promotion.",
+        f"[VALIDATION-{RUN_ID}] Deployment: canary releases gate on error-rate SLO for 15 min before full rollout.",
+        f"[VALIDATION-{RUN_ID}] Convention: every service publishes an OpenAPI spec alongside its deployment manifest.",
+        f"[VALIDATION-{RUN_ID}] Deployment: Helm values files split per environment with a shared base chart.",
         f"[VALIDATION-{RUN_ID}] Pattern: database migrations run as"
         " init containers so deployment fails fast on schema drift.",
     ]
@@ -305,12 +324,16 @@ async def run_recompile(client, vllm, metrics, temp_ids) -> dict:
     for i in range(4):
         label = "recompile_miss" if i == 0 else f"post_recompile_{i}"
         d, _ = await _measure(vllm, metrics, SYSTEM_MSG, user_post)
-        log(f"  Request {i + 1} ({label}): hit_rate={d['hit_rate']:.2%}")
+        ct = d["cached_tokens"]
+        pt = d["prompt_tokens"]
+        pct = f"{d['per_request_hit_rate']:.2%}" if d["per_request_hit_rate"] is not None else "n/a"
+        log(f"  Request {i + 1} ({label}): {ct}/{pt} cached ({pct})")
         requests_data.append({"label": label, **d})
 
-    warm_rates = [r["hit_rate"] for r in requests_data[1:]]
+    warm_rates = [r.get("per_request_hit_rate") or r["hit_rate"] for r in requests_data[1:]]
     mean_warm = sum(warm_rates) / len(warm_rates) if warm_rates else 0
     passed = mean_warm > 0.8
+    r0_rate = requests_data[0].get("per_request_hit_rate") or requests_data[0]["hit_rate"]
     return {
         "hypothesis": "Recompilation causes one-time miss, then cache-hits resume",
         "status": "PASS" if passed else "FAIL",
@@ -321,7 +344,7 @@ async def run_recompile(client, vllm, metrics, temp_ids) -> dict:
         "block_changed": block_pre != block_post,
         "requests": requests_data,
         "summary": {
-            "recompile_hit_rate": requests_data[0]["hit_rate"],
+            "recompile_hit_rate": r0_rate,
             "post_recompile_mean": mean_warm,
             "pass": passed,
         },
@@ -342,23 +365,25 @@ async def run_block_granularity(client, vllm, metrics) -> dict:
 
     log("  Sending question 2 (shared prefix, different suffix)...")
     d, resp = await _measure(vllm, metrics, SYSTEM_MSG, prefix + q2)
-    total_tokens = resp["usage"]["prompt_tokens"]
-    log(f"  Shared-prefix request: queries={d['queries']}, hits={d['hits']}, hit_rate={d['hit_rate']:.2%}")
-    log(f"  Total prompt tokens: {total_tokens}")
+    ct = d["cached_tokens"]
+    pt = d["prompt_tokens"]
+    pct = f"{d['per_request_hit_rate']:.2%}" if d["per_request_hit_rate"] is not None else "n/a"
+    log(f"  Shared-prefix request: {ct}/{pt} cached ({pct})")
 
-    passed = d["hit_rate"] > 0.7
+    rate = d.get("per_request_hit_rate") or d["hit_rate"]
+    passed = rate > 0.7
     return {
         "hypothesis": "Cache matching is 16-token block-aligned; shared prefix caches",
         "status": "PASS" if passed else "FAIL",
         "prefix_chars": len(prefix),
         "q1_chars": len(q1),
         "q2_chars": len(q2),
-        "total_prompt_tokens": total_tokens,
+        "total_prompt_tokens": pt,
         "request": d,
         "summary": {
-            "shared_prefix_hit_rate": d["hit_rate"],
-            "hits": d["hits"],
-            "queries": d["queries"],
+            "shared_prefix_hit_rate": rate,
+            "cached_tokens": ct,
+            "prompt_tokens": pt,
             "pass": passed,
         },
     }
