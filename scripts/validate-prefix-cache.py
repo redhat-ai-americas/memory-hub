@@ -10,6 +10,11 @@ Usage::
     export MEMORYHUB_URL="https://..."
     export MEMORYHUB_API_KEY="mh-dev-..."
 
+    # Optional: aggregate metrics via Prometheus/Thanos Querier
+    export PROMETHEUS_URL="https://thanos-querier-openshift-monitoring.apps.<cluster>.<domain>"
+    export PROMETHEUS_TOKEN="$(oc get secret metrics-reader-token \
+        -n openshift-monitoring -o jsonpath='{.data.token}' | base64 -d)"
+
     python scripts/validate-prefix-cache.py
 
 Results are written to research/vllm-prefix-cache-validation/results-<timestamp>.json.
@@ -135,6 +140,67 @@ class VLLMClient:
         return data.get("version", str(data))
 
 
+class PrometheusClient:
+    """Query aggregate vLLM metrics via the cluster's Thanos Querier."""
+
+    # PromQL templates for the metrics we care about
+    QUERIES = {
+        "prefix_cache_hit_rate": (
+            'rate(vllm:prefix_cache_hits_total{{model_name="{model}"}}[{window}])'
+            ' / rate(vllm:prefix_cache_queries_total{{model_name="{model}"}}[{window}])'
+        ),
+        "ttft_p95": (
+            'histogram_quantile(0.95, rate(vllm:time_to_first_token_seconds_bucket{{model_name="{model}"}}[{window}]))'
+        ),
+        "kv_cache_usage": 'vllm:kv_cache_usage_perc{{model_name="{model}"}}',
+        "active_requests": 'vllm:num_requests_running{{model_name="{model}"}}',
+        "cached_tokens_rate": (
+            'rate(vllm:prompt_tokens_by_source_total{{model_name="{model}",source="local_cache_hit"}}[{window}])'
+        ),
+        "computed_tokens_rate": (
+            'rate(vllm:prompt_tokens_by_source_total{{model_name="{model}",source="local_compute"}}[{window}])'
+        ),
+    }
+
+    def __init__(self, url: str, token: str, model: str = MODEL) -> None:
+        self._url = url.rstrip("/")
+        self._token = token
+        self._model = model
+        self._http = httpx.AsyncClient(
+            verify=False,
+            timeout=30,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    async def instant(self, query_name: str, window: str = "5m") -> float | None:
+        """Run an instant PromQL query and return the scalar value, or None."""
+        template = self.QUERIES.get(query_name)
+        if not template:
+            return None
+        promql = template.format(model=self._model, window=window)
+        try:
+            resp = await self._http.get(
+                f"{self._url}/api/v1/query",
+                params={"query": promql},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("data", {}).get("result", [])
+            if results:
+                val = float(results[0]["value"][1])
+                return None if val != val else val  # NaN check
+        except Exception as exc:
+            log(f"  [prometheus] query {query_name} failed: {exc}")
+        return None
+
+    async def snapshot(self, window: str = "2m") -> dict[str, float | None]:
+        """Capture current values for all tracked metrics."""
+        result = {}
+        for name in self.QUERIES:
+            result[name] = await self.instant(name, window=window)
+        return result
+
+
 def log(msg: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -170,6 +236,19 @@ async def _measure(vllm: VLLMClient, metrics: MetricsCollector, system: str, use
         delta["per_request_hit_rate"] = None
 
     return delta, resp
+
+
+async def _with_prom_context(prom: PrometheusClient | None, name: str, coro):
+    """Run a scenario coroutine and attach Prometheus context if available."""
+    prom_before = await prom.snapshot() if prom else None
+    result = await coro
+    prom_after = await prom.snapshot() if prom else None
+    if prom_before or prom_after:
+        result["prometheus"] = {
+            "before": prom_before,
+            "after": prom_after,
+        }
+    return result
 
 
 async def _search_block(client: MemoryHubClient):
@@ -730,7 +809,18 @@ def print_summary(results: dict) -> None:
     log("\n=== Summary ===")
     for name in ALL_SCENARIOS:
         if name in results:
-            log(f"  {name}: {results[name].get('status', 'MISSING')}")
+            s = results[name]
+            status = s.get("status", "MISSING")
+            prom = s.get("prometheus", {}).get("after", {})
+            extras = []
+            if prom.get("prefix_cache_hit_rate") is not None:
+                extras.append(f"prom_hit_rate={prom['prefix_cache_hit_rate']:.2%}")
+            if prom.get("ttft_p95") is not None:
+                extras.append(f"ttft_p95={prom['ttft_p95']:.3f}s")
+            if prom.get("kv_cache_usage") is not None:
+                extras.append(f"kv_usage={prom['kv_cache_usage']:.1%}")
+            suffix = f" ({', '.join(extras)})" if extras else ""
+            log(f"  {name}: {status}{suffix}")
 
 
 async def main() -> None:
@@ -762,6 +852,13 @@ async def main() -> None:
     vllm_url = os.environ["VLLM_URL"]
     memoryhub_url = os.environ["MEMORYHUB_URL"]
     api_key = os.environ["MEMORYHUB_API_KEY"]
+    prom_url = os.environ.get("PROMETHEUS_URL", "")
+    prom_token = os.environ.get("PROMETHEUS_TOKEN", "")
+    prom = PrometheusClient(prom_url, prom_token) if prom_url and prom_token else None
+    if prom:
+        log("Prometheus: connected to Thanos Querier")
+    else:
+        log("Prometheus: not configured (set PROMETHEUS_URL and PROMETHEUS_TOKEN for aggregate metrics)")
 
     mc = MetricsCollector(vllm_url)
     vllm = VLLMClient(vllm_url)
@@ -776,6 +873,11 @@ async def main() -> None:
         "vllm_version": version,
         "model": MODEL,
     }
+    if prom:
+        results["prometheus_url"] = prom_url
+        results["prometheus_connected"] = True
+    else:
+        results["prometheus_connected"] = False
 
     temp_memory_ids: list[str] = []
     client = MemoryHubClient(url=memoryhub_url, api_key=api_key)
@@ -784,26 +886,62 @@ async def main() -> None:
     try:
         async with client:
             if "stable_prefix" in scenarios_to_run:
-                results["stable_prefix"] = await run_stable_prefix(client, vllm, mc)
+                results["stable_prefix"] = await _with_prom_context(
+                    prom,
+                    "stable_prefix",
+                    run_stable_prefix(client, vllm, mc),
+                )
             if "append_only" in scenarios_to_run:
-                results["append_only"] = await run_append_only(client, vllm, mc, temp_memory_ids)
+                results["append_only"] = await _with_prom_context(
+                    prom,
+                    "append_only",
+                    run_append_only(client, vllm, mc, temp_memory_ids),
+                )
             if "recompile" in scenarios_to_run:
-                results["recompile"] = await run_recompile(client, vllm, mc, temp_memory_ids)
+                results["recompile"] = await _with_prom_context(
+                    prom,
+                    "recompile",
+                    run_recompile(client, vllm, mc, temp_memory_ids),
+                )
             if "block_granularity" in scenarios_to_run:
-                results["block_granularity"] = await run_block_granularity(client, vllm, mc)
+                results["block_granularity"] = await _with_prom_context(
+                    prom,
+                    "block_granularity",
+                    run_block_granularity(client, vllm, mc),
+                )
             if "threshold_analysis" in scenarios_to_run:
                 results["threshold_analysis"] = analyze_threshold(results)
             # Follow-up scenarios
             if "byte_stability_fix" in scenarios_to_run:
-                results["byte_stability_fix"] = await run_byte_stability_fix(client, vllm, mc, temp_memory_ids)
+                results["byte_stability_fix"] = await _with_prom_context(
+                    prom,
+                    "byte_stability_fix",
+                    run_byte_stability_fix(client, vllm, mc, temp_memory_ids),
+                )
             if "immediate_recompile" in scenarios_to_run:
-                results["immediate_recompile"] = await run_immediate_recompile(client, vllm, mc, temp_memory_ids)
+                results["immediate_recompile"] = await _with_prom_context(
+                    prom,
+                    "immediate_recompile",
+                    run_immediate_recompile(client, vllm, mc, temp_memory_ids),
+                )
             if "block_size_32" in scenarios_to_run:
-                results["block_size_32"] = await run_block_size_32(client, vllm, mc)
+                results["block_size_32"] = await _with_prom_context(
+                    prom,
+                    "block_size_32",
+                    run_block_size_32(client, vllm, mc),
+                )
             if "eviction_pressure" in scenarios_to_run:
-                results["eviction_pressure"] = await run_eviction_pressure(client, vllm, mc)
+                results["eviction_pressure"] = await _with_prom_context(
+                    prom,
+                    "eviction_pressure",
+                    run_eviction_pressure(client, vllm, mc),
+                )
             if "cross_query_sharing" in scenarios_to_run:
-                results["cross_query_sharing"] = await run_cross_query_sharing(client, vllm, mc)
+                results["cross_query_sharing"] = await _with_prom_context(
+                    prom,
+                    "cross_query_sharing",
+                    run_cross_query_sharing(client, vllm, mc),
+                )
     finally:
         if temp_memory_ids:
             async with client:
