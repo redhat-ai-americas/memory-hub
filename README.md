@@ -6,20 +6,17 @@ It works with any agent framework that speaks MCP — Claude Code, kagenti-deplo
 
 ## Why MemoryHub
 
-Agent memory is an inference cost problem disguised as a storage problem. Every agent request carries a context window dominated by injected memories — Manus reports a 100:1 input-to-output token ratio. The way those memories are assembled determines whether the LLM's KV cache can reuse prior computation or must recompute from scratch.
+- **Governed memory operations.** Every write, read, update, and deletion is access-controlled by [five-tier scope isolation](docs/governance.md) enforced at the SQL level. Memories carry [version history with provenance branches](docs/memory-tree.md), contradiction detection, and a [three-layer curation rules engine](docs/curator-agent.md) with inline secrets/PII scanning. Enterprise-scope memories require human approval. This is the substrate that makes all other capabilities trustworthy.
 
-**MemoryHub makes agent memory a cache asset, not a cache liability.** Every `search_memory` response is assembled in a deterministic, epoch-locked order designed for prefix cache hits across all major providers:
+- **Shared agent memory.** Agents don't just remember for themselves — they build an organizational hive mind. [Project-scoped memories](docs/memory-tree.md) surface for every agent working in that context. [Campaign scoping](planning/campaign-domain-framework.md) enables bounded cross-project initiatives where knowledge discovered by one project's agent is available to all enrolled projects. Domain tags enable crosscutting retrieval. [Real-time push notifications](docs/agent-memory-ergonomics/design.md) keep agent swarms current. A planned promotion pipeline will lift patterns discovered by individual agents into organizational knowledge.
 
-| Provider | Mechanism | Savings on cache hit |
-|----------|-----------|---------------------|
-| Self-hosted (vLLM + llm-d) | Automatic Prefix Caching + cache-aware routing | 2x throughput, 152x TTFT improvement |
-| Anthropic Claude | Prompt caching | 90% cost reduction |
-| OpenAI | Automatic prefix matching | 50% cost reduction |
-| Google Gemini | Context caching | 75-90% cost reduction |
+- **Inference cost optimization.** [Cache-optimized assembly](research/vllm-cache-optimization.md) returns memories in a deterministic, epoch-locked order designed for KV cache prefix hits across vLLM (2x throughput, 152x TTFT), Anthropic (90% cost reduction), OpenAI (50%), and Gemini (75-90%). The key insight: the first agent pays full inference cost; subsequent agents with overlapping memory contexts get the cached prefix nearly free. Token budget caps and weight-based stub/full injection keep context windows lean. [Governed context compaction](research/context-compaction-survey.md) is on the roadmap.
 
-The key insight: **the first agent pays full inference cost; subsequent agents with overlapping memory contexts get the cached prefix nearly free.** Ten agents sharing a project's memory context don't pay 10x — they pay ~1.9x (one full prefill + nine cache hits). This works without application-level coordination: MemoryHub produces deterministic token sequences, and the inference infrastructure (vLLM APC, llm-d routing, provider caching) handles the rest.
+- **Compliance-ready architecture.** Version history, provenance branches, and a planned [immutable audit trail](docs/governance.md) position MemoryHub for EU AI Act transparency requirements (enforcement begins August 2026), GDPR data governance, HIPAA, and financial regulations. Compaction will use readable summaries — not opaque tokens — so the compliance team can inspect what was kept.
 
-Beyond cost, MemoryHub adds the governance layer that no other memory system provides: multi-tier scope isolation, version history with provenance branches, an immutable audit trail, policy-driven curation, and a path toward EU AI Act transparency compliance for memory operations. See `research/vllm-cache-optimization.md` for the full caching investigation and `research/context-compaction-survey.md` for the compaction strategy.
+- **Framework-agnostic integration.** Works with any agent framework that speaks MCP. A [typed Python SDK](sdk/README.md), a CLI, a [project config wizard](docs/agent-memory-ergonomics/overview.md) that generates agent rule files, and designed integration paths for [kagenti](planning/kagenti-integration/overview.md) and [LlamaStack](planning/llamastack-integration/overview.md).
+
+- **Kubernetes-native on OpenShift AI.** [Single PostgreSQL backend](docs/storage-layer.md) handling relational, vector, and graph queries. FIPS compliance by delegation. Air-gap deployable with on-cluster embedding models. Red Hat UBI images. An [llm-d integration path](research/vllm-cache-optimization.md) for automatic cache-aware routing at the infrastructure level.
 
 **Status (2026-04-13).** Core memory operations, OAuth 2.1 + JWT auth with service-layer RBAC, the dashboard UI, the published Python SDK, the agent-memory-ergonomics work (search shape, session focus vector with cross-encoder reranking, project config + rule generation), and cache-optimized memory assembly with compilation epochs are all shipped. The Kubernetes operator and the curator-as-background-agent layer are still on the roadmap. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem status table.
 
