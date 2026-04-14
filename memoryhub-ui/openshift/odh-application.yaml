@@ -12,7 +12,7 @@ spec:
   description: >-
     Centralized agent memory with governance and curation
     for OpenShift AI workloads.
-  category: Partners
+  category: Self-managed
   provider: "Community"
   support: "community"
   route: memoryhub-ui

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from importlib.metadata import version as pkg_version
 from pathlib import Path
 
 import typer
@@ -11,6 +12,7 @@ from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
 from rich.console import Console
 from rich.table import Table
 
+from memoryhub_cli.admin import admin_app
 from memoryhub_cli.config import get_connection_params, save_config
 from memoryhub_cli.project_config import (
     InitChoices,
@@ -22,17 +24,36 @@ from memoryhub_cli.project_config import (
     write_init_files,
 )
 
+
+def _version_callback(value: bool) -> None:
+    if value:
+        print(f"memoryhub {pkg_version('memoryhub-cli')}")
+        raise typer.Exit()
+
+
 app = typer.Typer(
     name="memoryhub",
-    help="CLI client for MemoryHub — centralized, governed memory for AI agents.",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False, "--version", "-V", callback=_version_callback, is_eager=True,
+        help="Show version and exit.",
+    ),
+) -> None:
+    """CLI client for MemoryHub — centralized, governed memory for AI agents."""
+
+
 config_app = typer.Typer(
     name="config",
     help="Manage project-level MemoryHub configuration (.memoryhub.yaml).",
     no_args_is_help=True,
 )
 app.add_typer(config_app, name="config")
+app.add_typer(admin_app, name="admin", help="Manage agents and OAuth clients")
 console = Console()
 err_console = Console(stderr=True)
 
