@@ -4,7 +4,7 @@ Centralized, governed memory for AI agents.
 
 MemoryHub provides a persistent memory layer for AI agents running on OpenShift AI, with scope-based access control, multi-tenant isolation, and an immutable audit trail. It works with any agent framework — LlamaStack, LangChain, Claude Code, Cursor, and more.
 
-**Status:** Alpha (v0.4.0). Core operations are stable; curation and relationship APIs may evolve.
+**Status:** Alpha (v0.5.0). Core operations are stable; curation and relationship APIs may evolve.
 
 ## Installation
 
@@ -21,6 +21,41 @@ import asyncio
 from memoryhub import MemoryHubClient
 
 async def main():
+    # API key mode (simplest):
+    client = MemoryHubClient(
+        url="https://mcp-server.apps.example.com/mcp/",
+        api_key="mh-dev-abc123",
+    )
+
+    async with client:
+        # Search memories
+        results = await client.search("deployment patterns", max_results=5)
+        for memory in results.results:
+            print(f"[{memory.scope}] {memory.content[:80]}")
+
+        # Write a memory
+        written = await client.write(
+            "FastAPI is the preferred web framework",
+            scope="project",
+            weight=0.85,
+        )
+        print(f"Created: {written.memory.id}")
+
+asyncio.run(main())
+```
+
+`server_url` is accepted as an alias for `url` for backward compatibility.
+
+### OAuth 2.1 mode
+
+Recommended for production multi-agent deployments:
+
+```python
+import asyncio
+from memoryhub import MemoryHubClient
+
+async def main():
+    # OAuth 2.1 mode (recommended for production):
     client = MemoryHubClient(
         url="https://mcp-server.apps.example.com/mcp/",
         auth_url="https://auth-server.apps.example.com",
@@ -64,6 +99,17 @@ asyncio.run(main())
 
 Instead of passing credentials directly, use `MemoryHubClient.from_env()`:
 
+### API key mode
+
+```bash
+export MEMORYHUB_URL="https://mcp-server.apps.example.com/mcp/"
+export MEMORYHUB_API_KEY="mh-dev-abc123"
+```
+
+`MEMORYHUB_SERVER_URL` is accepted as an alias for `MEMORYHUB_URL`.
+
+### OAuth 2.1 mode
+
 ```bash
 export MEMORYHUB_URL="https://mcp-server.apps.example.com/mcp/"
 export MEMORYHUB_AUTH_URL="https://auth-server.apps.example.com"
@@ -106,9 +152,7 @@ from memoryhub import MemoryHubClient
 
 client = MemoryHubClient(
     url="https://mcp-server.apps.example.com/mcp/",
-    auth_url="https://auth-server.apps.example.com",
-    client_id="my-agent",
-    client_secret="my-secret",
+    api_key="mh-dev-abc123",
 )
 
 results = client.search_sync("deployment patterns")
@@ -124,6 +168,7 @@ results = client.search_sync("deployment patterns")
 | `read(memory_id, *, include_versions, project_id)` | Read a memory by ID |
 | `write(content, *, scope, weight, project_id, domains, ...)` | Create a new memory |
 | `update(memory_id, *, content, weight, project_id, domains, ...)` | Update an existing memory |
+| `delete(memory_id, *, project_id)` | Soft-delete a memory and its version chain |
 
 ### Lifecycle
 
@@ -140,20 +185,45 @@ results = client.search_sync("deployment patterns")
 | `create_relationship(source_id, target_id, relationship_type, *, project_id)` | Create a relationship (use `conflicts_with` + merge metadata to suggest merges) |
 | `set_curation_rule(name, *, tier, action, config)` | Configure curation rules |
 
+### Session focus
+
+| Method | Description |
+|--------|-------------|
+| `set_session_focus(focus, project)` | Declare the session's focus topic for history tracking |
+| `get_focus_history(project, *, start_date, end_date)` | Retrieve per-project session focus histogram |
+
+### Push notifications
+
+| Method | Description |
+|--------|-------------|
+| `on_memory_updated(callback)` | Register a callback fired when another agent writes a memory (requires `live_subscription: true` in `.memoryhub.yaml`) |
+
+### Utilities
+
+| Method | Description |
+|--------|-------------|
+| `get_injection_block(results)` | Render search results as a stable text block for prompt injection (static method) |
+
 Version history is accessed via `read(memory_id, include_versions=True, history_offset=0, history_max_versions=10)`.
 
 All methods accepting `project_id` use it for campaign enrollment verification. When a target memory has `scope="campaign"`, the server resolves campaign membership through `project_id`. The `domains` parameter on `search()` boosts domain-matching results (non-matching results still appear); on `write()`/`update()` it tags the memory with crosscutting knowledge domains.
 
 ## Authentication
 
-The SDK uses OAuth 2.1 `client_credentials` grant under the hood. Token management is fully automatic — the SDK fetches, caches, and refreshes JWT access tokens transparently. You never need to handle tokens directly.
+The SDK supports two authentication modes:
+
+**API key** — Calls `register_session` automatically on connect. Suitable for development and single-operator deployments.
+
+**OAuth 2.1** — Uses the `client_credentials` grant. Token management is fully automatic: the SDK fetches, caches, and refreshes JWT access tokens transparently. Recommended for production multi-agent deployments.
+
+The two modes are mutually exclusive. If both are provided, the constructor raises `ValueError`.
 
 ## Further documentation
 
 The SDK is one surface of the [memory-hub](https://github.com/redhat-ai-americas/memory-hub) monorepo. For deeper context:
 
 - **[Architecture overview](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/ARCHITECTURE.md)** — System design, deployment topology, data flow
-- **[MCP server tool reference](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/mcp-server.md)** — The 15 tools the SDK wraps, with parameter reference
+- **[MCP server tool reference](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/mcp-server.md)** — The 14 tools the SDK wraps, with parameter reference
 - **[Memory tree data model](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/memory-tree.md)** — How scopes, branches, and versioning work
 - **[Governance and authorization](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/governance.md)** — RBAC, scope-based access, audit trail
 - **[Agent memory ergonomics design](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md)** — Full `.memoryhub.yaml` schema, retrieval defaults, session focus, and loading patterns
