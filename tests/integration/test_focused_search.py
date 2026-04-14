@@ -532,3 +532,145 @@ async def test_focused_results_survive_pydantic_serialization(
         )
 
     assert "pivot_suggested" in round_tripped, "Serialized response missing 'pivot_suggested'"
+
+
+# ---------------------------------------------------------------------------
+# 4. Campaign-scoped search with domain boosting
+# ---------------------------------------------------------------------------
+
+
+async def test_campaign_scoped_search_with_domain_boost(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """Campaign-scoped memories with domains should be retrievable with domain boosting.
+
+    Creates campaign-scoped memories tagged with frontend domains, then
+    searches with domain boost parameters to verify that campaign memories
+    are found and the domain boost reorders results correctly.
+
+    Campaign memories use owner_id as the campaign UUID and require
+    campaign_ids to be passed for visibility.
+    """
+    campaign_id = "campaign-frontend-2026"
+
+    # Campaign memory tagged with React + TypeScript.
+    await create_memory(
+        _make(
+            "campaign react typescript component architecture patterns",
+            owner_id=campaign_id,
+            scope=MemoryScope.CAMPAIGN,
+            weight=0.85,
+            domains=["React", "TypeScript"],
+        ),
+        async_session, embedding_service, skip_curation=True,
+    )
+    # Campaign memory tagged with Vue + TypeScript.
+    await create_memory(
+        _make(
+            "campaign vue typescript composition api best practices",
+            owner_id=campaign_id,
+            scope=MemoryScope.CAMPAIGN,
+            weight=0.85,
+            domains=["Vue", "TypeScript"],
+        ),
+        async_session, embedding_service, skip_curation=True,
+    )
+    # Campaign memory with no domain tags.
+    await create_memory(
+        _make(
+            "campaign frontend performance optimization strategies",
+            owner_id=campaign_id,
+            scope=MemoryScope.CAMPAIGN,
+            weight=0.85,
+        ),
+        async_session, embedding_service, skip_curation=True,
+    )
+
+    query = "frontend component patterns typescript"
+    focus = "frontend web development"
+
+    # Campaign memories require authorized_scopes with campaign_ids to be visible.
+    auth_scopes = {"campaign": None}
+
+    # Search WITHOUT domain boost.
+    no_boost: FocusedSearchResult = await search_with_focus(
+        query, async_session, embedding_service,
+        focus_string=focus,
+        session_focus_weight=0.4,
+        authorized_scopes=auth_scopes,
+        campaign_ids={campaign_id},
+    )
+
+    # Search WITH React domain boost.
+    with_boost: FocusedSearchResult = await search_with_focus(
+        query, async_session, embedding_service,
+        focus_string=focus,
+        session_focus_weight=0.4,
+        authorized_scopes=auth_scopes,
+        campaign_ids={campaign_id},
+        domains=["React"],
+        domain_boost_weight=0.3,
+    )
+
+    assert len(no_boost.results) > 0, "Campaign search returned no results without boost"
+    assert len(with_boost.results) > 0, "Campaign search returned no results with boost"
+
+    # Same memories should be returned regardless of boost.
+    assert _content_set(no_boost.results) == _content_set(with_boost.results), (
+        "Domain boost changed the result set instead of just reordering"
+    )
+
+    # The React-tagged campaign memory should be at the top when boosted.
+    top_node = with_boost.results[0][0]
+    top_text = top_node.content if hasattr(top_node, "content") else (top_node.stub or "")
+    assert "react" in top_text.lower(), (
+        f"Expected React-tagged campaign memory at rank 0 with domain boost, "
+        f"got: {top_text!r}"
+    )
+
+    # Verify the React memory's rank improved (or stayed at top) with the boost.
+    react_rank_boosted = _rank_of(with_boost.results, "react")
+    react_rank_plain = _rank_of(no_boost.results, "react")
+    assert react_rank_boosted is not None, "React memory missing from boosted results"
+    assert react_rank_plain is not None, "React memory missing from plain results"
+    assert react_rank_boosted <= react_rank_plain, (
+        f"Domain boost did not improve React campaign memory rank: "
+        f"boosted={react_rank_boosted}, plain={react_rank_plain}"
+    )
+
+
+async def test_campaign_memories_invisible_without_campaign_ids(
+    async_session: AsyncSession,
+    embedding_service: MockEmbeddingService,
+) -> None:
+    """Campaign-scoped memories are invisible when campaign_ids is not provided.
+
+    This verifies the authorization gate: even when authorized_scopes includes
+    'campaign', the search returns nothing if campaign_ids is empty.
+    """
+    campaign_id = "campaign-invisible-test"
+
+    await create_memory(
+        _make(
+            "campaign secret architecture decision records",
+            owner_id=campaign_id,
+            scope=MemoryScope.CAMPAIGN,
+            weight=0.9,
+            domains=["React"],
+        ),
+        async_session, embedding_service, skip_curation=True,
+    )
+
+    # Search with campaign scope authorized but no campaign_ids.
+    results = await search_memories(
+        "architecture decision records",
+        async_session, embedding_service,
+        authorized_scopes={"campaign": None},
+        # campaign_ids intentionally omitted
+    )
+
+    assert len(results) == 0, (
+        f"Expected no results without campaign_ids, got {len(results)}: "
+        f"{[n.content if hasattr(n, 'content') else n.stub for n, _ in results]}"
+    )

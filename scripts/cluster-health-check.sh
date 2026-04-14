@@ -7,7 +7,8 @@
 # to catch stale assumptions about deployment state (migration drift, dead
 # pods, error loops) before they waste session time.
 #
-# Default mode checks: login, pod status, recent errors.
+# Default mode checks: login, pod status, recent errors, route, tool
+# count, image freshness.
 # --full adds: migration head comparison (requires port-forward to DB).
 #
 # Resolves a recurring retro gap: 4 retros flagged stale briefing data
@@ -181,7 +182,7 @@ else
     dim "pod errors:" "[skipped — no running pod]"
 fi
 
-# ── Check 5: Tool count ────────────────────────────────────────────────────
+# ── Check 5: Route ─────────────────────────────────────────────────────────
 
 ROUTE=$(oc get route "$DEPLOYMENT" -n "$NAMESPACE" \
     -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
@@ -193,7 +194,70 @@ else
     ISSUES=$((ISSUES + 1))
 fi
 
-# ── Check 6 (--full): Migration state ──────────────────────────────────────
+# ── Check 6: Tool count ───────────────────────────────────────────────────
+# Compare deployed tool count against main.py registrations
+
+MAIN_PY="$PROJECT_ROOT/memory-hub-mcp/src/main.py"
+EXPECTED_TOOLS=0
+if [[ -f "$MAIN_PY" ]]; then
+    # Count tool imports — each "from src.tools.<name> import" is one registered tool
+    EXPECTED_TOOLS=$(grep -c 'from src\.tools\.' "$MAIN_PY" 2>/dev/null || echo "0")
+fi
+
+DEPLOYED_TOOLS=""
+if [[ "$POD_COUNT" -ge 1 ]]; then
+    DEPLOYED_TOOLS=$(oc logs "deployment/$DEPLOYMENT" -n "$NAMESPACE" --tail=50 2>/dev/null \
+        | grep -oE "tools['\"]?: *[0-9]+" | grep -oE '[0-9]+' | head -1 || echo "")
+fi
+
+if [[ -n "$DEPLOYED_TOOLS" && "$EXPECTED_TOOLS" -gt 0 ]]; then
+    if [[ "$DEPLOYED_TOOLS" == "$EXPECTED_TOOLS" ]]; then
+        ok "tools:" "${DEPLOYED_TOOLS} deployed (matches main.py)"
+    else
+        warn "tools:" "deployed=${DEPLOYED_TOOLS}, main.py=${EXPECTED_TOOLS} (mismatch)"
+        ISSUES=$((ISSUES + 1))
+    fi
+elif [[ "$EXPECTED_TOOLS" -gt 0 ]]; then
+    dim "tools:" "${EXPECTED_TOOLS} expected (could not read deployed count from logs)"
+else
+    dim "tools:" "[could not determine tool counts]"
+fi
+
+# ── Check 7: Image freshness ──────────────────────────────────────────────
+# Check how old the deployed image is
+
+if [[ "$POD_COUNT" -ge 1 ]]; then
+    POD_CREATED=$(oc get pod -l "app.kubernetes.io/name=$DEPLOYMENT" -n "$NAMESPACE" \
+        -o jsonpath='{.items[0].metadata.creationTimestamp}' 2>/dev/null || echo "")
+
+    if [[ -n "$POD_CREATED" ]]; then
+        AGE_HOURS=$(python3 -c "
+from datetime import datetime, timezone
+ts = '$POD_CREATED'.replace('Z', '+00:00')
+dt = datetime.fromisoformat(ts)
+delta = datetime.now(timezone.utc) - dt
+print(int(delta.total_seconds() // 3600))
+" 2>/dev/null || echo "")
+
+        if [[ -n "$AGE_HOURS" ]]; then
+            if [[ "$AGE_HOURS" -lt 24 ]]; then
+                ok "image age:" "${AGE_HOURS}h (recent)"
+            elif [[ "$AGE_HOURS" -lt 168 ]]; then
+                dim "image age:" "$((AGE_HOURS / 24))d"
+            else
+                warn "image age:" "$((AGE_HOURS / 24))d — image may be stale"
+            fi
+        else
+            dim "image age:" "[could not parse creation timestamp]"
+        fi
+    else
+        dim "image age:" "[could not read pod creation time]"
+    fi
+else
+    dim "image age:" "[skipped — no running pod]"
+fi
+
+# ── Check 8 (--full): Migration state ─────────────────────────────────────
 
 if [[ "$FULL" == "true" ]]; then
     echo ""
