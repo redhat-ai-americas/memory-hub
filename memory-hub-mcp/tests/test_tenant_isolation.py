@@ -257,7 +257,7 @@ def _mock_create_memory_factory(store: FakeMemoryStore):
     """Build an AsyncMock that populates the store on each call and
     returns the same (memory, curation) shape as the real service."""
 
-    async def _fake(data, session, embedding_service, *, tenant_id, skip_curation=False):
+    async def _fake(data, session, embedding_service, *, tenant_id, skip_curation=False, **kwargs):
         node = _make_node(
             content=data.content,
             owner_id=data.owner_id,
@@ -514,6 +514,11 @@ async def test_search_as_b_does_not_see_a_memories():
             "src.tools.search_memory.count_search_matches",
             new=AsyncMock(side_effect=_fake_count),
         ),
+        patch(
+            "src.tools.search_memory.get_roles_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
     ):
         b_result = await search_memory(query="preferences")
 
@@ -594,6 +599,11 @@ async def test_search_as_a_finds_own_memories():
         patch(
             "src.tools.search_memory.count_search_matches",
             new=AsyncMock(side_effect=_fake_count),
+        ),
+        patch(
+            "src.tools.search_memory.get_roles_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
         ),
     ):
         a_result = await search_memory(query="anything")
@@ -725,7 +735,7 @@ async def test_update_as_same_tenant_succeeds():
     async def _fake_read(mid, session, *, tenant_id):
         return store.read(mid, tenant_id)
 
-    async def _fake_update(*, memory_id, data, session, embedding_service):
+    async def _fake_update(*, memory_id, data, session, embedding_service, **kwargs):
         old = store.memories[memory_id]
         new_version = _make_node(
             content=data.content or old.content,
@@ -871,12 +881,16 @@ async def test_delete_as_b_fails_on_tenant_a_memory():
 
 @pytest.mark.asyncio
 async def test_get_memory_history_as_b_fails_on_tenant_a_memory():
-    """Phase 5 (#46): get_memory_history tenant-filters the entry-point
-    read; tenant B sees "not found" for a tenant A memory, never its
-    version chain."""
+    """Phase 5 (#46): version history (read_memory with include_versions)
+    tenant-filters the entry-point read; tenant B sees "not found" for a
+    tenant A memory, never its version chain.
+
+    After #173, get_memory_history was consolidated into read_memory with
+    include_versions=True.
+    """
     from fastmcp.exceptions import ToolError
 
-    from src.tools.get_memory_history import get_memory_history
+    from src.tools.read_memory import read_memory
     from src.tools.write_memory import write_memory
 
     store = FakeMemoryStore()
@@ -916,39 +930,36 @@ async def test_get_memory_history_as_b_fails_on_tenant_a_memory():
     async def _fake_read(mid, session, *, tenant_id):
         return store.read(mid, tenant_id)
 
-    async def _fake_history(mid, session, *, tenant_id, **kwargs):
-        return store.history(mid, tenant_id)
-
     with (
         patch(
-            "src.tools.get_memory_history.get_claims_from_context",
+            "src.tools.read_memory.get_claims_from_context",
             return_value=CLAIMS_B_USER_B,
         ),
         patch(
-            "src.tools.get_memory_history.get_db_session",
+            "src.tools.read_memory.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.get_memory_history.release_db_session",
+            "src.tools.read_memory.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.get_memory_history._read_memory",
+            "src.tools.read_memory._read_memory",
             new=AsyncMock(side_effect=_fake_read),
-        ),
-        patch(
-            "src.tools.get_memory_history._get_memory_history",
-            new=AsyncMock(side_effect=_fake_history),
         ),
     ):
         with pytest.raises(ToolError, match="not found"):
-            await get_memory_history(memory_id=memory_id)
+            await read_memory(memory_id=memory_id, include_versions=True)
 
 
 @pytest.mark.asyncio
 async def test_get_memory_history_same_tenant_succeeds():
-    """Baseline: tenant A sees the version history of its own memory."""
-    from src.tools.get_memory_history import get_memory_history
+    """Baseline: tenant A sees the version history of its own memory.
+
+    After #173, get_memory_history was consolidated into read_memory with
+    include_versions=True. The history is returned in version_history.
+    """
+    from src.tools.read_memory import read_memory
     from src.tools.write_memory import write_memory
 
     store = FakeMemoryStore()
@@ -993,31 +1004,31 @@ async def test_get_memory_history_same_tenant_succeeds():
 
     with (
         patch(
-            "src.tools.get_memory_history.get_claims_from_context",
+            "src.tools.read_memory.get_claims_from_context",
             return_value=CLAIMS_A_USER_A,
         ),
         patch(
-            "src.tools.get_memory_history.get_db_session",
+            "src.tools.read_memory.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.get_memory_history.release_db_session",
+            "src.tools.read_memory.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.get_memory_history._read_memory",
+            "src.tools.read_memory._read_memory",
             new=AsyncMock(side_effect=_fake_read),
         ),
         patch(
-            "src.tools.get_memory_history._get_memory_history",
+            "src.tools.read_memory.get_memory_history",
             new=AsyncMock(side_effect=_fake_history),
         ),
     ):
-        result = await get_memory_history(memory_id=memory_id)
+        result = await read_memory(memory_id=memory_id, include_versions=True)
 
-    assert result["total_versions"] == 1
-    assert len(result["versions"]) == 1
-    assert result["versions"][0]["content"] == "content for history"
+    assert result["version_history"]["total_versions"] == 1
+    assert len(result["version_history"]["versions"]) == 1
+    assert result["version_history"]["versions"][0]["content"] == "content for history"
 
 
 # ===========================================================================
@@ -1201,6 +1212,16 @@ async def test_get_relationships_same_tenant_returns_edges():
         patch(
             "src.tools.get_relationships.get_relationships_service",
             new=AsyncMock(side_effect=_fake_get_rels),
+        ),
+        patch(
+            "src.tools.get_relationships.get_projects_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
+        patch(
+            "src.tools.get_relationships.get_roles_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
         ),
     ):
         result = await get_relationships(node_id=str(src_id))

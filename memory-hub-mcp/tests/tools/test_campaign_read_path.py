@@ -113,59 +113,10 @@ async def test_read_memory_campaign_with_project_id():
     assert result["owner_id"] == CAMPAIGN_UUID
 
 
-# --- get_memory_history ---
-
-
-@pytest.mark.asyncio
-async def test_get_memory_history_campaign_requires_project_id():
-    from src.tools.get_memory_history import get_memory_history
-
-    fake_node = _fake_campaign_node()
-    mock_session = AsyncMock()
-    mock_gen = AsyncMock()
-
-    with (
-        patch("src.tools.get_memory_history.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.get_memory_history.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_memory_history.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.get_memory_history._read_memory", new_callable=AsyncMock, return_value=fake_node),
-        pytest.raises(ToolError, match="project_id is required"),
-    ):
-        await get_memory_history(memory_id=MEMORY_UUID)
-
-
-@pytest.mark.asyncio
-async def test_get_memory_history_campaign_with_project_id():
-    from src.tools.get_memory_history import get_memory_history
-
-    fake_node = _fake_campaign_node()
-    mock_session = AsyncMock()
-    mock_gen = AsyncMock()
-
-    with (
-        patch("src.tools.get_memory_history.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.get_memory_history.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_memory_history.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.get_memory_history._read_memory", new_callable=AsyncMock, return_value=fake_node),
-        patch(
-            "src.tools.get_memory_history.get_campaigns_for_project",
-            new_callable=AsyncMock,
-            return_value={CAMPAIGN_UUID},
-        ),
-        patch(
-            "src.tools.get_memory_history._get_memory_history",
-            new_callable=AsyncMock,
-            return_value={
-                "versions": [fake_node],
-                "total_versions": 1,
-                "has_more": False,
-                "offset": 0,
-            },
-        ),
-    ):
-        result = await get_memory_history(memory_id=MEMORY_UUID, project_id="my-project")
-
-    assert result["total_versions"] == 1
+# --- get_memory_history (consolidated into read_memory via #173) ---
+# Tests for get_memory_history as a standalone tool were removed when
+# the tool was consolidated into read_memory (include_versions=True).
+# Campaign-scope coverage for read_memory is above (test_read_memory_*).
 
 
 # --- get_similar_memories ---
@@ -346,74 +297,11 @@ async def test_create_relationship_campaign_with_project_id():
     assert result["relationship_type"] == "related_to"
 
 
-# --- suggest_merge ---
-
-
-@pytest.mark.asyncio
-async def test_suggest_merge_campaign_requires_project_id():
-    from src.tools.suggest_merge import suggest_merge
-
-    fake_mem = _fake_campaign_node()
-    other_uuid = str(uuid.uuid4())
-    mock_session = AsyncMock()
-    mock_gen = AsyncMock()
-
-    with (
-        patch("src.tools.suggest_merge.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.suggest_merge.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.suggest_merge.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.suggest_merge._read_memory", new_callable=AsyncMock, return_value=fake_mem),
-        pytest.raises(ToolError, match="project_id is required"),
-    ):
-        await suggest_merge(
-            memory_a_id=MEMORY_UUID,
-            memory_b_id=other_uuid,
-            reasoning="These cover the same topic",
-        )
-
-
-@pytest.mark.asyncio
-async def test_suggest_merge_campaign_with_project_id():
-    from src.tools.suggest_merge import suggest_merge
-
-    fake_mem_a = _fake_campaign_node()
-    mem_b_id = uuid.uuid4()
-    fake_mem_b = _fake_campaign_node(id=mem_b_id)
-    mock_session = AsyncMock()
-    mock_gen = AsyncMock()
-
-    fake_rel = SimpleNamespace()
-    fake_rel.model_dump = lambda mode="json": {
-        "id": str(uuid.uuid4()),
-        "source_id": MEMORY_UUID,
-        "target_id": str(mem_b_id),
-        "relationship_type": "conflicts_with",
-    }
-
-    with (
-        patch("src.tools.suggest_merge.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.suggest_merge.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.suggest_merge.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.suggest_merge._read_memory", new_callable=AsyncMock, return_value=fake_mem_a),
-        patch(
-            "src.tools.suggest_merge.get_campaigns_for_project",
-            new_callable=AsyncMock,
-            return_value={CAMPAIGN_UUID},
-        ),
-        patch(
-            "src.tools.suggest_merge.create_relationship_service",
-            new_callable=AsyncMock,
-            return_value=fake_rel,
-        ),
-    ):
-        result = await suggest_merge(
-            memory_a_id=MEMORY_UUID,
-            memory_b_id=str(mem_b_id),
-            reasoning="These cover the same topic",
-            project_id="my-project",
-        )
-
-    assert "relationship" in result
+# --- suggest_merge (consolidated into create_relationship via #174) ---
+# Tests for suggest_merge as a standalone tool were removed when the tool
+# was consolidated into create_relationship (use relationship_type=
+# "conflicts_with" with merge metadata). Campaign-scope coverage for
+# create_relationship is above (test_create_relationship_*).
 
 
 # --- delete_memory ---
@@ -508,6 +396,8 @@ async def test_get_relationships_campaign_nodes_filtered_without_project_id():
             new_callable=AsyncMock,
             return_value=[fake_rel],
         ),
+        patch("src.tools.get_relationships.get_projects_for_user", new_callable=AsyncMock, return_value=set()),
+        patch("src.tools.get_relationships.get_roles_for_user", new_callable=AsyncMock, return_value=set()),
     ):
         result = await get_relationships(node_id=MEMORY_UUID)
 
@@ -553,6 +443,8 @@ async def test_get_relationships_campaign_nodes_accessible_with_project_id():
             new_callable=AsyncMock,
             return_value={CAMPAIGN_UUID},
         ),
+        patch("src.tools.get_relationships.get_projects_for_user", new_callable=AsyncMock, return_value=set()),
+        patch("src.tools.get_relationships.get_roles_for_user", new_callable=AsyncMock, return_value=set()),
     ):
         result = await get_relationships(node_id=MEMORY_UUID, project_id="my-project")
 
@@ -564,11 +456,9 @@ async def test_get_relationships_campaign_nodes_accessible_with_project_id():
 
 @pytest.mark.parametrize("tool_module,tool_name", [
     ("src.tools.read_memory", "read_memory"),
-    ("src.tools.get_memory_history", "get_memory_history"),
     ("src.tools.get_similar_memories", "get_similar_memories"),
     ("src.tools.report_contradiction", "report_contradiction"),
     ("src.tools.create_relationship", "create_relationship"),
-    ("src.tools.suggest_merge", "suggest_merge"),
     ("src.tools.delete_memory", "delete_memory"),
     ("src.tools.get_relationships", "get_relationships"),
 ])

@@ -98,6 +98,8 @@ async def test_get_relationships_success():
         patch("src.tools.get_relationships.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.get_relationships.release_db_session", new_callable=AsyncMock),
         patch("src.tools.get_relationships.get_relationships_service", new_callable=AsyncMock, return_value=[mock_rel]),
+        patch("src.tools.get_relationships.get_projects_for_user", new_callable=AsyncMock, return_value=set()),
+        patch("src.tools.get_relationships.get_roles_for_user", new_callable=AsyncMock, return_value=set()),
     ):
         result = await get_relationships(node_id=str(uuid.uuid4()))
     assert result["count"] == 1
@@ -136,6 +138,16 @@ async def test_get_relationships_forwards_tenant_id_to_service():
             new_callable=AsyncMock,
             return_value=[],
         ) as mock_service,
+        patch(
+            "src.tools.get_relationships.get_projects_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
+        patch(
+            "src.tools.get_relationships.get_roles_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
     ):
         await get_relationships(node_id=str(uuid.uuid4()))
 
