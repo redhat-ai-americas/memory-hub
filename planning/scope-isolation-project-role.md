@@ -99,7 +99,9 @@ class ProjectMembership(Base):
     joined_by: Mapped[str] = mapped_column(String(255), nullable=False)
 ```
 
-No separate `projects` table is needed in this phase. Projects are identified by string ID (same as campaign_memberships.project_id). A `projects` table with metadata (name, description, tenant_id) can come later if governance features require it. This keeps the migration minimal.
+**Update (2026-04-15):** A `projects` table was added in migration 012 with columns for name, description, tenant_id, and `enrollment_policy` (open/invite_only). This supersedes the original plan to defer the projects table. Project memberships and auto-enrollment (#188) use this table.
+
+~~No separate `projects` table is needed in this phase. Projects are identified by string ID (same as campaign_memberships.project_id). A `projects` table with metadata (name, description, tenant_id) can come later if governance features require it. This keeps the migration minimal.~~
 
 ### Authorization Changes
 
@@ -193,15 +195,16 @@ if project_id:
 
 This matches the campaign pattern: the caller explicitly declares the project context per-call, and the tool validates membership before including scoped memories.
 
-`write_memory` with scope="project": the caller must provide a `project_id` parameter (a new tool parameter, distinct from `owner_id`). The tool stores this value as `scope_id` on the memory node. `owner_id` continues to default to `claims["sub"]` (the writing user) for attribution. The tool verifies the caller is a member of the target project before allowing the write:
+`write_memory` with scope="project": the caller must provide a `project_id` parameter (a new tool parameter, distinct from `owner_id`). The tool stores this value as `scope_id` on the memory node. `owner_id` continues to default to `claims["sub"]` (the writing user) for attribution.
+
+**Update (2026-04-15):** The hard-reject behavior described in the original design was replaced by auto-enrollment (#188). Projects now default to `enrollment_policy='open'`. When a caller writes to an open project they are not yet a member of, the server auto-enrolls them and proceeds with the write. Invite-only projects (`enrollment_policy='invite_only'`) still reject non-members. The `list_projects` MCP tool lets agents discover available projects before writing.
+
 ```python
 if scope == "project" and not project_id:
     raise ToolError("scope='project' requires a project_id parameter.")
-if scope == "project" and not project_ids:
-    raise ToolError("Not a member of any project. ...")
-if scope == "project" and project_id not in project_ids:
-    raise ToolError(f"Not a member of project '{project_id}'. ...")
-# Set scope_id on the memory node
+# Auto-enrollment: if project is open and caller is not a member,
+# enroll them automatically before proceeding with the write.
+# Invite-only projects raise ToolError for non-members.
 memory_node.scope_id = project_id
 ```
 
@@ -423,7 +426,7 @@ Dependencies flow top-to-bottom; items at the same indent level can be paralleli
 
 2. **DECIDED: Keep service-identity-only restriction for role writes.** This is an intentional governance decision from `docs/governance.md`: role-scoped memories are created by the curator agent promoting patterns it detects across individual user memories, not by direct user writes. The new `role_names` check adds membership verification on top of the existing `identity_type == "service"` gate, closing the open-access gap without changing the write policy.
 
-3. **DECIDED: No `projects` table yet.** Projects remain implicit string IDs in `project_memberships`. A full projects table (id, name, description, tenant_id, created_at) is needed for the UI but not for authz -- a backlog issue will be created to track it separately.
+3. **DECIDED: ~~No `projects` table yet.~~ SUPERSEDED by #188.** A `projects` table was added in migration 012 with `enrollment_policy` (open/invite_only). Auto-enrollment uses this table to determine whether non-members can join on first write.
 
 4. **DECIDED: Table + JWT claims.** `get_roles_for_user` checks both the `role_assignments` table AND `claims.get("roles", [])`, merging the results into a single set. This gives immediate admin-managed roles via the table while allowing the OAuth 2.1 auth server to contribute roles via JWT claims as that integration matures.
 

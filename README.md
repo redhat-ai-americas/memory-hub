@@ -8,7 +8,7 @@ It works with any agent framework that speaks MCP — Claude Code, kagenti-deplo
 
 - **Governed memory operations.** Every write, read, update, and deletion is access-controlled by [five-tier scope isolation](docs/governance.md) enforced at the SQL level. Memories carry [version history with provenance branches](docs/memory-tree.md), contradiction detection, and a [three-layer curation rules engine](docs/curator-agent.md) with inline secrets/PII scanning. Enterprise-scope memories require human approval. This is the substrate that makes all other capabilities trustworthy.
 
-- **Shared agent memory.** Agents don't just remember for themselves — they build an organizational hive mind. [Project-scoped memories](docs/memory-tree.md) surface for every agent working in that context. [Campaign scoping](planning/campaign-domain-framework.md) enables bounded cross-project initiatives where knowledge discovered by one project's agent is available to all enrolled projects. Domain tags enable crosscutting retrieval. [Real-time push notifications](docs/agent-memory-ergonomics/design.md) keep agent swarms current. A planned promotion pipeline will lift patterns discovered by individual agents into organizational knowledge.
+- **Shared agent memory.** Agents don't just remember for themselves — they build an organizational hive mind. [Project-scoped memories](docs/memory-tree.md) surface for every agent working in that context, with auto-enrollment on first write to open projects so agents can start contributing without manual membership setup. [Campaign scoping](planning/campaign-domain-framework.md) enables bounded cross-project initiatives where knowledge discovered by one project's agent is available to all enrolled projects. Domain tags enable crosscutting retrieval. [Real-time push notifications](docs/agent-memory-ergonomics/design.md) keep agent swarms current. A planned promotion pipeline will lift patterns discovered by individual agents into organizational knowledge.
 
 - **Inference cost optimization.** [Cache-optimized assembly](research/vllm-cache-optimization.md) returns memories in a deterministic, epoch-locked order designed for KV cache prefix hits across vLLM (2x throughput, 152x TTFT), Anthropic (90% cost reduction), OpenAI (50%), and Gemini (75-90%). The key insight: the first agent pays full inference cost; subsequent agents with overlapping memory contexts get the cached prefix nearly free. Token budget caps and weight-based stub/full injection keep context windows lean. [Governed context compaction](research/context-compaction-survey.md) is on the roadmap.
 
@@ -18,13 +18,13 @@ It works with any agent framework that speaks MCP — Claude Code, kagenti-deplo
 
 - **Kubernetes-native on OpenShift AI.** [Single PostgreSQL backend](docs/storage-layer.md) handling relational, vector, and graph queries. FIPS compliance by delegation. Air-gap deployable with on-cluster embedding models. Red Hat UBI images. An [llm-d integration path](research/vllm-cache-optimization.md) for automatic cache-aware routing at the infrastructure level.
 
-**Status (2026-04-13).** Core memory operations, OAuth 2.1 + JWT auth with service-layer RBAC, the dashboard UI, the published Python SDK, the agent-memory-ergonomics work (search shape, session focus vector with cross-encoder reranking, project config + rule generation), and cache-optimized memory assembly with compilation epochs are all shipped. The Kubernetes operator and the curator-as-background-agent layer are still on the roadmap. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem status table.
+**Status (2026-04-15).** Core memory operations, OAuth 2.1 + JWT auth with service-layer RBAC, the dashboard UI, the published Python SDK, the agent-memory-ergonomics work (search shape, session focus vector with cross-encoder reranking, project config + rule generation), and cache-optimized memory assembly with compilation epochs are all shipped. The Kubernetes operator and the curator-as-background-agent layer are still on the roadmap. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem status table.
 
 ## What's in this repo
 
 | Component | Path | What it is |
 |---|---|---|
-| **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing 15 tools (search, read, write, update, delete, history, similarity, relationships, curation, contradiction, session registration, session focus) over streamable-HTTP. The primary agent surface. |
+| **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing 14 tools (search, read, write, update, delete, similarity, relationships, curation, contradiction, session registration, session focus, project discovery) over streamable-HTTP. The primary agent surface. |
 | **Server-side library** | [`src/memoryhub_core/`](src/memoryhub_core/) | SQLAlchemy models, service layer, embedding integration, RBAC enforcement (`core/authz.py`). Distribution name `memoryhub-core`; import name `memoryhub_core`. The MCP server, BFF, alembic migrations, and the seed-OAuth-clients script all import from here. |
 | **Python SDK** | [`sdk/`](sdk/) | `pip install memoryhub` — typed async client wrapping the MCP tools. OAuth 2.1 token management is automatic. See [`sdk/README.md`](sdk/README.md). |
 | **CLI** | [`memoryhub-cli/`](memoryhub-cli/) | `pip install memoryhub-cli` — terminal client for search/read/write/delete plus `memoryhub config init` for generating project-level `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md` rule files. |
@@ -139,7 +139,7 @@ See [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/desi
                           ┌──────────▼──────────┐
                           │   memory-hub-mcp    │
                           │   (FastMCP 3)       │
-                          │   15 tools          │
+                          │   14 tools          │
                           └──────────┬──────────┘
                                      │
               ┌──────────────────────┼──────────────────────┐

@@ -1,6 +1,6 @@
 # memory-hub-mcp
 
-The MCP server for MemoryHub. Exposes the memory layer as 15 tools over
+The MCP server for MemoryHub. Exposes the memory layer as 14 tools over
 streamable-HTTP so any MCP-speaking agent framework can read and write
 governed, tenant-scoped memories.
 
@@ -13,7 +13,7 @@ PyPI, see [`sdk/`](../sdk/). For the CLI, see
 
 ## Tools
 
-Fifteen tools grouped by purpose. Every tool is authenticated (via
+Fourteen tools grouped by purpose. Every tool is authenticated (via
 `register_session` for API-key sessions, or a JWT when the server is
 deployed behind the OAuth 2.1 authorization server), every write is
 governed by the curator pipeline, and every row is tenant-isolated.
@@ -21,17 +21,16 @@ governed by the curator pipeline, and every row is tenant-isolated.
 | Tool | Purpose |
 |------|---------|
 | `register_session` | Authenticate the session with an API key and start the #62 push subscriber |
-| `write_memory` | Create a new memory node or a branch (rationale, provenance, etc.) |
-| `read_memory` | Fetch a memory by UUID, optionally with version history |
+| `write_memory` | Create a new memory node or a branch (rationale, provenance, etc.). Project-scoped writes auto-enroll the caller in open projects |
+| `read_memory` | Fetch a memory by UUID, optionally with version history (consolidated from `get_memory_history`) |
 | `update_memory` | Create a new version of an existing memory, preserving the old one |
 | `delete_memory` | Soft-delete a memory and its entire version chain (destructive) |
 | `search_memory` | Semantic search across accessible memories via pgvector, with focus bias |
-| `get_memory_history` | Paginated version history of a memory for forensics |
+| `list_projects` | Discover available projects with mine/all filter |
 | `report_contradiction` | Signal that observed behavior contradicts a stored memory |
-| `create_relationship` | Create a directed edge between two memory nodes |
+| `create_relationship` | Create a directed edge between two memory nodes (also handles merge suggestions, consolidated from `suggest_merge`) |
 | `get_relationships` | Query relationships for a node, optionally tracing provenance |
 | `get_similar_memories` | Find near-duplicates of a memory with cosine similarity scores |
-| `suggest_merge` | Record that two memories should be merged (`conflicts_with` edge) |
 | `set_curation_rule` | Create or update a user-layer curation rule (regex or embedding tier) |
 | `set_session_focus` | Declare the session's focus topic for #61 history and #62 broadcast filter |
 | `get_focus_history` | Aggregated per-project histogram of session focus declarations |
@@ -67,6 +66,10 @@ for curator review. The return value includes curation metadata — if
 duplicates. If a curation rule blocks the write, a `ToolError` is raised with the reason
 (SDK maps to `CurationVetoError`).
 
+When `scope="project"`, the caller is auto-enrolled in open projects on
+first write. Invite-only projects reject non-members. Use `list_projects`
+to discover available projects before writing.
+
 **Parameters:** `content` (str), `scope` (`user` | `project` | `role` |
 `organizational` | `enterprise`), `owner_id` (str, optional — defaults to
 authenticated user), `weight` (float 0.0-1.0, default 0.7), `parent_id`
@@ -85,7 +88,7 @@ Pass `include_versions=true` to also return the full version history.
 ##### `update_memory`
 
 Create a new version of an existing memory. The old version stays
-accessible via `get_memory_history` with `isCurrent=false`. Use when a
+accessible via `read_memory(include_versions=true)`. Use when a
 preference changes, information is corrected, or a memory needs
 refinement. At least one of `content`, `weight`, or `metadata` must be
 provided.
@@ -127,15 +130,14 @@ default 0.0), `current_only` (bool, default true), `mode` (`full` |
 `focus` (str, optional), `session_focus_weight` (float 0.0-1.0, default
 0.4).
 
-##### `get_memory_history`
+##### `list_projects`
 
-Paginated version history for a memory. Pass any version ID in the chain
-(current or historical) — the tool traces the full chain. Supports
-forensics (*"what did the agent believe on March 15?"*) and helps agents
-reason about context drift.
+Discover available projects. Returns projects the caller is a member of
+(filter `mine`), or all projects visible in the tenant (filter `all`).
+Useful for agents to discover which projects exist before writing
+project-scoped memories.
 
-**Parameters:** `memory_id` (UUID str), `max_versions` (int 1-100, default
-20), `offset` (int, default 0).
+**Parameters:** `filter` (`mine` | `all`, default `mine`).
 
 ##### `report_contradiction`
 
@@ -182,15 +184,6 @@ Results are paged to avoid context bloat.
 **Parameters:** `memory_id` (UUID str), `threshold` (float 0.0-1.0,
 default 0.80), `max_results` (int 1-50, default 10), `offset` (int,
 default 0).
-
-##### `suggest_merge`
-
-Record that two memories should be merged. The suggestion is stored as a
-`conflicts_with` relationship with merge reasoning in the edge metadata.
-Use `get_relationships` to surface pending merge suggestions for review.
-
-**Parameters:** `memory_a_id` (UUID str), `memory_b_id` (UUID str),
-`reasoning` (str).
 
 ##### `set_curation_rule`
 

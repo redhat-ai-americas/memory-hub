@@ -16,7 +16,7 @@ graph TB
     end
 
     subgraph "memory-hub-mcp namespace"
-        MCP[MCP Server<br/>FastMCP 3<br/>15 tools]
+        MCP[MCP Server<br/>FastMCP 3<br/>14 tools]
         UI_BE[Dashboard BFF<br/>FastAPI]
         OAP[oauth-proxy<br/>sidecar]
     end
@@ -224,9 +224,9 @@ External cluster routes:
 
 ## What's decided and what's open
 
-**Decided and shipped.** Tree-based memory model. PostgreSQL + pgvector for relational + vector + graph in one database. MCP as the primary agent interface. OAuth 2.1 with `client_credentials` and short-lived JWTs. Service-layer RBAC enforced via `core/authz.py`. Stateless session focus with cross-encoder reranking and graceful cosine fallback. `.memoryhub.yaml` schema with Pydantic v2 in the SDK. CLI with `memoryhub config init` for project-level setup. Single-namespace co-location of MCP + UI; separate namespaces for auth and database. Dashboard with six panels behind oauth-proxy. Three-namespace deployment topology. Server-side library renamed to `memoryhub-core` (distribution name) / `memoryhub_core` (import name) so it no longer collides with the published SDK (#55 closed). Campaign & domain framework MVP — campaign as a new scope between project and organizational with enrollment-based RBAC, crosscutting domain tags on memories with RRF-integrated retrieval boosting (#154).
+**Decided and shipped.** Tree-based memory model. PostgreSQL + pgvector for relational + vector + graph in one database. MCP as the primary agent interface. OAuth 2.1 with `client_credentials` and short-lived JWTs. Service-layer RBAC enforced via `core/authz.py`. Stateless session focus with cross-encoder reranking and graceful cosine fallback. `.memoryhub.yaml` schema with Pydantic v2 in the SDK. CLI with `memoryhub config init` for project-level setup. Single-namespace co-location of MCP + UI; separate namespaces for auth and database. Dashboard with six panels behind oauth-proxy. Three-namespace deployment topology. Server-side library renamed to `memoryhub-core` (distribution name) / `memoryhub_core` (import name) so it no longer collides with the published SDK (#55 closed). Campaign & domain framework MVP — campaign as a new scope between project and organizational with enrollment-based RBAC, crosscutting domain tags on memories with RRF-integrated retrieval boosting (#154). Project auto-enrollment (#188) — `projects` table with `enrollment_policy` (open/invite_only), agents writing to open projects are auto-enrolled on first project-scoped write, `list_projects` tool for project discovery.
 
-**Decided, not yet implemented.** Kubernetes Operator with CRDs (skeleton only). Valkey-backed session vector store (deferred until #61 or #62 lands). Audit logging stub interface (#67). FIPS end-to-end validation. `token_exchange` grant for platform-integrated agents. Project-scope membership enforcement (#64) — currently scope filtering treats project membership as implicit. Campaign promotion pipeline (Phase 3+) — curator-driven cross-project knowledge promotion with HITL approval queue. Emergent domain ontology — automatic synonym detection and normalization of domain tags.
+**Decided, not yet implemented.** Kubernetes Operator with CRDs (skeleton only). Valkey-backed session vector store (deferred until #61 or #62 lands). Audit logging stub interface (#67). FIPS end-to-end validation. `token_exchange` grant for platform-integrated agents. Campaign promotion pipeline (Phase 3+) — curator-driven cross-project knowledge promotion with HITL approval queue. Emergent domain ontology — automatic synonym detection and normalization of domain tags.
 
 **Open.** Multi-cluster federation. CRD naming and structure for the operator. Grafana dashboard layouts. The actor_id / driver_id model for distinguishing the agent that wrote a memory from the human it acted for (#66). HIPAA / PHI detection patterns in the curation pipeline (#68).
 
