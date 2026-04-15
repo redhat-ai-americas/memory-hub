@@ -218,27 +218,28 @@ def test_deleted_memories_silently_skipped():
 # ---------------------------------------------------------------------------
 
 
-def test_should_recompile_default_immediate():
-    """Default min_appendix=1 triggers recompilation on any appendix entry."""
+def test_should_recompile_default_threshold():
+    """Default min_appendix=5 allows appendix growth before recompilation."""
     assert should_recompile(10, 0) is False
-    assert should_recompile(10, 1) is True
-    assert should_recompile(10, 4) is True
-    assert should_recompile(100, 1) is True
+    assert should_recompile(10, 1) is False  # below min_appendix=5
+    assert should_recompile(10, 4) is False  # still below
+    assert should_recompile(10, 5) is True   # hits min_appendix
+    assert should_recompile(100, 5) is True  # hits min_appendix
 
 
-def test_should_recompile_threshold_explicit_min():
-    """Verify boundary conditions with explicit min_appendix=5."""
+def test_should_recompile_boundary_conditions():
+    """Verify boundary conditions around the default min_appendix=5."""
     # 10 compiled + 4 appendix → below min_appendix and below ratio threshold.
-    assert should_recompile(10, 4, min_appendix=5) is False
+    assert should_recompile(10, 4) is False
 
     # 10 compiled + 5 appendix → hits min_appendix.
-    assert should_recompile(10, 5, min_appendix=5) is True
+    assert should_recompile(10, 5) is True
 
     # 10 compiled + 3 appendix → 3/10 = 0.3, not strictly greater than 0.3.
-    assert should_recompile(10, 3, min_appendix=5) is False
+    assert should_recompile(10, 3) is False
 
     # 3 compiled + 1 appendix → 1/3 ≈ 0.333 > 0.3 → True (ratio check).
-    assert should_recompile(3, 1, min_appendix=5) is True
+    assert should_recompile(3, 1) is True
 
 
 def test_should_recompile_empty_epoch():

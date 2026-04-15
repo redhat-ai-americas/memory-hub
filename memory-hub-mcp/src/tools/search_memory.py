@@ -10,6 +10,7 @@ token-efficient.
 
 import json
 import logging
+import uuid as uuid_mod
 from typing import Annotated, Any, Literal
 
 from fastmcp import Context
@@ -30,8 +31,11 @@ from memoryhub_core.services.valkey_client import (
     ValkeyUnavailableError,
     get_valkey_client,
 )
+from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.services.memory import (
+    _bulk_branch_flags,
     count_search_matches,
+    node_to_read,
     search_memories,
     search_memories_with_focus,
 )
@@ -243,6 +247,123 @@ async def _apply_cache_optimized_ordering(
         "compilation_epoch": new_epoch.epoch,
         "appendix_count": 0,
     }
+
+
+async def _backfill_compiled_entries(
+    results: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+    session: Any,
+    tenant_id: str,
+    owner_id: str,
+    weight_threshold: float,
+) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
+    """Ensure compiled entries are present in the result set.
+
+    The similarity search limits results to max_results by cosine score,
+    which can exclude compiled entries that rank lower by similarity but
+    belong in the cache-stable prefix. This function:
+
+    1. Peeks at the current compilation epoch from Valkey
+    2. Finds epoch IDs missing from the similarity results
+    3. Loads those from the database
+    4. Appends them to the results so _apply_cache_optimized_ordering
+       can place them in their correct epoch positions
+
+    Returns the (possibly extended) results list. No-op if Valkey is
+    unavailable or no epoch exists.
+    """
+    compilation_owner = owner_id if owner_id is not None else "*"
+    valkey = get_valkey_client()
+
+    try:
+        existing_data = await valkey.read_compilation(tenant_id, compilation_owner)
+    except ValkeyUnavailableError:
+        return results
+
+    if existing_data is None:
+        return results
+
+    epoch = CompilationEpoch.from_dict(existing_data)
+    if not epoch.ordered_ids:
+        return results
+
+    # Find compiled IDs missing from the similarity results.
+    result_ids = {str(item.id) for item, _ in results}
+    missing_ids = [
+        mid for mid in epoch.ordered_ids if mid not in result_ids
+    ]
+    if not missing_ids:
+        return results
+
+    # Load missing memories from DB, filtered by tenant.
+    from sqlalchemy import select
+
+    missing_uuids = []
+    for mid in missing_ids:
+        try:
+            missing_uuids.append(uuid_mod.UUID(mid))
+        except ValueError:
+            continue
+
+    if not missing_uuids:
+        return results
+
+    stmt = (
+        select(MemoryNode)
+        .where(
+            MemoryNode.id.in_(missing_uuids),
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.deleted_at.is_(None),
+            MemoryNode.is_current.is_(True),
+        )
+    )
+    db_result = await session.execute(stmt)
+    nodes = db_result.scalars().all()
+
+    if not nodes:
+        return results
+
+    # Build MemoryNodeRead/Stub entries for the backfilled items.
+    node_ids = [n.id for n in nodes]
+    branch_flags = await _bulk_branch_flags(node_ids, session)
+
+    backfilled: list[tuple[MemoryNodeRead | MemoryNodeStub, float]] = []
+    for node in nodes:
+        has_children, has_rationale, branch_count = branch_flags.get(
+            node.id, (False, False, 0)
+        )
+        # Score 0.0: these weren't in the similarity results; the
+        # compilation ordering ignores scores for compiled entries.
+        if node.weight >= weight_threshold:
+            backfilled.append((
+                node_to_read(
+                    node,
+                    has_children=has_children,
+                    has_rationale=has_rationale,
+                    branch_count=branch_count,
+                ),
+                0.0,
+            ))
+        else:
+            backfilled.append((
+                MemoryNodeStub(
+                    id=node.id,
+                    parent_id=node.parent_id,
+                    stub=node.stub,
+                    scope=node.scope,
+                    weight=node.weight,
+                    branch_type=node.branch_type,
+                    has_children=has_children,
+                    has_rationale=has_rationale,
+                    created_at=node.created_at,
+                ),
+                0.0,
+            ))
+
+    logger.debug(
+        "Backfilled %d compiled entries missing from similarity results",
+        len(backfilled),
+    )
+    return results + backfilled
 
 
 @mcp.tool(
@@ -652,12 +773,25 @@ async def search_memory(
                 for item, score in results
             ]
 
+        # --- Backfill compiled entries (#188) ---
+        # The similarity search limits results to max_results by cosine
+        # score, which can exclude compiled entries that belong in the
+        # cache-stable prefix. Backfill them before compilation ordering
+        # so compiled entries are never displaced by high-similarity
+        # appendix entries.
+        cache_optimized = not raw_results
+        if cache_optimized and results:
+            results = await _backfill_compiled_entries(
+                results, session, tenant,
+                owner_id=owner_id,
+                weight_threshold=effective_weight_threshold,
+            )
+
         # --- Cache-optimized assembly (default, #175) ---
         # When raw_results is False (the default), reorder results by
         # compilation epoch for cache-stable prompt injection. Runs after
         # mode='index' so stubs are used in the compilation ordering.
         compilation_meta: dict[str, Any] | None = None
-        cache_optimized = not raw_results
         if cache_optimized and results:
             # owner_id for compilation scope: the effective owner from the
             # tool parameter (already resolved above — None means "all
