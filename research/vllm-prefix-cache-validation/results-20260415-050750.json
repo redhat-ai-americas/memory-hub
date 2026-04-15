@@ -1,0 +1,287 @@
+{
+  "timestamp_utc": "2026-04-15T05:07:07.563142+00:00",
+  "vllm_url": "https://gpt-oss-20b-2-gpt-oss-model-2.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com",
+  "vllm_version": "0.13.0+rhai19",
+  "model": "RedHatAI/gpt-oss-20b",
+  "prometheus_url": "https://thanos-querier-openshift-monitoring.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com",
+  "prometheus_connected": true,
+  "stable_prefix": {
+    "hypothesis": "Identical memory injection blocks produce >90% prefix cache hit rates",
+    "status": "PASS",
+    "injection_block_chars": 4170,
+    "injection_block_hash": "bc711301dd9c64e8afa8b3339e549bd2742b16c58b236cba144c0a2589183a87",
+    "compilation_epoch": 20,
+    "compilation_hash": "a0fd45b896c06f785463116e3e39df64e745da378f0beb2156d42b3c4f057aac",
+    "requests": [
+      {
+        "request_num": 1,
+        "label": "cold_start",
+        "queries": 956.0,
+        "hits": 64.0,
+        "hit_rate": 0.06694560669456066,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 956,
+        "cached_tokens": 64,
+        "per_request_hit_rate": 0.06694560669456066
+      },
+      {
+        "request_num": 2,
+        "label": "warm_1",
+        "queries": 956.0,
+        "hits": 944.0,
+        "hit_rate": 0.9874476987447699,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 956,
+        "cached_tokens": 944,
+        "per_request_hit_rate": 0.9874476987447699
+      },
+      {
+        "request_num": 3,
+        "label": "warm_2",
+        "queries": 956.0,
+        "hits": 944.0,
+        "hit_rate": 0.9874476987447699,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 956,
+        "cached_tokens": 944,
+        "per_request_hit_rate": 0.9874476987447699
+      },
+      {
+        "request_num": 4,
+        "label": "warm_3",
+        "queries": 956.0,
+        "hits": 944.0,
+        "hit_rate": 0.9874476987447699,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 956,
+        "cached_tokens": 944,
+        "per_request_hit_rate": 0.9874476987447699
+      },
+      {
+        "request_num": 5,
+        "label": "warm_4",
+        "queries": 956.0,
+        "hits": 944.0,
+        "hit_rate": 0.9874476987447699,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 956,
+        "cached_tokens": 944,
+        "per_request_hit_rate": 0.9874476987447699
+      }
+    ],
+    "summary": {
+      "cold_hit_rate": 0.06694560669456066,
+      "warm_hit_rate_mean": 0.9874476987447699,
+      "warm_hit_rate_min": 0.9874476987447699,
+      "pass": true
+    },
+    "prometheus": {
+      "before": {
+        "prefix_cache_hit_rate": null,
+        "ttft_p95": null,
+        "kv_cache_usage": 0.0,
+        "active_requests": 0.0,
+        "cached_tokens_rate": null,
+        "computed_tokens_rate": null
+      },
+      "after": {
+        "prefix_cache_hit_rate": null,
+        "ttft_p95": null,
+        "kv_cache_usage": 0.0,
+        "active_requests": 0.0,
+        "cached_tokens_rate": null,
+        "computed_tokens_rate": null
+      }
+    }
+  },
+  "append_only": {
+    "hypothesis": "Adding appendix memories preserves compiled prefix cache hits",
+    "status": "FAIL",
+    "block_v1_chars": 4170,
+    "block_v2_chars": 4176,
+    "prefix_preserved": false,
+    "appendix_count": 2,
+    "epoch_before": 20,
+    "epoch_after": 20,
+    "requests": [
+      {
+        "label": "with_appendix",
+        "queries": 957.0,
+        "hits": 80.0,
+        "hit_rate": 0.08359456635318704,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 957,
+        "cached_tokens": 80,
+        "per_request_hit_rate": 0.08359456635318704
+      },
+      {
+        "label": "repeat_appendix",
+        "queries": 957.0,
+        "hits": 944.0,
+        "hit_rate": 0.9864158829676071,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 957,
+        "cached_tokens": 944,
+        "per_request_hit_rate": 0.9864158829676071
+      }
+    ],
+    "summary": {
+      "append_hit_rate": 0.08359456635318704,
+      "repeat_hit_rate": 0.9864158829676071,
+      "pass": false
+    },
+    "prometheus": {
+      "before": {
+        "prefix_cache_hit_rate": null,
+        "ttft_p95": null,
+        "kv_cache_usage": 0.0,
+        "active_requests": 0.0,
+        "cached_tokens_rate": null,
+        "computed_tokens_rate": null
+      },
+      "after": {
+        "prefix_cache_hit_rate": 0.8254893830120985,
+        "ttft_p95": null,
+        "kv_cache_usage": 0.00046086538836020985,
+        "active_requests": 1.0,
+        "cached_tokens_rate": null,
+        "computed_tokens_rate": null
+      }
+    }
+  },
+  "recompile": {
+    "hypothesis": "Recompilation causes one-time miss, then cache-hits resume",
+    "status": "PASS",
+    "epoch_before": 20,
+    "epoch_after": 21,
+    "epoch_incremented": true,
+    "appendix_after_recompile": 0,
+    "block_changed": true,
+    "requests": [
+      {
+        "label": "recompile_miss",
+        "queries": 795.0,
+        "hits": 256.0,
+        "hit_rate": 0.3220125786163522,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 795,
+        "cached_tokens": 256,
+        "per_request_hit_rate": 0.3220125786163522
+      },
+      {
+        "label": "post_recompile_1",
+        "queries": 795.0,
+        "hits": 784.0,
+        "hit_rate": 0.9861635220125786,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 795,
+        "cached_tokens": 784,
+        "per_request_hit_rate": 0.9861635220125786
+      },
+      {
+        "label": "post_recompile_2",
+        "queries": 795.0,
+        "hits": 784.0,
+        "hit_rate": 0.9861635220125786,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 795,
+        "cached_tokens": 784,
+        "per_request_hit_rate": 0.9861635220125786
+      },
+      {
+        "label": "post_recompile_3",
+        "queries": 795.0,
+        "hits": 784.0,
+        "hit_rate": 0.9861635220125786,
+        "tokens_cache_hit": 0,
+        "tokens_computed": 0,
+        "prompt_tokens": 795,
+        "cached_tokens": 784,
+        "per_request_hit_rate": 0.9861635220125786
+      }
+    ],
+    "summary": {
+      "recompile_hit_rate": 0.3220125786163522,
+      "post_recompile_mean": 0.9861635220125787,
+      "pass": true
+    },
+    "prometheus": {
+      "before": {
+        "prefix_cache_hit_rate": 0.8255118614632596,
+        "ttft_p95": 0.05399999999999999,
+        "kv_cache_usage": 0.00046086538836020985,
+        "active_requests": 1.0,
+        "cached_tokens_rate": null,
+        "computed_tokens_rate": null
+      },
+      "after": {
+        "prefix_cache_hit_rate": 0.8170195041486517,
+        "ttft_p95": null,
+        "kv_cache_usage": 0.0,
+        "active_requests": 0.0,
+        "cached_tokens_rate": null,
+        "computed_tokens_rate": null
+      }
+    }
+  },
+  "block_granularity": {
+    "hypothesis": "Cache matching is 16-token block-aligned; shared prefix caches",
+    "status": "PASS",
+    "prefix_chars": 3417,
+    "q1_chars": 58,
+    "q2_chars": 54,
+    "total_prompt_tokens": 798,
+    "request": {
+      "queries": 798.0,
+      "hits": 784.0,
+      "hit_rate": 0.9824561403508771,
+      "tokens_cache_hit": 0,
+      "tokens_computed": 0,
+      "prompt_tokens": 798,
+      "cached_tokens": 784,
+      "per_request_hit_rate": 0.9824561403508771
+    },
+    "summary": {
+      "shared_prefix_hit_rate": 0.9824561403508771,
+      "cached_tokens": 784,
+      "prompt_tokens": 798,
+      "pass": true
+    },
+    "prometheus": {
+      "before": {
+        "prefix_cache_hit_rate": 0.8170319037895808,
+        "ttft_p95": 0.0545,
+        "kv_cache_usage": 0.0,
+        "active_requests": 0.0,
+        "cached_tokens_rate": null,
+        "computed_tokens_rate": null
+      },
+      "after": {
+        "prefix_cache_hit_rate": 0.8172345961367233,
+        "ttft_p95": 0.0545,
+        "kv_cache_usage": 0.0,
+        "active_requests": 0.0,
+        "cached_tokens_rate": null,
+        "computed_tokens_rate": null
+      }
+    }
+  },
+  "threshold_analysis": {
+    "hypothesis": "30%/5-entry recompile threshold is appropriate",
+    "status": "ANALYSIS",
+    "append_waste_per_request": 0.9164054336468129,
+    "recompile_one_time_cost": 0.6779874213836479,
+    "breakeven_requests": 0.7398334803468085,
+    "recommendation": "Appendix mode wastes ~92% of tokens per request. Recompilation costs ~68% once. Break-even at ~0.7 requests. Current threshold may be too high -- consider recompiling sooner."
+  }
+}

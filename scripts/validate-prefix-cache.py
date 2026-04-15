@@ -60,7 +60,7 @@ FOLLOWUP_SCENARIOS = [
 ]
 ALL_SCENARIOS = BASELINE_SCENARIOS + FOLLOWUP_SCENARIOS
 
-MODEL = "RedHatAI/granite-3.3-8b-instruct"
+MODEL = "RedHatAI/granite-3.3-8b-instruct"  # default; overridden by auto-detection
 SEARCH_QUERY = "project conventions deployment patterns"
 SYSTEM_MSG = "You are a helpful assistant."
 
@@ -119,13 +119,27 @@ class VLLMClient:
     def __init__(self, vllm_url: str) -> None:
         self._url = vllm_url.rstrip("/")
         self._http = httpx.AsyncClient(verify=False, timeout=60)
+        self.model: str = MODEL  # overridden by detect_model()
+
+    async def detect_model(self) -> str:
+        """Auto-detect the model name from /v1/models."""
+        resp = await self._http.get(f"{self._url}/v1/models")
+        resp.raise_for_status()
+        data = resp.json()
+        models = data.get("data", [])
+        if models:
+            self.model = models[0]["id"]
+        return self.model
 
     async def chat(self, system: str, user: str) -> dict:
         resp = await self._http.post(
             f"{self._url}/v1/chat/completions",
             json={
-                "model": MODEL,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
                 "max_tokens": 50,
                 "temperature": 0,
             },
@@ -864,14 +878,19 @@ async def main() -> None:
     vllm = VLLMClient(vllm_url)
 
     version = await vllm.get_version()
+    model = await vllm.detect_model()
     snap = await mc.snapshot()
-    log(f"vLLM v{version}, prefix_cache_queries={snap.prefix_cache_queries}")
+    log(f"vLLM v{version}, model={model}, prefix_cache_queries={snap.prefix_cache_queries}")
+
+    # Update PrometheusClient with detected model if needed
+    if prom and model != MODEL:
+        prom = PrometheusClient(prom_url, prom_token, model=model)
 
     results: dict = {
         "timestamp_utc": datetime.now(UTC).isoformat(),
         "vllm_url": vllm_url,
         "vllm_version": version,
-        "model": MODEL,
+        "model": model,
     }
     if prom:
         results["prometheus_url"] = prom_url
