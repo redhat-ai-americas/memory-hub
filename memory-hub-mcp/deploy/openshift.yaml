@@ -111,6 +111,25 @@ spec:
         # the same namespace (memory-hub-mcp) per deploy/valkey/.
         - name: MEMORYHUB_VALKEY_URL
           value: "redis://memoryhub-valkey.memory-hub-mcp.svc.cluster.local:6379/0"
+        # MinIO for two-tier storage (#84). Content exceeding the S3
+        # threshold is uploaded to MinIO with semantic chunks for search.
+        # When unset, oversized content stays inline with chunks only.
+        - name: MEMORYHUB_S3_ENDPOINT
+          value: "memoryhub-minio:9000"
+        - name: MEMORYHUB_S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: memoryhub-minio-credentials
+              key: MINIO_ROOT_USER
+        - name: MEMORYHUB_S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: memoryhub-minio-credentials
+              key: MINIO_ROOT_PASSWORD
+        - name: MEMORYHUB_S3_BUCKET
+          value: "memoryhub"
+        - name: MEMORYHUB_S3_SECURE
+          value: "false"
         resources:
           limits:
             memory: "512Mi"
