@@ -535,13 +535,10 @@ async def run_byte_stability_fix(client, vllm, metrics, temp_ids) -> dict:
     log("  This scenario requires the byte-stability fix to get_injection_block().")
     log("  See findings.md recommendation #1.")
 
-    # Use max_results=50 to avoid compiled-entry displacement.
-    # With max_results=15, new high-similarity memories can push compiled
-    # entries out of the similarity-ranked top-N, changing the compiled
-    # section even though the epoch hasn't changed. This is a separate
-    # server-side issue (similarity ranking happens before compilation
-    # partitioning); this scenario validates client-side byte-stability.
-    scenario_max_results = 50
+    # The search pipeline now backfills compiled entries before ranking, so
+    # similarity displacement no longer affects the compiled section. Use the
+    # server default instead of the old max_results=50 workaround.
+    scenario_max_results = 15
 
     sr1, block_v1 = await _search_block(client, max_results=scenario_max_results)
     epoch_before = sr1.compilation_epoch  # noqa: F841
@@ -607,9 +604,10 @@ async def run_immediate_recompile(client, vllm, metrics, temp_ids) -> dict:
     log("=== Follow-Up: Immediate Recompile ===")
     log("  This scenario requires min_appendix=1 in compilation config.")
 
-    # Use max_results=50 to ensure the new memory appears in results
-    # (same reasoning as byte_stability_fix — avoid similarity displacement).
-    scenario_max_results = 50
+    # The search pipeline now backfills compiled entries before ranking, so
+    # similarity displacement no longer affects the compiled section. Use the
+    # server default instead of the old max_results=50 workaround.
+    scenario_max_results = 15
 
     sr1, block_v1 = await _search_block(client, max_results=scenario_max_results)
     question = "Explain the monitoring and alerting setup."
