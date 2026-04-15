@@ -1403,7 +1403,7 @@ class MockS3Adapter:
 
 
 def _make_oversized_content() -> str:
-    """Return content exceeding the 4096-byte S3 threshold.
+    """Return content exceeding the configured S3 threshold (default 1024 bytes).
 
     Uses distinct paragraphs separated by double-newlines so that the
     semantic chunker produces multiple chunks (it splits on paragraph
@@ -1500,6 +1500,70 @@ async def test_create_memory_s3_no_adapter_inline_fallback(async_session, embedd
     result, curation = await create_memory(data, async_session, embedding_service, s3_adapter=None)
 
     assert curation["blocked"] is False
+    assert result.storage_type == "inline"
+    assert result.content_ref is None
+
+
+async def test_create_memory_oversized_no_s3_truncates_embed_text(async_session, embedding_service):
+    """Oversized content without S3 still truncates embed text to prevent 413."""
+    from unittest.mock import AsyncMock
+    from memoryhub_core.config import AppSettings
+
+    big_content = _make_oversized_content()
+    captured_texts = []
+    original_embed = embedding_service.embed
+
+    async def capturing_embed(text):
+        captured_texts.append(text)
+        return await original_embed(text)
+
+    embedding_service.embed = capturing_embed
+    try:
+        data = _make_create_data(content=big_content)
+        result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=None)
+    finally:
+        embedding_service.embed = original_embed
+
+    settings = AppSettings()
+    # The first embed call is for the parent node
+    assert len(captured_texts) >= 1
+    assert len(captured_texts[0]) == settings.s3_prefix_chars, (
+        f"embed text should be truncated to {settings.s3_prefix_chars} chars, "
+        f"got {len(captured_texts[0])}"
+    )
+
+
+async def test_create_memory_oversized_no_s3_creates_chunks(async_session, embedding_service):
+    """Oversized content without S3 still creates chunk children."""
+    from sqlalchemy import select as sa_select
+    from memoryhub_core.models.memory import MemoryNode as MN
+
+    data = _make_create_data(content=_make_oversized_content())
+    result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=None)
+
+    chunks_stmt = sa_select(MN).where(
+        MN.parent_id == result.id,
+        MN.branch_type == "chunk",
+        MN.deleted_at.is_(None),
+    )
+    chunks = (await async_session.execute(chunks_stmt)).scalars().all()
+
+    assert len(chunks) >= 2, f"expected multiple chunks, got {len(chunks)}"
+    for chunk in chunks:
+        assert chunk.weight == 0.0
+        assert chunk.is_current is True
+        assert chunk.storage_type == "inline"
+    assert result.storage_type == "inline"
+    assert result.content_ref is None
+
+
+async def test_create_memory_oversized_no_s3_stores_full_content_inline(async_session, embedding_service):
+    """Without S3, full oversized content is stored inline in the database."""
+    big_content = _make_oversized_content()
+    data = _make_create_data(content=big_content)
+    result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=None)
+
+    assert result.content == big_content, "full content should be stored inline"
     assert result.storage_type == "inline"
     assert result.content_ref is None
 
@@ -1628,6 +1692,84 @@ async def test_update_memory_non_chunk_branches_still_copied(async_session, embe
     # The copied rationale should have a new ID (deep copy, not move)
     old_rationale_ids = {c.id for c in old_children if c.branch_type == "rationale"}
     assert new_rationale[0].id not in old_rationale_ids, "deep-copied rationale should have a new ID"
+
+
+async def test_update_memory_oversized_no_s3_creates_chunks(async_session, embedding_service):
+    """Updating with oversized content and no S3 creates chunk children."""
+    from sqlalchemy import select as sa_select
+    from memoryhub_core.models.memory import MemoryNode as MN
+
+    # Create a normal (small) inline memory
+    data = _make_create_data(content="Short initial content")
+    original, _ = await create_memory(data, async_session, embedding_service, s3_adapter=None)
+
+    # Update with oversized content, still no S3
+    new_content = _make_oversized_content()
+    updated = await update_memory(
+        original.id,
+        MemoryNodeUpdate(content=new_content),
+        async_session,
+        embedding_service,
+        s3_adapter=None,
+    )
+
+    assert updated.storage_type == "inline"
+    assert updated.content_ref is None
+
+    chunks_stmt = sa_select(MN).where(
+        MN.parent_id == updated.id,
+        MN.branch_type == "chunk",
+        MN.is_current.is_(True),
+    )
+    chunks = (await async_session.execute(chunks_stmt)).scalars().all()
+    assert len(chunks) >= 2, f"expected chunks after oversized update, got {len(chunks)}"
+
+
+async def test_update_memory_oversized_no_s3_retires_old_chunks(async_session, embedding_service):
+    """Updating oversized inline memory retires old chunks and creates new ones."""
+    from sqlalchemy import select as sa_select
+    from memoryhub_core.models.memory import MemoryNode as MN
+
+    # Create oversized memory without S3 (now creates chunks)
+    data = _make_create_data(content=_make_oversized_content())
+    original, _ = await create_memory(data, async_session, embedding_service, s3_adapter=None)
+
+    old_chunks_stmt = sa_select(MN).where(
+        MN.parent_id == original.id,
+        MN.branch_type == "chunk",
+    )
+    old_chunks = (await async_session.execute(old_chunks_stmt)).scalars().all()
+    assert len(old_chunks) >= 2
+    old_chunk_ids = {c.id for c in old_chunks}
+
+    # Update with different oversized content
+    new_content = "\n\n".join(
+        [f"Updated paragraph {i}: " + "z" * 400 for i in range(15)]
+    )
+    updated = await update_memory(
+        original.id,
+        MemoryNodeUpdate(content=new_content),
+        async_session,
+        embedding_service,
+        s3_adapter=None,
+    )
+
+    # Old chunks should be retired
+    async_session.expire_all()
+    old_chunks = (await async_session.execute(old_chunks_stmt)).scalars().all()
+    for chunk in old_chunks:
+        assert chunk.is_current is False, "old chunks must be retired"
+
+    # New chunks should exist under updated version
+    new_chunks_stmt = sa_select(MN).where(
+        MN.parent_id == updated.id,
+        MN.branch_type == "chunk",
+        MN.is_current.is_(True),
+    )
+    new_chunks = (await async_session.execute(new_chunks_stmt)).scalars().all()
+    assert len(new_chunks) >= 2, "new chunks should be created"
+    new_chunk_ids = {c.id for c in new_chunks}
+    assert old_chunk_ids.isdisjoint(new_chunk_ids), "new chunks should have different IDs"
 
 
 # -- delete_memory: two-tier storage --

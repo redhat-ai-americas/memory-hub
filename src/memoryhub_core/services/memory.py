@@ -88,17 +88,20 @@ async def create_memory(
     verified the caller is allowed to write into this tenant; this function
     just persists that decision onto the row.
 
-    ``s3_adapter`` enables two-tier storage. When provided, content exceeding
-    ``AppSettings.s3_threshold_bytes`` is uploaded to MinIO and stored as
-    semantic chunks (child nodes with ``branch_type="chunk"``).
+    Content exceeding ``AppSettings.s3_threshold_bytes`` is always chunked into
+    child nodes (``branch_type="chunk"``) for fine-grained search, and the
+    embedding is truncated to ``s3_prefix_chars`` to prevent 413 errors.
+    When ``s3_adapter`` is provided, the full content is also uploaded to MinIO;
+    otherwise it remains inline in the database.
     """
     app_settings = AppSettings()
     content_bytes = len(data.content.encode("utf-8"))
-    is_oversized = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
+    needs_chunking = content_bytes > app_settings.s3_threshold_bytes
+    use_s3 = needs_chunking and s3_adapter is not None
 
     # For oversized content, embed only the prefix (fits within embedder's
     # ~512 token limit). Full content is searchable via chunk children.
-    embed_text = data.content[:app_settings.s3_prefix_chars] if is_oversized else data.content
+    embed_text = data.content[:app_settings.s3_prefix_chars] if needs_chunking else data.content
     embedding = await embedding_service.embed(embed_text)
 
     stub = generate_stub(
@@ -138,22 +141,26 @@ async def create_memory(
     # Upload to S3 before DB commit so a failed upload doesn't leave a
     # dangling row. If the DB commit later fails, the S3 object becomes
     # orphaned (acceptable; cleaned up by periodic reaper).
-    if is_oversized:
+    if use_s3:
         content_ref = await s3_adapter.put_content(
             tenant_id, memory_id, memory_id, data.content,
         )
         db_content = data.content[:app_settings.s3_prefix_chars]
         storage_type = "s3"
+    elif needs_chunking:
+        # Oversized but no S3 — store full content inline, still chunk
+        content_ref = None
+        db_content = data.content
+        storage_type = "inline"
+        logger.warning(
+            "Memory %s exceeds S3 threshold (%d > %d bytes) but no S3 "
+            "adapter configured; storing inline with chunks",
+            memory_id, content_bytes, app_settings.s3_threshold_bytes,
+        )
     else:
         content_ref = None
         db_content = data.content
         storage_type = "inline"
-        if content_bytes > app_settings.s3_threshold_bytes:
-            logger.warning(
-                "Memory %s exceeds S3 threshold (%d > %d bytes) but no S3 "
-                "adapter configured; storing inline",
-                memory_id, content_bytes, app_settings.s3_threshold_bytes,
-            )
 
     node = MemoryNode(
         id=memory_id,
@@ -181,13 +188,13 @@ async def create_memory(
     await session.commit()
     await session.refresh(node)
 
-    # Create semantic chunks for S3 memories so each section is
+    # Create semantic chunks for oversized memories so each section is
     # independently searchable via its own embedding. The parent is
     # already committed — if chunk creation fails, the memory still
     # exists (searchable via its prefix embedding) but without chunk
     # granularity.
     has_children = False
-    if is_oversized:
+    if needs_chunking:
         try:
             has_children = await _create_chunk_children(
                 content=data.content,
@@ -352,8 +359,9 @@ async def update_memory(
     ``existing.tenant_id``). Deep-copied child branches also inherit their
     parent's tenant.
 
-    When ``s3_adapter`` is provided and updated content exceeds the S3
-    threshold, the new version is stored in S3 with fresh semantic chunks.
+    When updated content exceeds the S3 threshold, fresh semantic chunks are
+    always created for fine-grained search. If ``s3_adapter`` is provided,
+    the full content is also uploaded to MinIO; otherwise it remains inline.
     Old chunk children are retired (not deep-copied) since they reflect
     the previous content.
     """
@@ -394,10 +402,15 @@ async def update_memory(
     # Determine storage strategy for the new version
     if content_changed:
         content_bytes = len(new_content.encode("utf-8"))
-        is_oversized = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
-        embed_text = new_content[:app_settings.s3_prefix_chars] if is_oversized else new_content
+        needs_chunking = content_bytes > app_settings.s3_threshold_bytes
+        use_s3 = needs_chunking and s3_adapter is not None
+        embed_text = new_content[:app_settings.s3_prefix_chars] if needs_chunking else new_content
     else:
-        is_oversized = old_node.storage_type == "s3" and s3_adapter is not None
+        needs_chunking = False
+        # Content unchanged — inherit S3 if the old node was S3-backed
+        # and we have an adapter, otherwise fall through to the else
+        # branch at the storage-type decision below.
+        use_s3 = old_node.storage_type == "s3" and s3_adapter is not None
         # For unchanged content, the old node's content field already
         # holds the prefix (if S3) or full content (if inline)
         embed_text = new_content
@@ -415,7 +428,7 @@ async def update_memory(
     new_id = uuid.uuid4()
 
     # Handle S3 storage for the new version
-    if content_changed and is_oversized:
+    if content_changed and use_s3:
         content_ref = await s3_adapter.put_content(
             old_node.tenant_id, new_id, new_id, new_content,
         )
@@ -507,10 +520,10 @@ async def update_memory(
 
     await session.commit()
 
-    # Create fresh semantic chunks if the new version is S3-backed.
+    # Create fresh semantic chunks if the new content is oversized.
     # Uses the same _create_chunk_children helper as create_memory.
     chunk_created = False
-    if content_changed and is_oversized:
+    if content_changed and needs_chunking:
         try:
             chunk_created = await _create_chunk_children(
                 content=new_content,
