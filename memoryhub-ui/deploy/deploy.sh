@@ -146,15 +146,84 @@ if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ]; then
 fi
 echo "  OK: running digest matches imagestream :latest"
 
-# Step 9: Print route URL
+# Step 9: Sync the RHOAI dashboard proxy route.
+#
+# The RHOAI dashboard resolves the "Open application" link by looking up
+# a Route named `memoryhub-ui` in its own namespace (redhat-ods-applications).
+# The `routeNamespace` field in OdhApplication is defined in the CRD but
+# the dashboard backend does not read it (logs "namespace undefined").
+#
+# Workaround: create a Service (no selector) + Endpoints + Route in the
+# dashboard namespace that forward to the UI pod in memory-hub-mcp.
+# The Endpoints object uses the pod IP directly, so it must be refreshed
+# on every deploy (pod restart = new IP).
+RHOAI_NS="redhat-ods-applications"
+echo ""
+echo "Syncing RHOAI dashboard proxy route in $RHOAI_NS..."
+UI_POD_IP=$(oc get pod -n "$NAMESPACE" -l app="$DEPLOYMENT" \
+    -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || echo "")
+if [ -z "$UI_POD_IP" ]; then
+    echo "  WARNING: could not resolve UI pod IP. RHOAI tile will not link correctly."
+    echo "  Re-run this script after the UI pod is running."
+else
+    echo "  UI pod IP: $UI_POD_IP"
+    cat <<PROXY_EOF | oc apply -f - 2>/dev/null
+apiVersion: v1
+kind: Service
+metadata:
+  name: memoryhub-ui
+  namespace: $RHOAI_NS
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: memoryhub-ui
+  namespace: $RHOAI_NS
+subsets:
+- addresses:
+  - ip: $UI_POD_IP
+  ports:
+  - port: 8080
+    protocol: TCP
+PROXY_EOF
+    # Create the Route only if it doesn't exist (idempotent).
+    if ! oc get route memoryhub-ui -n "$RHOAI_NS" &>/dev/null; then
+        cat <<ROUTE_EOF | oc apply -f - 2>/dev/null
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: memoryhub-ui
+  namespace: $RHOAI_NS
+spec:
+  to:
+    kind: Service
+    name: memoryhub-ui
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+ROUTE_EOF
+    fi
+    echo "  Proxy route synced."
+fi
+
+# Step 10: Apply the OdhApplication tile (idempotent).
+echo ""
+echo "Applying RHOAI tile..."
+oc apply -f "$PROJECT_ROOT/openshift/odh-application.yaml"
+
+# Step 11: Print route URL
 ROUTE=$(oc get route "$DEPLOYMENT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 echo ""
 echo "=== Deployment Complete ==="
 if [ -n "$ROUTE" ]; then
     echo "Dashboard URL: https://$ROUTE/"
-    echo ""
-    echo "To register the RHOAI tile:"
-    echo "  oc apply -f $PROJECT_ROOT/openshift/odh-application.yaml"
 else
     echo "Warning: Could not retrieve route URL"
 fi

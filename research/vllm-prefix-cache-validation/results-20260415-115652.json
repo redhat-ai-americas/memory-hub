@@ -1,0 +1,28 @@
+{
+  "timestamp_utc": "2026-04-15T11:56:42.583156+00:00",
+  "vllm_url": "https://granite-3-3-8b-instruct-granite-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com",
+  "vllm_version": "0.19.0",
+  "model": "RedHatAI/granite-3.3-8b-instruct",
+  "prometheus_connected": false,
+  "byte_stability_fix": {
+    "hypothesis": "Byte-stable compiled section preserves prefix cache on append",
+    "status": "FAIL",
+    "compiled_prefix_preserved": false,
+    "block_v1_chars": 4170,
+    "block_v2_chars": 4199,
+    "request": {
+      "queries": 1015.0,
+      "hits": 224.0,
+      "hit_rate": 0.2206896551724138,
+      "tokens_cache_hit": 224.0,
+      "tokens_computed": 791.0,
+      "prompt_tokens": 1015,
+      "cached_tokens": 224,
+      "per_request_hit_rate": 0.2206896551724138
+    },
+    "summary": {
+      "hit_rate": 0.2206896551724138,
+      "pass": false
+    }
+  }
+}

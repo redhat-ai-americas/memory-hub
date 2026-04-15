@@ -1,0 +1,63 @@
+{
+  "timestamp_utc": "2026-04-15T12:25:48.773899+00:00",
+  "vllm_url": "https://granite-3-3-8b-instruct-granite-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com",
+  "vllm_version": "0.19.0",
+  "model": "RedHatAI/granite-3.3-8b-instruct",
+  "prometheus_connected": false,
+  "immediate_recompile": {
+    "hypothesis": "Immediate recompile (min_appendix=1) restores cache after 1 miss",
+    "status": "PASS",
+    "epoch_changed": true,
+    "appendix_zero": true,
+    "requests": [
+      {
+        "label": "post_write_miss",
+        "queries": 1797.0,
+        "hits": 1728.0,
+        "hit_rate": 0.9616026711185309,
+        "tokens_cache_hit": 1728.0,
+        "tokens_computed": 69.0,
+        "prompt_tokens": 1797,
+        "cached_tokens": 1728,
+        "per_request_hit_rate": 0.9616026711185309
+      },
+      {
+        "label": "post_write_warm_1",
+        "queries": 1797.0,
+        "hits": 1792.0,
+        "hit_rate": 0.9972175848636616,
+        "tokens_cache_hit": 1792.0,
+        "tokens_computed": 5.0,
+        "prompt_tokens": 1797,
+        "cached_tokens": 1792,
+        "per_request_hit_rate": 0.9972175848636616
+      },
+      {
+        "label": "post_write_warm_2",
+        "queries": 1797.0,
+        "hits": 1792.0,
+        "hit_rate": 0.9972175848636616,
+        "tokens_cache_hit": 1792.0,
+        "tokens_computed": 5.0,
+        "prompt_tokens": 1797,
+        "cached_tokens": 1792,
+        "per_request_hit_rate": 0.9972175848636616
+      },
+      {
+        "label": "post_write_warm_3",
+        "queries": 1797.0,
+        "hits": 1792.0,
+        "hit_rate": 0.9972175848636616,
+        "tokens_cache_hit": 1792.0,
+        "tokens_computed": 5.0,
+        "prompt_tokens": 1797,
+        "cached_tokens": 1792,
+        "per_request_hit_rate": 0.9972175848636616
+      }
+    ],
+    "summary": {
+      "post_write_warm_mean": 0.9972175848636616,
+      "pass": true
+    }
+  }
+}

@@ -12,11 +12,17 @@ spec:
   description: >-
     Centralized agent memory with governance and curation
     for OpenShift AI workloads.
-  category: Self-managed
+  # "Red Hat managed" is required for the RHOAI dashboard to show the
+  # "Open application" link. "Self-managed" triggers an ISV subscription
+  # validation flow that we don't implement. The route is resolved in the
+  # dashboard's own namespace (redhat-ods-applications) because the
+  # routeNamespace field is not read by the dashboard backend (logged as
+  # "namespace undefined"). deploy.sh creates a cross-namespace proxy
+  # route there that forwards to the real service in memory-hub-mcp.
+  category: "Red Hat managed"
   provider: "Community"
   support: "community"
   route: memoryhub-ui
-  routeNamespace: memory-hub-mcp
   docsLink: ""
   getStartedLink: ""
   getStartedMarkDown: |
