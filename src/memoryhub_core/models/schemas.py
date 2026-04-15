@@ -346,7 +346,30 @@ class CampaignMembershipRead(BaseModel):
     enrolled_by: str
 
 
-# -- Project membership schemas --
+# -- Project schemas --
+
+
+class ProjectCreate(BaseModel):
+    """Input schema for creating a project."""
+
+    name: str = Field(min_length=1, max_length=255, description="Project identifier")
+    description: str | None = Field(default=None, description="Human-readable project description")
+    invite_only: bool = Field(default=False, description="If true, users must be explicitly invited")
+    tenant_id: str = Field(default="default", description="Tenant this project belongs to")
+    created_by: str = Field(min_length=1, description="User or system creating the project")
+
+
+class ProjectRead(BaseModel):
+    """Output schema for reading a project."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    description: str | None
+    invite_only: bool
+    tenant_id: str
+    created_at: datetime
+    created_by: str
 
 
 class ProjectMembershipCreate(BaseModel):

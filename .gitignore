@@ -35,3 +35,18 @@ seed-clients.json
 NEXT_SESSION_old.md
 NEXT_SESSION.md
 planning/rfe_draft.md
+
+
+# Community research input:
+research/other-input/
+
+# Research drafts (not ready for commit)
+research/COUNTERPOINTS.md
+research/agent-memory-primer.md
+research/agent-memory-protocol-rfc.md
+research/agent-memory-survey-paper.md
+research/draft_blog-everyone-trying-to-own-memory.md
+research/draft_survey-section-architectural-placement.md
+
+# Claude Code worktrees
+.claude/worktrees/

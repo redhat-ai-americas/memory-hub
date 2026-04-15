@@ -1,6 +1,7 @@
-"""SQLAlchemy ORM model for project memberships.
+"""SQLAlchemy ORM models for projects and project memberships.
 
-Maps users to projects for scope-based access control. Project-scoped
+Projects define enrollment policy (open vs invite-only). ProjectMembership
+maps users to projects for scope-based access control. Project-scoped
 memories are only visible to users who hold a membership in the memory's
 project (stored in memory_nodes.scope_id).
 """
@@ -8,11 +9,43 @@ project (stored in memory_nodes.scope_id).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, UniqueConstraint, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from memoryhub_core.models.base import Base
+
+
+class Project(Base):
+    """Project definition with enrollment policy."""
+
+    __tablename__ = "projects"
+
+    name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invite_only: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        server_default=text("'default'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    __table_args__ = (
+        Index("ix_projects_tenant_id", "tenant_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Project name={self.name!r} invite_only={self.invite_only}>"
 
 
 class ProjectMembership(Base):
@@ -25,7 +58,9 @@ class ProjectMembership(Base):
         primary_key=True,
         server_default=text("uuid_generate_v4()"),
     )
-    project_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    project_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("projects.name"), nullable=False,
+    )
     user_id: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(
         String(50),

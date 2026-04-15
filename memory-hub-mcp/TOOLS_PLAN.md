@@ -474,6 +474,50 @@ Phase 4 adds two tools that make session focus a stored, analyzable signal rathe
 - **`ValkeyClient` wrapper** (`memoryhub_core.services.valkey_client`): Async client over `redis.asyncio` (Valkey is protocol-compatible). Provides `write_session_focus`, `read_focus_history`, `ping`, and vector base64 codec helpers. Tests use `fakeredis` for in-memory Valkey emulation.
 - **`MEMORYHUB_VALKEY_URL` env var**: Connection string passed to the MCP server pod, e.g. `redis://memoryhub-valkey.memory-hub-mcp.svc.cluster.local:6379/0`.
 
+### Phase 5 (current)
+
+16. **list_projects** — Depends on the `projects` table (Alembic 012) and the `list_projects_for_tenant()` service function in `memoryhub_core.services.project`. Read-only project discovery tool. Refs #188.
+
+### Phase 5 (resolved when shipped)
+
+- **`projects` table**: Alembic migration 012, creates `projects(name PK, description, invite_only, tenant_id, created_at, created_by)` with FK from `project_memberships.project_id`.
+- **`ensure_project_membership()`**: Service function that auto-enrolls users in open projects on first project-scoped write. Called by `write_memory` instead of the old hard-reject check.
+- **`list_projects_for_tenant()`**: Service function returning project dicts with `is_member` flag. Supports `include_all_open` filter mode.
+
+---
+
+## Phase 5 Tools: Project Discovery (#188)
+
+Phase 5 adds project discovery for agents. The companion change (auto-enrollment via `ensure_project_membership`) is wired directly into the existing `write_memory` tool rather than as a separate tool — the agent doesn't need a `join_project` tool because the act of writing creates the membership.
+
+### Design Principles for Phase 5
+
+**Don't add tools where existing tools suffice.** Auto-enrollment is wired into `write_memory` because that's where the agent hits the friction. Adding `create_project` / `join_project` / `leave_project` tools would bloat the tool surface for operations that either happen automatically (join on write) or rarely (admin-only project creation). A single `list_projects` tool covers the remaining gap: discoverability.
+
+**Filter, don't gate.** The `filter` parameter defaults to `"mine"` (only the user's projects) but supports `"all"` (all open projects in the tenant with an `is_member` flag). Invite-only projects that the user is NOT a member of are excluded from `"all"` results — they should not be discoverable.
+
+### list_projects
+
+- **Purpose**: List projects you belong to or that are available to join. Use this to discover which projects exist and which you're a member of before writing project-scoped memories. Projects you are not yet a member of can be joined automatically by writing a project-scoped memory with that `project_id` (auto-enrollment).
+- **Parameters**:
+  - `filter` (string, optional, default "mine"): Which projects to return. `"mine"` returns only projects you're a member of. `"all"` also includes open projects you could join, with an `is_member` flag on each.
+- **Returns**: A dict with:
+  - `projects` (list of dicts): Each entry has `name`, `description`, `invite_only`, `created_at`, `created_by`, and `is_member` (boolean).
+  - `total` (integer): Number of projects returned.
+- **Error Cases**:
+  - "No authenticated session found. Call register_session first, or provide a JWT in the Authorization header." — No auth context. → SDK: `AuthenticationError`
+  - "Invalid filter value '[value]'. Must be one of: mine, all." → SDK: `ValidationError`
+- **Tool Annotations**:
+  - `readOnlyHint: true` — Pure read.
+  - `destructiveHint: false`
+  - `idempotentHint: true` — Repeat calls return the same result (ignoring intervening writes).
+  - `openWorldHint: false`
+- **Example Usage**: Discovering projects before a first write:
+  ```
+  list_projects(filter="all")
+  ```
+  Returns: `{"projects": [{"name": "memory-hub", "description": null, "invite_only": false, "created_at": "2026-04-01T...", "created_by": "admin", "is_member": true}, {"name": "agent-template", "description": null, "invite_only": false, "created_at": "2026-04-15T...", "created_by": "wjackson", "is_member": false}], "total": 2}`. The agent sees it's not a member of `agent-template` yet; a `write_memory(scope="project", project_id="agent-template", ...)` call will auto-enroll.
+
 ## Open Questions (Phase 1 — Resolved)
 
 - **Embedding strategy**: all-MiniLM-L6-v2 on OpenShift AI via HTTP API. MockEmbeddingService for tests.

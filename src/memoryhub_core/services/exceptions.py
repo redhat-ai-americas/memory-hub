@@ -52,6 +52,17 @@ class RelationshipNotFoundError(Exception):
         super().__init__(f"Relationship {relationship_id} not found")
 
 
+class ProjectInviteOnlyError(Exception):
+    """Raised when a user attempts to join an invite-only project."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(
+            f"Project '{project_id}' requires an invitation. "
+            "Contact a project admin to be added."
+        )
+
+
 class CrossTenantRelationshipError(Exception):
     """Raised when a relationship would span two different tenants.
 

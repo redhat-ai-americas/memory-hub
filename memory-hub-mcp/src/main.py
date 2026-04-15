@@ -24,6 +24,7 @@ from src.tools.set_curation_rule import set_curation_rule
 
 from src.tools.set_session_focus import set_session_focus
 from src.tools.get_focus_history import get_focus_history
+from src.tools.list_projects import list_projects
 
 mcp = FastMCP(
     "MemoryHub",
@@ -38,7 +39,9 @@ mcp = FastMCP(
         "Curation tools: get_similar_memories to inspect near-duplicates flagged "
         "during write, create_relationship to link memories (use "
         "relationship_type='conflicts_with' with merge metadata to suggest "
-        "merges), and set_curation_rule to tune duplicate-detection thresholds."
+        "merges), and set_curation_rule to tune duplicate-detection thresholds. "
+        "Use list_projects to discover available projects before writing "
+        "project-scoped memories; writing to a new project auto-enrolls you."
     ),
 )
 
@@ -46,7 +49,8 @@ for tool_fn in [register_session, write_memory, read_memory, update_memory,
                 delete_memory, search_memory,
                 report_contradiction, create_relationship, get_relationships,
                 get_similar_memories, set_curation_rule,
-                set_session_focus, get_focus_history]:
+                set_session_focus, get_focus_history,
+                list_projects]:
     mcp.add_tool(tool_fn)
 
 

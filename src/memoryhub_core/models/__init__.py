@@ -5,7 +5,7 @@ from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.campaign import Campaign, CampaignMembership
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
-from memoryhub_core.models.project import ProjectMembership
+from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.role import RoleAssignment
 from memoryhub_core.models.schemas import (
     CampaignCreate,
@@ -22,8 +22,10 @@ from memoryhub_core.models.schemas import (
     MemoryNodeUpdate,
     MemoryScope,
     MemoryVersionInfo,
+    ProjectCreate,
     ProjectMembershipCreate,
     ProjectMembershipRead,
+    ProjectRead,
     RelationshipCreate,
     RelationshipRead,
     RelationshipType,
@@ -59,9 +61,12 @@ __all__ = [
     "MemoryScope",
     "MemoryVersionInfo",
     "MemoryRelationship",
+    "Project",
+    "ProjectCreate",
     "ProjectMembership",
     "ProjectMembershipCreate",
     "ProjectMembershipRead",
+    "ProjectRead",
     "RelationshipCreate",
     "RelationshipRead",
     "RelationshipType",

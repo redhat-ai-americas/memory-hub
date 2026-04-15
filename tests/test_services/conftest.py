@@ -20,6 +20,7 @@ from sqlalchemy.types import TypeDecorator
 
 from memoryhub_core.models.base import Base
 from memoryhub_core.models.campaign import Campaign, CampaignMembership  # noqa: F401 — import registers tables with Base
+from memoryhub_core.models.project import Project, ProjectMembership  # noqa: F401 — import registers tables with Base
 from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship

@@ -29,9 +29,13 @@ from src.tools._push_helpers import broadcast_after_write
 
 from memoryhub_core.models.schemas import MemoryNodeCreate
 from memoryhub_core.services.campaign import get_campaigns_for_project
-from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.exceptions import (
+    MemoryAccessDeniedError,
+    MemoryNotFoundError,
+    ProjectInviteOnlyError,
+)
+from memoryhub_core.services.project import ensure_project_membership
 from memoryhub_core.services.role import get_roles_for_user
-from memoryhub_core.services.exceptions import MemoryAccessDeniedError, MemoryNotFoundError
 from memoryhub_core.services.memory import create_memory
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 
@@ -204,8 +208,10 @@ async def write_memory(
             await release_db_session(gen_for_campaign)
 
     # Resolve project membership when writing to project scope.
+    # Auto-enrolls the user if the project is open (or creates it).
     project_ids: set[str] | None = None
     scope_id_value: str | None = None
+    was_auto_enrolled = False
     if scope == "project":
         if not project_id:
             raise ToolError(
@@ -216,16 +222,14 @@ async def write_memory(
         if PROJECT_ISOLATION_ENABLED:
             session_for_project, gen_for_project = await get_db_session()
             try:
-                project_ids = await get_projects_for_user(
-                    session_for_project, claims["sub"],
+                project_ids, was_auto_enrolled = await ensure_project_membership(
+                    session_for_project, project_id, claims["sub"], write_tenant_id,
                 )
+                await session_for_project.commit()
+            except ProjectInviteOnlyError as exc:
+                raise ToolError(str(exc)) from exc
             finally:
                 await release_db_session(gen_for_project)
-            if not project_ids or project_id not in project_ids:
-                raise ToolError(
-                    f"Not a member of project '{project_id}'. "
-                    "You can only write project-scoped memories for projects you belong to."
-                )
 
     # Resolve role assignments when writing to role scope.
     # Role writes require service identity (checked by authorize_write).
@@ -353,7 +357,7 @@ async def write_memory(
             embedding_service=embedding_service,
         )
 
-        return {
+        result = {
             "memory": memory.model_dump(mode="json"),
             "curation": {
                 "blocked": False,
@@ -363,6 +367,12 @@ async def write_memory(
                 "flags": curation_result["flags"],
             },
         }
+        if was_auto_enrolled:
+            result["auto_enrolled"] = {
+                "project_id": project_id,
+                "message": f"Auto-enrolled in project '{project_id}'.",
+            }
+        return result
 
     except ToolError:
         raise
