@@ -172,6 +172,30 @@ async def test_read_memory(async_session, embedding_service):
     assert result.has_rationale is False
 
 
+async def test_read_memory_preserves_scope_id_and_domains(async_session, embedding_service):
+    """Regression: node_to_read must propagate scope_id and domains.
+
+    Without these fields, authorize_read/authorize_write always receive None
+    for scope_id, breaking all project-scope and role-scope authorization.
+    """
+    data = _make_create_data(
+        content="project-scoped with domains",
+        scope=MemoryScope.PROJECT,
+        scope_id="my-project",
+        domains=["React", "FastAPI"],
+    )
+    created, _ = await create_memory(data, async_session, embedding_service)
+
+    result = await read_memory(created.id, async_session)
+
+    assert result.scope_id == "my-project", (
+        f"scope_id lost in node_to_read: expected 'my-project', got {result.scope_id!r}"
+    )
+    assert result.domains == ["React", "FastAPI"], (
+        f"domains lost in node_to_read: expected ['React', 'FastAPI'], got {result.domains!r}"
+    )
+
+
 async def test_read_memory_with_children(async_session, embedding_service):
     parent, _ = await create_memory(_make_create_data(content="Parent node"), async_session, embedding_service)
     await create_memory(
