@@ -163,7 +163,7 @@ def should_recompile(
     compiled_count: int,
     appendix_count: int,
     threshold: float = 0.3,
-    min_appendix: int = 5,
+    min_appendix: int = 1,
 ) -> bool:
     """Decide whether the appendix has grown large enough to warrant recompilation.
 
@@ -174,16 +174,18 @@ def should_recompile(
       AND appendix_count / compiled_count > threshold: True.
     - Otherwise: False.
 
-    The ratio check is intentionally limited to corpora where the appendix
-    has not yet reached the absolute min_appendix threshold. For large compiled
-    sets, the absolute count is the right signal; the ratio fires only when the
-    corpus is still small and proportional growth is meaningful.
+    The default min_appendix=1 means every new memory triggers immediate
+    recompilation. This is an interim setting while the byte-stability fix
+    for get_injection_block() is validated; raise to 5+ once append-only
+    cache hit rates are confirmed on the cluster. The ratio check is only
+    reachable when callers pass a higher min_appendix explicitly.
 
     Args:
         compiled_count:  Number of memories in the current epoch (compiled section).
         appendix_count:  Number of new memories since the last compilation.
         threshold:       Fractional threshold; default 0.3 means 30%.
         min_appendix:    Absolute count that triggers recompilation regardless of ratio.
+                         Default 1 (immediate). Set higher to allow appendix growth.
 
     Returns:
         True if a new compilation should be triggered.

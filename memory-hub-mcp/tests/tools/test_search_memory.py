@@ -1050,9 +1050,9 @@ async def test_appendix_entries_flagged():
 
     from memoryhub_core.services.compilation import compile_memory_set
 
-    # Create 5 compiled memories + 1 new one. We need >= 5 compiled so
-    # should_recompile(5, 1) returns False (ratio check only fires when
-    # compiled_count < min_appendix=5).
+    # Create 5 compiled memories + 1 new one. Patch should_recompile
+    # to return False so the new memory stays in the appendix —
+    # this test verifies appendix flagging, not the recompile threshold.
     compiled_mems = []
     for i in range(5):
         mem, score = _fake_full_result(
@@ -1114,6 +1114,10 @@ async def test_appendix_entries_flagged():
             patch(
                 "src.tools.search_memory.get_valkey_client",
                 return_value=mock_valkey,
+            ),
+            patch(
+                "src.tools.search_memory.should_recompile",
+                return_value=False,
             ),
         ):
             result = await search_memory(query="memory")

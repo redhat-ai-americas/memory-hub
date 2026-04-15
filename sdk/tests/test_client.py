@@ -1438,12 +1438,14 @@ def _make_memory(
     content: str = "some content",
     stub: str | None = None,
     result_type: str | None = "full",
+    is_appendix: bool | None = None,
 ) -> Memory:
     return Memory(
         id=id,
         content=content,
         stub=stub,
         result_type=result_type,
+        is_appendix=is_appendix,
         scope="user",
         owner_id="wjackson",
     )
@@ -1511,3 +1513,84 @@ def test_get_injection_block_single_entry_no_separator():
 
     assert block == "Only one."
     assert "---" not in block
+
+
+def test_get_injection_block_byte_stability():
+    """Compiled prefix is byte-identical with and without appendix entries."""
+    compiled = [
+        _make_memory(id="m1", content="Use Podman.", result_type="full", is_appendix=False),
+        _make_memory(id="m2", content="FIPS required.", result_type="full", is_appendix=False),
+    ]
+
+    # Without appendix
+    result_v1 = SearchResult(results=compiled, total_matching=2, has_more=False)
+    block_v1 = MemoryHubClient.get_injection_block(result_v1)
+
+    # With appendix
+    appendix = [
+        _make_memory(id="m3", content="New memory.", result_type="full", is_appendix=True),
+    ]
+    result_v2 = SearchResult(results=compiled + appendix, total_matching=3, has_more=False)
+    block_v2 = MemoryHubClient.get_injection_block(result_v2)
+
+    # The compiled prefix must be byte-identical
+    assert block_v2.startswith(block_v1)
+    assert "\n===\n" in block_v2
+    assert block_v2 == f"{block_v1}\n===\nNew memory."
+
+
+def test_get_injection_block_appendix_separator():
+    """Compiled and appendix sections use different separators."""
+    memories = [
+        _make_memory(id="m1", content="Compiled A.", result_type="full", is_appendix=False),
+        _make_memory(id="m2", content="Compiled B.", result_type="full", is_appendix=False),
+        _make_memory(id="m3", content="Appendix A.", result_type="full", is_appendix=True),
+        _make_memory(id="m4", content="Appendix B.", result_type="full", is_appendix=True),
+    ]
+    result = SearchResult(results=memories, total_matching=4, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert block == "Compiled A.\n---\nCompiled B.\n===\nAppendix A.\n---\nAppendix B."
+
+
+def test_get_injection_block_appendix_only():
+    """Appendix-only results omit the === separator."""
+    memories = [
+        _make_memory(id="m1", content="Appendix only.", result_type="full", is_appendix=True),
+    ]
+    result = SearchResult(results=memories, total_matching=1, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert block == "Appendix only."
+    assert "===" not in block
+
+
+def test_get_injection_block_no_appendix_flag():
+    """Memories with is_appendix=None are treated as compiled."""
+    memories = [
+        _make_memory(id="m1", content="Legacy.", result_type="full", is_appendix=None),
+    ]
+    result = SearchResult(results=memories, total_matching=1, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert block == "Legacy."
+
+
+def test_memory_model_stub_without_content():
+    """Stub results can be constructed without content or owner_id."""
+    mem = Memory(id="stub-1", scope="user", stub="Short summary.", result_type="stub")
+    assert mem.content == ""
+    assert mem.owner_id == ""
+    assert mem.stub == "Short summary."
+
+
+def test_get_injection_block_skips_empty_content():
+    """Memories with empty content and no stub are silently dropped."""
+    memories = [
+        _make_memory(id="m1", content="Real content.", result_type="full"),
+        _make_memory(id="m2", content="", result_type="full"),
+    ]
+    result = SearchResult(results=memories, total_matching=2, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert block == "Real content."

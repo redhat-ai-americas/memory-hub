@@ -14,12 +14,12 @@ class Memory(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str
-    content: str
+    content: str = ""
     stub: str | None = None
     weight: float = 0.7
     scope: str
     branch_type: str | None = None
-    owner_id: str
+    owner_id: str = ""
     is_current: bool = True
     version: int = 1
     parent_id: str | None = None

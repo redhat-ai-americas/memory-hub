@@ -491,25 +491,51 @@ class MemoryHubClient:
 
     @staticmethod
     def get_injection_block(results: SearchResult) -> str:
-        """Render search results as a deterministic plain text block for prompt injection.
+        """Render search results as a byte-stable text block for prompt injection.
 
-        Produces a stable text representation with no per-request metadata
-        (no relevance scores, no timestamps, no request IDs). When the server
-        returns cache-optimized results, the text block is token-stable across
-        requests for the same memory set.
+        Compiled memories (``is_appendix=False`` or ``None``) are rendered
+        first as a self-contained block.  Appendix memories are appended
+        after a ``===`` separator.  The compiled block is byte-identical
+        regardless of how many appendix entries follow — this is the
+        invariant that keeps vLLM's prefix KV-cache valid across requests.
+
+        Structure when appendix entries exist::
+
+            {compiled entries joined by \\n---\\n}
+            \\n===\\n
+            {appendix entries joined by \\n---\\n}
+
+        When there are no appendix entries, the ``===`` separator is omitted.
 
         Returns empty string for empty results.
         """
         if not results.results:
             return ""
 
-        blocks: list[str] = []
+        compiled: list[str] = []
+        appendix: list[str] = []
+
         for memory in results.results:
-            if memory.result_type == "full" and hasattr(memory, "content") and memory.content:
-                blocks.append(memory.content)
-            elif hasattr(memory, "stub") and memory.stub:
-                blocks.append(memory.stub)
-        return "\n---\n".join(blocks)
+            text = None
+            if memory.result_type == "full" and memory.content:
+                text = memory.content
+            elif memory.stub:
+                text = memory.stub
+
+            if text:
+                if memory.is_appendix:
+                    appendix.append(text)
+                else:
+                    compiled.append(text)
+
+        compiled_block = "\n---\n".join(compiled)
+        if not appendix:
+            return compiled_block
+
+        appendix_block = "\n---\n".join(appendix)
+        if not compiled_block:
+            return appendix_block
+        return f"{compiled_block}\n===\n{appendix_block}"
 
     async def read(
         self,
