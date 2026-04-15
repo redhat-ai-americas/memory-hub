@@ -63,6 +63,29 @@ class ProjectInviteOnlyError(Exception):
         )
 
 
+class EmbeddingServiceError(Exception):
+    """Base class for embedding service failures."""
+
+
+class EmbeddingContentTooLargeError(EmbeddingServiceError):
+    """Raised when content exceeds the embedding model's input limit."""
+
+    def __init__(self, content_length: int, detail: str = "") -> None:
+        self.content_length = content_length
+        msg = f"Content too large for embedding ({content_length} chars)"
+        if detail:
+            msg += f": {detail}"
+        super().__init__(msg)
+
+
+class EmbeddingServiceUnavailableError(EmbeddingServiceError):
+    """Raised when the embedding service is unreachable or timed out."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"Embedding service unavailable: {reason}")
+
+
 class CrossTenantRelationshipError(Exception):
     """Raised when a relationship would span two different tenants.
 

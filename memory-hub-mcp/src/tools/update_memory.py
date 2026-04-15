@@ -17,6 +17,9 @@ from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.exceptions import (
+    EmbeddingContentTooLargeError,
+    EmbeddingServiceError,
+    EmbeddingServiceUnavailableError,
     MemoryAccessDeniedError,
     MemoryNotCurrentError,
     MemoryNotFoundError,
@@ -197,5 +200,17 @@ async def update_memory(
         )
     except MemoryAccessDeniedError as exc:
         raise ToolError(f"Access denied: {exc.reason}")
+    except EmbeddingContentTooLargeError as exc:
+        raise ToolError(
+            f"Invalid content size: {exc.content_length} characters exceeds the "
+            "embedding model's input limit. Shorten the content or split into smaller memories."
+        ) from exc
+    except EmbeddingServiceUnavailableError as exc:
+        raise ToolError(
+            f"Embedding service is unavailable: {exc.reason}. "
+            "Memory was not updated. Retry after the embedding service recovers."
+        ) from exc
+    except EmbeddingServiceError as exc:
+        raise ToolError(f"Embedding failed: {exc}. Memory was not updated.") from exc
     finally:
         await release_db_session(gen)

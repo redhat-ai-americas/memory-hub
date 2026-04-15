@@ -30,6 +30,9 @@ from src.tools._push_helpers import broadcast_after_write
 from memoryhub_core.models.schemas import MemoryNodeCreate
 from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import (
+    EmbeddingContentTooLargeError,
+    EmbeddingServiceError,
+    EmbeddingServiceUnavailableError,
     MemoryAccessDeniedError,
     MemoryNotFoundError,
     ProjectInviteOnlyError,
@@ -383,6 +386,19 @@ async def write_memory(
         )
     except MemoryAccessDeniedError as exc:
         raise ToolError(f"Access denied: {exc.reason}") from exc
+    except EmbeddingContentTooLargeError as exc:
+        raise ToolError(
+            f"Invalid content size: {exc.content_length} characters exceeds the "
+            "embedding model's input limit. Shorten the content or split into "
+            "smaller memories."
+        ) from exc
+    except EmbeddingServiceUnavailableError as exc:
+        raise ToolError(
+            f"Embedding service is unavailable: {exc.reason}. Memory was not saved. "
+            "Retry after the embedding service recovers."
+        ) from exc
+    except EmbeddingServiceError as exc:
+        raise ToolError(f"Embedding failed: {exc}. Memory was not saved.") from exc
     except Exception as exc:
         logger.error("Failed to create memory: %s", exc, exc_info=True)
         raise ToolError("Failed to create memory. See server logs for details.") from exc

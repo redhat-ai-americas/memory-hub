@@ -25,6 +25,11 @@ from memoryhub_core.services.compilation import (
     compile_memory_set,
     should_recompile,
 )
+from memoryhub_core.services.exceptions import (
+    EmbeddingContentTooLargeError,
+    EmbeddingServiceError,
+    EmbeddingServiceUnavailableError,
+)
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.valkey_client import (
@@ -938,5 +943,21 @@ async def search_memory(
                 response["focus_fallback_reason"] = focus_meta["fallback_reason"]
         return response
 
+    except EmbeddingContentTooLargeError as exc:
+        raise ToolError(
+            f"Invalid query size: {exc.content_length} characters exceeds the "
+            "embedding model's input limit. Use a shorter, more focused search query."
+        ) from exc
+    except EmbeddingServiceUnavailableError as exc:
+        raise ToolError(
+            f"Embedding service is unavailable: {exc.reason}."
+            " Search requires embeddings to function."
+            " Retry after the embedding service recovers."
+        ) from exc
+    except EmbeddingServiceError as exc:
+        raise ToolError(
+            f"Search failed due to embedding error: {exc}."
+            " Retry or contact an administrator."
+        ) from exc
     finally:
         await release_db_session(gen)

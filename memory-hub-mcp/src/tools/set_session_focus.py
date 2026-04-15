@@ -26,6 +26,11 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
+from memoryhub_core.services.exceptions import (
+    EmbeddingContentTooLargeError,
+    EmbeddingServiceError,
+    EmbeddingServiceUnavailableError,
+)
 from memoryhub_core.services.valkey_client import (
     ValkeyUnavailableError,
     get_valkey_client,
@@ -124,7 +129,23 @@ async def set_session_focus(
     session_id = user_id  # interim: see module docstring
 
     embedding_service = get_embedding_service()
-    focus_vector = await embedding_service.embed(focus)
+    try:
+        focus_vector = await embedding_service.embed(focus)
+    except EmbeddingContentTooLargeError as exc:
+        raise ToolError(
+            f"Invalid focus text: {exc.content_length} characters exceeds the "
+            "embedding model's input limit. Use a shorter focus description "
+            "(5-10 words recommended)."
+        ) from exc
+    except EmbeddingServiceUnavailableError as exc:
+        raise ToolError(
+            f"Embedding service is unavailable: {exc.reason}. Session focus was "
+            "not set. Retry after the embedding service recovers."
+        ) from exc
+    except EmbeddingServiceError as exc:
+        raise ToolError(
+            f"Failed to embed focus text: {exc}. Session focus was not set."
+        ) from exc
 
     valkey = get_valkey_client()
     try:

@@ -1,11 +1,20 @@
 """Embedding service interface and implementations."""
 
 import hashlib
+import logging
 import math
 import os
 from abc import ABC, abstractmethod
 
 import httpx
+
+from memoryhub_core.services.exceptions import (
+    EmbeddingContentTooLargeError,
+    EmbeddingServiceError,
+    EmbeddingServiceUnavailableError,
+)
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 384
 
@@ -74,8 +83,32 @@ class HttpEmbeddingService(EmbeddingService):
         self._client = httpx.AsyncClient(timeout=30.0)
 
     async def embed(self, text: str) -> list[float]:
-        response = await self._client.post(self.url, json={"inputs": text})
-        response.raise_for_status()
+        try:
+            response = await self._client.post(self.url, json={"inputs": text})
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 413:
+                raise EmbeddingContentTooLargeError(
+                    content_length=len(text),
+                    detail="Reduce content length or split into smaller memories.",
+                ) from exc
+            logger.error(
+                "Embedding HTTP %d error (content length=%d)",
+                exc.response.status_code,
+                len(text),
+            )
+            raise EmbeddingServiceError(
+                f"Embedding request failed (HTTP {exc.response.status_code})"
+            ) from exc
+        except httpx.ConnectError as exc:
+            raise EmbeddingServiceUnavailableError(
+                "Could not connect to embedding service"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise EmbeddingServiceUnavailableError(
+                "Embedding request timed out (30s limit)"
+            ) from exc
+
         data = response.json()
         # API returns [[float, ...]] — unwrap the outer array
         return data[0] if isinstance(data[0], list) else data
