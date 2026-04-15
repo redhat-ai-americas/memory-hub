@@ -607,7 +607,11 @@ async def run_immediate_recompile(client, vllm, metrics, temp_ids) -> dict:
     log("=== Follow-Up: Immediate Recompile ===")
     log("  This scenario requires min_appendix=1 in compilation config.")
 
-    sr1, block_v1 = await _search_block(client)
+    # Use max_results=50 to ensure the new memory appears in results
+    # (same reasoning as byte_stability_fix — avoid similarity displacement).
+    scenario_max_results = 50
+
+    sr1, block_v1 = await _search_block(client, max_results=scenario_max_results)
     question = "Explain the monitoring and alerting setup."
     user_v1 = _make_user_msg(block_v1, question)
 
@@ -627,7 +631,7 @@ async def run_immediate_recompile(client, vllm, metrics, temp_ids) -> dict:
     temp_ids.append(result.memory.id)
     await asyncio.sleep(2)
 
-    sr2, block_v2 = await _search_block(client)
+    sr2, block_v2 = await _search_block(client, max_results=scenario_max_results)
     epoch_changed = (sr2.compilation_epoch or 0) > (sr1.compilation_epoch or 0)
     appendix_zero = (sr2.appendix_count or 0) == 0
     log(f"  Epoch changed: {epoch_changed}, appendix: {sr2.appendix_count}")
