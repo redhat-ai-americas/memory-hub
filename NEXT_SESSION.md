@@ -1,35 +1,43 @@
 # Next Session Plan
 
 ## Completed this session
-- #188 project enrollment friction: auto-enrollment on project-scoped
-  writes (open projects), list_projects MCP tool, CLI
-  --project/--non-interactive flags, SDK project_id field in ProjectConfig
-- Compiled-entry backfill in search pipeline (fixes displacement when
-  high-similarity memories push compiled entries out of top-N)
-- min_appendix raised from 1 to 5 (reduces recompilation frequency)
-- Migration 012 (projects table) deployed
-- MCP server rebuilt with 14 tools (build #26)
-- Validation scripts updated (max_results workaround removed)
+- Fixed project-scoped read/update/delete RBAC: `node_to_read()` was
+  dropping `scope_id` and `domains` when converting ORM to Pydantic,
+  so `authorize_read`/`authorize_write` always saw `scope_id=None`.
+  Root cause was one layer deeper than the NEXT_SESSION.md description
+  suggested -- the #167 tool-layer wiring was correct but inert.
+- Regression test added: `test_read_memory_preserves_scope_id_and_domains`
+- Cleaned up enrollment-test project and membership from DB
+- MCP server v0.5.1 deployed (build #27), verified end-to-end:
+  write -> read -> delete all pass for project-scoped memories
 
-## Priority items for next session
+## Priority items for next session: Bugs
 
-### 1. Project-scoped delete_memory RBAC fix (HIGH)
-delete_memory doesn't pass project_ids to authorize_write, so
-project-scoped deletes fail even for the memory owner. Discovered during
-validation. Should be a small fix in the delete tool to thread project_ids
-through the authz call.
+### 1. #119 Translate upstream embedder errors into structured tool responses
+Embedding service errors (e.g., connection failures, timeouts) currently
+propagate as unstructured exceptions. Agents can't distinguish "embedder
+down" from "bad input" and can't recover gracefully.
 
-### 2. Cleanup from validation (LOW)
-The enrollment-test project and its test memory created during validation
-could be cleaned up.
+### 2. #102 ui: BFF /api/memory/{id}/history backward-only walker follow-up
+The history walker in the BFF only walks backward through the version
+chain. Needs to also walk forward to find the current version from any
+arbitrary version ID.
 
-### 3. #176 first 3 users (DEPRIORITIZED)
-Still on the backlog but not blocking anything.
+### 3. #84 storage: Handle embedding service 413 on long memory content
+When memory content exceeds the embedding model's token limit, the
+embedding service returns a 413. Currently this surfaces as an opaque
+error. Should truncate or chunk gracefully with a clear message.
+
+## Session after next: Design docs
+Review and flesh out the 6 design docs tagged `needs-design`:
+#171 (knowledge compilation), #170 (graph-enhanced retrieval),
+#169 (context compaction / ACE), #168 (conversation thread persistence),
+#166 (projects table governance), #109 (UI design doc).
 
 ## Context
 - SDK v0.6.0 on PyPI (v0.6.1 unreleased: project_id field in ProjectConfig)
 - CLI v0.3.0 (unreleased: --project/--non-interactive flags)
-- MCP server v0.5.0, build #26, 14 tools deployed
+- MCP server v0.5.1, build #27, 14 tools deployed
 - Curation thresholds: exact_duplicate 0.98, near_duplicate gate 0.90,
   flag 0.80
 - min_appendix=5 (was 1)
