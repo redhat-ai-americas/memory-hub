@@ -265,9 +265,9 @@ async def _with_prom_context(prom: PrometheusClient | None, name: str, coro):
     return result
 
 
-async def _search_block(client: MemoryHubClient):
+async def _search_block(client: MemoryHubClient, max_results: int = 15):
     """Search and return (SearchResult, injection_block)."""
-    sr = await client.search(SEARCH_QUERY, max_results=15, mode="full_only", max_response_tokens=20000)
+    sr = await client.search(SEARCH_QUERY, max_results=max_results, mode="full_only", max_response_tokens=20000)
     return sr, MemoryHubClient.get_injection_block(sr)
 
 
@@ -535,7 +535,15 @@ async def run_byte_stability_fix(client, vllm, metrics, temp_ids) -> dict:
     log("  This scenario requires the byte-stability fix to get_injection_block().")
     log("  See findings.md recommendation #1.")
 
-    sr1, block_v1 = await _search_block(client)
+    # Use max_results=50 to avoid compiled-entry displacement.
+    # With max_results=15, new high-similarity memories can push compiled
+    # entries out of the similarity-ranked top-N, changing the compiled
+    # section even though the epoch hasn't changed. This is a separate
+    # server-side issue (similarity ranking happens before compilation
+    # partitioning); this scenario validates client-side byte-stability.
+    scenario_max_results = 50
+
+    sr1, block_v1 = await _search_block(client, max_results=scenario_max_results)
     epoch_before = sr1.compilation_epoch  # noqa: F841
     question = "What are the key architectural decisions?"
     user_v1 = _make_user_msg(block_v1, question)
@@ -562,7 +570,7 @@ async def run_byte_stability_fix(client, vllm, metrics, temp_ids) -> dict:
         temp_ids.append(result.memory.id)
 
     await asyncio.sleep(2)
-    sr2, block_v2 = await _search_block(client)
+    sr2, block_v2 = await _search_block(client, max_results=scenario_max_results)
 
     # Key check: does block_v2 start with the exact bytes of block_v1?
     compiled_prefix_preserved = block_v2.startswith(block_v1)
