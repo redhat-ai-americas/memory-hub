@@ -587,6 +587,7 @@ class MemoryHubClient:
         metadata: dict[str, Any] | None = None,
         project_id: str | None = None,
         domains: list[str] | None = None,
+        force: bool = False,
     ) -> WriteResult:
         """Write a new memory.
 
@@ -600,21 +601,30 @@ class MemoryHubClient:
             metadata: Arbitrary metadata dict.
             project_id: Project identifier for campaign enrollment verification.
             domains: Domain tags for the memory, e.g. ['React', 'Spring Boot'].
+            force: When True, bypass near-duplicate and exact-duplicate similarity
+                gates. Regex rules (secrets, PII) are never bypassed.
+
+        Returns:
+            A WriteResult. When curation detects a near-duplicate, the memory is
+            not written: the returned WriteResult has memory=None and
+            curation.gated=True with existing_memory_id, recommendation, and
+            cache_impact fields populated. Check curation.gated before accessing
+            memory.
         """
-        data = await self._call(
-            "write_memory",
-            {
-                "content": content,
-                "scope": scope,
-                "owner_id": owner_id,
-                "weight": weight,
-                "parent_id": parent_id,
-                "branch_type": branch_type,
-                "metadata": metadata,
-                "project_id": project_id,
-                "domains": domains,
-            },
-        )
+        payload: dict[str, Any] = {
+            "content": content,
+            "scope": scope,
+            "owner_id": owner_id,
+            "weight": weight,
+            "parent_id": parent_id,
+            "branch_type": branch_type,
+            "metadata": metadata,
+            "project_id": project_id,
+            "domains": domains,
+        }
+        if force:
+            payload["force"] = True
+        data = await self._call("write_memory", payload)
         return WriteResult.model_validate(data)
 
     async def update(

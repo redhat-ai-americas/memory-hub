@@ -61,6 +61,7 @@ async def create_memory(
     *,
     tenant_id: str,
     skip_curation: bool = False,
+    force: bool = False,
     s3_adapter: S3StorageAdapter | None = None,
 ) -> tuple[MemoryNodeRead | None, dict]:
     """Create a new memory node.
@@ -75,6 +76,11 @@ async def create_memory(
 
     Set ``skip_curation=True`` to bypass the pipeline entirely (used for
     downstream writes from merge operations).
+
+    Set ``force=True`` to bypass similarity gate checks (near-duplicate and
+    exact-duplicate). Tier 1 regex checks (secrets, PII) are still enforced.
+    Use when the caller has already confirmed the write with the user after a
+    gated response.
 
     ``tenant_id`` is a required keyword argument -- tool-layer callers must
     pass the caller's tenant (from JWT claims) explicitly so every insert is
@@ -111,6 +117,7 @@ async def create_memory(
             scope=data.scope,
             session=session,
             tenant_id=tenant_id,
+            force=force,
         )
         if curation_result["blocked"]:
             return None, curation_result

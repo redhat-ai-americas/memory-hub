@@ -7,8 +7,10 @@ milliseconds. No LLM calls happen on the write path.
 
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.services.curation.rules import load_rules, seed_default_rules
 from memoryhub_core.services.curation.scanner import scan_content, scan_with_custom_patterns
 from memoryhub_core.services.curation.similarity import check_similarity
@@ -35,8 +37,10 @@ async def run_curation_pipeline(
     session: AsyncSession,
     *,
     tenant_id: str,
-    reject_threshold: float = 0.95,
+    reject_threshold: float = 0.98,
     flag_threshold: float = 0.80,
+    gate_threshold: float = 0.90,
+    force: bool = False,
 ) -> dict:
     """Run the full inline curation pipeline on a pending memory write.
 
@@ -50,6 +54,17 @@ async def run_curation_pipeline(
         "nearest_score": float | None,
         "flags": list[str],
     }
+
+    When ``blocked=True`` and ``gated=True``, the caller should prompt the
+    user to confirm or update the existing memory rather than writing a
+    duplicate. The response includes ``existing_memory_id``,
+    ``existing_memory_stub``, and ``recommendation="update_existing"`` to
+    support this flow. When ``blocked=True`` and ``gated`` is absent (or
+    False), the write is hard-blocked (regex match, policy, etc.).
+
+    Pass ``force=True`` to bypass the gate (near-duplicate and exact-duplicate
+    similarity checks). Tier 1 regex checks (secrets, PII, etc.) are never
+    bypassed by ``force``.
 
     When blocked=True, the caller must not persist the memory.
 
@@ -92,8 +107,8 @@ async def run_curation_pipeline(
 
     if embedding is not None:
         # Allow rule config to override the caller-supplied thresholds.
-        reject_threshold, flag_threshold = _resolve_embedding_thresholds(
-            rules, reject_threshold, flag_threshold
+        reject_threshold, flag_threshold, gate_threshold = _resolve_embedding_thresholds(
+            rules, reject_threshold, flag_threshold, gate_threshold
         )
 
         sim = await check_similarity(
@@ -109,18 +124,11 @@ async def run_curation_pipeline(
         nearest_id = sim.nearest_id
         nearest_score = sim.nearest_score
 
-        if nearest_score is not None and nearest_score >= reject_threshold:
-            return {
-                "blocked": True,
-                "reason": "exact_duplicate",
-                "detail": (
-                    f"Memory is {nearest_score:.0%} similar to existing memory {nearest_id}"
-                ),
-                "similar_count": similar_count,
-                "nearest_id": nearest_id,
-                "nearest_score": nearest_score,
-                "flags": [],
-            }
+        if nearest_score is not None and not force:
+            if nearest_score >= reject_threshold:
+                return await _gated("exact_duplicate", nearest_id, nearest_score, similar_count, session)
+            elif nearest_score >= gate_threshold:
+                return await _gated("near_duplicate", nearest_id, nearest_score, similar_count, session)
 
         if similar_count > 0:
             flags.append("possible_duplicate")
@@ -170,10 +178,12 @@ def _resolve_embedding_thresholds(
     rules: list,
     reject_threshold: float,
     flag_threshold: float,
-) -> tuple[float, float]:
+    gate_threshold: float,
+) -> tuple[float, float, float]:
     """Extract threshold overrides from embedding-tier rules.
 
     Only the first matching config key wins (rules are already sorted by priority).
+    Returns ``(reject_threshold, flag_threshold, gate_threshold)``.
     """
     for rule in rules:
         if rule.tier != "embedding":
@@ -183,7 +193,47 @@ def _resolve_embedding_thresholds(
             reject_threshold = float(config["threshold"])
         elif rule.name == "near_duplicate" and "similarity_range" in config:
             flag_threshold = float(config["similarity_range"][0])
-    return reject_threshold, flag_threshold
+            if "gate_threshold" in config:
+                gate_threshold = float(config["gate_threshold"])
+    return reject_threshold, flag_threshold, gate_threshold
+
+
+async def _gated(
+    reason: str,
+    nearest_id: uuid.UUID,
+    nearest_score: float,
+    similar_count: int,
+    session: AsyncSession,
+) -> dict:
+    """Build a gated-write response that asks the caller to update an existing memory.
+
+    Fetches the existing memory's stub text so the agent can present a
+    meaningful "did you mean this?" prompt rather than a bare UUID.
+    """
+    stub: str | None = None
+    try:
+        result = await session.execute(
+            select(MemoryNode.stub).where(MemoryNode.id == nearest_id)
+        )
+        row = result.scalar_one_or_none()
+        if row is not None:
+            stub = str(row)
+    except Exception:
+        pass  # Non-blocking; a missing stub is cosmetic, not fatal
+
+    return {
+        "blocked": True,
+        "gated": True,
+        "reason": reason,
+        "detail": f"Memory is {nearest_score:.0%} similar to existing memory {nearest_id}",
+        "similar_count": similar_count,
+        "nearest_id": nearest_id,
+        "nearest_score": nearest_score,
+        "existing_memory_id": str(nearest_id),
+        "existing_memory_stub": stub,
+        "recommendation": "update_existing",
+        "flags": [],
+    }
 
 
 def _blocked(reason: str, detail: str | None) -> dict:

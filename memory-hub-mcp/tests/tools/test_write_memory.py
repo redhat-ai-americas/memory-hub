@@ -31,7 +31,7 @@ def test_write_memory_has_required_parameters():
         f"Missing required params: {required - param_names}"
     )
 
-    optional = {"weight", "parent_id", "branch_type", "metadata", "ctx"}
+    optional = {"weight", "parent_id", "branch_type", "metadata", "ctx", "force"}
     assert optional.issubset(param_names), (
         f"Missing optional params: {optional - param_names}"
     )
@@ -46,6 +46,7 @@ def test_write_memory_default_values():
     assert params["parent_id"].default is None
     assert params["branch_type"].default is None
     assert params["metadata"].default is None
+    assert params["force"].default is False
 
 
 @pytest.mark.asyncio
@@ -191,3 +192,142 @@ async def test_write_memory_forwards_tenant_id_to_service():
         f"Expected tenant_id='tenant_a' forwarded from claims into create_memory, "
         f"got kwargs={kwargs}"
     )
+
+
+@pytest.mark.asyncio
+async def test_write_memory_gated_returns_structured_response():
+    """Near-duplicate gate returns structured response, not ToolError."""
+    import uuid as _uuid
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    fake_curation = {
+        "blocked": True,
+        "gated": True,
+        "reason": "near_duplicate",
+        "detail": "Memory is 92% similar to existing memory abc",
+        "similar_count": 1,
+        "nearest_id": _uuid.uuid4(),
+        "nearest_score": 0.92,
+        "existing_memory_id": "abc-123",
+        "existing_memory_stub": "Existing memory text.",
+        "recommendation": "update_existing",
+        "flags": [],
+    }
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:write:user", "memory:read:user"],
+    }
+
+    with (
+        patch("src.tools.write_memory.get_claims_from_context", return_value=fake_claims),
+        patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+        patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.create_memory", new_callable=AsyncMock, return_value=(None, fake_curation)),
+        patch("src.tools.write_memory._get_cache_impact", new_callable=AsyncMock, return_value={"compiled_count": 28, "will_recompile": True}),
+    ):
+        result = await write_memory(content="near-dup content", scope="user")
+
+    assert result["memory"] is None
+    assert result["curation"]["gated"] is True
+    assert result["curation"]["reason"] == "near_duplicate"
+    assert result["curation"]["existing_memory_id"] == "abc-123"
+    assert result["curation"]["existing_memory_stub"] == "Existing memory text."
+    assert result["curation"]["cache_impact"]["compiled_count"] == 28
+
+
+@pytest.mark.asyncio
+async def test_write_memory_regex_block_still_raises_tool_error():
+    """Hard blocks (regex: secrets) still raise ToolError, not structured response."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    fake_curation = {
+        "blocked": True,
+        "reason": "secrets_scan",
+        "detail": "AWS access key detected",
+        "similar_count": 0,
+        "nearest_id": None,
+        "nearest_score": None,
+        "flags": [],
+    }
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:write:user", "memory:read:user"],
+    }
+
+    with (
+        patch("src.tools.write_memory.get_claims_from_context", return_value=fake_claims),
+        patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+        patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.create_memory", new_callable=AsyncMock, return_value=(None, fake_curation)),
+    ):
+        with pytest.raises(ToolError, match="Curation rule blocked write: secrets_scan"):
+            await write_memory(content="AKIAIOSFODNN7EXAMPLE", scope="user")
+
+
+@pytest.mark.asyncio
+async def test_write_memory_force_forwarded_to_create_memory():
+    """force=True is forwarded to create_memory."""
+    import datetime as _dt
+    import uuid as _uuid
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, StorageType
+
+    fake_node = MemoryNodeRead(
+        id=_uuid.uuid4(),
+        parent_id=None,
+        content="forced write",
+        stub="forced write",
+        storage_type=StorageType.INLINE,
+        content_ref=None,
+        weight=0.7,
+        scope=MemoryScope.USER,
+        branch_type=None,
+        owner_id="wjackson",
+        tenant_id="default",
+        is_current=True,
+        version=1,
+        previous_version_id=None,
+        metadata=None,
+        created_at=_dt.datetime.now(_dt.UTC),
+        updated_at=_dt.datetime.now(_dt.UTC),
+        expires_at=None,
+        has_children=False,
+        has_rationale=False,
+        branch_count=0,
+    )
+    fake_curation = {
+        "blocked": False,
+        "reason": None,
+        "detail": None,
+        "similar_count": 1,
+        "nearest_id": _uuid.uuid4(),
+        "nearest_score": 0.92,
+        "flags": ["possible_duplicate"],
+    }
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:write:user", "memory:read:user"],
+    }
+
+    with (
+        patch("src.tools.write_memory.get_claims_from_context", return_value=fake_claims),
+        patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+        patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.create_memory", new_callable=AsyncMock, return_value=(fake_node, fake_curation)) as mock_create,
+        patch("src.tools.write_memory.broadcast_after_write", new_callable=AsyncMock),
+    ):
+        result = await write_memory(content="forced write", scope="user", force=True)
+
+    assert result["memory"] is not None
+    _, kwargs = mock_create.call_args
+    assert kwargs.get("force") is True

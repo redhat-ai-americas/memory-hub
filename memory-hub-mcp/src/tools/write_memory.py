@@ -36,6 +36,23 @@ from memoryhub_core.services.memory import create_memory
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 
 
+async def _get_cache_impact(tenant_id: str, owner_id: str) -> dict:
+    """Read compilation state to estimate the cache cost of a forced write."""
+    from memoryhub_core.services.compilation import CompilationEpoch
+    from memoryhub_core.services.valkey_client import ValkeyUnavailableError
+
+    try:
+        from memoryhub_core.services.valkey_client import get_valkey_client
+        valkey = get_valkey_client()
+        data = await valkey.read_compilation(tenant_id, owner_id)
+        if data is None:
+            return {"compiled_count": 0, "will_recompile": True}
+        epoch = CompilationEpoch.from_dict(data)
+        return {"compiled_count": len(epoch.ordered_ids), "will_recompile": True}
+    except (ValkeyUnavailableError, Exception):
+        return {"compiled_count": None, "will_recompile": True}
+
+
 @mcp.tool(
     annotations={
         "readOnlyHint": False,
@@ -123,6 +140,18 @@ async def write_memory(
             ),
         ),
     ] = None,
+    force: Annotated[
+        bool,
+        Field(
+            description=(
+                "When True, bypass near-duplicate and exact-duplicate similarity "
+                "gates and write the memory regardless of similarity to existing "
+                "memories. Regex rules (secrets, PII) are never bypassed. Use when "
+                "you have confirmed the new memory provides value beyond the "
+                "existing one."
+            ),
+        ),
+    ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Create a new memory node or branch in the memory tree.
@@ -132,13 +161,12 @@ async def write_memory(
     (organizational, enterprise), the write is queued for curator review.
 
     Returns the created memory node with its generated ID, stub text, and timestamp,
-    along with curation metadata. If curation.similar_count is greater than 0, there
-    are existing memories that are similar to the one you just created. Consider
-    reviewing them with get_similar_memories to check for duplicates. If an existing
-    memory covers the same information, consider using update_memory instead of
-    creating duplicates.
+    along with curation metadata. If curation detects a near-duplicate or exact
+    duplicate, the memory is NOT written and the response has memory=null with
+    curation.gated=true, including the existing memory's ID, stub, and cache
+    impact information. To override, retry with force=true.
 
-    If the write is blocked by a curation rule (e.g., exact duplicate detected),
+    If the write is blocked by a regex curation rule (e.g., secrets detected),
     a ToolError is raised with a message starting with "Curation rule blocked".
     """
     if ctx:
@@ -281,11 +309,36 @@ async def write_memory(
             embedding_service,
             tenant_id=write_tenant_id,
             s3_adapter=get_s3_adapter(),
+            force=force,
         )
 
         if curation_result["blocked"]:
-            # No broadcast on a blocked write — the memory wasn't persisted,
-            # so subscribers should not be told about it.
+            if curation_result.get("gated"):
+                # Similarity gate fired — return structured response so the
+                # caller can decide to update_memory or retry with force=True.
+                cache_impact = await _get_cache_impact(write_tenant_id, owner_id)
+                return {
+                    "memory": None,
+                    "curation": {
+                        "blocked": True,
+                        "gated": True,
+                        "reason": curation_result["reason"],
+                        "detail": curation_result.get("detail"),
+                        "similar_count": curation_result["similar_count"],
+                        "nearest_id": (
+                            str(curation_result["nearest_id"])
+                            if curation_result["nearest_id"]
+                            else None
+                        ),
+                        "nearest_score": curation_result["nearest_score"],
+                        "existing_memory_id": curation_result.get("existing_memory_id"),
+                        "existing_memory_stub": curation_result.get("existing_memory_stub"),
+                        "recommendation": curation_result.get("recommendation"),
+                        "cache_impact": cache_impact,
+                        "flags": curation_result.get("flags", []),
+                    },
+                }
+            # Hard block (regex: secrets, PII) — still a ToolError.
             raise ToolError(
                 f"Curation rule blocked write: {curation_result['reason']}"
             )

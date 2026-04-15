@@ -551,3 +551,203 @@ async def test_seed_default_rules_is_per_tenant(async_session):
     assert first_a == 5
     assert second_a == 0  # already seeded for tenant_a
     assert first_b == 5  # tenant_b gets its own copy
+
+
+# -- Cache-aware write gate tests --
+
+
+async def test_pipeline_gates_near_duplicate(async_session, monkeypatch):
+    """A similarity score in the gate range blocks with gated=True and returns existing memory info."""
+    import uuid as _uuid
+    from unittest.mock import AsyncMock, MagicMock
+    from memoryhub_core.services.curation.similarity import SimilarityResult
+
+    await seed_default_rules(async_session)
+
+    nearest = _uuid.uuid4()
+    mock_sim = SimilarityResult(similar_count=1, nearest_id=nearest, nearest_score=0.92)
+    monkeypatch.setattr(
+        "memoryhub_core.services.curation.pipeline.check_similarity",
+        AsyncMock(return_value=mock_sim),
+    )
+
+    # Patch _gated to avoid a real DB stub lookup in the SQLite test env.
+    from memoryhub_core.services.curation import pipeline as _pipeline
+
+    async def _fake_gated(reason, nearest_id, nearest_score, similar_count, session):
+        return {
+            "blocked": True,
+            "gated": True,
+            "reason": reason,
+            "detail": f"Memory is {nearest_score:.0%} similar to existing memory {nearest_id}",
+            "similar_count": similar_count,
+            "nearest_id": nearest_id,
+            "nearest_score": nearest_score,
+            "existing_memory_id": str(nearest_id),
+            "existing_memory_stub": "stub text",
+            "recommendation": "update_existing",
+            "flags": [],
+        }
+
+    monkeypatch.setattr(_pipeline, "_gated", _fake_gated)
+
+    result = await run_curation_pipeline(
+        content="Some memory content",
+        embedding=[0.1, 0.2, 0.3],
+        owner_id="user-123",
+        scope="user",
+        session=async_session,
+    )
+
+    assert result["blocked"] is True, f"Expected blocked, got {result}"
+    assert result["gated"] is True, f"Expected gated, got {result}"
+    assert result["reason"] == "near_duplicate", f"Unexpected reason: {result['reason']}"
+    assert result["existing_memory_id"] == str(nearest)
+
+
+async def test_pipeline_gates_exact_duplicate(async_session, monkeypatch):
+    """A similarity score above the reject threshold still uses the gated response path."""
+    import uuid as _uuid
+    from unittest.mock import AsyncMock
+    from memoryhub_core.services.curation.similarity import SimilarityResult
+    from memoryhub_core.services.curation import pipeline as _pipeline
+
+    await seed_default_rules(async_session)
+
+    nearest = _uuid.uuid4()
+    mock_sim = SimilarityResult(similar_count=1, nearest_id=nearest, nearest_score=0.985)
+    monkeypatch.setattr(
+        "memoryhub_core.services.curation.pipeline.check_similarity",
+        AsyncMock(return_value=mock_sim),
+    )
+
+    async def _fake_gated(reason, nearest_id, nearest_score, similar_count, session):
+        return {
+            "blocked": True,
+            "gated": True,
+            "reason": reason,
+            "detail": f"Memory is {nearest_score:.0%} similar to existing memory {nearest_id}",
+            "similar_count": similar_count,
+            "nearest_id": nearest_id,
+            "nearest_score": nearest_score,
+            "existing_memory_id": str(nearest_id),
+            "existing_memory_stub": None,
+            "recommendation": "update_existing",
+            "flags": [],
+        }
+
+    monkeypatch.setattr(_pipeline, "_gated", _fake_gated)
+
+    result = await run_curation_pipeline(
+        content="Some memory content",
+        embedding=[0.1, 0.2, 0.3],
+        owner_id="user-123",
+        scope="user",
+        session=async_session,
+    )
+
+    assert result["blocked"] is True
+    assert result["gated"] is True
+    assert result["reason"] == "exact_duplicate"
+
+
+async def test_pipeline_force_bypasses_gate(async_session, monkeypatch):
+    """force=True allows a near-duplicate write to proceed."""
+    import uuid as _uuid
+    from unittest.mock import AsyncMock
+    from memoryhub_core.services.curation.similarity import SimilarityResult
+
+    await seed_default_rules(async_session)
+
+    nearest = _uuid.uuid4()
+    mock_sim = SimilarityResult(similar_count=1, nearest_id=nearest, nearest_score=0.92)
+    monkeypatch.setattr(
+        "memoryhub_core.services.curation.pipeline.check_similarity",
+        AsyncMock(return_value=mock_sim),
+    )
+
+    result = await run_curation_pipeline(
+        content="Some memory content",
+        embedding=[0.1, 0.2, 0.3],
+        owner_id="user-123",
+        scope="user",
+        session=async_session,
+        force=True,
+    )
+
+    assert result["blocked"] is False, f"Expected unblocked with force=True, got {result}"
+    assert "possible_duplicate" in result["flags"]
+
+
+async def test_pipeline_force_does_not_bypass_regex(async_session):
+    """force=True never bypasses Tier 1 regex checks like secrets scanning."""
+    await seed_default_rules(async_session)
+
+    content = "My AWS key is AKIA1234567890ABCDEF — do not store!"
+    result = await run_curation_pipeline(
+        content=content,
+        embedding=None,
+        owner_id="user-123",
+        scope="user",
+        session=async_session,
+        force=True,
+    )
+
+    assert result["blocked"] is True, f"Secrets should still be blocked with force=True"
+    assert result.get("gated") is not True, "Secrets block should not be a gate"
+    assert result["reason"] == "secrets_scan"
+
+
+async def test_pipeline_score_below_gate_writes(async_session, monkeypatch):
+    """A similarity score below the gate threshold does not block; adds possible_duplicate flag."""
+    import uuid as _uuid
+    from unittest.mock import AsyncMock
+    from memoryhub_core.services.curation.similarity import SimilarityResult
+
+    await seed_default_rules(async_session)
+
+    nearest = _uuid.uuid4()
+    mock_sim = SimilarityResult(similar_count=1, nearest_id=nearest, nearest_score=0.85)
+    monkeypatch.setattr(
+        "memoryhub_core.services.curation.pipeline.check_similarity",
+        AsyncMock(return_value=mock_sim),
+    )
+
+    result = await run_curation_pipeline(
+        content="Some memory content",
+        embedding=[0.1, 0.2, 0.3],
+        owner_id="user-123",
+        scope="user",
+        session=async_session,
+    )
+
+    assert result["blocked"] is False, f"Score 0.85 should not be blocked, got {result}"
+    assert "possible_duplicate" in result["flags"]
+
+
+def test_resolve_embedding_thresholds_gate():
+    """_resolve_embedding_thresholds returns a 3-tuple with gate_threshold from rule config."""
+    from memoryhub_core.services.curation.pipeline import _resolve_embedding_thresholds
+    from unittest.mock import MagicMock
+
+    # Build minimal mock rules matching the seeded defaults.
+    exact_rule = MagicMock()
+    exact_rule.tier = "embedding"
+    exact_rule.name = "exact_duplicate"
+    exact_rule.config = {"threshold": 0.98}
+
+    near_rule = MagicMock()
+    near_rule.tier = "embedding"
+    near_rule.name = "near_duplicate"
+    near_rule.config = {"similarity_range": [0.80, 0.90], "gate_threshold": 0.90}
+
+    reject, flag, gate = _resolve_embedding_thresholds(
+        [exact_rule, near_rule],
+        reject_threshold=0.95,
+        flag_threshold=0.80,
+        gate_threshold=0.85,
+    )
+
+    assert reject == 0.98, f"reject_threshold should be 0.98, got {reject}"
+    assert flag == 0.80, f"flag_threshold should be 0.80, got {flag}"
+    assert gate == 0.90, f"gate_threshold should be 0.90, got {gate}"

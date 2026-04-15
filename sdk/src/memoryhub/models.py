@@ -46,10 +46,17 @@ class CurationInfo(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     blocked: bool = False
+    gated: bool = False
     similar_count: int = 0
     nearest_id: str | None = None
     nearest_score: float | None = None
     flags: list[str] = Field(default_factory=list)
+    # Populated only when gated=True:
+    reason: str | None = None
+    existing_memory_id: str | None = None
+    existing_memory_stub: str | None = None
+    recommendation: str | None = None
+    cache_impact: dict[str, Any] | None = None
 
 
 class WriteResult(BaseModel):
@@ -57,7 +64,7 @@ class WriteResult(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    memory: Memory
+    memory: Memory | None = None
     curation: CurationInfo
 
 

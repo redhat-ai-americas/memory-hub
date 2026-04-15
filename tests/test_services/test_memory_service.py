@@ -1636,3 +1636,37 @@ async def test_delete_memory_inline_no_s3_cleanup(async_session, embedding_servi
     await _svc_delete_memory(result.id, async_session, s3_adapter=s3)
 
     assert len(s3.deleted) == 0, "no S3 cleanup should be attempted for inline memories"
+
+
+# -- force flag passthrough --
+
+
+async def test_create_memory_passes_force(async_session, embedding_service, monkeypatch):
+    """force=True is forwarded to run_curation_pipeline so gated writes can proceed."""
+    from unittest.mock import AsyncMock, call
+    import memoryhub_core.services.memory as _memory_module
+
+    captured_kwargs: dict = {}
+
+    original_pipeline = _memory_module.run_curation_pipeline
+
+    async def _capturing_pipeline(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        # Delegate to the real pipeline so the test exercises no magic path.
+        return await original_pipeline(*args, **kwargs)
+
+    monkeypatch.setattr(_memory_module, "run_curation_pipeline", _capturing_pipeline)
+
+    data = _make_create_data(content="prefers Podman for containers")
+    await _svc_create_memory(
+        data,
+        async_session,
+        embedding_service,
+        tenant_id=_TEST_TENANT_ID,
+        force=True,
+    )
+
+    assert "force" in captured_kwargs, "force kwarg was not forwarded to run_curation_pipeline"
+    assert captured_kwargs["force"] is True, (
+        f"Expected force=True forwarded, got force={captured_kwargs.get('force')!r}"
+    )

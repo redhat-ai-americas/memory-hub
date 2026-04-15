@@ -637,6 +637,83 @@ async def test_write(client):
     assert call_args[0][1]["scope"] == "user"
 
 
+def test_write_result_gated_response():
+    """WriteResult parses correctly when the server gates a near-duplicate write."""
+    from memoryhub.models import CurationInfo, WriteResult
+
+    data = {
+        "memory": None,
+        "curation": {
+            "blocked": False,
+            "gated": True,
+            "similar_count": 1,
+            "nearest_id": "mem-existing",
+            "nearest_score": 0.97,
+            "flags": ["near_duplicate"],
+            "reason": "near_duplicate",
+            "existing_memory_id": "abc-123",
+            "existing_memory_stub": "Use Podman, not Docker.",
+            "recommendation": "update_existing",
+            "cache_impact": {"compiled_count": 3, "will_recompile": True},
+        },
+    }
+    result = WriteResult.model_validate(data)
+
+    assert result.memory is None
+    assert isinstance(result.curation, CurationInfo)
+    assert result.curation.gated is True
+    assert result.curation.reason == "near_duplicate"
+    assert result.curation.existing_memory_id == "abc-123"
+    assert result.curation.existing_memory_stub == "Use Podman, not Docker."
+    assert result.curation.recommendation == "update_existing"
+    assert result.curation.cache_impact == {"compiled_count": 3, "will_recompile": True}
+
+
+def test_curation_info_gated_fields_default():
+    """CurationInfo defaults all new gated-gate fields to None/False."""
+    from memoryhub.models import CurationInfo
+
+    ci = CurationInfo()
+
+    assert ci.gated is False
+    assert ci.reason is None
+    assert ci.existing_memory_id is None
+    assert ci.existing_memory_stub is None
+    assert ci.recommendation is None
+    assert ci.cache_impact is None
+
+
+def test_write_result_memory_can_be_none():
+    """WriteResult validates successfully when memory is None."""
+    from memoryhub.models import CurationInfo, WriteResult
+
+    result = WriteResult(memory=None, curation=CurationInfo())
+
+    assert result.memory is None
+    assert isinstance(result.curation, CurationInfo)
+
+
+async def test_write_force_in_payload(client):
+    """force=True includes 'force' in the payload; default False omits it."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "memory": MINIMAL_MEMORY,
+            "curation": MINIMAL_CURATION,
+        }
+    )
+
+    # force=True — key must be present and True
+    await c.write("something", force=True)
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert forwarded.get("force") is True
+
+    # force=False (default) — key must be absent (backward compat)
+    await c.write("something else")
+    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert "force" not in forwarded
+
+
 # ── update ───────────────────────────────────────────────────────────────────
 
 
