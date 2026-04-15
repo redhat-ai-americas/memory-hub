@@ -15,6 +15,7 @@ from rich.table import Table
 from memoryhub_cli.admin import admin_app
 from memoryhub_cli.config import get_connection_params, save_config
 from memoryhub_cli.project_config import (
+    FocusSource,
     InitChoices,
     LoadingPattern,
     SessionShape,
@@ -80,13 +81,17 @@ def _get_client():
 
 
 def _get_project_id_default() -> str | None:
-    """Try to load project_id from .memoryhub.yaml campaigns config.
+    """Try to load project_id from .memoryhub.yaml.
 
-    Returns the project directory name as the project identifier when
-    campaigns are configured, or None when no config/campaigns exist.
+    Returns, in priority order:
+    1. An explicit ``project_id`` field from the config.
+    2. The project directory name when campaigns are configured.
+    3. None when no config exists or neither field is set.
     """
     try:
         config = load_project_config()  # auto-discovers .memoryhub.yaml
+        if config.project_id:
+            return config.project_id
         if config.memory_loading.campaigns:
             return Path.cwd().name
     except Exception:
@@ -463,54 +468,72 @@ def config_init(
         "-f",
         help="Overwrite existing .memoryhub.yaml or generated rule file.",
     ),
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        "-p",
+        help="Project identifier for project-scoped memories.",
+    ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Use defaults for all prompts, skip interactive setup.",
+    ),
 ):
     """Walk through project setup and write `.memoryhub.yaml` + the
     generated `.claude/rules/memoryhub-loading.md` rule file."""
     project_dir = project_dir.resolve()
     console.print(f"[bold]Configuring MemoryHub for[/bold] {project_dir}\n")
 
-    shape_idx = _prompt_choice(_SHAPE_PROMPT, _SHAPE_BY_INDEX, default=1)
-    shape = _SHAPE_BY_INDEX[shape_idx]
-
-    suggested_pattern = suggest_pattern(shape)
-    pattern_default = next(
-        i for i, p in _PATTERN_BY_INDEX.items() if p == suggested_pattern
-    )
-    pattern_idx = _prompt_choice(_PATTERN_PROMPT, _PATTERN_BY_INDEX, default=pattern_default)
-    pattern = _PATTERN_BY_INDEX[pattern_idx]
-
-    focus_idx = _prompt_choice(_FOCUS_PROMPT, _FOCUS_BY_INDEX, default=4)
-    focus_source = _FOCUS_BY_INDEX[focus_idx]
-
-    if shape == "broad":
-        # Broad mode already loads everything — contradiction detection
-        # is comprehensive by default.
-        keep_contradictions = True
+    if non_interactive:
+        shape: SessionShape = "focused"
+        pattern: LoadingPattern = "lazy"
+        focus_source: FocusSource = "auto"
+        keep_contradictions = False
+        campaigns: list[str] = []
     else:
-        blurb = _CONTRADICTION_BLURBS.get(shape, _CONTRADICTION_BLURBS["focused"])
-        console.print(f"\n{blurb}\n")
-        keep_contradictions = typer.confirm(
-            "Enable cross-domain contradiction detection?",
-            default=False,
-        )
+        shape_idx = _prompt_choice(_SHAPE_PROMPT, _SHAPE_BY_INDEX, default=1)
+        shape = _SHAPE_BY_INDEX[shape_idx]
 
-    # ── Campaign enrollment ──
-    console.print(
-        "\n[bold]Campaign enrollment[/bold]\n"
-        "  Campaigns enable cross-project knowledge sharing. If this\n"
-        "  project is part of a coordinated effort (e.g., a modernization\n"
-        "  initiative), enter the campaign names. Skip if none."
-    )
-    campaigns_raw = typer.prompt(
-        "Campaigns (comma-separated, or Enter to skip)",
-        default="",
-        show_default=False,
-    )
-    campaigns = (
-        [c.strip() for c in campaigns_raw.split(",") if c.strip()]
-        if campaigns_raw
-        else []
-    )
+        suggested_pattern = suggest_pattern(shape)
+        pattern_default = next(
+            i for i, p in _PATTERN_BY_INDEX.items() if p == suggested_pattern
+        )
+        pattern_idx = _prompt_choice(_PATTERN_PROMPT, _PATTERN_BY_INDEX, default=pattern_default)
+        pattern = _PATTERN_BY_INDEX[pattern_idx]
+
+        focus_idx = _prompt_choice(_FOCUS_PROMPT, _FOCUS_BY_INDEX, default=4)
+        focus_source = _FOCUS_BY_INDEX[focus_idx]
+
+        if shape == "broad":
+            # Broad mode already loads everything — contradiction detection
+            # is comprehensive by default.
+            keep_contradictions = True
+        else:
+            blurb = _CONTRADICTION_BLURBS.get(shape, _CONTRADICTION_BLURBS["focused"])
+            console.print(f"\n{blurb}\n")
+            keep_contradictions = typer.confirm(
+                "Enable cross-domain contradiction detection?",
+                default=False,
+            )
+
+        # ── Campaign enrollment ──
+        console.print(
+            "\n[bold]Campaign enrollment[/bold]\n"
+            "  Campaigns enable cross-project knowledge sharing. If this\n"
+            "  project is part of a coordinated effort (e.g., a modernization\n"
+            "  initiative), enter the campaign names. Skip if none."
+        )
+        campaigns_raw = typer.prompt(
+            "Campaigns (comma-separated, or Enter to skip)",
+            default="",
+            show_default=False,
+        )
+        campaigns = (
+            [c.strip() for c in campaigns_raw.split(",") if c.strip()]
+            if campaigns_raw
+            else []
+        )
 
     choices = InitChoices(
         session_shape=shape,
@@ -518,6 +541,7 @@ def config_init(
         focus_source=focus_source,
         cross_domain_contradiction_detection=keep_contradictions,
         campaigns=campaigns,
+        project_id=project,
     )
     config = build_project_config(choices)
 
@@ -549,6 +573,8 @@ def config_init(
     console.print(f"  Cross-domain contradictions: {cross}")
     if campaigns:
         console.print(f"  Campaigns: {', '.join(campaigns)}")
+    if project:
+        console.print(f"  Project: {project}")
 
     # ── #153: API key check ──
     api_key_path = Path.home() / ".config" / "memoryhub" / "api-key"

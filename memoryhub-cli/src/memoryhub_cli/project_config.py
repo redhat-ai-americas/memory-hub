@@ -45,6 +45,7 @@ class InitChoices:
     focus_source: FocusSource
     cross_domain_contradiction_detection: bool
     campaigns: list[str] = field(default_factory=list)
+    project_id: str | None = None
 
 
 # ── Defaults that the prompt suggests based on session shape ─────────────────
@@ -80,6 +81,7 @@ def build_project_config(choices: InitChoices) -> ProjectConfig:
     re-run ``memoryhub config regenerate``.
     """
     return ProjectConfig(
+        project_id=choices.project_id,
         memory_loading=MemoryLoadingConfig(
             mode=_MODE_FOR_SHAPE[choices.session_shape],
             pattern=choices.pattern,
@@ -110,7 +112,7 @@ _YAML_HEADER = (
 def render_yaml(config: ProjectConfig) -> str:
     """Serialize a ProjectConfig to YAML with a generator banner."""
     body = yaml.safe_dump(
-        config.model_dump(),
+        config.model_dump(exclude_none=True),
         sort_keys=False,
         default_flow_style=False,
     )

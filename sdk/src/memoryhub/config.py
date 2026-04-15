@@ -91,6 +91,10 @@ class ProjectConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    project_id: str | None = Field(
+        default=None,
+        description="Project identifier for project-scoped memories.",
+    )
     memory_loading: MemoryLoadingConfig = Field(default_factory=MemoryLoadingConfig)
     retrieval_defaults: RetrievalDefaults = Field(default_factory=RetrievalDefaults)
 
