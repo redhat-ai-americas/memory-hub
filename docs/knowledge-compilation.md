@@ -18,7 +18,7 @@ Meta's enterprise deployment is the closest precedent: 50+ specialized agents re
 
 MemoryHub's governance substrate — scoped RBAC, tenant isolation, versioned memory tree, contradiction detection, auditable provenance — is the differentiator. Every existing implementation is personal and filesystem-based. MemoryHub can deliver the governed multi-user version: compilation respects scope boundaries, articles are owned artifacts with RBAC, contradictions block publication, and every compilation event is auditable. This is the capability that turns the memory system into an institutional knowledge engineering platform.
 
-The `compilation_hash` determinism from issue #175 (compilation epochs, already shipped) means that multiple agents receiving the same compiled article get identical token prefixes. Combined with llm-d's KV Block Index routing on OpenShift AI, this produces cross-agent KV cache hits at the vLLM pod level with no application-level coordination. The knowledge compilation service is also a prompt cache amplifier.
+The `compilation_hash` determinism from issue #175 (compilation epochs, already shipped) means that multiple agents receiving the same compiled article get identical token prefixes. Combined with llm-d's KV Block Index routing on OpenShift AI, this is expected to produce cross-agent KV cache hits at the vLLM pod level with no application-level coordination (based on how prefix-keyed KV caching works; not yet validated against production llm-d deployments). The knowledge compilation service is also a prompt cache amplifier.
 
 ---
 
@@ -36,7 +36,7 @@ Memory extraction pipeline (#168)
     │  writes memory_nodes + conversation_extractions
     ▼
 Entity extraction (#170, Phase 2)
-    │  writes entity nodes + MENTIONS relationships
+    │  writes entity nodes + mentions relationships
     ▼
 Knowledge Compilation (this document)
     │  compilation pods read memory_nodes + relationships
@@ -56,8 +56,8 @@ Agent query results → file_finding → new source memories
 Each subsystem contributes a distinct artifact class:
 
 - **#168 (conversation threads)**: Raw source material as `conversation_messages` and extracted `memory_nodes` with `conversation_extractions` provenance.
-- **#170 (graph-enhanced memory)**: Entity nodes (POLE+O taxonomy via `scope="entity"`), `MENTIONS` relationships linking memories to entities, and temporal validity on all relationships.
-- **#169 (context compaction)**: The structured summarization template and ACE Generator/Reflector/Curator pattern. The health-check linter in this document is the curator's evolution with richer article-scope analysis. Compaction's `compilation_epoch` invalidation mechanism from #175 is the cache coordination layer.
+- **#170 (graph-enhanced memory)**: Entity nodes (POLE+O taxonomy via `scope="entity"`), `mentions` relationships linking memories to entities, and temporal validity on all relationships.
+- **#169 (context compaction)**: The structured summarization template and ACE Generator/Reflector/Curator pattern. The health-check linter in this document is the evolution of #169's memory-level Curator, operating at the article level with richer cross-article analysis (health-check linter). A separate article-level Curator component within the ACE pattern adjusts compilation prompts based on Reflector findings. These are two distinct components: the health-check linter sweeps for inconsistencies across the corpus; the article-level Curator tunes generation quality within the ACE loop. Compaction's `compilation_epoch` invalidation mechanism from #175 is the cache coordination layer.
 - **#171 (this document)**: The compilation service that reads all of the above and writes `compiled_article` nodes.
 
 ### On-Cluster Service Architecture
@@ -149,13 +149,13 @@ Source memories link to the compiled article via `memory_relationships` with `re
 
 **S3 key schema**: `articles/{tenant_id}/{scope}/{scope_id}/{article_id}` where `article_id` is the `memory_node.id`. Prior compiled versions are archived to `articles/{tenant_id}/{scope}/{scope_id}/{article_id}/v{N}` before overwrite. Version retention follows the standard compaction cold-path `retention_days` policy.
 
-Add `compiled_article` to the application-layer enum of valid `branch_type` values. No schema migration is needed (the column is `TEXT`).
+Add `compiled_article` to the application-layer enum of valid `branch_type` values. No schema migration is needed (the column is `String(50)`; both `compiled_article` at 17 chars and `lint_report` at 11 chars fit comfortably).
 
 ### Article Types
 
 **Concept page**: Synthesizes all memories related to a conceptual topic. Includes definition, how it is used in the project, known edge cases, and links to related concepts. Example: "PostgreSQL connection pooling in MemoryHub."
 
-**Entity page**: One page per named entity (person, system, organization, location, event). Aggregates all memory mentions of the entity, organized chronologically and by relevance. Populated primarily from entity nodes (#170) and their MENTIONS relationships. Example: "pgvector — usage history and configuration."
+**Entity page**: One page per named entity (person, system, organization, location, event). Aggregates all memory mentions of the entity, organized chronologically and by relevance. Populated primarily from entity nodes (#170) and their `mentions` relationships. Example: "pgvector — usage history and configuration."
 
 **Timeline page**: Chronological view of events, decisions, or changes related to a topic. Built from memories with `valid_from`/`valid_until` temporal data (#170 Phase 1). Example: "MemoryHub deployment history, Q1 2026."
 
@@ -216,7 +216,7 @@ Compilation depth is tracked in the job metadata:
 }
 ```
 
-A compilation job triggered by `file_finding` has `compilation_depth: 1`. If that compilation's article publication triggers a downstream re-index (because the master index changed), the index recompilation gets `compilation_depth: 2`. The maximum allowed depth is 3. Jobs at depth 3 do not trigger further compilation; they complete and log the depth ceiling reached.
+A compilation job triggered by `file_finding` has `compilation_depth: 1`. If that compilation's article publication triggers a downstream re-index (because the master index changed), the index recompilation gets `compilation_depth: 2`. The maximum allowed depth is 3. Jobs at depth 3 do not trigger further compilation; they complete and log the depth ceiling reached. The depth cap of 3 is a backstop against model-collapse feedback loops; the primary guard is the quality gate in `file_finding` that rejects circular-source submissions. Depth 3 allows raw → topic summary → meta-summary compilation without enabling unbounded recursion.
 
 Circular topic references (concept A links to concept B which links to concept A) are allowed in article content but do not create circular compilation jobs. Job triggering is topic-keyed, not article-keyed — one compilation per `(tenant, scope, topic_hash)` at a time. A second enqueue for the same key while a job is running is coalesced (not added to the queue separately).
 
@@ -234,7 +234,7 @@ If any check fails, `file_finding` returns an error with an explanation. The age
 
 ## Health-Check Linting
 
-The health-check linter runs periodic LLM sweeps over the compiled article corpus for a given scope. It is the evolution of the ACE Curator from #169 applied at the article level rather than the memory level.
+The health-check linter runs periodic LLM sweeps over the compiled article corpus for a given scope. It is the evolution of #169's memory-level Curator applied at the article level. Note that the article-level Curator within the ACE pattern (described in §Incremental Compilation) is a separate component: the health-check linter performs corpus-wide inconsistency sweeps, while the article-level Curator tunes compilation prompts based on Reflector findings — two distinct components operating at different layers.
 
 ### What the linter checks
 
@@ -441,7 +441,7 @@ When a topic's source memories exceed the compilation LLM's context window (a pr
 
 ### Hierarchical compilation
 
-1. **Cluster**: Group source memories by sub-topic using k-means on their embeddings. Default k = `ceil(source_count / 50)` (targeting ~50 memories per cluster).
+1. **Cluster**: Group source memories by sub-topic using k-means on their embeddings. Default k = `ceil(source_count / 50)` (targeting ~50 memories per cluster). k-means with cosine distance is pragmatic at MemoryHub's scale but topic clusters in embedding space are often non-convex; topics that bridge two clusters (e.g., "connection pooling in FIPS mode") may land in either. Accept as a known limitation; revisit with HDBSCAN or spectral clustering only if empirical clustering quality becomes a bottleneck.
 2. **Sub-compile**: Compile one article per cluster as a sub-topic page. Each sub-compilation is a standard compilation job; jobs run in parallel across available workers.
 3. **Synthesize**: Once all sub-topic pages complete, run a final compilation pass that reads the sub-topic page abstracts (not full content) and synthesizes the top-level concept page.
 4. **Cross-reference**: The final synthesis pass builds the cross-reference index linking the sub-topic pages.
@@ -494,7 +494,7 @@ CREATE INDEX ix_compilation_jobs_status        ON compilation_jobs (status) WHER
 CREATE INDEX ix_compilation_jobs_article_id    ON compilation_jobs (article_id) WHERE article_id IS NOT NULL;
 ```
 
-No changes to `memory_nodes` or `memory_relationships` are required. The `compiled_article` branch type and `lint_report` branch type are application-layer enum additions (the column is `TEXT`). The `derived_from` relationship type already exists in the `RelationshipType` enum.
+No changes to `memory_nodes` or `memory_relationships` are required. The `compiled_article` branch type and `lint_report` branch type are application-layer enum additions (the column is `String(50)`). The `derived_from` and `related_to` relationship types already exist in the `RelationshipType` enum; no new relationship types are required.
 
 Alembic migration: `015_add_compilation_jobs.py`. Creates the `compilation_jobs` table. Non-destructive; no backfill required.
 
@@ -510,7 +510,7 @@ Issue #175's compilation epoch mechanism (Valkey key `memoryhub:compilation:<ten
 
 - **#168 (conversation thread persistence)**: Source material for compilation. The `conversation_extractions` table provides the memory→thread provenance that compilation can surface in article footnotes.
 - **#169 (context compaction)**: ACE Curator pattern, structured summarization template, and the `compaction_events`/`compaction_retrievals` infrastructure that the Reflector component mirrors at the article level. Compilation epochs from #175 (referenced in #169's compaction trigger) are the cache staleness signal.
-- **#170 (graph-enhanced memory)**: Entity nodes (Phase 2) and `MENTIONS` relationships are the primary source for entity page compilation. Temporal validity on relationships (Phase 1) enables timeline page compilation.
+- **#170 (graph-enhanced memory)**: Entity nodes (Phase 2) and `mentions` relationships are the primary source for entity page compilation. Temporal validity on relationships (Phase 1) enables timeline page compilation.
 - **S3/MinIO**: Article Markdown content stored externally; follows the same decoupling pattern established in commits `9ad20ba`/`efe1df9`. S3 unavailability causes compilation to fail with a structured error (not silent degradation).
 - **Valkey**: Job queue, article cache, epoch staleness checks, pub/sub for completion notification. No new Valkey infrastructure beyond what compaction already uses.
 - **LLM inference endpoint**: Compilation workers require an LLM endpoint with sufficient context window (32K tokens default) and structured output support. Configured via environment variables in the deployment manifest; not hardcoded.
@@ -520,7 +520,7 @@ Issue #175's compilation epoch mechanism (Valkey key `memoryhub:compilation:<ten
 - Any agent calling `query_knowledge` or `compile_knowledge` (the primary consumer).
 - The master index article is consumed by agents as the entry point to navigate the knowledge base.
 - `file_finding` creates a feedback loop from agent work back into the source memory pool — this is the virtuous loop and any agent performing original research is a potential contributor.
-- llm-d prefix cache routing (OpenShift AI): deterministic article content enables cross-agent KV cache hits at the vLLM pod level. No code change required; the benefit is structural.
+- llm-d prefix cache routing (OpenShift AI): deterministic article content is expected to produce cross-agent KV cache hits via llm-d's KV Block Index routing (based on how prefix-keyed KV caching works; not yet validated against production llm-d deployments). No code change required; the benefit is structural.
 
 ---
 

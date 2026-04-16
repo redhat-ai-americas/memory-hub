@@ -129,7 +129,7 @@ The background compaction job runs on a configurable schedule. It does not call 
 2. Query `memory_nodes` for candidates matching rule predicates: `weight < threshold`, `created_at < cutoff`, `domain_tags intersection`, `is_current = true`, `deleted_at IS NULL`.
 3. For each candidate, check contradiction block (see §Contradiction-Aware Compaction). Skip if blocked.
 4. For each candidate, check `protect` rules. Skip if protected.
-5. For similarity-merge candidates, call `get_similar_memories_service` with the candidate's embedding to find merge partners above the configured merge threshold (default: 0.92).
+5. For similarity-merge candidates, call `get_similar_memories` with the candidate's embedding to find merge partners above the configured merge threshold (default: 0.92).
 
 **Generator/Reflector/Curator pattern (ACE):**
 
@@ -147,7 +147,7 @@ The background compaction job runs on a configurable schedule. It does not call 
 
 For each candidate that passes all guards:
 
-1. If action is `archive`: write full content to MinIO at `{tenant_id}/compaction/{memory_id}/{compaction_event_id}`; update `content` column to structured stub (first 500 chars of existing content); update `content_ref` to cold-storage key; create `compaction_provenance` branch.
+1. If action is `archive`: write full content to MinIO at `{tenant_id}/compaction/{memory_id}/{compaction_event_id}`; update `content` column to structured stub (first 500 chars of existing content); write cold-storage reference to the `compaction_events.cold_storage_key` column for this event; create `compaction_provenance` branch. Embeddings for archived memories are recomputed against the structured stub within the same compaction transaction. The pre-compaction embedding is preserved in the cold-storage archive metadata for forensic queries but is not used in retrieval.
 2. If action is `merge`: run structured summarization across the candidate group (one LLM call per group, not per memory); write merged content to the compacted memory; archive all source memories to cold storage; create `compaction_provenance` branch linking all sources to the merged output.
 3. If action is `summarize`: call the summarization endpoint with the structured template (see below); replace `content` with the summary; archive original to cold storage; create `compaction_provenance` branch.
 4. Invalidate the compilation epoch for the affected `(tenant_id, owner_id)` pair by deleting the Valkey key `memoryhub:compilation:<tenant>:<owner>`. The next `search_memory` call recompiles from the new state.
@@ -241,7 +241,8 @@ Every compaction event — background merge, session compaction, retrieval trunc
 | `policy_rule_id` | UUID FK → curator_rules | Which rule triggered this event (null for retrieval truncation) |
 | `source_memory_ids` | JSONB (array of UUID) | Source memories included in this compaction |
 | `output_memory_id` | UUID FK → memory_nodes | The compacted/merged output memory (null for archive-only) |
-| `cold_storage_keys` | JSONB (array of String) | MinIO object keys for all archived originals |
+| `cold_storage_key` | VARCHAR(512) | The MinIO object key where the pre-compaction original content is archived. NULL for merge/summarize actions that don't archive a single source; populated for archive actions. |
+| `cold_storage_keys` | JSONB (array of String) | MinIO object keys for all archived originals (used by merge/summarize compaction types) |
 | `summary_schema_version` | String(10) | Version of the structured summary template used |
 | `token_delta` | Integer | Tokens saved (estimated); negative = expansion |
 | `actor` | String(255) | `system`, `owner_id`, or service identity that initiated |
@@ -274,7 +275,7 @@ In the memory tree, each compaction that produces an output memory (merge, summa
 
 ### Hot path (PostgreSQL)
 
-Compacted memories in the hot path are the normal `memory_nodes` rows: stub text, embedding, weight, provenance branches, metadata. The `content` column holds the compacted form (structured summary or archive stub). The `content_ref` column holds the cold-storage key for memories that were archived.
+Compacted memories in the hot path are the normal `memory_nodes` rows: stub text, embedding, weight, provenance branches, metadata. The `content` column holds the compacted form (structured summary or archive stub). The `content_ref` column retains its existing semantics (oversized-content S3 offload via `storage_type='s3'`). Compaction archive locations live on the `compaction_events` row, keyed by the memory's most recent compaction event.
 
 Reads from the hot path are unchanged — `search_memory`, `read_memory` without `hydrate=True`, retrieval-time token budget assembly all operate on hot-path rows.
 
@@ -300,7 +301,7 @@ Cold-path objects contain the complete original `content` string (or the full S3
 }
 ```
 
-**Hydration from cold path:** `read_memory(memory_id, hydrate_cold=True)` fetches the cold-path original if `content_ref` points to a compaction object. This flag is distinct from the existing `hydrate=True` (which fetches oversized S3-backed content). The MCP tool `read_memory` exposes `hydrate_cold` as an optional parameter, restricted to callers with `memory:admin` scope or the memory's original `owner_id`.
+**Hydration from cold path:** `read_memory(memory_id, hydrate_cold=True)` queries `compaction_events` for the memory's most recent event with a populated `cold_storage_key`, then fetches that object from MinIO. Distinct from the existing `hydrate=True` flag (which follows `content_ref` for oversized-content offload). The MCP tool `read_memory` exposes `hydrate_cold` as an optional parameter, restricted to callers with `memory:admin` scope or the memory's original `owner_id`.
 
 **When to move to cold:** The compaction pipeline writes to cold storage at compaction time. There is no deferred migration — the original is archived in the same transaction as the hot-path update. If the MinIO write fails, the compaction is rolled back and the event is not recorded.
 
@@ -318,10 +319,10 @@ The `contradiction_block` system rule prevents compaction from silently resolvin
 
 ```sql
 SELECT COUNT(*) FROM contradiction_reports
-WHERE memory_id = $1 AND resolved = false;
+WHERE memory_id = $1 AND resolved = false AND confidence >= 0.5;
 ```
 
-If the count is greater than zero, the compaction candidate is skipped and the event is logged with `status = 'blocked_contradiction'`. The rule cannot be overridden by user or org layer rules (`override = true`).
+Compaction is blocked only when at least one unresolved contradiction has `confidence >= 0.5`. Low-confidence contradictions (below 0.5) are informational and do not block compaction. The threshold is configurable via `MEMORYHUB_COMPACTION_CONTRADICTION_THRESHOLD` (default 0.5). When blocked, the event is logged with `status = 'blocked_contradiction'`. The rule cannot be overridden by user or org layer rules (`override = true`).
 
 **For merge candidates:** If any memory in a merge group has unresolved contradictions, the entire group is blocked — not just the individual memory. This prevents a merge from obscuring which source memory was contradicted.
 
@@ -350,7 +351,7 @@ When `search_memory` or `read_memory` returns a result for a memory that has a `
 | `retrieved_at` | TIMESTAMPTZ | |
 | `hydrate_cold_requested` | Boolean | Whether the caller requested the original |
 
-`hydrate_cold_requested = true` is a strong signal of over-aggressive compaction — the agent needed the full original.
+`hydrate_cold_requested = true` is a strong signal of over-aggressive compaction — the agent needed the full original. Writes to `compaction_retrievals` are sampled at 10% of search hits to bound write load; a 30-day TTL purge job keeps the table bounded. Sampling rate and TTL are configurable.
 
 ### Reflector job
 
@@ -498,6 +499,7 @@ CREATE TABLE compaction_events (
     policy_rule_id        UUID REFERENCES curator_rules(id),
     source_memory_ids     JSONB NOT NULL DEFAULT '[]',
     output_memory_id      UUID REFERENCES memory_nodes(id),
+    cold_storage_key      VARCHAR(512),
     cold_storage_keys     JSONB NOT NULL DEFAULT '[]',
     summary_schema_version TEXT,
     token_delta           INTEGER,

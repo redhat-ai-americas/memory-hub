@@ -122,7 +122,7 @@ Content size threshold for S3 routing: 8 KB. Messages at or below the threshold 
 
 ### Relationship to Memory Tree
 
-Threads and messages connect to `memory_nodes` via `memory_relationships` using a new relationship type: `extracted_from`. This is a directed edge pointing from the memory node (source) to the conversation message or thread that produced it (target). Because `memory_relationships` already uses UUID FKs to `memory_nodes`, a new table is needed to represent the thread/message side of extraction provenance.
+Threads and messages connect to `memory_nodes` via a dedicated provenance table rather than `memory_relationships`. The `memory_relationships` table (and its `RelationshipType` enum — `derived_from`, `supersedes`, `conflicts_with`, `related_to`) is unchanged; no new enum value is added. A separate table is needed because `memory_relationships` uses UUID FKs to `memory_nodes` on both ends and cannot reference thread/message rows directly.
 
 `conversation_extractions` records the provenance of each extraction event:
 
@@ -385,9 +385,11 @@ Conversation thread    →  durable across sessions (this feature)
 
 Agents using the MemoryHub MCP server should maintain the `thread_id` across reconnections and pass it to `append_message` after re-establishing their application session via `register_session`. The SDK will expose a `resume_thread(thread_id)` helper that combines `register_session` and initial `get_thread` in one call.
 
+The `thread_id` is durable across MCP pod restarts. The Valkey-backed application session store described in `planning/session-persistence.md` (Fork A) makes `register_session` state persistent across pod restarts; `thread_id` as a database identity in PostgreSQL is unaffected by pod lifecycle. If the MCP pod restarts mid-extraction, the in-flight extraction task is lost but not unrecoverable: the `extraction_cursor` on `conversation_threads` records the last committed sequence number, so a restarted pod (or a re-queued background task) resumes from that point rather than reprocessing the full thread. No messages are extracted twice and no extraction window is permanently skipped.
+
 ### Relationship to Issue #86
 
-Issue #86's per-conversation session ID maps to `conversation_threads.id`. When #86 lands, the application session will carry a `thread_id` claim that survives transport reconnections. Until #86 ships, the `thread_id` must be tracked client-side.
+Issue #86's per-conversation session ID is the transport-level complement to `thread_id`. `thread_id` is the stable application-level identity (a database row that survives reconnections, pod restarts, and agent handoffs); the session ID in #86 is a transport-level claim that ties a reconnecting client back to its prior application session without a fresh `register_session` round-trip. When #86 lands, the application session will carry a `thread_id` claim so agents need not track it client-side. Until #86 ships, agents are responsible for persisting `thread_id` themselves.
 
 ---
 

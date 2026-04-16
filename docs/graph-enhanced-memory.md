@@ -38,8 +38,16 @@ The existing `created_at` column tracks when the system recorded the relationshi
 The Alembic migration (`013_add_relationship_validity.py`) must:
 1. Add `valid_from` with `server_default=func.now()`, backfilled from `created_at`.
 2. Add `valid_until` as nullable.
-3. Add a partial index: `CREATE INDEX ON memory_relationships (valid_until) WHERE valid_until IS NOT NULL;`
-4. Add a composite index: `CREATE INDEX ON memory_relationships (source_id, relationship_type, valid_until);`
+3. Drop the existing unique constraint and replace it with a partial unique index:
+   ```sql
+   ALTER TABLE memory_relationships DROP CONSTRAINT uq_memory_relationships_edge;
+   CREATE UNIQUE INDEX uq_memory_relationships_active_edge
+     ON memory_relationships (source_id, target_id, relationship_type)
+     WHERE valid_until IS NULL;
+   ```
+   The original constraint rejects any second row with the same `(source_id, target_id, relationship_type)` regardless of `valid_until`, so the invalidate-and-recreate pattern would raise `IntegrityError` at runtime without this change.
+4. Add a partial index: `CREATE INDEX ON memory_relationships (valid_until) WHERE valid_until IS NOT NULL;`
+5. Add a composite index: `CREATE INDEX ON memory_relationships (source_id, relationship_type, valid_until);`
 
 #### Invalidation Semantics
 
@@ -62,9 +70,11 @@ async def invalidate_relationship(
     await session.execute(stmt)
 ```
 
-The `uq_memory_relationships_edge` unique constraint (source, target, type) prevents re-creating the same active edge while an active one exists. When a relationship is invalidated, a new one with the same endpoints can be created, giving a full audit trail of edge lifecycles.
+The partial unique index `uq_memory_relationships_active_edge` enforces that only one active edge per (source, target, type) can exist. Invalidated edges (`valid_until IS NOT NULL`) are excluded from the uniqueness check, allowing the full audit trail of edge lifecycles.
 
 The existing `MemoryRelationship` model comment ("immutable — create or delete, never update") is partially superseded: `valid_until` is the sole mutable field, settable only to the current time or a past time. All other columns remain immutable.
+
+Note on column naming: the `MemoryRelationship` ORM model uses `metadata_` (trailing underscore) as both the Python attribute name and the actual PostgreSQL column name. This differs from `MemoryNode.metadata_`, which maps to the column named `metadata`. Any raw SQL written against `memory_relationships` must use `metadata_` as the column name.
 
 #### "What Was True at Time T?" Queries
 
@@ -106,7 +116,7 @@ This is a fourth RRF signal alongside the existing query, focus, and domain sign
 
 #### Implementation in the Search Service Layer
 
-Add to `services/memory.py`:
+Add to `services/graph.py` alongside the existing `find_related` and `trace_provenance` functions:
 
 ```python
 async def collect_graph_neighbors(
@@ -282,14 +292,18 @@ When `entities` is provided, the SQL WHERE clause adds:
 
 ```sql
 AND id IN (
-    SELECT source_id FROM memory_relationships mr
+    SELECT mr.source_id FROM memory_relationships mr
     JOIN memory_nodes en ON en.id = mr.target_id
+    JOIN memory_nodes src ON src.id = mr.source_id
     WHERE mr.relationship_type = 'mentions'
       AND en.scope = 'entity'
       AND en.content = ANY(:entity_names)
       AND mr.valid_until IS NULL
+      AND src.owner_id = ANY(:authorized_owner_ids)
 )
 ```
+
+The join through `memory_nodes src` and the `owner_id` filter mirrors the `_build_search_filters` pattern used elsewhere in the search path, preventing entity names from leaking membership across tenants or users.
 
 The filter runs before vector similarity, as a pre-filter on the candidate set. This is a SQL predicate, not a post-filter — it uses the index on `relationship_type` and the entity content index added above.
 
@@ -347,6 +361,7 @@ Neo4j Agent Memory's reasoning tier — recording agent thought chains, tool cal
 `013_add_relationship_validity.py`:
 - Adds `valid_from TIMESTAMPTZ NOT NULL DEFAULT now()` to `memory_relationships`, backfilled from `created_at`.
 - Adds `valid_until TIMESTAMPTZ NULL DEFAULT NULL`.
+- Drops `uq_memory_relationships_edge` and replaces it with partial unique index `uq_memory_relationships_active_edge` on `(source_id, target_id, relationship_type) WHERE valid_until IS NULL`.
 - Adds partial index on `valid_until WHERE valid_until IS NOT NULL`.
 - Adds composite index on `(source_id, relationship_type, valid_until)`.
 - No data loss; all existing relationships are treated as active (`valid_until = NULL`).

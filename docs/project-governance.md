@@ -13,7 +13,7 @@ What is missing:
 - No HTTP API for project CRUD — projects only spring into existence on first write
 - No MCP tool for explicit project creation or update
 - No invite management path — adding members to invite-only projects requires direct DB access via `manage-memberships.py`
-- No ORM relationship between `Project` and `ProjectMembership` (foreign key exists in DB, not modeled in SQLAlchemy)
+- No ORM `relationship()` / `back_populates` pair between `Project` and `ProjectMembership` — the FK is modeled, but `project.memberships` ORM navigation is not available; membership queries go through `ProjectMembership` directly.
 - No FK from `memory_nodes.scope_id` to `projects.name` — project deletion leaves orphan scope references
 - No project-level policies (TTL defaults, memory quotas)
 - No projects panel in `memoryhub-ui`
@@ -225,3 +225,5 @@ PatternFly components: `Table`, `Toolbar`, `Drawer`, `Modal` (for delete confirm
 **Quota enforcement granularity.** `max_memories` counts all active (non-deleted, `is_current = true`) memories for the project. Whether this counts across all versions or just current nodes should be decided at implementation time. Counting only `is_current` rows is simpler and more useful (reflects what agents actually see).
 
 **`manage-memberships.py` retirement timeline.** The script bypasses service-layer guards by writing raw SQL. Once the membership API is deployed and the UI panel is functional, the script should be deprecated. A migration note in the script's docstring is sufficient; a hard removal can happen once the cluster is confirmed running the new API.
+
+**Invite-only "request to join" flow.** Agents can discover open projects via `list_projects(filter="all")` but invite-only projects are hidden from non-members entirely. There is no API path for an agent to signal "I'd like to join this invite-only project" short of out-of-band contact with an admin. A `request_project_membership` MCP tool (or equivalent admin-notification path) is a plausible follow-up but is out of scope for this design.

@@ -24,8 +24,8 @@ Operators should be able to perform these tasks without touching the database or
 | Users & Agents | Roster of all memory owners | Cross-navigate to graph filtered by owner | Shipped |
 | Curation Rules | Manage server-side guardrails | Create, enable/disable, delete rules; view detail | Shipped |
 | Contradictions | Review agent-reported contradictions | Filter by confidence/resolution, mark resolved | Shipped |
-| Client Management | OAuth 2.1 client lifecycle | Create clients, rotate secrets, activate/deactivate | Shipped |
 | Observability | Metrics and logs (placeholder) | None | Stub (disabled) |
+| Client Management | OAuth 2.1 client lifecycle | Create clients, rotate secrets, activate/deactivate | Shipped |
 
 Navigation is a single-level left sidebar (`PageSidebar` with `NavList`). There is no routing library; the active view is managed via `activePanel` state in `App.tsx`. The Observability item is rendered at 45% opacity with `pointer-events: none` and `aria-disabled`.
 
@@ -58,7 +58,7 @@ Node labels are the memory `stub` truncated to 60 characters with a trailing ell
 | `conflicts_with` | Solid line, arrowhead | `#C9190B` red |
 | `supersedes` | Dashed line, arrowhead | `#EC7A08` orange |
 
-Selected elements are highlighted with a `#F0AB00` gold border or line color. Search-matched nodes receive a 4px gold border via the `highlighted` CSS class.
+Selected edges get a `#F0AB00` gold line color. Selected nodes get a `#151515` (near-black) border. Search-matched nodes receive a 4px `#F0AB00` gold border via the `highlighted` CSS class.
 
 **Interaction model**
 
@@ -195,7 +195,7 @@ When no contradiction reports exist at all, the view renders a PatternFly `Empty
 
 Confidence label colors:
 - `> 0.8` → red
-- `0.5–0.8` → yellow
+- `>= 0.5 and <= 0.8` → yellow
 - `< 0.5` → green
 
 The confidence color convention is inverted from intuition: high confidence in a contradiction is the alarming case, so red = high.
@@ -216,7 +216,7 @@ A compact `Table` with a "Create Client" primary button.
 
 Row actions: "Activate"/"Deactivate" (`variant="secondary"`) and "Rotate Secret" (`variant="warning"`). Both are inline in a `Flex` row.
 
-**Create modal** (medium variant): Fields are Client ID (required), Client Name (required), Identity Type (select: user/service), Tenant ID (required), Scopes (checkboxes). The button is disabled until all three required text fields are non-empty.
+**Create modal** (medium variant): Fields are Client ID (required), Client Name (required), Identity Type (select: user/service), Tenant ID (required), Scopes (checkboxes). The button is disabled until the Name field is non-empty.
 
 Available scopes: `memory:read`, `memory:write:user`, `memory:write`, `memory:admin`.
 
