@@ -1,7 +1,7 @@
 # MemoryHub MinIO Deployment
 
 Single-instance MinIO for MemoryHub S3-compatible object storage. Stores
-memory content that exceeds the 4 KB inline threshold. Deployed into the
+memory content that exceeds the 1 KB inline threshold. Deployed into the
 existing `memory-hub-mcp` namespace so the MCP server can reach it via
 plain in-namespace service discovery.
 

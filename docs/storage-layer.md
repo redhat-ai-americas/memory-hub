@@ -117,15 +117,21 @@ Content that stays in PostgreSQL: short memories (a few sentences), embeddings, 
 
 Content that goes to MinIO: document-sized memories (multi-paragraph or multi-page), files attached to memories, archived content. These benefit from object storage economics and streaming access.
 
-**Threshold: 1 KB (1024 bytes).** Content at or below 1 KB stays inline in PostgreSQL. Content above 1 KB is stored as an S3 object in MinIO, with the PostgreSQL row holding a reference (`content_ref`) and a truncated prefix for quick access.
+**Threshold: 1 KB (1024 bytes), configurable via `MEMORYHUB_S3_THRESHOLD_BYTES`.** The three storage scenarios are:
 
-The rationale for 1 KB: all-MiniLM-L6-v2 (our embedding model) rejects inputs above ~1100 characters of English text with HTTP 413. Setting the threshold at 1024 bytes ensures content that would fail the embedder is always routed to S3 with a safe prefix (~1000 chars) embedded instead. The threshold is configurable via `MEMORYHUB_S3_THRESHOLD_BYTES`.
+1. **Content ≤ threshold**: stored inline in PostgreSQL, full content embedded, no chunks created.
+2. **Content > threshold, S3 available**: prefix stored in the PostgreSQL row (`content` column), full content written to MinIO (`content_ref`), semantic chunks created as child nodes.
+3. **Content > threshold, no S3 configured**: full content stored inline in PostgreSQL, embedding truncated to the ~1000-character prefix (same as scenario 2), semantic chunks still created.
+
+Chunking fires in scenarios 2 and 3 — it is not conditional on S3 availability.
+
+The rationale for 1 KB: all-MiniLM-L6-v2 (our embedding model) rejects inputs above ~1100 characters of English text with HTTP 413. Setting the threshold at 1024 bytes ensures content that would fail the embedder is always handled with a safe prefix (~1000 chars) embedded instead.
 
 The node row always exists in PostgreSQL regardless -- MinIO stores the body, PostgreSQL stores everything else including a reference to the MinIO object.
 
-### What gets embedded for S3-backed content
+### What gets embedded for oversized content
 
-For memories stored in MinIO, the PostgreSQL row holds a truncated prefix (~1000 characters, ~250 tokens) in the `content` column. This prefix is what gets embedded for the parent node. The all-MiniLM-L6-v2 embedder has a practical input limit of ~1100 characters of English text; 1000 provides margin. Full content is searchable via **semantic chunk children** -- each chunk is a child node with `branch_type="chunk"`, its own embedding, and `weight=0.0`. Agents find relevant chunks through `search_memory`, then follow `parent_id` to retrieve the full memory.
+For memories that exceed the threshold, only a truncated prefix (~1000 characters, ~250 tokens) is embedded for the parent node, regardless of whether the full content lives in MinIO or inline in PostgreSQL. The all-MiniLM-L6-v2 embedder has a practical input limit of ~1100 characters of English text; 1000 provides margin. Full content is searchable via **semantic chunk children** -- each chunk is a child node with `branch_type="chunk"`, its own embedding, and `weight=0.0`. Agents find relevant chunks through `search_memory`, then follow `parent_id` to retrieve the full memory.
 
 ### Curator participation
 
@@ -143,13 +149,13 @@ Each version of an S3-backed memory gets its own S3 object, keyed as `{tenant_id
 
 ### Semantic chunking
 
-When content exceeds the 1 KB threshold and lands in S3, the write path also creates **semantic chunks** as child nodes in the memory tree. These chunks enable fine-grained search over large documents without requiring agents to hydrate and scan the full content.
+When content exceeds the 1 KB threshold, the write path creates **semantic chunks** as child nodes in the memory tree regardless of whether MinIO is configured. Chunking is decoupled from S3 availability: even when content is stored inline in PostgreSQL (no S3), chunks are still created to enable fine-grained search over large content without requiring agents to scan the full body.
 
 Chunk nodes have:
 - `branch_type="chunk"` -- distinguishes them from rationale, provenance, and other branch types
 - `weight=0.0` -- chunks are search scaffolding, not memories in their own right; zero weight keeps them out of weight-based rankings
 - Their own embedding -- each chunk is independently searchable via `search_memory`
-- `parent_id` pointing to the S3-backed parent memory
+- `parent_id` pointing to the oversized parent memory
 
 **Chunking strategy**: `semantic_chunk()` splits content on paragraph boundaries first, then sentence boundaries, targeting ~256 tokens per chunk. This keeps each chunk well within the embedding model's 512-token window while preserving semantic coherence.
 
