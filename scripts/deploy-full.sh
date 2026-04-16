@@ -1,6 +1,7 @@
 #!/bin/bash
 # Full MemoryHub stack deployment to OpenShift.
-# Usage: scripts/deploy-full.sh [--skip-db] [--skip-migrations] [--skip-mcp]
+# Usage: scripts/deploy-full.sh [--skip-prereqs] [--skip-db] [--skip-migrations]
+#                                [--skip-mcp] [--skip-auth] [--skip-ui] [--skip-tile]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,12 +10,17 @@ SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 DB_NAMESPACE="memoryhub-db"
 MCP_PROJECT="memory-hub-mcp"
 AUTH_PROJECT="memoryhub-auth"
+UI_NAMESPACE="memoryhub-ui"
+RHOAI_NAMESPACE="redhat-ods-applications"
 DB_POD_LABEL="app.kubernetes.io/name=memoryhub-pg"
 
+SKIP_PREREQS=false
 SKIP_DB=false
 SKIP_MIGRATIONS=false
 SKIP_MCP=false
 SKIP_AUTH=false
+SKIP_UI=false
+SKIP_TILE=false
 
 START_TIME=$(date +%s)
 
@@ -59,17 +65,23 @@ elapsed() {
 parse_args() {
     for arg in "$@"; do
         case "$arg" in
+            --skip-prereqs)    SKIP_PREREQS=true ;;
             --skip-db)         SKIP_DB=true ;;
             --skip-migrations) SKIP_MIGRATIONS=true ;;
             --skip-mcp)        SKIP_MCP=true ;;
             --skip-auth)       SKIP_AUTH=true ;;
+            --skip-ui)         SKIP_UI=true ;;
+            --skip-tile)       SKIP_TILE=true ;;
             -h|--help)
-                echo "Usage: $SCRIPT_NAME [--skip-db] [--skip-migrations] [--skip-mcp] [--skip-auth]"
+                echo "Usage: $SCRIPT_NAME [OPTIONS]"
                 echo ""
+                echo "  --skip-prereqs     Skip check-prereqs.sh (for known-good environments)"
                 echo "  --skip-db          Skip PostgreSQL deployment"
                 echo "  --skip-migrations  Skip Alembic migrations"
                 echo "  --skip-mcp         Skip MCP server deployment"
                 echo "  --skip-auth        Skip Auth server deployment"
+                echo "  --skip-ui          Skip UI deployment"
+                echo "  --skip-tile        Skip RHOAI OdhApplication tile"
                 exit 0
                 ;;
             *)
@@ -80,10 +92,33 @@ parse_args() {
 }
 
 # ---------------------------------------------------------------------------
-# Section 0: Preflight checks
+# Section 0a: Prerequisite check (external script)
+# ---------------------------------------------------------------------------
+check_prereqs() {
+    if [ "$SKIP_PREREQS" = true ]; then
+        skipped "Prerequisite check (--skip-prereqs)"
+        return 0
+    fi
+
+    local prereq_script="$REPO_ROOT/scripts/check-prereqs.sh"
+    if [ ! -f "$prereq_script" ]; then
+        warn "check-prereqs.sh not found at $prereq_script — skipping prereq check."
+        return 0
+    fi
+
+    banner "0. Prerequisite Check"
+    if ! bash "$prereq_script"; then
+        die "Prerequisite check failed. Fix the issues above and re-run, or pass --skip-prereqs to bypass."
+    fi
+    echo ""
+    echo -e "  ${GREEN}Prerequisites satisfied${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Section 0b: Preflight checks
 # ---------------------------------------------------------------------------
 preflight() {
-    banner "0. Preflight Checks"
+    banner "1. Preflight Checks"
 
     info "Verifying OpenShift login..."
     if ! oc whoami &>/dev/null; then
@@ -109,13 +144,15 @@ preflight() {
     echo "    Migrations:  $([ "$SKIP_MIGRATIONS" = true ] && echo "skip" || echo "run")"
     echo "    MCP server:  $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
     echo "    Auth server: $([ "$SKIP_AUTH" = true ] && echo "skip" || echo "deploy")"
+    echo "    UI:          $([ "$SKIP_UI" = true ] && echo "skip" || echo "deploy")"
+    echo "    RHOAI tile:  $([ "$SKIP_TILE" = true ] && echo "skip" || echo "apply")"
 }
 
 # ---------------------------------------------------------------------------
 # Section 1: PostgreSQL
 # ---------------------------------------------------------------------------
 deploy_postgresql() {
-    banner "1. PostgreSQL"
+    banner "2. PostgreSQL"
 
     if [ "$SKIP_DB" = true ]; then
         skipped "PostgreSQL (--skip-db)"
@@ -154,7 +191,7 @@ deploy_postgresql() {
 # Section 2: Alembic Migrations
 # ---------------------------------------------------------------------------
 run_migrations() {
-    banner "2. Alembic Migrations"
+    banner "3. Alembic Migrations"
 
     if [ "$SKIP_MIGRATIONS" = true ]; then
         skipped "Migrations (--skip-migrations)"
@@ -179,7 +216,7 @@ run_migrations() {
 # Section 3: MCP Server
 # ---------------------------------------------------------------------------
 deploy_mcp() {
-    banner "3. MCP Server"
+    banner "4. MCP Server"
 
     if [ "$SKIP_MCP" = true ]; then
         skipped "MCP server (--skip-mcp)"
@@ -196,50 +233,10 @@ deploy_mcp() {
 }
 
 # ---------------------------------------------------------------------------
-# Section 4: Verification
-# ---------------------------------------------------------------------------
-verify() {
-    banner "4. Verification"
-
-    local mcp_route_host mcp_route_path
-    mcp_route_host=$(oc get route mcp-server -n "$MCP_PROJECT" \
-        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    mcp_route_path=$(oc get route mcp-server -n "$MCP_PROJECT" \
-        -o jsonpath='{.spec.path}' 2>/dev/null || echo "/mcp/")
-
-    local db_pod_status
-    db_pod_status=$(oc get pod -n "$DB_NAMESPACE" -l "$DB_POD_LABEL" \
-        -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "unknown")
-
-    echo ""
-    echo "  Deployment summary:"
-    echo ""
-    printf "    %-20s %s\n" "PostgreSQL:" "$db_pod_status  (ns: $DB_NAMESPACE)"
-    printf "    %-20s %s\n" "DB connection:" \
-        "memoryhub-pg.$DB_NAMESPACE.svc.cluster.local:5432"
-
-    if [ -n "$mcp_route_host" ]; then
-        printf "    %-20s %s\n" "MCP server URL:" "https://${mcp_route_host}${mcp_route_path}"
-    else
-        printf "    %-20s %s\n" "MCP server URL:" "(route not found — check: oc get route -n $MCP_PROJECT)"
-    fi
-
-    local auth_route_host
-    auth_route_host=$(oc get route auth-server -n "$AUTH_PROJECT" \
-        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-
-    if [ -n "$auth_route_host" ]; then
-        printf "    %-20s %s\n" "Auth server URL:" "https://${auth_route_host}"
-    else
-        printf "    %-20s %s\n" "Auth server URL:" "(route not found — check: oc get route -n $AUTH_PROJECT)"
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# Section 3b: Auth Server
+# Section 5b: Auth Server (defined after MCP; called after deploy_mcp)
 # ---------------------------------------------------------------------------
 deploy_auth() {
-    banner "3b. Auth Server"
+    banner "5. Auth Server"
 
     if [ "$SKIP_AUTH" = true ]; then
         skipped "Auth server (--skip-auth)"
@@ -259,6 +256,112 @@ deploy_auth() {
 }
 
 # ---------------------------------------------------------------------------
+# Section 6: UI
+# ---------------------------------------------------------------------------
+deploy_ui() {
+    banner "6. UI"
+
+    if [ "$SKIP_UI" = true ]; then
+        skipped "UI deployment (--skip-ui)"
+        return 0
+    fi
+
+    local ui_deploy="$REPO_ROOT/memoryhub-ui/deploy/deploy.sh"
+    if [ ! -f "$ui_deploy" ]; then
+        die "UI deploy script not found: $ui_deploy"
+    fi
+
+    info "Deploying UI (namespace: $UI_NAMESPACE)..."
+    if ! bash "$ui_deploy"; then
+        die "UI deployment failed. Check output above."
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}UI deployed${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Section 7: RHOAI OdhApplication tile
+# ---------------------------------------------------------------------------
+deploy_tile() {
+    banner "7. RHOAI OdhApplication Tile"
+
+    if [ "$SKIP_TILE" = true ]; then
+        skipped "OdhApplication tile (--skip-tile)"
+        return 0
+    fi
+
+    local odh_manifest="$REPO_ROOT/memoryhub-ui/openshift/odh-application.yaml"
+    if [ ! -f "$odh_manifest" ]; then
+        die "OdhApplication manifest not found: $odh_manifest"
+    fi
+
+    info "Applying OdhApplication CR to $RHOAI_NAMESPACE..."
+    if ! oc apply -f "$odh_manifest" -n "$RHOAI_NAMESPACE"; then
+        die "Failed to apply OdhApplication manifest."
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}RHOAI tile applied${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Summary banner
+# ---------------------------------------------------------------------------
+print_summary() {
+    banner "Deployment Summary"
+
+    local cluster_url current_user
+    cluster_url=$(oc whoami --show-server 2>/dev/null || echo "(unavailable)")
+    current_user=$(oc whoami 2>/dev/null || echo "(unavailable)")
+
+    local ui_route mcp_route auth_route rhoai_route
+    ui_route=$(oc get route memoryhub-ui -n "$UI_NAMESPACE" \
+        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    mcp_route=$(oc get route memory-hub-mcp -n "$MCP_PROJECT" \
+        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    auth_route=$(oc get route auth-server -n "$AUTH_PROJECT" \
+        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    rhoai_route=$(oc get route rhods-dashboard -n "$RHOAI_NAMESPACE" \
+        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+
+    echo ""
+    printf "    %-24s %s\n" "Cluster:" "$cluster_url"
+    printf "    %-24s %s\n" "User:" "$current_user"
+    echo ""
+
+    if [ -n "$ui_route" ]; then
+        printf "    %-24s %s\n" "UI:" "https://${ui_route}"
+    else
+        printf "    %-24s %s\n" "UI:" "(route not found — check: oc get route memoryhub-ui -n $UI_NAMESPACE)"
+    fi
+
+    if [ -n "$mcp_route" ]; then
+        printf "    %-24s %s\n" "MCP server:" "https://${mcp_route}/mcp/"
+    else
+        printf "    %-24s %s\n" "MCP server:" "(route not found — check: oc get route -n $MCP_PROJECT)"
+    fi
+
+    if [ -n "$auth_route" ]; then
+        printf "    %-24s %s\n" "Auth server:" "https://${auth_route}"
+    else
+        printf "    %-24s %s\n" "Auth server:" "(route not found — check: oc get route auth-server -n $AUTH_PROJECT)"
+    fi
+
+    if [ -n "$rhoai_route" ]; then
+        printf "    %-24s %s\n" "RHOAI dashboard:" "https://${rhoai_route}"
+    else
+        printf "    %-24s %s\n" "RHOAI dashboard:" "(route not found — check: oc get route rhods-dashboard -n $RHOAI_NAMESPACE)"
+    fi
+
+    echo ""
+    if [ -n "$mcp_route" ]; then
+        printf "    %-24s %s\n" "MCP endpoint (agents):" "https://${mcp_route}/mcp/"
+    fi
+    printf "    %-24s %s\n" "Dev API key:" "~/.config/memoryhub/api-key"
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -268,12 +371,15 @@ main() {
     echo -e "${BOLD}MemoryHub — Full Stack Deployment${RESET}"
     echo "  $(date)"
 
+    check_prereqs
     preflight
     deploy_postgresql
     run_migrations
     deploy_mcp
     deploy_auth
-    verify
+    deploy_ui
+    deploy_tile
+    print_summary
 
     local secs
     secs=$(elapsed)

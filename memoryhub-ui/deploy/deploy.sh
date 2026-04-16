@@ -18,7 +18,7 @@
 #   9. Print the route URL
 set -euo pipefail
 
-NAMESPACE="memory-hub-mcp"
+NAMESPACE="${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}"
 DEPLOYMENT="memoryhub-ui"
 IMAGESTREAM="memoryhub-ui"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

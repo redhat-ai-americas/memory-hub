@@ -37,6 +37,31 @@ It works with any agent framework that speaks MCP — Claude Code, kagenti-deplo
 | **Demos** | [`demos/`](demos/) | Conference demo scripts (HIMSS, RSA, IACP, IAEM, World AgriTech) and the RHOAI dashboard demo material. |
 | **Retrospectives** | [`retrospectives/`](retrospectives/) | Per-session retros documenting decisions, gaps, and patterns. Read these for the "why" behind major design choices. |
 
+## Install in your cluster
+
+MemoryHub installs to an OpenShift cluster with Red Hat OpenShift AI (RHOAI) already running. A single `make install` brings up PostgreSQL + pgvector, runs migrations, builds and deploys the MCP server, the OAuth 2.1 auth service, the dashboard UI, and the RHOAI Applications tile.
+
+```bash
+git clone https://github.com/redhat-ai-americas/memory-hub.git
+cd memory-hub
+make check-prereqs    # verify cluster state (non-destructive)
+make install          # full stack deploy
+```
+
+At the end of `make install`, the summary banner prints the UI Route, MCP endpoint, auth endpoint, and pointers to the API-key setup. Expect 10–15 minutes on a first install — the MCP server, auth service, and UI each go through an OpenShift BuildConfig.
+
+To remove everything:
+
+```bash
+make uninstall        # prompts for confirmation; use --yes for CI
+```
+
+Use `make uninstall --skip-db` to preserve the database across a reinstall (useful when testing config changes without losing memories).
+
+**Prerequisites:** `oc` and `podman` on your PATH, cluster-admin on a cluster with RHOAI installed, a default StorageClass. `make check-prereqs` verifies all of these — run it first. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the "new contributor no-deploy" rule: if you're onboarding to this codebase, work against a local SQLite or Podman PostgreSQL instead of deploying to a cluster.
+
+**Partial installs** (advanced): `make deploy-db`, `make deploy-mcp`, `make deploy-auth`, `make deploy-ui`, `make deploy-tile` — each skips the others. `make help` lists everything.
+
 ## Three ways to use it
 
 ### 1. From an agent via MCP (Claude Code, kagenti, anything that speaks MCP)
