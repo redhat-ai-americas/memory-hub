@@ -147,15 +147,23 @@ async def write_memory(
             ),
         ),
     ] = None,
+    project_description: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Description for the project when auto-creating it on first "
+                "project-scoped write. Ignored if the project already exists. "
+                "Helps other agents understand what the project is about in "
+                "list_projects output."
+            ),
+        ),
+    ] = None,
     force: Annotated[
         bool,
         Field(
             description=(
-                "When True, bypass near-duplicate and exact-duplicate similarity "
-                "gates and write the memory regardless of similarity to existing "
-                "memories. Regex rules (secrets, PII) are never bypassed. Use when "
-                "you have confirmed the new memory provides value beyond the "
-                "existing one."
+                "(Advanced) Bypass near-duplicate similarity gates. Regex rules "
+                "(secrets, PII) are never bypassed."
             ),
         ),
     ] = False,
@@ -227,6 +235,7 @@ async def write_memory(
             try:
                 project_ids, was_auto_enrolled = await ensure_project_membership(
                     session_for_project, project_id, claims["sub"], write_tenant_id,
+                    description=project_description,
                 )
                 await session_for_project.commit()
             except ProjectInviteOnlyError as exc:

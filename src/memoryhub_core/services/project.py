@@ -56,6 +56,7 @@ async def ensure_project_membership(
     project_id: str,
     user_id: str,
     tenant_id: str,
+    description: str | None = None,
 ) -> tuple[set[str], bool]:
     """Ensure the user is a member of the project, auto-enrolling if allowed.
 
@@ -79,6 +80,7 @@ async def ensure_project_membership(
     if project is None:
         project = Project(
             name=project_id,
+            description=description,
             created_by=user_id,
             tenant_id=tenant_id,
         )

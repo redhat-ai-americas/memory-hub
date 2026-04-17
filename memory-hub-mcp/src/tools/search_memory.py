@@ -402,9 +402,9 @@ async def search_memory(
         str | None,
         Field(
             description=(
-                "Filter to a specific owner's memories (user ID or project identifier). "
-                "Omit to default to your authenticated user_id (requires register_session). "
-                "Pass an empty string to search across all owners without filtering."
+                "(Advanced) Filter to a specific owner's memories. "
+                "Omit to default to your user_id. "
+                "Pass empty string to search across all owners."
             )
         ),
     ] = None,
@@ -420,8 +420,8 @@ async def search_memory(
         float,
         Field(
             description=(
-                "Memories with weight below this value return as stubs instead of full "
-                "content. Set to 0.8 to stub low-priority matches. Ignored when mode='full_only'."
+                "(Advanced) Memories with weight below this value return as stubs "
+                "instead of full content. Default 0.0 (all full)."
             ),
             ge=0.0,
             le=1.0,
@@ -430,23 +430,16 @@ async def search_memory(
     current_only: Annotated[
         bool,
         Field(
-            description="If true, only returns current versions. Set false for forensic searches."
+            description="(Advanced) If true, only returns current versions. Set false for forensic searches."
         ),
     ] = True,
     mode: Annotated[
         Literal["full", "index", "full_only"],
         Field(
             description=(
-                "Result detail mode. 'full' (default) returns full content for "
-                "weight >= weight_threshold and stubs below it. 'index' returns "
-                "stubs for everything regardless of weight (use for exploratory "
-                "'what's in here?' or audit searches). 'full_only' ignores "
-                "weight_threshold so weight alone never causes stubbing (use for "
-                "specific-question answering when zero round-trips matters). Note "
-                "that max_response_tokens can still degrade entries to stubs once "
-                "the budget is hit -- to guarantee full content end-to-end, raise "
-                "max_response_tokens or lower max_results in addition to setting "
-                "mode='full_only'."
+                "(Advanced) Result detail mode. 'full' (default): full content "
+                "for high-weight matches, stubs for low. 'index': stubs only "
+                "(for exploratory searches). 'full_only': always full content."
             ),
         ),
     ] = "full",
@@ -454,10 +447,8 @@ async def search_memory(
         int,
         Field(
             description=(
-                "Soft cap on the total response token cost. Results are packed in "
-                "similarity order; once the cap is reached, remaining matches degrade "
-                "to stubs. Stubs are always included regardless of cap so the agent "
-                "never silently misses a ranked match. Default 4000."
+                "(Advanced) Soft cap on total response tokens. Past this cap, "
+                "remaining results degrade to stubs. Default 4000."
             ),
             ge=100,
             le=20000,
@@ -467,12 +458,9 @@ async def search_memory(
         bool,
         Field(
             description=(
-                "Branch handling. Default false omits branches (rationale, provenance, "
-                "etc.) whose parent is already in the result set -- the agent can drill "
-                "in via read_memory using has_rationale/has_children flags. Set true to "
-                "receive those branches nested under their parent in a 'branches' field. "
-                "Branches whose parent is NOT in the result set are always returned as "
-                "top-level entries regardless of this flag."
+                "(Advanced) If true, nest branch memories (rationale, provenance) "
+                "under their parent. Default false omits them — use read_memory "
+                "to drill in when has_rationale or has_children is flagged."
             ),
         ),
     ] = False,
@@ -480,14 +468,9 @@ async def search_memory(
         str | None,
         Field(
             description=(
-                "Optional session focus string (e.g., 'OpenShift deployment' or "
-                "'OAuth token validation'). When provided, retrieval is biased toward "
-                "memories whose content matches the focus, in addition to the immediate "
-                "query. Out-of-focus memories are down-weighted but not excluded -- a "
-                "strong query match still surfaces them. The focus string is embedded "
-                "and combined with the query via reciprocal-rank fusion (NEW-1 from "
-                "the two-vector retrieval research). Pass per call rather than via "
-                "register_session: stateless makes scaling and concurrency simpler."
+                "(Advanced) Session focus string (e.g., 'OpenShift deployment'). "
+                "Biases retrieval toward memories matching this focus in addition "
+                "to the query. Pass on every call (stateless)."
             ),
         ),
     ] = None,
@@ -495,11 +478,8 @@ async def search_memory(
         float,
         Field(
             description=(
-                "Strength of the focus bias when 'focus' is set, on a 0.0 to 1.0 "
-                "scale. 0.0 collapses to plain query-cosine retrieval (focus has no "
-                "effect). 0.4 (the default) follows the project config schema and "
-                "produced the best gain/loss ratio in benchmarking. Values above 0.6 "
-                "tank cross-topic recall. Ignored when focus is None."
+                "(Advanced) Focus bias strength (0.0-1.0). Default 0.4. "
+                "Higher values favor on-focus recall. Ignored when focus is None."
             ),
             ge=0.0,
             le=1.0,
@@ -509,8 +489,7 @@ async def search_memory(
         float,
         Field(
             description=(
-                "Strength of the domain boost (0.0-1.0). Default 0.3. "
-                "Higher values favor domain-matching results more aggressively. "
+                "(Advanced) Domain boost strength (0.0-1.0). Default 0.3. "
                 "Ignored when domains is not set."
             ),
             ge=0.0,
@@ -532,9 +511,8 @@ async def search_memory(
         list[str] | None,
         Field(
             description=(
-                "Domain tags to boost in results (e.g., ['React', 'Spring Boot']). "
-                "Results with matching domains are ranked higher. Non-matching "
-                "results still appear — this is a boost, not a filter."
+                "(Advanced) Domain tags to boost in results (e.g., ['React']). "
+                "Matching results rank higher. Non-matching still appear."
             ),
         ),
     ] = None,
@@ -542,10 +520,8 @@ async def search_memory(
         bool,
         Field(
             description=(
-                "When True, skip cache-optimized assembly and return results "
-                "ranked by similarity score (legacy behavior). Default False "
-                "returns results in a stable, deterministic order optimized "
-                "for KV cache efficiency when injected into prompts."
+                "(Advanced) When True, return results ranked by similarity "
+                "score instead of cache-optimized stable ordering. Default False."
             ),
         ),
     ] = False,
