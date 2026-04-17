@@ -12,13 +12,23 @@ spec:
   description: >-
     Centralized agent memory with governance and curation
     for OpenShift AI workloads.
-  # "Red Hat managed" is required for the RHOAI dashboard to show the
-  # "Open application" link. "Self-managed" triggers an ISV subscription
-  # validation flow that we don't implement. The route is resolved in the
-  # dashboard's own namespace (redhat-ods-applications) because the
-  # routeNamespace field is not read by the dashboard backend (logged as
-  # "namespace undefined"). deploy.sh creates a cross-namespace proxy
-  # route there that forwards to the real service in memory-hub-mcp.
+  # "Red Hat managed" is currently required for the RHOAI dashboard to
+  # show an enabled "Open application" link. Verified 2026-04-16 that
+  # switching to "Self-managed" disables the launch link regardless of
+  # the `odh-enabled-applications-config` ConfigMap entry or a direct
+  # `status.enabled=true` subresource patch. Self-managed tiles require
+  # either (a) a `csvName` pointing at an installed Operator's CSV, or
+  # (b) an `enable` block whose validation is hardcoded per-app in the
+  # dashboard source (see nvidia-nim's "Contacting NVIDIA to validate"
+  # flow). Long-term fix: submit an odh-dashboard PR to register a
+  # MemoryHub validator, or bundle into the RHOAI operator's reconciled
+  # resource set. See NEXT_SESSION.md for the full finding.
+  #
+  # The route is resolved in the dashboard's own namespace
+  # (redhat-ods-applications) because the routeNamespace field is not
+  # read by the dashboard backend (logged as "namespace undefined").
+  # deploy.sh creates a cross-namespace proxy route there that forwards
+  # to the real service in memory-hub-mcp.
   category: "Red Hat managed"
   provider: "Community"
   support: "community"

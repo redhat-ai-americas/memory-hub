@@ -21,6 +21,25 @@ Use the `/issue-tracker` skill for ALL issue operations. Never create issues man
 - MinIO for S3/object storage
 - MCP server via fips-agents CLI workflow
 
+## Cluster Contexts
+
+This project deploys to the **workshop-cluster**. A second cluster (gemma-cluster) is used for unrelated work. Both are configured as named contexts in `~/.kube/config`:
+
+- `workshop-cluster` — MemoryHub's cluster (n7pd5)
+- `gemma-cluster` — Gemma 4 deployment cluster (l78nk)
+
+**Always pass `--context workshop-cluster`** on every `oc` / `kubectl` command for this project. Do not rely on the current context, and do not switch contexts with `oc login` or `oc config use-context` — that would break whichever session isn't expecting the switch.
+
+```bash
+# Correct — explicit context + explicit namespace
+oc get pods --context workshop-cluster -n memoryhub
+
+# Wrong — relies on implicit current context
+oc get pods -n memoryhub
+```
+
+This extends the existing `-n` namespace rule: explicit context *and* explicit namespace on every command.
+
 ## MCP Server (memory-hub-mcp/)
 The MCP server lives in `memory-hub-mcp/` and was scaffolded from the fips-agents MCP template. Follow the workflow in order:
 
@@ -63,12 +82,21 @@ Every change must be deployable from code without manual steps. When implementin
 
 **API completeness** — When adding a column to a model that is managed through an admin API, the API schemas (request and response) must be updated in the same PR. If the only way to set a field is direct DB manipulation, the field is not shippable.
 
+**Cross-namespace Secrets** — Services that need credentials from another namespace (e.g., the auth service needs DB credentials from `memoryhub-db`) must have those Secrets copied by `deploy-full.sh` using the `copy_secret` helper. The target Secret is created idempotently (skip if exists). Never assume a Secret from a previous install survived — namespace deletion removes everything.
+
+**SCC grants** — MinIO and Valkey require `anyuid` SCC on their ServiceAccounts. The deploy script must grant this after applying the kustomize manifests. Without it, pods fail with SCC validation errors on fresh namespaces.
+
+**The golden test** — `make uninstall --skip-db && make install` against a live cluster must succeed end-to-end with zero manual intervention. If it doesn't, `deploy-full.sh` is incomplete. Run this before marking any infrastructure change as done.
+
 **The checklist** — Before marking a feature as deployed, verify:
 - [ ] Schema changes have an Alembic migration
-- [ ] deploy.sh creates all required Secrets (with generate-if-missing pattern)
-- [ ] deploy.sh applies all required K8s resources (with idempotent guards)
+- [ ] deploy-full.sh creates all required Secrets (with generate-if-missing pattern)
+- [ ] deploy-full.sh applies all required K8s resources (with idempotent guards)
+- [ ] deploy-full.sh grants required SCCs for pods that need them
+- [ ] Cross-namespace Secrets are copied by deploy-full.sh, not created manually
 - [ ] Admin/management APIs expose all user-facing model fields
 - [ ] requirements.txt matches pyproject.toml dependencies (container builds use requirements.txt)
+- [ ] `make uninstall --skip-db && make install` succeeds on a clean namespace set
 
 ## Testing
 - pytest for all Python testing

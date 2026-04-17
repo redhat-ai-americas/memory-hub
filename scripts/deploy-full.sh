@@ -53,6 +53,37 @@ warn()    { echo -e "  ${YELLOW}!${RESET} $*"; }
 die()     { echo -e "  ${RED}✗${RESET} $*" >&2; exit 1; }
 skipped() { echo -e "  ${YELLOW}(skipped)${RESET} $*"; }
 
+# Copy a Secret from one namespace to another, optionally renaming it.
+# Idempotent: skips if the target already exists.
+copy_secret() {
+    local src_name=$1 src_ns=$2 dst_name=$3 dst_ns=$4
+    if oc get secret "$dst_name" -n "$dst_ns" &>/dev/null; then
+        info "Secret $dst_name already exists in $dst_ns"
+        return 0
+    fi
+    info "Copying Secret $src_name from $src_ns to $dst_ns (as $dst_name)..."
+    oc get secret "$src_name" -n "$src_ns" -o json | \
+        python3 -c "
+import json, sys
+s = json.load(sys.stdin)
+s['metadata'] = {'name': '$dst_name', 'namespace': '$dst_ns'}
+s.pop('status', None)
+json.dump(s, sys.stdout)
+" | oc apply -f -
+}
+
+# Create a Secret with a random hex value if it doesn't already exist.
+# Idempotent: skips if the target already exists.
+ensure_random_secret() {
+    local name=$1 ns=$2 key=$3
+    if oc get secret "$name" -n "$ns" &>/dev/null; then
+        info "Secret $name already exists in $ns"
+        return 0
+    fi
+    info "Generating Secret $name in $ns..."
+    oc create secret generic "$name" --from-literal="$key=$(openssl rand -hex 32)" -n "$ns"
+}
+
 elapsed() {
     local end_time
     end_time=$(date +%s)
@@ -143,6 +174,8 @@ preflight() {
     echo "    PostgreSQL:  $([ "$SKIP_DB" = true ] && echo "skip" || echo "deploy")"
     echo "    Migrations:  $([ "$SKIP_MIGRATIONS" = true ] && echo "skip" || echo "run")"
     echo "    MCP server:  $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
+    echo "    MinIO:       $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
+    echo "    Valkey:      $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
     echo "    Auth server: $([ "$SKIP_AUTH" = true ] && echo "skip" || echo "deploy")"
     echo "    UI:          $([ "$SKIP_UI" = true ] && echo "skip" || echo "deploy")"
     echo "    RHOAI tile:  $([ "$SKIP_TILE" = true ] && echo "skip" || echo "apply")"
@@ -203,6 +236,14 @@ run_migrations() {
         die "Migration script not found: $migration_script"
     fi
 
+    # Auto-read DB password from K8s Secret if not already set
+    if [ -z "${MEMORYHUB_DB_PASSWORD:-}" ]; then
+        info "Reading DB password from K8s Secret in $DB_NAMESPACE..."
+        MEMORYHUB_DB_PASSWORD=$(oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" \
+            -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+        export MEMORYHUB_DB_PASSWORD
+    fi
+
     info "Running $migration_script..."
     if ! bash "$migration_script"; then
         die "Migrations failed. Check output above."
@@ -210,6 +251,46 @@ run_migrations() {
 
     echo ""
     echo -e "  ${GREEN}Migrations complete${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Section 3b: MinIO + Valkey infrastructure (MCP dependencies)
+# ---------------------------------------------------------------------------
+deploy_infra() {
+    banner "3b. MinIO + Valkey"
+
+    if [ "$SKIP_MCP" = true ]; then
+        skipped "Infrastructure (MCP skipped)"
+        return 0
+    fi
+
+    # Ensure MCP namespace exists (MCP deploy script also does this, but we
+    # need it now for MinIO/Valkey which must be ready before MCP starts)
+    if ! oc get namespace "$MCP_PROJECT" &>/dev/null; then
+        info "Creating namespace $MCP_PROJECT..."
+        oc create namespace "$MCP_PROJECT"
+    fi
+
+    info "Deploying MinIO..."
+    oc apply -k "$REPO_ROOT/deploy/minio/" -n "$MCP_PROJECT"
+    oc adm policy add-scc-to-user anyuid -z memoryhub-minio -n "$MCP_PROJECT"
+
+    info "Deploying Valkey..."
+    oc apply -k "$REPO_ROOT/deploy/valkey/" -n "$MCP_PROJECT"
+    oc adm policy add-scc-to-user anyuid -z memoryhub-valkey -n "$MCP_PROJECT"
+
+    info "Waiting for MinIO rollout..."
+    if ! oc rollout status deployment/memoryhub-minio -n "$MCP_PROJECT" --timeout=120s; then
+        die "MinIO did not become ready. Check: oc describe deployment/memoryhub-minio -n $MCP_PROJECT"
+    fi
+
+    info "Waiting for Valkey rollout..."
+    if ! oc rollout status deployment/memoryhub-valkey -n "$MCP_PROJECT" --timeout=120s; then
+        die "Valkey did not become ready. Check: oc describe deployment/memoryhub-valkey -n $MCP_PROJECT"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}MinIO + Valkey ready${RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -233,6 +314,25 @@ deploy_mcp() {
 }
 
 # ---------------------------------------------------------------------------
+# Section 4b: Auth infrastructure (Secrets required by the auth deployment)
+# ---------------------------------------------------------------------------
+prepare_auth_infra() {
+    if [ "$SKIP_AUTH" = true ]; then return 0; fi
+
+    banner "4b. Auth Infrastructure"
+
+    if ! oc get namespace "$AUTH_PROJECT" &>/dev/null; then
+        info "Creating namespace $AUTH_PROJECT..."
+        oc create namespace "$AUTH_PROJECT"
+    fi
+
+    copy_secret memoryhub-pg-credentials "$DB_NAMESPACE" memoryhub-pg-credentials "$AUTH_PROJECT"
+    ensure_random_secret auth-admin-key "$AUTH_PROJECT" MEMORYHUB_ADMIN_KEY
+
+    echo -e "  ${GREEN}Auth infrastructure ready${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # Section 5b: Auth Server (defined after MCP; called after deploy_mcp)
 # ---------------------------------------------------------------------------
 deploy_auth() {
@@ -253,6 +353,42 @@ deploy_auth() {
 
     echo ""
     echo -e "  ${GREEN}Auth server deployed${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Section 5b: UI infrastructure (namespace, ServiceAccount, Secrets)
+# ---------------------------------------------------------------------------
+prepare_ui_infra() {
+    if [ "$SKIP_UI" = true ]; then return 0; fi
+
+    banner "5b. UI Infrastructure"
+
+    if ! oc get namespace "$UI_NAMESPACE" &>/dev/null; then
+        info "Creating namespace $UI_NAMESPACE..."
+        oc create namespace "$UI_NAMESPACE"
+    fi
+
+    # ServiceAccount for oauth-proxy sidecar
+    info "Applying UI ServiceAccount..."
+    oc apply -f "$REPO_ROOT/memoryhub-ui/openshift/oauth-proxy-sa.yaml" -n "$UI_NAMESPACE"
+
+    # DB credentials (renamed to memoryhub-db-credentials for the UI BFF)
+    copy_secret memoryhub-pg-credentials "$DB_NAMESPACE" memoryhub-db-credentials "$UI_NAMESPACE"
+
+    # OAuth proxy session secret (must be exactly 32 bytes, key must be "session-secret")
+    if ! oc get secret memoryhub-ui-proxy -n "$UI_NAMESPACE" &>/dev/null; then
+        info "Generating OAuth proxy session secret..."
+        oc create secret generic memoryhub-ui-proxy \
+            --from-literal="session-secret=$(openssl rand -base64 32 | head -c 32)" \
+            -n "$UI_NAMESPACE"
+    else
+        info "Secret memoryhub-ui-proxy already exists in $UI_NAMESPACE"
+    fi
+
+    # Admin key for the UI BFF
+    ensure_random_secret memoryhub-ui-admin-key "$UI_NAMESPACE" MEMORYHUB_ADMIN_KEY
+
+    echo -e "  ${GREEN}UI infrastructure ready${RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -375,8 +511,11 @@ main() {
     preflight
     deploy_postgresql
     run_migrations
+    deploy_infra          # MinIO + Valkey before MCP
     deploy_mcp
+    prepare_auth_infra    # Secrets before auth
     deploy_auth
+    prepare_ui_infra      # SA + Secrets before UI
     deploy_ui
     deploy_tile
     print_summary
