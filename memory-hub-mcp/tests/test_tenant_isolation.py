@@ -519,6 +519,11 @@ async def test_search_as_b_does_not_see_a_memories():
             new_callable=AsyncMock,
             return_value=set(),
         ),
+        patch(
+            "src.tools.search_memory.get_projects_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
     ):
         b_result = await search_memory(query="preferences")
 
@@ -602,6 +607,11 @@ async def test_search_as_a_finds_own_memories():
         ),
         patch(
             "src.tools.search_memory.get_roles_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
+        patch(
+            "src.tools.search_memory.get_projects_for_user",
             new_callable=AsyncMock,
             return_value=set(),
         ),

@@ -132,7 +132,7 @@ async def register_session(
         Field(
             description=(
                 "Your MemoryHub API key. Provided by the system administrator. "
-                "Format: mh-dev-<username>-<year>."
+                "Format: mh-dev-<hex>."
             ),
         ),
     ],
@@ -171,7 +171,7 @@ async def register_session(
     if user is None:
         raise ToolError(
             "Invalid API key. Contact your system administrator for a valid key. "
-            "Keys follow the format: mh-dev-<username>-<year>."
+            "Keys follow the format: mh-dev-<hex>."
         )
 
     set_session(user)

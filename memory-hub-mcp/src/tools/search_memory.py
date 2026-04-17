@@ -521,11 +521,10 @@ async def search_memory(
         str | None,
         Field(
             description=(
-                "Your project identifier. Required to include project-scoped "
-                "memories in results (memories are filtered to projects you belong to). "
-                "Also used to resolve campaign-scoped memories for campaigns your "
-                "project is enrolled in. Pass your configured project_id from your "
-                "agent setup. Omit to exclude project and campaign memories from search."
+                "Your project identifier. Restricts project-scoped results to "
+                "this project only. Also resolves campaign-scoped memories for "
+                "campaigns this project is enrolled in. Omit to include project "
+                "memories from ALL projects you belong to."
             ),
         ),
     ] = None,
@@ -639,15 +638,22 @@ async def search_memory(
     # When PROJECT_ISOLATION_ENABLED is False, skip resolution — the
     # search filter's generic branch handles project scope without
     # scope_id filtering, and authorize_read returns True.
+    #
+    # When a specific project_id is given, restrict results to THAT
+    # project only.  Without project_id, include all projects the
+    # caller belongs to so project-scoped memories stay discoverable.
     project_ids: set[str] | None = None
-    if project_id and PROJECT_ISOLATION_ENABLED:
-        session_for_project, gen_for_project = await get_db_session()
-        try:
-            project_ids = await get_projects_for_user(
-                session_for_project, claims["sub"],
-            )
-        finally:
-            await release_db_session(gen_for_project)
+    if PROJECT_ISOLATION_ENABLED:
+        if project_id:
+            project_ids = {project_id}
+        else:
+            session_for_project, gen_for_project = await get_db_session()
+            try:
+                project_ids = await get_projects_for_user(
+                    session_for_project, claims["sub"],
+                )
+            finally:
+                await release_db_session(gen_for_project)
 
     # Resolve role assignments for the caller (table + JWT claims).
     role_names: set[str] | None = None
