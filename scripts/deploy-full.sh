@@ -336,26 +336,6 @@ deploy_mcp() {
     make deploy PROJECT="$MCP_PROJECT"
     popd > /dev/null
 
-    # The MCP openshift.yaml contains a placeholder DB password.  After
-    # deploy, patch the Secret with the real password from memoryhub-db
-    # and restart the pod so it picks up the correct credentials.
-    info "Syncing DB password into MCP namespace..."
-    local real_pass
-    real_pass=$(oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" \
-        -o jsonpath='{.data.POSTGRES_PASSWORD}')
-    oc get secret memoryhub-db-credentials -n "$MCP_PROJECT" -o json | \
-        python3 -c "
-import json, sys
-s = json.load(sys.stdin)
-s['data']['MEMORYHUB_DB_PASSWORD'] = '$real_pass'
-s['metadata'] = {k: v for k, v in s['metadata'].items()
-                 if k in ('name', 'namespace', 'labels', 'annotations')}
-s.pop('status', None)
-json.dump(s, sys.stdout)
-" | oc apply -f -
-    oc rollout restart deployment/memory-hub-mcp -n "$MCP_PROJECT"
-    oc rollout status deployment/memory-hub-mcp -n "$MCP_PROJECT" --timeout=120s
-
     echo ""
     echo -e "  ${GREEN}MCP server deployed${RESET}"
 }

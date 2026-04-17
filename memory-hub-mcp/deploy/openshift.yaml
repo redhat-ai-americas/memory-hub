@@ -24,27 +24,6 @@ kind: ImageStream
 metadata:
   name: memory-hub-mcp
 ---
-# WARNING: Dev credentials only. For production, use OpenShift Secrets management
-# or HashiCorp Vault. The embedding URL is cluster-specific and must be updated
-# per deployment.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: memoryhub-db-credentials
-type: Opaque
-stringData:
-  MEMORYHUB_DB_HOST: memoryhub-pg.memoryhub-db.svc.cluster.local
-  MEMORYHUB_DB_PORT: "5432"
-  MEMORYHUB_DB_NAME: memoryhub
-  MEMORYHUB_DB_USER: memoryhub
-  MEMORYHUB_DB_PASSWORD: REPLACE-ME-match-the-postgres-secret
-  MEMORYHUB_EMBEDDING_URL: https://all-minilm-l6-v2-embedding-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/embed
-  # Cross-encoder reranker for two-vector retrieval (#58). When unset
-  # or unreachable, search_memories_with_focus falls back to a cosine-
-  # rank blend with focus -- correct results without the cross-encoder
-  # lift. Cluster-specific URL; update per deployment.
-  MEMORYHUB_RERANKER_URL: https://ms-marco-minilm-l12-v2-reranker-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:

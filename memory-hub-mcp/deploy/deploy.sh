@@ -138,15 +138,33 @@ fi
 # Apply configmap first — the Deployment mounts it as a volume.
 oc apply -f "$USERS_CM" -n "$NAMESPACE"
 
-# openshift.yaml has a placeholder PG password. Refuse to apply it verbatim;
-# the operator must have replaced REPLACE-ME-match-the-postgres-secret with
-# the real PG password (or use a separate Secret and edit this file).
-if grep -q "REPLACE-ME-match-the-postgres-secret" "$SCRIPT_DIR/openshift.yaml"; then
-  echo "ERROR: $SCRIPT_DIR/openshift.yaml still contains the REPLACE-ME"
-  echo "       PG password placeholder. Replace it with the actual value"
-  echo "       from deploy/postgresql/secret.yaml before running deploy.sh."
-  exit 1
+# Create the memoryhub-db-credentials Secret from the DB namespace's source of
+# truth. This replaces the old pattern of baking a placeholder password into
+# openshift.yaml and patching it post-deploy (#192).
+DB_SRC_NAMESPACE="memoryhub-db"
+DB_SRC_SECRET="memoryhub-pg-credentials"
+
+echo ""
+echo "Creating DB credentials Secret from $DB_SRC_NAMESPACE/$DB_SRC_SECRET..."
+if ! oc get secret "$DB_SRC_SECRET" -n "$DB_SRC_NAMESPACE" &>/dev/null; then
+    echo "ERROR: Source Secret $DB_SRC_SECRET not found in namespace $DB_SRC_NAMESPACE."
+    echo "       Deploy PostgreSQL first (scripts/deploy-full.sh) or create the Secret manually."
+    exit 1
 fi
+
+DB_PASSWORD=$(oc get secret "$DB_SRC_SECRET" -n "$DB_SRC_NAMESPACE" \
+    -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+
+oc create secret generic memoryhub-db-credentials \
+    --from-literal=MEMORYHUB_DB_HOST=memoryhub-pg.memoryhub-db.svc.cluster.local \
+    --from-literal=MEMORYHUB_DB_PORT=5432 \
+    --from-literal=MEMORYHUB_DB_NAME=memoryhub \
+    --from-literal=MEMORYHUB_DB_USER=memoryhub \
+    --from-literal=MEMORYHUB_DB_PASSWORD="$DB_PASSWORD" \
+    --from-literal=MEMORYHUB_EMBEDDING_URL=https://all-minilm-l6-v2-embedding-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/embed \
+    --from-literal=MEMORYHUB_RERANKER_URL=https://ms-marco-minilm-l12-v2-reranker-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com \
+    --dry-run=client -o json | oc apply -f - -n "$NAMESPACE"
+echo "OK: memoryhub-db-credentials Secret created/updated in $NAMESPACE"
 oc apply -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
 
 # Step 4: Start binary build

@@ -6,11 +6,11 @@
 # CREDENTIAL DRIFT: When the DB namespace is deleted and recreated,
 # deploy-full.sh generates a new random password for memoryhub-pg-credentials.
 # Consumer namespaces (MCP, Auth, UI) that hold cross-namespace copies of the
-# DB secret will be stale after reinstall.  deploy-full.sh handles this via the
-# password-sync step in deploy_mcp (lines ~342-356) and via copy_secret for
-# auth/UI.  Running 'make deploy' in a sub-project *without* deploy-full.sh
-# will leave the old (wrong) password in place, causing DB auth failures.
-# Always use deploy-full.sh for reinstalls, or manually sync the password.
+# DB secret will be stale after reinstall.  Each component's deploy.sh reads
+# the password from the DB namespace at deploy time (#192), and deploy-full.sh
+# uses copy_secret for auth/UI.  Standalone 'make deploy' in a sub-project
+# also reads from the DB namespace, so credentials stay in sync even without
+# deploy-full.sh.
 #
 # Usage: scripts/uninstall-full.sh [--yes] [--skip-db] [--skip-tile]
 set -euo pipefail
