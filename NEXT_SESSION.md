@@ -1,65 +1,42 @@
 # Next Session Plan
 
-## Completed this session (2026-04-16)
+## Completed this session (2026-04-17)
 
-### Design docs
-- Drafted, committed, and pushed design docs for 6 needs-design issues
-  (commit 8bc7856): #166 project-governance, #109 ui/design, #168
-  conversation-persistence, #169 context-compaction, #170
-  graph-enhanced-memory, #171 knowledge-compilation.
-- Ran parallel review sub-agents across all 6 docs. Found 2 critical
-  design issues (#170 missing partial unique constraint migration, #169
-  content_ref dual-use collision) and ~15 minor fixes. All resolved in
-  commit c8fc3c6.
-- Linked each design doc from its issue with a summary comment.
-- Removed `needs-design` label from #168, #169, #170, #171.
-- #102 already closed (confirmed fixed by #63).
+### Golden test — found and fixed
+- Ran `scripts/uninstall-full.sh --skip-db --yes && scripts/deploy-full.sh`.
+  Failed at seed-oauth-clients: deploy-full.sh was overwriting the DB
+  credentials Secret with a placeholder from `deploy/postgresql/secret.yaml`.
+- Fix: removed secret.yaml from kustomization, added idempotent Secret
+  generation to `deploy_postgresql()` (openssl rand on first install,
+  skip-if-exists). Created `scripts/run-seed-oauth-clients.sh` wrapper
+  (port-forward pattern matching run-migrations.sh).
+- Second bug found during test: MCP namespace `memoryhub-db-credentials`
+  Secret had a hardcoded placeholder in `openshift.yaml`. Added post-deploy
+  password sync step to `deploy_mcp()`.
+- Re-ran golden test (preserve-DB variant): full pass, all services up.
+- CLAUDE.md updated: golden test rule now documents both variants
+  (preserve-DB and full-fresh) with correct script invocations.
 
-### Agent ergonomics consult
-- Consulted with sibling Claude Code session building demo-chat-agent:
-  register_session is a tool call (not HTTP header), proposed
-  BaseAgent.connect_mcp auth extension pattern, system prompt block
-  for gpt-oss-20b memory tool usage.
+### Agent DX improvements (MCP server v0.5.1 → v0.6.0)
+- Ran agent usability test (sub-agent self-enrollment). Initial DX rating: 4/5.
+- Fix 1: Corrected API key format hint (`mh-dev-<hex>` not `mh-dev-<username>-<year>`).
+- Fix 2: `search_memory` with `project_id` now filters to that project only
+  (was returning results from all member projects).
+- Fix 3: Added "Quick start" section to `search_memory` docstring.
+- Fix 4: New `get_session` tool (lightweight whoami, 15th tool).
+- Fix 5: `list_projects` now returns `memory_count` per project.
+- Fix 6: Labeled 11 search_memory params as "(Advanced)" to reduce
+  cognitive load for first-time users.
+- Fix 7: Added `project_description` param to `write_memory` for auto-create.
+- Final DX rating: 4.5/5.
+- Wrote `docs/agent-integration-guide.md` for onboarding other agent sessions.
 
-### Red Hat managed indicator investigation
-- Verified 2026-04-16: switching OdhApplication to Self-managed disables
-  the launch link. Self-managed tiles require either a csvName (installed
-  Operator CSV) or an enable block (hardcoded per-app validator in
-  dashboard source). Neither applies. Reverted to Red Hat managed.
-- Two forward paths: (1) submit odh-dashboard PR registering a
-  MemoryHub validator, (2) bundle into RHOAI operator's reconciled set.
-- Findings documented in odh-application.yaml comments and the retro.
-
-### Install polish + migration
-- Created `scripts/check-prereqs.sh` (8 checks), `scripts/uninstall-full.sh`
-  (full teardown with --skip-db and --yes flags).
-- Extended `scripts/deploy-full.sh` with UI deploy, RHOAI tile apply,
-  prereq verification, and summary banner.
-- Renamed root `make install` (was venv setup) to `make dev`. New
-  `make install` is the cluster install entry point. Added `make uninstall`,
-  `make check-prereqs`, `make deploy-ui`, `make deploy-tile`.
-- Fixed UI namespace drift: `memoryhub-ui/deploy/deploy.sh` was hardcoded
-  to `memory-hub-mcp`; fixed to `memoryhub-ui`. Stripped hardcoded
-  namespace refs from openshift.yaml and oauth-proxy-sa.yaml.
-- Ran live migration on workshop cluster (`make uninstall --skip-db`
-  then manual install). Discovered 5 categories of drift debt: MinIO +
-  Valkey deployment, SCC grants, cross-namespace Secrets, auth admin key,
-  UI proxy/admin Secrets. All wired into deploy-full.sh (commit d67ec5e).
-- CLAUDE.md updated with golden test rule, cross-namespace Secret rule,
-  SCC grant rule.
+### Resolved from prior session
+- CLAUDE.md pre-session modification (item #5): was already clean, no action needed.
 
 ## Priority items for next session
 
-### 1. Golden test verification (blocking)
-
-Run `make uninstall --skip-db && make install` end-to-end on the
-workshop cluster to verify that deploy-full.sh is fully self-contained
-after the d67ec5e fixes. The current cluster is working because we fixed
-things manually during the migration — we haven't proven the script
-works from scratch yet. This MUST pass before declaring the install
-story complete.
-
-### 2. Red Hat managed — read odh-dashboard source
+### 1. Red Hat managed — read odh-dashboard source
 
 Before committing to Path 1 (submit upstream PR) or Path 2 (bundle into
 RHOAI operator), read the actual odh-dashboard source at
@@ -67,7 +44,15 @@ github.com/opendatahub-io/odh-dashboard to confirm the "validation is
 hardcoded per-app" theory. If there IS a generic validator path, the fix
 is simpler than we think.
 
-### 3. Design doc implementation (from the design-docs retro)
+### 2. Close #188 (project membership friction)
+
+The auto-enrollment flow works end-to-end (verified this session). The
+remaining structural items from #188 (explicit project management tools,
+guided discovery, session TTL) should be triaged: close the issue with
+a comment documenting what shipped, or file new issues for the structural
+items and close #188 as the auto-enrollment fix.
+
+### 3. Design doc implementation
 
 The 6 design docs are candidates for implementation. In ascending scope:
 - **#166** (project-governance) — smallest, good warm-up
@@ -78,38 +63,41 @@ The 6 design docs are candidates for implementation. In ascending scope:
 
 ### 4. Ruff lint cleanup
 
-71 pre-existing errors (13 root + 58 MCP). Not blocking but increasingly
-visible in session-close checks. Quick cleanup session.
+434 errors (was 71 last session — growth is from new code + ruff version
+changes). Not blocking but increasingly visible in session-close checks.
 
-### 5. CLAUDE.md pre-session modification
+### 5. DX push to 5/5
 
-CLAUDE.md has been showing as modified pre-session for 3+ sessions.
-Run `git diff CLAUDE.md` at next session start and commit or revert.
+Remaining structural items from the usability test:
+- Explicit project management tools (create, describe, list members)
+- Progressive discovery in register_session response
+- Session TTL / explicit expiry for predictable auth lifecycle
+These are the "second category" items deferred from this session.
 
 ## Context
 - SDK v0.6.0 on PyPI (v0.6.1 unreleased: project_id field in ProjectConfig)
-- CLI v0.3.0 (unreleased: --project/--non-interactive flags)
-- MCP server v0.5.1, build #27 (rebuilt during this session's migration),
-  14 tools deployed
-- MinIO deployed to memory-hub-mcp namespace (rebuilt during migration)
-- Valkey deployed to memory-hub-mcp namespace (rebuilt during migration)
+- CLI v0.4.0
+- MCP server **v0.6.0**, 15 tools deployed
 - Curation thresholds: exact_duplicate 0.98, near_duplicate gate 0.90,
   flag 0.80
-- min_appendix=5 (was 1)
+- min_appendix=5
 
 ## Cluster state
-- Cluster: workshop-cluster (n7pd5, sandbox5167). **Pass `--context
-  workshop-cluster` on every `oc` / `kubectl` command.** The default
-  kubeconfig context is currently workshop-cluster (may drift).
+- Cluster: **mcp-rhoai** context (n7pd5, sandbox5167). The old
+  "workshop-cluster" context name no longer exists — it was renamed
+  to `mcp-rhoai`. **Pass `--context mcp-rhoai` on every `oc` / `kubectl`
+  command.**
 - `scripts/cluster-health-check.sh` uses the default context; its
   output may be misleading if context drifts.
-- gpt-oss-20b: `gpt-oss-model-2` namespace, verified live
-- MCP server: memory-hub-mcp namespace (rebuilt 2026-04-16)
-- MinIO: memory-hub-mcp namespace (rebuilt 2026-04-16)
-- Valkey: memory-hub-mcp namespace (rebuilt 2026-04-16)
-- Auth: memoryhub-auth namespace (rebuilt 2026-04-16)
-- UI: **memoryhub-ui** namespace (migrated from memory-hub-mcp, 2026-04-16)
-- DB: memoryhub-db namespace, migrations through 012 in sync (preserved
-  through migration with --skip-db)
+- DB password was reset this session (golden test recovery). All
+  namespace Secrets are in sync. The password is NOT the original
+  `memoryhub-dev-password` — it was regenerated.
+- gpt-oss-20b: `gpt-oss-model-2` namespace
+- MCP server: memory-hub-mcp namespace (rebuilt 2026-04-17)
+- MinIO: memory-hub-mcp namespace
+- Valkey: memory-hub-mcp namespace
+- Auth: memoryhub-auth namespace (rebuilt 2026-04-17)
+- UI: memoryhub-ui namespace (rebuilt 2026-04-17)
+- DB: memoryhub-db namespace, migrations through 012 in sync
 - OdhApplication: `redhat-ods-applications/memoryhub` (category: Red Hat
   managed — hack, see investigation notes)
