@@ -41,6 +41,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/perf/fixtures/topics/*.py" = ["E501"]  # synthetic memory content — long by design
+"src/memoryhub_core/models/contradiction.py" = ["F821"]  # SQLAlchemy forward ref Mapped["MemoryNode"]
+"memoryhub-auth/src/routes/*.py" = ["B008"]  # Depends() in defaults is idiomatic FastAPI
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

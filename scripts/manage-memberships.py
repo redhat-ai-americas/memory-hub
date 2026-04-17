@@ -24,15 +24,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from memoryhub_core.config import DatabaseSettings  # noqa: E402
-from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
+
+from memoryhub_core.config import DatabaseSettings  # noqa: E402
 
 
 async def list_projects(engine):
     async with engine.connect() as conn:
         result = await conn.execute(
-            text("SELECT project_id, user_id, role, joined_at, joined_by FROM project_memberships ORDER BY project_id, user_id")
+            text(
+                "SELECT project_id, user_id, role, joined_at, joined_by"
+                " FROM project_memberships ORDER BY project_id, user_id"
+            )
         )
         rows = result.fetchall()
         if not rows:
@@ -79,7 +83,10 @@ async def remove_project(engine, project_id: str, user_id: str):
 async def list_roles(engine):
     async with engine.connect() as conn:
         result = await conn.execute(
-            text("SELECT role_name, user_id, tenant_id, assigned_at, assigned_by FROM role_assignments ORDER BY role_name, user_id")
+            text(
+                "SELECT role_name, user_id, tenant_id, assigned_at, assigned_by"
+                " FROM role_assignments ORDER BY role_name, user_id"
+            )
         )
         rows = result.fetchall()
         if not rows:

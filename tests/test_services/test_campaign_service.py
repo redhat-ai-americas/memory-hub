@@ -3,13 +3,10 @@
 import uuid
 
 import pytest
-from sqlalchemy import text
 
 from memoryhub_core.models.campaign import Campaign, CampaignMembership
-from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.memory import _build_search_filters
-
 
 # -- get_campaigns_for_project ------------------------------------------------
 

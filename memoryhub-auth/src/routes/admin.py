@@ -1,7 +1,7 @@
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import bcrypt
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -80,7 +80,7 @@ async def create_client(
         plaintext_secret.encode(), bcrypt.gensalt()
     ).decode()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     client = OAuthClient(
         client_id=body.client_id,
         client_secret_hash=secret_hash,
@@ -153,7 +153,7 @@ async def update_client(
     if body.public is not None:
         client.public = body.public
 
-    client.updated_at = datetime.now(timezone.utc)
+    client.updated_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(client)
 
@@ -180,7 +180,7 @@ async def rotate_secret(
     client.client_secret_hash = bcrypt.hashpw(
         plaintext_secret.encode(), bcrypt.gensalt()
     ).decode()
-    client.updated_at = datetime.now(timezone.utc)
+    client.updated_at = datetime.now(UTC)
     await session.commit()
 
     log.info("Rotated secret for client %s", client_id)

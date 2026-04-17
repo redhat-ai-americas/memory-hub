@@ -6,6 +6,7 @@ Create Date: 2026-04-10
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "011_add_scope_isolation"

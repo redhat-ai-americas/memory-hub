@@ -92,7 +92,7 @@ async def ensure_project_membership(
             await session.rollback()
             project = await get_project(session, project_id)
             if project is not None and project.invite_only:
-                raise ProjectInviteOnlyError(project_id)
+                raise ProjectInviteOnlyError(project_id) from None
 
     # Create the membership.
     membership = ProjectMembership(

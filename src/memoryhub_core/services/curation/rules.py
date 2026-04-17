@@ -66,9 +66,8 @@ async def load_rules(
 
     for rule in all_rules:
         # Skip rules whose scope_filter doesn't match the write scope
-        if rule.scope_filter is not None and scope is not None:
-            if rule.scope_filter != scope:
-                continue
+        if rule.scope_filter is not None and scope is not None and rule.scope_filter != scope:
+            continue
 
         if rule.layer == "system":
             system_rules[rule.name] = rule

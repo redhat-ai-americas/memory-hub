@@ -1,12 +1,12 @@
 import hashlib
+import logging
 import secrets
 import time
-import logging
 
 import jwt
 
 from src.config import settings
-from src.keys import get_private_key, get_kid
+from src.keys import get_kid, get_private_key
 
 log = logging.getLogger("memoryhub-auth.tokens")
 

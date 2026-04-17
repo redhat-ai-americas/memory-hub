@@ -221,12 +221,25 @@ async def test_write_memory_gated_returns_structured_response():
     }
 
     with (
-        patch("src.tools.write_memory.get_claims_from_context", return_value=fake_claims),
-        patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+        patch(
+            "src.tools.write_memory.get_claims_from_context", return_value=fake_claims
+        ),
+        patch(
+            "src.tools.write_memory.get_db_session",
+            return_value=(MagicMock(), AsyncMock()),
+        ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
         patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
-        patch("src.tools.write_memory.create_memory", new_callable=AsyncMock, return_value=(None, fake_curation)),
-        patch("src.tools.write_memory._get_cache_impact", new_callable=AsyncMock, return_value={"compiled_count": 28, "will_recompile": True}),
+        patch(
+            "src.tools.write_memory.create_memory",
+            new_callable=AsyncMock,
+            return_value=(None, fake_curation),
+        ),
+        patch(
+            "src.tools.write_memory._get_cache_impact",
+            new_callable=AsyncMock,
+            return_value={"compiled_count": 28, "will_recompile": True},
+        ),
     ):
         result = await write_memory(content="near-dup content", scope="user")
 
@@ -260,14 +273,23 @@ async def test_write_memory_regex_block_still_raises_tool_error():
     }
 
     with (
-        patch("src.tools.write_memory.get_claims_from_context", return_value=fake_claims),
-        patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+        patch(
+            "src.tools.write_memory.get_claims_from_context", return_value=fake_claims
+        ),
+        patch(
+            "src.tools.write_memory.get_db_session",
+            return_value=(MagicMock(), AsyncMock()),
+        ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
         patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
-        patch("src.tools.write_memory.create_memory", new_callable=AsyncMock, return_value=(None, fake_curation)),
+        patch(
+            "src.tools.write_memory.create_memory",
+            new_callable=AsyncMock,
+            return_value=(None, fake_curation),
+        ),
+        pytest.raises(ToolError, match="Curation rule blocked write: secrets_scan"),
     ):
-        with pytest.raises(ToolError, match="Curation rule blocked write: secrets_scan"):
-            await write_memory(content="AKIAIOSFODNN7EXAMPLE", scope="user")
+        await write_memory(content="AKIAIOSFODNN7EXAMPLE", scope="user")
 
 
 @pytest.mark.asyncio
@@ -319,11 +341,20 @@ async def test_write_memory_force_forwarded_to_create_memory():
     }
 
     with (
-        patch("src.tools.write_memory.get_claims_from_context", return_value=fake_claims),
-        patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+        patch(
+            "src.tools.write_memory.get_claims_from_context", return_value=fake_claims
+        ),
+        patch(
+            "src.tools.write_memory.get_db_session",
+            return_value=(MagicMock(), AsyncMock()),
+        ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
         patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
-        patch("src.tools.write_memory.create_memory", new_callable=AsyncMock, return_value=(fake_node, fake_curation)) as mock_create,
+        patch(
+            "src.tools.write_memory.create_memory",
+            new_callable=AsyncMock,
+            return_value=(fake_node, fake_curation),
+        ) as mock_create,
         patch("src.tools.write_memory.broadcast_after_write", new_callable=AsyncMock),
     ):
         result = await write_memory(content="forced write", scope="user", force=True)

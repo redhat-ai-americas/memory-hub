@@ -8,8 +8,6 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field, ValidationError
 
-logger = logging.getLogger(__name__)
-
 from src.core.app import mcp
 from src.core.authz import (
     AuthenticationError,
@@ -41,6 +39,8 @@ from memoryhub_core.services.project import ensure_project_membership
 from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.memory import create_memory
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
+
+logger = logging.getLogger(__name__)
 
 
 async def _get_cache_impact(tenant_id: str, owner_id: str) -> dict:

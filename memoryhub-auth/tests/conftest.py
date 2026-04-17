@@ -1,7 +1,7 @@
 """Shared test fixtures for memoryhub-auth."""
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import bcrypt
 import pytest
@@ -18,7 +18,7 @@ os.environ.setdefault("AUTH_ACCESS_TOKEN_TTL", "300")
 os.environ.setdefault("AUTH_REFRESH_TOKEN_TTL", "3600")
 
 from src.keys import load_keys  # noqa: E402
-from src.models import Base, OAuthClient, RefreshToken, AuthSession  # noqa: E402
+from src.models import Base, OAuthClient  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Key loading — once per session
@@ -169,8 +169,8 @@ async def sample_client(db_session) -> OAuthClient:
         active=True,
         redirect_uris=["https://example.com/callback"],
         public=False,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     db_session.add(obj)
     await db_session.commit()
@@ -189,8 +189,8 @@ async def inactive_client(db_session) -> OAuthClient:
         tenant_id="test-tenant",
         default_scopes=["memory:read"],
         active=False,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     db_session.add(obj)
     await db_session.commit()
@@ -211,8 +211,8 @@ async def public_client(db_session) -> OAuthClient:
         active=True,
         redirect_uris=["https://librechat.example.com/api/mcp/memoryhub/oauth/callback"],
         public=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     db_session.add(obj)
     await db_session.commit()

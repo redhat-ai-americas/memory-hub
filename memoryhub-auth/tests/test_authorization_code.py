@@ -4,12 +4,12 @@ import base64
 import hashlib
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from src.models import AuthSession
 
+from src.models import AuthSession
 from tests.conftest import TEST_CLIENT_SECRET
 
 
@@ -42,7 +42,7 @@ def _ready_session(client_id="test-agent", **overrides):
         tenant_id="default",
         scopes=["memory:read:user", "memory:write:user"],
         status="ready",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
     )
     defaults.update(overrides)
     return AuthSession(**defaults), raw_code, verifier
@@ -99,6 +99,7 @@ class TestAuthorizationCodeHappyPath:
 
     async def test_jwt_claims_correct(self, client, sample_client, db_engine):
         import jwt as pyjwt
+
         from src.keys import get_public_key
 
         factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
@@ -269,7 +270,7 @@ class TestAuthorizationCodeValidation:
     async def test_expired_code_rejected(self, client, sample_client, db_engine):
         factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
         auth_sess, raw_code, verifier = _ready_session(
-            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)
+            expires_at=datetime.now(UTC) - timedelta(minutes=1)
         )
         async with factory() as sess:
             sess.add(auth_sess)

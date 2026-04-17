@@ -10,7 +10,7 @@ import hashlib
 import logging
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import httpx
@@ -155,7 +155,7 @@ async def _check_group_membership(opaque_token: str, username: str) -> None:
             )
     except httpx.RequestError as exc:
         log.error("OpenShift group lookup network error: group=%s err=%s", group_name, exc)
-        raise OAuthError(502, "server_error", "Failed to verify group membership")
+        raise OAuthError(502, "server_error", "Failed to verify group membership") from exc
 
     if resp.status_code != 200:
         log.error(
@@ -224,7 +224,7 @@ async def openshift_callback(
     auth_session.tenant_id = settings.default_tenant_id
     auth_session.scopes = settings.default_human_scopes
     auth_session.status = "ready"
-    auth_session.expires_at = datetime.now(timezone.utc) + timedelta(
+    auth_session.expires_at = datetime.now(UTC) + timedelta(
         seconds=settings.auth_session_ready_ttl
     )
     await session.commit()

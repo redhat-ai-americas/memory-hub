@@ -15,8 +15,6 @@ Run these with the compose stack active:
 
 import pytest
 from sqlalchemy import select, text
-
-pytestmark = pytest.mark.integration
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import memoryhub_core.services.curation.pipeline as pipeline_module
@@ -31,14 +29,22 @@ from memoryhub_core.models.schemas import (
 from memoryhub_core.services.embeddings import EMBEDDING_DIM, MockEmbeddingService
 from memoryhub_core.services.graph import (
     create_relationship,
-    get_relationships as _svc_get_relationships,
     trace_provenance,
+)
+from memoryhub_core.services.graph import (
+    get_relationships as _svc_get_relationships,
 )
 from memoryhub_core.services.memory import (
     create_memory as _svc_create_memory,
+)
+from memoryhub_core.services.memory import (
     search_memories as _svc_search_memories,
+)
+from memoryhub_core.services.memory import (
     update_memory,
 )
+
+pytestmark = pytest.mark.integration
 
 
 # Phase 3 (#46) made create_memory require a tenant_id kwarg. Phase 4
@@ -124,10 +130,18 @@ async def test_search_returns_results_ordered_by_cosine_similarity(
     """Results must be ranked by cosine similarity descending, not arbitrary."""
     # Create memories with distinct semantic content.
     # MockEmbeddingService uses word-level hashing, so overlapping words → closer vectors.
-    await create_memory(_make("python programming language interpreter"), async_session, embedding_service, skip_curation=True)
-    await create_memory(_make("kubernetes container orchestration deployment"), async_session, embedding_service, skip_curation=True)
-    await create_memory(_make("python data science machine learning"), async_session, embedding_service, skip_curation=True)
-    await create_memory(_make("postgresql database relational tables"), async_session, embedding_service, skip_curation=True)
+    await create_memory(
+        _make("python programming language interpreter"), async_session, embedding_service, skip_curation=True
+    )
+    await create_memory(
+        _make("kubernetes container orchestration deployment"), async_session, embedding_service, skip_curation=True
+    )
+    await create_memory(
+        _make("python data science machine learning"), async_session, embedding_service, skip_curation=True
+    )
+    await create_memory(
+        _make("postgresql database relational tables"), async_session, embedding_service, skip_curation=True
+    )
 
     # Query is most similar to the python-related memories.
     results = await search_memories(
@@ -164,8 +178,12 @@ async def test_search_scores_are_not_synthetic_rank_values(
     embedding_service: MockEmbeddingService,
 ) -> None:
     """PostgreSQL path returns real cosine similarity; not the 0, 1/n, 2/n... fallback."""
-    await create_memory(_make("database indexing performance optimization"), async_session, embedding_service, skip_curation=True)
-    await create_memory(_make("network packet routing protocol latency"), async_session, embedding_service, skip_curation=True)
+    await create_memory(
+        _make("database indexing performance optimization"), async_session, embedding_service, skip_curation=True
+    )
+    await create_memory(
+        _make("network packet routing protocol latency"), async_session, embedding_service, skip_curation=True
+    )
 
     results = await search_memories(
         query="database performance",
@@ -233,7 +251,7 @@ async def test_embedding_roundtrip_matches_mock_service(
     node = result.scalar_one()
 
     assert node.embedding is not None
-    for i, (stored, expected) in enumerate(zip(node.embedding, expected_embedding)):
+    for i, (stored, expected) in enumerate(zip(node.embedding, expected_embedding, strict=False)):
         assert abs(stored - expected) < 1e-5, (
             f"Embedding mismatch at dimension {i}: stored={stored:.6f}, expected={expected:.6f}"
         )
@@ -689,8 +707,8 @@ async def test_update_memory_new_version_has_fresh_embedding(
     original_embedding = await embedding_service.embed(original_content)
 
     # The new embedding must match the updated content, not the original.
-    new_emb_dot_updated = sum(a * b for a, b in zip(new_node.embedding, expected_embedding))
-    new_emb_dot_original = sum(a * b for a, b in zip(new_node.embedding, original_embedding))
+    new_emb_dot_updated = sum(a * b for a, b in zip(new_node.embedding, expected_embedding, strict=False))
+    new_emb_dot_original = sum(a * b for a, b in zip(new_node.embedding, original_embedding, strict=False))
     assert new_emb_dot_updated > new_emb_dot_original, (
         f"New embedding should be closer to updated content than original content. "
         f"dot(updated)={new_emb_dot_updated:.4f}, dot(original)={new_emb_dot_original:.4f}"

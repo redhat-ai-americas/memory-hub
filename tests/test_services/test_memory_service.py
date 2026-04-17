@@ -19,19 +19,34 @@ from memoryhub_core.models.schemas import (
 from memoryhub_core.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
 from memoryhub_core.services.memory import (
     DEFAULT_PIVOT_THRESHOLD,
-    count_search_matches as _svc_count_search_matches,
-    create_memory as _svc_create_memory,
-    delete_memory as _svc_delete_memory,
-    get_memory_history as _svc_get_memory_history,
-    read_memory as _svc_read_memory,
     report_contradiction,
     resolve_contradiction,
+)
+from memoryhub_core.services.memory import (
+    count_search_matches as _svc_count_search_matches,
+)
+from memoryhub_core.services.memory import (
+    create_memory as _svc_create_memory,
+)
+from memoryhub_core.services.memory import (
+    delete_memory as _svc_delete_memory,
+)
+from memoryhub_core.services.memory import (
+    get_memory_history as _svc_get_memory_history,
+)
+from memoryhub_core.services.memory import (
+    read_memory as _svc_read_memory,
+)
+from memoryhub_core.services.memory import (
     search_memories as _svc_search_memories,
+)
+from memoryhub_core.services.memory import (
     search_memories_with_focus as _svc_search_memories_with_focus,
+)
+from memoryhub_core.services.memory import (
     update_memory as _svc_update_memory,
 )
 from memoryhub_core.services.rerank import NoopRerankerService, RerankerService
-
 
 # Default tenant used by tests that don't care which tenant writes occur in.
 # Phase 3 made tenant_id a required kwarg on create_memory; Phase 4 adds
@@ -42,7 +57,9 @@ from memoryhub_core.services.rerank import NoopRerankerService, RerankerService
 _TEST_TENANT_ID = "default"
 
 
-async def create_memory(data, session, embedding_service, skip_curation=False, *, tenant_id=_TEST_TENANT_ID, s3_adapter=None):
+async def create_memory(
+    data, session, embedding_service, skip_curation=False, *, tenant_id=_TEST_TENANT_ID, s3_adapter=None
+):
     """Test wrapper around the service create_memory with a default tenant."""
     return await _svc_create_memory(
         data,
@@ -505,6 +522,7 @@ async def test_get_memory_history_walks_chain_bidirectionally(
 
 async def test_report_contradiction(async_session, embedding_service):
     from sqlalchemy import select
+
     from memoryhub_core.models.contradiction import ContradictionReport
 
     node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
@@ -557,6 +575,7 @@ async def test_report_contradiction_preserves_existing_metadata(async_session, e
 
 async def test_report_contradiction_resolved_not_counted(async_session, embedding_service):
     from sqlalchemy import select
+
     from memoryhub_core.models.contradiction import ContradictionReport
 
     node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
@@ -598,6 +617,7 @@ async def test_resolve_contradiction(async_session, embedding_service):
     )
 
     from sqlalchemy import select
+
     from memoryhub_core.models.contradiction import ContradictionReport
 
     result = await async_session.execute(
@@ -624,6 +644,7 @@ async def test_resolve_contradiction_already_resolved(async_session, embedding_s
     )
 
     from sqlalchemy import select
+
     from memoryhub_core.models.contradiction import ContradictionReport
 
     result = await async_session.execute(
@@ -664,7 +685,7 @@ async def test_search_memories_returns_results(async_session, embedding_service)
     # Each result is a (node, score) tuple
     for item, score in results:
         assert isinstance(score, float)
-        assert isinstance(item, (MemoryNodeRead, MemoryNodeStub))
+        assert isinstance(item, MemoryNodeRead | MemoryNodeStub)
     # High weight -> MemoryNodeRead, low weight -> MemoryNodeStub
     types = {type(item) for item, _ in results}
     assert MemoryNodeRead in types
@@ -997,6 +1018,7 @@ def test_cosine_distance_returns_python_float_for_numpy_inputs():
 async def test_create_memory_populates_tenant_from_param(async_session, embedding_service):
     """create_memory must stamp the passed tenant_id onto the persisted row."""
     from sqlalchemy import select
+
     from memoryhub_core.models.memory import MemoryNode
 
     data = _make_create_data(content="tenant-a content")
@@ -1027,6 +1049,7 @@ async def test_update_memory_inherits_tenant_from_existing(async_session, embedd
     """The new version must inherit tenant_id from the existing row, not
     from claims or a parameter. Tenant is a property of the memory."""
     from sqlalchemy import select
+
     from memoryhub_core.models.memory import MemoryNode
 
     original, _ = await _svc_create_memory(
@@ -1057,6 +1080,7 @@ async def test_update_memory_deep_copied_children_inherit_tenant(async_session, 
     """Deep-copied child branches from update_memory must inherit the
     parent's tenant so the whole subtree stays tenant-consistent."""
     from sqlalchemy import select
+
     from memoryhub_core.models.memory import MemoryNode
 
     parent, _ = await _svc_create_memory(
@@ -1093,6 +1117,7 @@ async def test_report_contradiction_inherits_tenant_from_memory(async_session, e
     """The contradiction report row must carry the contradicted memory's
     tenant_id, inherited from the loaded memory — callers don't pass it."""
     from sqlalchemy import select
+
     from memoryhub_core.models.contradiction import ContradictionReport
 
     node, _ = await _svc_create_memory(
@@ -1450,16 +1475,17 @@ async def test_create_memory_s3_when_over_threshold(async_session, embedding_ser
 async def test_create_memory_s3_creates_chunks(async_session, embedding_service):
     """Oversized S3 content produces chunk children with branch_type='chunk'."""
     from sqlalchemy import select as sa_select
-    from memoryhub_core.models.memory import MemoryNode as MN
+
+    from memoryhub_core.models.memory import MemoryNode
 
     s3 = MockS3Adapter()
     data = _make_create_data(content=_make_oversized_content())
     result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
 
-    chunks_stmt = sa_select(MN).where(
-        MN.parent_id == result.id,
-        MN.branch_type == "chunk",
-        MN.deleted_at.is_(None),
+    chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == result.id,
+        MemoryNode.branch_type == "chunk",
+        MemoryNode.deleted_at.is_(None),
     )
     chunks = (await async_session.execute(chunks_stmt)).scalars().all()
 
@@ -1473,15 +1499,16 @@ async def test_create_memory_s3_creates_chunks(async_session, embedding_service)
 async def test_create_memory_s3_chunks_have_embeddings(async_session, embedding_service):
     """Each semantic chunk gets its own embedding vector."""
     from sqlalchemy import select as sa_select
-    from memoryhub_core.models.memory import MemoryNode as MN
+
+    from memoryhub_core.models.memory import MemoryNode
 
     s3 = MockS3Adapter()
     data = _make_create_data(content=_make_oversized_content())
     result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
 
-    chunks_stmt = sa_select(MN).where(
-        MN.parent_id == result.id,
-        MN.branch_type == "chunk",
+    chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == result.id,
+        MemoryNode.branch_type == "chunk",
     )
     chunks = (await async_session.execute(chunks_stmt)).scalars().all()
 
@@ -1506,7 +1533,6 @@ async def test_create_memory_s3_no_adapter_inline_fallback(async_session, embedd
 
 async def test_create_memory_oversized_no_s3_truncates_embed_text(async_session, embedding_service):
     """Oversized content without S3 still truncates embed text to prevent 413."""
-    from unittest.mock import AsyncMock
     from memoryhub_core.config import AppSettings
 
     big_content = _make_oversized_content()
@@ -1536,15 +1562,16 @@ async def test_create_memory_oversized_no_s3_truncates_embed_text(async_session,
 async def test_create_memory_oversized_no_s3_creates_chunks(async_session, embedding_service):
     """Oversized content without S3 still creates chunk children."""
     from sqlalchemy import select as sa_select
-    from memoryhub_core.models.memory import MemoryNode as MN
+
+    from memoryhub_core.models.memory import MemoryNode
 
     data = _make_create_data(content=_make_oversized_content())
     result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=None)
 
-    chunks_stmt = sa_select(MN).where(
-        MN.parent_id == result.id,
-        MN.branch_type == "chunk",
-        MN.deleted_at.is_(None),
+    chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == result.id,
+        MemoryNode.branch_type == "chunk",
+        MemoryNode.deleted_at.is_(None),
     )
     chunks = (await async_session.execute(chunks_stmt)).scalars().all()
 
@@ -1574,7 +1601,8 @@ async def test_create_memory_oversized_no_s3_stores_full_content_inline(async_se
 async def test_update_memory_s3_content_changed_rechunks(async_session, embedding_service):
     """Updating S3 content retires old chunks and creates new ones."""
     from sqlalchemy import select as sa_select
-    from memoryhub_core.models.memory import MemoryNode as MN
+
+    from memoryhub_core.models.memory import MemoryNode
 
     s3 = MockS3Adapter()
     original_content = _make_oversized_content()
@@ -1582,9 +1610,9 @@ async def test_update_memory_s3_content_changed_rechunks(async_session, embeddin
     original, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
 
     # Verify original chunks exist
-    old_chunks_stmt = sa_select(MN).where(
-        MN.parent_id == original.id,
-        MN.branch_type == "chunk",
+    old_chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == original.id,
+        MemoryNode.branch_type == "chunk",
     )
     old_chunks = (await async_session.execute(old_chunks_stmt)).scalars().all()
     assert len(old_chunks) >= 2
@@ -1610,10 +1638,10 @@ async def test_update_memory_s3_content_changed_rechunks(async_session, embeddin
         assert chunk.is_current is False, "old chunks must be retired"
 
     # New chunks should exist under the updated version
-    new_chunks_stmt = sa_select(MN).where(
-        MN.parent_id == updated.id,
-        MN.branch_type == "chunk",
-        MN.is_current.is_(True),
+    new_chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == updated.id,
+        MemoryNode.branch_type == "chunk",
+        MemoryNode.is_current.is_(True),
     )
     new_chunks = (await async_session.execute(new_chunks_stmt)).scalars().all()
     assert len(new_chunks) >= 2, "new chunks should be created after rechunking"
@@ -1643,7 +1671,8 @@ async def test_update_memory_s3_content_unchanged_preserves_storage(async_sessio
 async def test_update_memory_non_chunk_branches_still_copied(async_session, embedding_service):
     """On content update, rationale branches are deep-copied but chunk branches are retired."""
     from sqlalchemy import select as sa_select
-    from memoryhub_core.models.memory import MemoryNode as MN
+
+    from memoryhub_core.models.memory import MemoryNode
 
     s3 = MockS3Adapter()
     parent_data = _make_create_data(content=_make_oversized_content())
@@ -1658,7 +1687,9 @@ async def test_update_memory_non_chunk_branches_still_copied(async_session, embe
     await create_memory(rationale_data, async_session, embedding_service)
 
     # Verify starting state: chunks + 1 rationale
-    children_stmt = sa_select(MN).where(MN.parent_id == parent.id, MN.deleted_at.is_(None))
+    children_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == parent.id, MemoryNode.deleted_at.is_(None)
+    )
     old_children = (await async_session.execute(children_stmt)).scalars().all()
     old_chunk_count = sum(1 for c in old_children if c.branch_type == "chunk")
     old_rationale_count = sum(1 for c in old_children if c.branch_type == "rationale")
@@ -1678,9 +1709,9 @@ async def test_update_memory_non_chunk_branches_still_copied(async_session, embe
     )
 
     # New version should have deep-copied rationale + new chunks
-    new_children_stmt = sa_select(MN).where(
-        MN.parent_id == updated.id,
-        MN.deleted_at.is_(None),
+    new_children_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == updated.id,
+        MemoryNode.deleted_at.is_(None),
     )
     new_children = (await async_session.execute(new_children_stmt)).scalars().all()
 
@@ -1697,7 +1728,8 @@ async def test_update_memory_non_chunk_branches_still_copied(async_session, embe
 async def test_update_memory_oversized_no_s3_creates_chunks(async_session, embedding_service):
     """Updating with oversized content and no S3 creates chunk children."""
     from sqlalchemy import select as sa_select
-    from memoryhub_core.models.memory import MemoryNode as MN
+
+    from memoryhub_core.models.memory import MemoryNode
 
     # Create a normal (small) inline memory
     data = _make_create_data(content="Short initial content")
@@ -1716,10 +1748,10 @@ async def test_update_memory_oversized_no_s3_creates_chunks(async_session, embed
     assert updated.storage_type == "inline"
     assert updated.content_ref is None
 
-    chunks_stmt = sa_select(MN).where(
-        MN.parent_id == updated.id,
-        MN.branch_type == "chunk",
-        MN.is_current.is_(True),
+    chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == updated.id,
+        MemoryNode.branch_type == "chunk",
+        MemoryNode.is_current.is_(True),
     )
     chunks = (await async_session.execute(chunks_stmt)).scalars().all()
     assert len(chunks) >= 2, f"expected chunks after oversized update, got {len(chunks)}"
@@ -1728,15 +1760,16 @@ async def test_update_memory_oversized_no_s3_creates_chunks(async_session, embed
 async def test_update_memory_oversized_no_s3_retires_old_chunks(async_session, embedding_service):
     """Updating oversized inline memory retires old chunks and creates new ones."""
     from sqlalchemy import select as sa_select
-    from memoryhub_core.models.memory import MemoryNode as MN
+
+    from memoryhub_core.models.memory import MemoryNode
 
     # Create oversized memory without S3 (now creates chunks)
     data = _make_create_data(content=_make_oversized_content())
     original, _ = await create_memory(data, async_session, embedding_service, s3_adapter=None)
 
-    old_chunks_stmt = sa_select(MN).where(
-        MN.parent_id == original.id,
-        MN.branch_type == "chunk",
+    old_chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == original.id,
+        MemoryNode.branch_type == "chunk",
     )
     old_chunks = (await async_session.execute(old_chunks_stmt)).scalars().all()
     assert len(old_chunks) >= 2
@@ -1761,10 +1794,10 @@ async def test_update_memory_oversized_no_s3_retires_old_chunks(async_session, e
         assert chunk.is_current is False, "old chunks must be retired"
 
     # New chunks should exist under updated version
-    new_chunks_stmt = sa_select(MN).where(
-        MN.parent_id == updated.id,
-        MN.branch_type == "chunk",
-        MN.is_current.is_(True),
+    new_chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == updated.id,
+        MemoryNode.branch_type == "chunk",
+        MemoryNode.is_current.is_(True),
     )
     new_chunks = (await async_session.execute(new_chunks_stmt)).scalars().all()
     assert len(new_chunks) >= 2, "new chunks should be created"
@@ -1809,7 +1842,6 @@ async def test_delete_memory_inline_no_s3_cleanup(async_session, embedding_servi
 
 async def test_create_memory_passes_force(async_session, embedding_service, monkeypatch):
     """force=True is forwarded to run_curation_pipeline so gated writes can proceed."""
-    from unittest.mock import AsyncMock, call
     import memoryhub_core.services.memory as _memory_module
 
     captured_kwargs: dict = {}

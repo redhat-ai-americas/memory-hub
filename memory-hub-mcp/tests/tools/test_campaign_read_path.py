@@ -27,8 +27,10 @@ def _campaign_claims():
         "identity_type": "user",
         "tenant_id": "default",
         "scopes": [
-            "memory:read:user", "memory:write:user",
-            "memory:read:campaign", "memory:write:campaign",
+            "memory:read:user",
+            "memory:write:user",
+            "memory:read:campaign",
+            "memory:write:campaign",
         ],
     }
 
@@ -78,10 +80,20 @@ async def test_read_memory_campaign_requires_project_id():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.read_memory.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.read_memory.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(
+            "src.tools.read_memory.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.read_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
         patch("src.tools.read_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.read_memory._read_memory", new_callable=AsyncMock, return_value=fake_node),
+        patch(
+            "src.tools.read_memory._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
         pytest.raises(ToolError, match="project_id is required"),
     ):
         await read_memory(memory_id=MEMORY_UUID)
@@ -97,10 +109,20 @@ async def test_read_memory_campaign_with_project_id():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.read_memory.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.read_memory.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(
+            "src.tools.read_memory.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.read_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
         patch("src.tools.read_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.read_memory._read_memory", new_callable=AsyncMock, return_value=fake_node),
+        patch(
+            "src.tools.read_memory._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
         patch(
             "src.tools.read_memory.get_campaigns_for_project",
             new_callable=AsyncMock,
@@ -126,15 +148,29 @@ async def test_read_memory_campaign_with_project_id():
 async def test_get_similar_memories_campaign_requires_project_id():
     from src.tools.get_similar_memories import get_similar_memories
 
-    fake_source = SimpleNamespace(scope="campaign", owner_id=CAMPAIGN_UUID, tenant_id="default")
+    fake_source = SimpleNamespace(
+        scope="campaign", owner_id=CAMPAIGN_UUID, tenant_id="default"
+    )
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.get_similar_memories.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.get_similar_memories.read_memory_service", new_callable=AsyncMock, return_value=fake_source),
+        patch(
+            "src.tools.get_similar_memories.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.get_similar_memories.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock
+        ),
+        patch(
+            "src.tools.get_similar_memories.read_memory_service",
+            new_callable=AsyncMock,
+            return_value=fake_source,
+        ),
         pytest.raises(ToolError, match="project_id is required"),
     ):
         await get_similar_memories(memory_id=MEMORY_UUID)
@@ -144,15 +180,29 @@ async def test_get_similar_memories_campaign_requires_project_id():
 async def test_get_similar_memories_campaign_with_project_id():
     from src.tools.get_similar_memories import get_similar_memories
 
-    fake_source = SimpleNamespace(scope="campaign", owner_id=CAMPAIGN_UUID, tenant_id="default")
+    fake_source = SimpleNamespace(
+        scope="campaign", owner_id=CAMPAIGN_UUID, tenant_id="default"
+    )
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.get_similar_memories.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.get_similar_memories.read_memory_service", new_callable=AsyncMock, return_value=fake_source),
+        patch(
+            "src.tools.get_similar_memories.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.get_similar_memories.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock
+        ),
+        patch(
+            "src.tools.get_similar_memories.read_memory_service",
+            new_callable=AsyncMock,
+            return_value=fake_source,
+        ),
         patch(
             "src.tools.get_similar_memories.get_campaigns_for_project",
             new_callable=AsyncMock,
@@ -164,7 +214,9 @@ async def test_get_similar_memories_campaign_with_project_id():
             return_value={"results": [], "total": 0, "has_more": False},
         ),
     ):
-        result = await get_similar_memories(memory_id=MEMORY_UUID, project_id="my-project")
+        result = await get_similar_memories(
+            memory_id=MEMORY_UUID, project_id="my-project"
+        )
 
     assert result["total"] == 0
 
@@ -181,10 +233,22 @@ async def test_report_contradiction_campaign_requires_project_id():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.report_contradiction.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.report_contradiction.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.report_contradiction.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.report_contradiction._read_memory", new_callable=AsyncMock, return_value=fake_node),
+        patch(
+            "src.tools.report_contradiction.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.report_contradiction.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.report_contradiction.release_db_session", new_callable=AsyncMock
+        ),
+        patch(
+            "src.tools.report_contradiction._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
         pytest.raises(ToolError, match="project_id is required"),
     ):
         await report_contradiction(
@@ -202,10 +266,22 @@ async def test_report_contradiction_campaign_with_project_id():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.report_contradiction.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.report_contradiction.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.report_contradiction.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.report_contradiction._read_memory", new_callable=AsyncMock, return_value=fake_node),
+        patch(
+            "src.tools.report_contradiction.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.report_contradiction.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.report_contradiction.release_db_session", new_callable=AsyncMock
+        ),
+        patch(
+            "src.tools.report_contradiction._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
         patch(
             "src.tools.report_contradiction.get_campaigns_for_project",
             new_callable=AsyncMock,
@@ -239,10 +315,22 @@ async def test_create_relationship_campaign_requires_project_id():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.create_relationship.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.create_relationship.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.create_relationship.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.create_relationship._read_memory", new_callable=AsyncMock, return_value=fake_node),
+        patch(
+            "src.tools.create_relationship.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.create_relationship.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.create_relationship.release_db_session", new_callable=AsyncMock
+        ),
+        patch(
+            "src.tools.create_relationship._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
         pytest.raises(ToolError, match="project_id is required"),
     ):
         await create_relationship(
@@ -258,7 +346,7 @@ async def test_create_relationship_campaign_with_project_id():
 
     fake_source = _fake_campaign_node()
     target_id = uuid.uuid4()
-    fake_target = _fake_campaign_node(id=target_id)
+    _fake_campaign_node(id=target_id)
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
 
@@ -272,10 +360,22 @@ async def test_create_relationship_campaign_with_project_id():
     }
 
     with (
-        patch("src.tools.create_relationship.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.create_relationship.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.create_relationship.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.create_relationship._read_memory", new_callable=AsyncMock, return_value=fake_source),
+        patch(
+            "src.tools.create_relationship.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.create_relationship.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.create_relationship.release_db_session", new_callable=AsyncMock
+        ),
+        patch(
+            "src.tools.create_relationship._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_source,
+        ),
         patch(
             "src.tools.create_relationship.get_campaigns_for_project",
             new_callable=AsyncMock,
@@ -316,10 +416,20 @@ async def test_delete_memory_campaign_requires_project_id():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.delete_memory.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.delete_memory.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(
+            "src.tools.delete_memory.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.delete_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
         patch("src.tools.delete_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.delete_memory._read_memory", new_callable=AsyncMock, return_value=fake_node),
+        patch(
+            "src.tools.delete_memory._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
         pytest.raises(ToolError, match="project_id is required"),
     ):
         await delete_memory(memory_id=MEMORY_UUID)
@@ -334,10 +444,20 @@ async def test_delete_memory_campaign_with_project_id():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.delete_memory.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.delete_memory.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(
+            "src.tools.delete_memory.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.delete_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
         patch("src.tools.delete_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.delete_memory._read_memory", new_callable=AsyncMock, return_value=fake_node),
+        patch(
+            "src.tools.delete_memory._read_memory",
+            new_callable=AsyncMock,
+            return_value=fake_node,
+        ),
         patch(
             "src.tools.delete_memory.get_campaigns_for_project",
             new_callable=AsyncMock,
@@ -388,16 +508,30 @@ async def test_get_relationships_campaign_nodes_filtered_without_project_id():
     }
 
     with (
-        patch("src.tools.get_relationships.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.get_relationships.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(
+            "src.tools.get_relationships.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.get_relationships.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
         patch("src.tools.get_relationships.release_db_session", new_callable=AsyncMock),
         patch(
             "src.tools.get_relationships.get_relationships_service",
             new_callable=AsyncMock,
             return_value=[fake_rel],
         ),
-        patch("src.tools.get_relationships.get_projects_for_user", new_callable=AsyncMock, return_value=set()),
-        patch("src.tools.get_relationships.get_roles_for_user", new_callable=AsyncMock, return_value=set()),
+        patch(
+            "src.tools.get_relationships.get_projects_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
+        patch(
+            "src.tools.get_relationships.get_roles_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
     ):
         result = await get_relationships(node_id=MEMORY_UUID)
 
@@ -430,8 +564,14 @@ async def test_get_relationships_campaign_nodes_accessible_with_project_id():
     }
 
     with (
-        patch("src.tools.get_relationships.get_claims_from_context", return_value=_campaign_claims()),
-        patch("src.tools.get_relationships.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(
+            "src.tools.get_relationships.get_claims_from_context",
+            return_value=_campaign_claims(),
+        ),
+        patch(
+            "src.tools.get_relationships.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
         patch("src.tools.get_relationships.release_db_session", new_callable=AsyncMock),
         patch(
             "src.tools.get_relationships.get_relationships_service",
@@ -443,8 +583,16 @@ async def test_get_relationships_campaign_nodes_accessible_with_project_id():
             new_callable=AsyncMock,
             return_value={CAMPAIGN_UUID},
         ),
-        patch("src.tools.get_relationships.get_projects_for_user", new_callable=AsyncMock, return_value=set()),
-        patch("src.tools.get_relationships.get_roles_for_user", new_callable=AsyncMock, return_value=set()),
+        patch(
+            "src.tools.get_relationships.get_projects_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
+        patch(
+            "src.tools.get_relationships.get_roles_for_user",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
     ):
         result = await get_relationships(node_id=MEMORY_UUID, project_id="my-project")
 
@@ -454,14 +602,18 @@ async def test_get_relationships_campaign_nodes_accessible_with_project_id():
 
 # --- Signature tests ---
 
-@pytest.mark.parametrize("tool_module,tool_name", [
-    ("src.tools.read_memory", "read_memory"),
-    ("src.tools.get_similar_memories", "get_similar_memories"),
-    ("src.tools.report_contradiction", "report_contradiction"),
-    ("src.tools.create_relationship", "create_relationship"),
-    ("src.tools.delete_memory", "delete_memory"),
-    ("src.tools.get_relationships", "get_relationships"),
-])
+
+@pytest.mark.parametrize(
+    "tool_module,tool_name",
+    [
+        ("src.tools.read_memory", "read_memory"),
+        ("src.tools.get_similar_memories", "get_similar_memories"),
+        ("src.tools.report_contradiction", "report_contradiction"),
+        ("src.tools.create_relationship", "create_relationship"),
+        ("src.tools.delete_memory", "delete_memory"),
+        ("src.tools.get_relationships", "get_relationships"),
+    ],
+)
 def test_tool_has_project_id_parameter(tool_module, tool_name):
     """All read-path tools must expose project_id for campaign enrollment."""
     import importlib

@@ -23,6 +23,6 @@ os.environ.setdefault("MEMORYHUB_USERS_FILE", os.path.join(_script_dir, "dev-use
 os.chdir(_script_dir)
 sys.path.insert(0, os.path.dirname(_script_dir))
 
-from src.main import main
+from src.main import main  # noqa: E402
 
 main()

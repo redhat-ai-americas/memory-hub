@@ -8,8 +8,6 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field, ValidationError
 
-logger = logging.getLogger(__name__)
-
 from src.core.app import mcp
 from src.core.authz import (
     AuthenticationError,
@@ -24,6 +22,8 @@ from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.graph import create_relationship as create_relationship_service
 from memoryhub_core.services.memory import read_memory as _read_memory
+
+logger = logging.getLogger(__name__)
 
 _VALID_TYPES = [t.value for t in RelationshipType]
 

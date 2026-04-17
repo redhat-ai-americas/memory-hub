@@ -18,12 +18,20 @@ def test_load_tools_resources_prompts(tmp_path: Path):
 
     # Write a simple tool
     (tools_dir / "t1.py").write_text(
-        "from src.core.app import mcp\nfrom fastmcp import Context\n@mcp.tool\nasync def t1(x: int, ctx: Context) -> int:\n    await ctx.debug('adding one')\n    return x + 1\n"
+        "from src.core.app import mcp\n"
+        "from fastmcp import Context\n"
+        "@mcp.tool\n"
+        "async def t1(x: int, ctx: Context) -> int:\n"
+        "    await ctx.debug('adding one')\n"
+        "    return x + 1\n"
     )
 
     # Write a simple resource
     (resources_dir / "r1.py").write_text(
-        "from src.core.app import mcp\n@mcp.resource(\"resource://r1\")\ndef r1() -> str:\n    return 'ok'\n"
+        "from src.core.app import mcp\n"
+        '@mcp.resource("resource://r1")\n'
+        "def r1() -> str:\n"
+        "    return 'ok'\n"
     )
 
     # Write a simple prompt (Python-based with FastMCP decorator)

@@ -1,7 +1,6 @@
 """Tests for set_session_focus tool."""
 
 import inspect
-from datetime import date
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
@@ -11,7 +10,6 @@ from memoryhub_core.config import ValkeySettings
 from memoryhub_core.services.embeddings import MockEmbeddingService
 from memoryhub_core.services.valkey_client import (
     ValkeyClient,
-    ValkeyUnavailableError,
     decode_vector,
     set_valkey_client,
 )

@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from memoryhub_core.services.compilation import (
     CompilationEpoch,
@@ -23,7 +21,7 @@ from memoryhub_core.services.compilation import (
 # Test helpers
 # ---------------------------------------------------------------------------
 
-_BASE_DATE = datetime(2026, 4, 1, tzinfo=timezone.utc)
+_BASE_DATE = datetime(2026, 4, 1, tzinfo=UTC)
 
 
 @dataclass
@@ -269,7 +267,7 @@ def test_epoch_serialization_roundtrip():
     """to_dict() → from_dict() must produce an identical CompilationEpoch."""
     a = _mem(0.9, days_ago=2)
     b = _mem(0.5, days_ago=1)
-    now = datetime(2026, 4, 13, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 4, 13, 12, 0, 0, tzinfo=UTC)
 
     original = compile_memory_set(_results(a, b), epoch=3, now=now)
     restored = CompilationEpoch.from_dict(original.to_dict())

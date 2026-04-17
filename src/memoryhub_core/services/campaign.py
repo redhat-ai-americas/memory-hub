@@ -5,7 +5,6 @@ based on project enrollment. Used by the authz layer and search filters
 to include campaign-scoped memories in results.
 """
 
-import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

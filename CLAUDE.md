@@ -23,16 +23,19 @@ Use the `/issue-tracker` skill for ALL issue operations. Never create issues man
 
 ## Cluster Contexts
 
-This project deploys to the **workshop-cluster**. A second cluster (gemma-cluster) is used for unrelated work. Both are configured as named contexts in `~/.kube/config`:
+This project deploys to the **mcp-rhoai** cluster context. Other clusters (kagenti-rhoai, fips-rhoai) are used for unrelated work. All are configured as named contexts in `~/.kube/config`:
 
-- `workshop-cluster` — MemoryHub's cluster (n7pd5)
-- `gemma-cluster` — Gemma 4 deployment cluster (l78nk)
+- `mcp-rhoai` — MemoryHub's cluster (n7pd5, sandbox5167)
+- `kagenti-rhoai` — Kagenti deployment cluster (gs4bz)
+- `fips-rhoai` — FIPS cluster (l78nk)
 
-**Always pass `--context workshop-cluster`** on every `oc` / `kubectl` command for this project. Do not rely on the current context, and do not switch contexts with `oc login` or `oc config use-context` — that would break whichever session isn't expecting the switch.
+> **Note:** The context was previously named `workshop-cluster`. It was renamed to `mcp-rhoai` circa 2026-04-17. Old session notes and retros may reference the old name.
+
+**Always pass `--context mcp-rhoai`** on every `oc` / `kubectl` command for this project. Do not rely on the current context, and do not switch contexts with `oc login` or `oc config use-context` — that would break whichever session isn't expecting the switch.
 
 ```bash
 # Correct — explicit context + explicit namespace
-oc get pods --context workshop-cluster -n memoryhub
+oc get pods --context mcp-rhoai -n memoryhub
 
 # Wrong — relies on implicit current context
 oc get pods -n memoryhub

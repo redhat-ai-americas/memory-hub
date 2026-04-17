@@ -64,7 +64,9 @@ class MemoryNodeCreate(BaseModel):
         description="Branch type (rationale, provenance, description, etc.). Null for root memories.",
     )
     metadata: dict[str, Any] | None = Field(default=None, description="Extensible metadata")
-    domains: list[str] | None = Field(default=None, description="Crosscutting knowledge domain tags (e.g., 'React', 'Spring Boot')")
+    domains: list[str] | None = Field(
+        default=None, description="Crosscutting knowledge domain tags (e.g., 'React', 'Spring Boot')"
+    )
 
 
 class MemoryNodeUpdate(BaseModel):

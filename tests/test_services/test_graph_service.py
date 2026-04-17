@@ -21,12 +21,13 @@ from memoryhub_core.services.graph import (
     create_relationship,
     delete_relationship,
     find_related,
-    get_relationships as _svc_get_relationships,
     get_subtree,
     trace_provenance,
 )
+from memoryhub_core.services.graph import (
+    get_relationships as _svc_get_relationships,
+)
 from memoryhub_core.services.memory import create_memory as _svc_create_memory
-
 
 # Phase 3 (#46): create_memory now requires a tenant_id kwarg. Most graph
 # tests don't care which tenant the memories live in, so this wrapper
@@ -450,6 +451,7 @@ async def test_find_related_no_relationships(async_session, embedding_service):
 async def test_create_relationship_derives_tenant_from_source(async_session, embedding_service):
     """Relationships must inherit tenant_id from the source memory node."""
     from sqlalchemy import select
+
     from memoryhub_core.models.memory import MemoryRelationship
 
     source, _ = await _svc_create_memory(

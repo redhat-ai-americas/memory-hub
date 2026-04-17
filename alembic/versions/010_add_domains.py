@@ -6,8 +6,9 @@ Create Date: 2026-04-09
 """
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "010_add_domains"
 down_revision = "009_add_campaigns"

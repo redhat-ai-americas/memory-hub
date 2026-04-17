@@ -1,13 +1,13 @@
 """Tests for GET /oauth/openshift/callback — OpenShift broker callback."""
 
 import secrets
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from unittest.mock import MagicMock
+
 from src.config import settings
 from src.models import AuthSession
 
@@ -22,7 +22,7 @@ def _create_pending_session(**overrides) -> AuthSession:
         code_challenge="dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
         code_challenge_method="S256",
         status="pending",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     defaults.update(overrides)
     return AuthSession(**defaults)
@@ -128,7 +128,7 @@ class TestCallbackValidation:
         factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
         async with factory() as sess:
             auth_sess = _create_pending_session(
-                expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)
+                expires_at=datetime.now(UTC) - timedelta(minutes=1)
             )
             sess.add(auth_sess)
             await sess.commit()
@@ -303,8 +303,8 @@ class TestCheckGroupMembership:
     async def test_user_not_in_group_raises_403(self, monkeypatch):
         """Group API returns 200 but user is NOT in .users — 403."""
         monkeypatch.setattr(settings, "openshift_allowed_group", "memoryhub-users")
-        from src.routes.openshift_callback import _check_group_membership
         from src.errors import OAuthError
+        from src.routes.openshift_callback import _check_group_membership
 
         mock_client_instance = AsyncMock()
         mock_client_instance.get.return_value = _mock_group_response(200, ["bob", "carol"])
@@ -312,9 +312,11 @@ class TestCheckGroupMembership:
         mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client_instance)
         mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.routes.openshift_callback.httpx.AsyncClient", return_value=mock_client_ctx):
-            with pytest.raises(OAuthError) as exc_info:
-                await _check_group_membership("opaque-token", "alice")
+        with (
+            patch("src.routes.openshift_callback.httpx.AsyncClient", return_value=mock_client_ctx),
+            pytest.raises(OAuthError) as exc_info,
+        ):
+            await _check_group_membership("opaque-token", "alice")
 
         assert exc_info.value.status_code == 403
         assert exc_info.value.error == "access_denied"
@@ -322,8 +324,8 @@ class TestCheckGroupMembership:
     async def test_group_api_failure_raises_502(self, monkeypatch):
         """Group API returns non-200 (e.g. 404) — 502 server_error."""
         monkeypatch.setattr(settings, "openshift_allowed_group", "nonexistent-group")
-        from src.routes.openshift_callback import _check_group_membership
         from src.errors import OAuthError
+        from src.routes.openshift_callback import _check_group_membership
 
         mock_client_instance = AsyncMock()
         mock_client_instance.get.return_value = _mock_group_response(404)
@@ -331,9 +333,11 @@ class TestCheckGroupMembership:
         mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client_instance)
         mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.routes.openshift_callback.httpx.AsyncClient", return_value=mock_client_ctx):
-            with pytest.raises(OAuthError) as exc_info:
-                await _check_group_membership("opaque-token", "alice")
+        with (
+            patch("src.routes.openshift_callback.httpx.AsyncClient", return_value=mock_client_ctx),
+            pytest.raises(OAuthError) as exc_info,
+        ):
+            await _check_group_membership("opaque-token", "alice")
 
         assert exc_info.value.status_code == 502
         assert exc_info.value.error == "server_error"
@@ -341,8 +345,8 @@ class TestCheckGroupMembership:
     async def test_empty_users_list_raises_403(self, monkeypatch):
         """Group API returns 200 with empty .users list — 403."""
         monkeypatch.setattr(settings, "openshift_allowed_group", "memoryhub-users")
-        from src.routes.openshift_callback import _check_group_membership
         from src.errors import OAuthError
+        from src.routes.openshift_callback import _check_group_membership
 
         mock_client_instance = AsyncMock()
         mock_client_instance.get.return_value = _mock_group_response(200, [])
@@ -350,9 +354,11 @@ class TestCheckGroupMembership:
         mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client_instance)
         mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.routes.openshift_callback.httpx.AsyncClient", return_value=mock_client_ctx):
-            with pytest.raises(OAuthError) as exc_info:
-                await _check_group_membership("opaque-token", "anyone")
+        with (
+            patch("src.routes.openshift_callback.httpx.AsyncClient", return_value=mock_client_ctx),
+            pytest.raises(OAuthError) as exc_info,
+        ):
+            await _check_group_membership("opaque-token", "anyone")
 
         assert exc_info.value.status_code == 403
         assert exc_info.value.error == "access_denied"

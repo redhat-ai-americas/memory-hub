@@ -57,9 +57,8 @@ async def test_500_raises_embedding_service_error(service: HttpEmbeddingService)
     response = _http_response(500)
     mock_post = AsyncMock(return_value=response)
 
-    with patch.object(service._client, "post", mock_post):
-        with pytest.raises(EmbeddingServiceError) as exc_info:
-            await service.embed("some text")
+    with patch.object(service._client, "post", mock_post), pytest.raises(EmbeddingServiceError) as exc_info:
+        await service.embed("some text")
 
     # Must be the base class, not the too-large subclass.
     assert type(exc_info.value) is EmbeddingServiceError, (
@@ -76,9 +75,8 @@ async def test_connect_error_raises_unavailable(service: HttpEmbeddingService):
     """A connection failure must raise EmbeddingServiceUnavailableError."""
     mock_post = AsyncMock(side_effect=httpx.ConnectError("connection refused"))
 
-    with patch.object(service._client, "post", mock_post):
-        with pytest.raises(EmbeddingServiceUnavailableError):
-            await service.embed("some text")
+    with patch.object(service._client, "post", mock_post), pytest.raises(EmbeddingServiceUnavailableError):
+        await service.embed("some text")
 
 
 @pytest.mark.asyncio
@@ -86,9 +84,8 @@ async def test_timeout_raises_unavailable(service: HttpEmbeddingService):
     """A timeout must raise EmbeddingServiceUnavailableError."""
     mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
 
-    with patch.object(service._client, "post", mock_post):
-        with pytest.raises(EmbeddingServiceUnavailableError):
-            await service.embed("some text")
+    with patch.object(service._client, "post", mock_post), pytest.raises(EmbeddingServiceUnavailableError):
+        await service.embed("some text")
 
 
 @pytest.mark.asyncio
@@ -98,6 +95,5 @@ async def test_embed_batch_propagates_413(service: HttpEmbeddingService):
     response = _http_response(413)
     mock_post = AsyncMock(return_value=response)
 
-    with patch.object(service._client, "post", mock_post):
-        with pytest.raises(EmbeddingContentTooLargeError):
-            await service.embed_batch(["a", "b"])
+    with patch.object(service._client, "post", mock_post), pytest.raises(EmbeddingContentTooLargeError):
+        await service.embed_batch(["a", "b"])

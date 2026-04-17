@@ -2,7 +2,6 @@
 import base64
 
 import jwt
-import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from src.keys import (

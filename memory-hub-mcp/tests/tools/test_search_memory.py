@@ -219,9 +219,15 @@ async def test_search_memory_has_more_when_paginated():
     }
     try:
         with (
-            patch("src.tools.search_memory.get_db_session", return_value=(mock_session, mock_gen)),
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
             patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
-            patch("src.tools.search_memory.get_embedding_service", return_value=fake_embedding_service),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
             patch(
                 "src.tools.search_memory.search_memories",
                 new_callable=AsyncMock,
@@ -258,9 +264,15 @@ async def test_search_memory_has_more_false_when_page_holds_all():
     }
     try:
         with (
-            patch("src.tools.search_memory.get_db_session", return_value=(mock_session, mock_gen)),
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
             patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
-            patch("src.tools.search_memory.get_embedding_service", return_value=fake_embedding_service),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
             patch(
                 "src.tools.search_memory.search_memories",
                 new_callable=AsyncMock,
@@ -295,9 +307,15 @@ async def test_search_memory_empty_returns_zero_total():
     }
     try:
         with (
-            patch("src.tools.search_memory.get_db_session", return_value=(mock_session, mock_gen)),
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
             patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
-            patch("src.tools.search_memory.get_embedding_service", return_value=fake_embedding_service),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
             patch(
                 "src.tools.search_memory.search_memories",
                 new_callable=AsyncMock,
@@ -472,9 +490,7 @@ async def test_search_memory_mode_full_only_overrides_weight_threshold():
                 "src.tools.search_memory.get_db_session",
                 return_value=(mock_session, mock_gen),
             ),
-            patch(
-                "src.tools.search_memory.release_db_session", new_callable=AsyncMock
-            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
             patch(
                 "src.tools.search_memory.get_embedding_service",
                 return_value=fake_embedding_service,
@@ -526,9 +542,7 @@ async def test_search_memory_mode_full_passes_weight_threshold_through():
                 "src.tools.search_memory.get_db_session",
                 return_value=(mock_session, mock_gen),
             ),
-            patch(
-                "src.tools.search_memory.release_db_session", new_callable=AsyncMock
-            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
             patch(
                 "src.tools.search_memory.get_embedding_service",
                 return_value=fake_embedding_service,
@@ -559,7 +573,7 @@ async def test_search_memory_token_budget_degrades_remainder_to_stub():
     # Three big-content full results. We compute the actual estimated cost of
     # one entry via the production helper, then size the budget to fit exactly
     # one and overflow on the second. This stays robust to JSON-overhead drift.
-    from src.tools.search_memory import _format_entry, _estimate_tokens
+    from src.tools.search_memory import _format_entry
 
     big_content = "x" * 4000
     full1, score1 = _fake_full_result(big_content, weight=0.9, score=0.95)
@@ -787,7 +801,9 @@ async def test_search_memory_focus_pivot_signal_surfaces():
         pivot_suggested=True,
         pivot_distance=0.71,
         pivot_threshold=0.55,
-        pivot_reason="query vector distance from session focus is 0.710 (threshold 0.55)",
+        pivot_reason=(
+            "query vector distance from session focus is 0.710 (threshold 0.55)"
+        ),
     )
     result = await _run_focused_search(
         bundle,
@@ -809,7 +825,9 @@ async def test_search_memory_focus_fallback_reason_surfaces():
         [(full, score)],
         pivot_suggested=False,
         used_reranker=False,
-        fallback_reason="reranker call failed (TimeoutError); falling back to cosine rank",
+        fallback_reason=(
+            "reranker call failed (TimeoutError); falling back to cosine rank"
+        ),
     )
     result = await _run_focused_search(
         bundle,
@@ -828,7 +846,9 @@ async def test_search_memory_focus_empty_results_still_emits_pivot():
         pivot_suggested=True,
         pivot_distance=0.7,
         pivot_threshold=0.55,
-        pivot_reason="query vector distance from session focus is 0.700 (threshold 0.55)",
+        pivot_reason=(
+            "query vector distance from session focus is 0.700 (threshold 0.55)"
+        ),
     )
     result = await _run_focused_search(
         bundle,
@@ -915,7 +935,8 @@ async def test_search_memory_forwards_tenant_id_to_service():
     )
     _, count_kwargs = mock_count.call_args
     assert count_kwargs.get("tenant_id") == "tenant_a", (
-        f"Expected tenant_id='tenant_a' in count_search_matches kwargs, got {count_kwargs}"
+        "Expected tenant_id='tenant_a' in count_search_matches kwargs, "
+        f"got {count_kwargs}"
     )
 
 
@@ -979,7 +1000,8 @@ async def test_search_memory_focused_path_forwards_tenant_id():
     )
     _, count_kwargs = mock_count.call_args
     assert count_kwargs.get("tenant_id") == "tenant_a", (
-        f"Expected tenant_id='tenant_a' in count_search_matches kwargs, got {count_kwargs}"
+        "Expected tenant_id='tenant_a' in count_search_matches kwargs, "
+        f"got {count_kwargs}"
     )
 
 
@@ -1039,7 +1061,10 @@ async def test_raw_results_preserves_similarity_order():
         assert "is_appendix" not in entry
 
     # Order preserved: first result has higher score
-    assert result["results"][0]["relevance_score"] > result["results"][1]["relevance_score"]
+    assert (
+        result["results"][0]["relevance_score"]
+        > result["results"][1]["relevance_score"]
+    )
 
 
 @pytest.mark.asyncio
@@ -1059,9 +1084,7 @@ async def test_appendix_entries_flagged():
             f"compiled memory {i}", weight=0.9 - i * 0.01, score=0.80
         )
         compiled_mems.append((mem, score))
-    new_mem, new_score = _fake_full_result(
-        "brand new memory", weight=0.5, score=0.90
-    )
+    new_mem, new_score = _fake_full_result("brand new memory", weight=0.5, score=0.90)
 
     # Build a compilation epoch that only includes the 5 existing memories
     epoch = compile_memory_set(

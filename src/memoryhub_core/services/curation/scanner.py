@@ -51,10 +51,7 @@ def scan_content(content: str, pattern_set: str = "all") -> list[ScanResult]:
             match = pattern.search(content)
             if match:
                 matched_text = match.group()
-                if len(matched_text) > 12:
-                    redacted = matched_text[:4] + "..." + matched_text[-4:]
-                else:
-                    redacted = "***"
+                redacted = matched_text[:4] + "..." + matched_text[-4:] if len(matched_text) > 12 else "***"
                 results.append(
                     ScanResult(
                         matched=True,

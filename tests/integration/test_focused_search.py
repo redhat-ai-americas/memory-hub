@@ -526,7 +526,7 @@ async def test_focused_results_survive_pydantic_serialization(
     for idx, item in enumerate(round_tripped["results"]):
         assert "content" in item, f"Result {idx} missing 'content'"
         assert "relevance_score" in item, f"Result {idx} missing 'relevance_score'"
-        assert isinstance(item["relevance_score"], (int, float)), (
+        assert isinstance(item["relevance_score"], int | float), (
             f"Result {idx} relevance_score is {type(item['relevance_score']).__name__}, "
             f"expected int or float after JSON round-trip"
         )

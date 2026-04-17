@@ -6,6 +6,7 @@ Create Date: 2026-04-09
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "009_add_campaigns"

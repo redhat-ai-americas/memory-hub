@@ -1,7 +1,7 @@
 import base64
 import hashlib
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 from fastapi import APIRouter, Depends, Form
@@ -142,7 +142,7 @@ async def _handle_client_credentials(
         subject=client.client_id,
         scopes=scopes,
         tenant_id=client.tenant_id,
-        expires_at=datetime.now(timezone.utc)
+        expires_at=datetime.now(UTC)
         + timedelta(seconds=settings.refresh_token_ttl),
     )
     session.add(rt)
@@ -184,7 +184,7 @@ async def _handle_refresh_token(
         select(RefreshToken).where(
             RefreshToken.token_hash == token_hash,
             RefreshToken.revoked == False,  # noqa: E712
-            RefreshToken.expires_at > datetime.now(timezone.utc),
+            RefreshToken.expires_at > datetime.now(UTC),
         )
     )
     stored_rt = result.scalar_one_or_none()
@@ -199,7 +199,7 @@ async def _handle_refresh_token(
 
     # Revoke old token, issue new pair — single transaction
     stored_rt.revoked = True
-    stored_rt.revoked_at = datetime.now(timezone.utc)
+    stored_rt.revoked_at = datetime.now(UTC)
 
     scopes = stored_rt.scopes
     access_token = create_access_token(
@@ -216,7 +216,7 @@ async def _handle_refresh_token(
         subject=stored_rt.subject,
         scopes=scopes,
         tenant_id=stored_rt.tenant_id,
-        expires_at=datetime.now(timezone.utc)
+        expires_at=datetime.now(UTC)
         + timedelta(seconds=settings.refresh_token_ttl),
     )
     session.add(new_rt)
@@ -261,7 +261,7 @@ async def _handle_authorization_code(
     # Atomically claim the authorization code — prevents TOCTOU replay.
     # UPDATE ... WHERE status='ready' returns the row only if we won the race.
     code_hash = hashlib.sha256(code.encode()).hexdigest()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = await session.execute(
         update(AuthSession)
         .where(
@@ -307,7 +307,7 @@ async def _handle_authorization_code(
         subject=auth_session.subject,
         scopes=scopes,
         tenant_id=auth_session.tenant_id,
-        expires_at=datetime.now(timezone.utc)
+        expires_at=datetime.now(UTC)
         + timedelta(seconds=settings.refresh_token_ttl),
     )
     session.add(rt)

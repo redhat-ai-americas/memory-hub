@@ -6,8 +6,6 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
-logger = logging.getLogger(__name__)
 from sqlalchemy import and_, select
 
 from src.core.app import mcp
@@ -28,6 +26,8 @@ from memoryhub_core.models.schemas import (
     RuleTrigger,
 )
 from memoryhub_core.services.curation.rules import create_rule
+
+logger = logging.getLogger(__name__)
 
 _VALID_TIERS = [t.value for t in RuleTier]
 _VALID_ACTIONS = [a.value for a in RuleAction]

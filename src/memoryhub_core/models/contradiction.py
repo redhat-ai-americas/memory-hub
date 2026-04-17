@@ -2,7 +2,6 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -46,7 +45,7 @@ class ContradictionReport(Base):
         server_default=text("false"),
         nullable=False,
     )
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+    resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         default=None,

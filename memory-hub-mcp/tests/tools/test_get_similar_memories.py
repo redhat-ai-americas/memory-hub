@@ -69,11 +69,18 @@ async def test_get_similar_memories_success():
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
-    fake_source = SimpleNamespace(scope="user", owner_id="wjackson", tenant_id="default")
+    fake_source = SimpleNamespace(
+        scope="user", owner_id="wjackson", tenant_id="default"
+    )
 
     with (
-        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.get_similar_memories.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock
+        ),
         patch(
             "src.tools.get_similar_memories.read_memory_service",
             new_callable=AsyncMock,
@@ -113,7 +120,9 @@ async def test_get_similar_memories_returns_results_for_owner():
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
-    fake_source = SimpleNamespace(scope="user", owner_id="wjackson", tenant_id="default")
+    fake_source = SimpleNamespace(
+        scope="user", owner_id="wjackson", tenant_id="default"
+    )
     sim_id = uuid.uuid4()
     service_results = {
         "results": [
@@ -125,8 +134,13 @@ async def test_get_similar_memories_returns_results_for_owner():
     }
 
     with (
-        patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
-        patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.get_similar_memories.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock
+        ),
         patch(
             "src.tools.get_similar_memories.read_memory_service",
             new_callable=AsyncMock,
@@ -167,7 +181,9 @@ async def test_get_similar_memories_unauthorized_for_other_owner():
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
-    other_owner_source = SimpleNamespace(scope="user", owner_id="someone-else", tenant_id="default")
+    other_owner_source = SimpleNamespace(
+        scope="user", owner_id="someone-else", tenant_id="default"
+    )
 
     auth_mod._current_session = {
         "user_id": "wjackson",
@@ -176,8 +192,14 @@ async def test_get_similar_memories_unauthorized_for_other_owner():
     }
     try:
         with (
-            patch("src.tools.get_similar_memories.get_db_session", return_value=(mock_session, mock_gen)),
-            patch("src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.get_similar_memories.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch(
+                "src.tools.get_similar_memories.release_db_session",
+                new_callable=AsyncMock,
+            ),
             patch(
                 "src.tools.get_similar_memories.read_memory_service",
                 new_callable=AsyncMock,
@@ -238,7 +260,8 @@ async def test_get_similar_memories_forwards_tenant_id_to_service():
 
     _, read_kwargs = mock_read.call_args
     assert read_kwargs.get("tenant_id") == "tenant_a", (
-        f"Expected tenant_id='tenant_a' in read_memory_service kwargs, got {read_kwargs}"
+        "Expected tenant_id='tenant_a' in read_memory_service kwargs, "
+        f"got {read_kwargs}"
     )
     _, similar_kwargs = mock_similar.call_args
     assert similar_kwargs.get("tenant_id") == "tenant_a", (

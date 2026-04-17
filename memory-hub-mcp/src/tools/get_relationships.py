@@ -9,8 +9,6 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-logger = logging.getLogger(__name__)
-
 from src.core.app import mcp
 from src.core.authz import (
     AuthenticationError,
@@ -29,6 +27,8 @@ from memoryhub_core.services.graph import (
     get_relationships as get_relationships_service,
     trace_provenance,
 )
+
+logger = logging.getLogger(__name__)
 
 _VALID_TYPES = [t.value for t in RelationshipType]
 _VALID_DIRECTIONS = ("outgoing", "incoming", "both")

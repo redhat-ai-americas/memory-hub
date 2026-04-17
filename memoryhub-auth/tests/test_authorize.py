@@ -6,6 +6,7 @@ import os
 
 import pytest
 from sqlalchemy import select
+
 from src.config import settings
 
 
@@ -58,6 +59,7 @@ class TestAuthorizeHappyPath:
         assert resp.status_code == 302
 
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
         from src.models import AuthSession
 
         factory = async_sessionmaker(db_engine, class_=AsyncSession)

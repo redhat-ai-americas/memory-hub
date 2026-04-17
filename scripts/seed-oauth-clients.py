@@ -34,9 +34,10 @@ import bcrypt
 # Add repo root to path so we can import memoryhub
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from memoryhub_core.config import DatabaseSettings  # noqa: E402
-from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
+
+from memoryhub_core.config import DatabaseSettings  # noqa: E402
 
 
 def _load_clients() -> list[dict]:

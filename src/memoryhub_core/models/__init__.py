@@ -1,8 +1,8 @@
 """Memory data models (Pydantic + SQLAlchemy)."""
 
 from memoryhub_core.models.base import Base, TimestampMixin
-from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.campaign import Campaign, CampaignMembership
+from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.project import Project, ProjectMembership

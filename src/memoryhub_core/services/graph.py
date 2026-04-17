@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.schemas import (
-    MemoryNodeRead,
     RelationshipCreate,
     RelationshipRead,
 )

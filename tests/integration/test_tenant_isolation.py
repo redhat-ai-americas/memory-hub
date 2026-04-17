@@ -23,8 +23,6 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-pytestmark = pytest.mark.integration
-
 import memoryhub_core.services.curation.pipeline as pipeline_module
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.schemas import (
@@ -59,6 +57,8 @@ from memoryhub_core.services.memory import (
     search_memories,
     update_memory,
 )
+
+pytestmark = pytest.mark.integration
 
 # ---------------------------------------------------------------------------
 # Helpers

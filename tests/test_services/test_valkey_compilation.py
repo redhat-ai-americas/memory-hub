@@ -10,7 +10,7 @@ import fakeredis.aioredis
 import pytest
 
 from memoryhub_core.config import ValkeySettings
-from memoryhub_core.services.compilation import CompilationEpoch, compile_memory_set
+from memoryhub_core.services.compilation import CompilationEpoch
 from memoryhub_core.services.valkey_client import ValkeyClient, _compilation_key
 
 

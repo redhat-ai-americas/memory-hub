@@ -3,8 +3,7 @@
 No database required — all functions under test are pure synchronous functions.
 """
 
-from memoryhub_core.services.curation.scanner import ScanResult, scan_content, scan_with_custom_patterns
-
+from memoryhub_core.services.curation.scanner import scan_content, scan_with_custom_patterns
 
 # -- secrets_scan detection --
 

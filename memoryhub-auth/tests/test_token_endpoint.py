@@ -1,6 +1,6 @@
 """Integration tests for the /token endpoint (client_credentials and refresh_token grants)."""
-import pytest
 import jwt as pyjwt
+import pytest
 
 from src.keys import get_public_key
 

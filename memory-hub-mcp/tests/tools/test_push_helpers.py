@@ -22,7 +22,6 @@ import pytest
 from memoryhub_core.config import ValkeySettings
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.valkey_client import (
-    ACTIVE_SESSIONS_KEY,
     ValkeyClient,
     set_valkey_client,
 )

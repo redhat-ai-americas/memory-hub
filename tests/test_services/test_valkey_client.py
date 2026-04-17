@@ -7,7 +7,7 @@ used by ``valkey_client``.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime
 
 import fakeredis.aioredis
 import pytest
@@ -86,7 +86,7 @@ class TestPing:
 
 class TestWriteSessionFocus:
     async def test_writes_session_hash_and_history_entry(self, valkey_client):
-        fixed_now = datetime(2026, 4, 7, 12, 30, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 4, 7, 12, 30, 0, tzinfo=UTC)
         result = await valkey_client.write_session_focus(
             session_id="sess-abc",
             focus="deployment",
@@ -138,7 +138,7 @@ class TestWriteSessionFocus:
         assert 500 < ttl <= 600  # within the requested window
 
     async def test_history_list_carries_retention_ttl(self, valkey_client):
-        fixed_now = datetime(2026, 4, 7, 0, 0, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 4, 7, 0, 0, 0, tzinfo=UTC)
         await valkey_client.write_session_focus(
             session_id="sess-hist",
             focus="ui",
@@ -153,7 +153,7 @@ class TestWriteSessionFocus:
         assert 2_591_000 < ttl <= 2_592_000
 
     async def test_multiple_writes_append_to_same_day_list(self, valkey_client):
-        fixed_now = datetime(2026, 4, 7, 9, 0, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 4, 7, 9, 0, 0, tzinfo=UTC)
         for i in range(3):
             await valkey_client.write_session_focus(
                 session_id=f"sess-{i}",
@@ -171,7 +171,7 @@ class TestWriteSessionFocus:
         assert len(history) == 3
 
     async def test_writes_use_project_scoped_history_key(self, valkey_client):
-        fixed_now = datetime(2026, 4, 7, 9, 0, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 4, 7, 9, 0, 0, tzinfo=UTC)
         await valkey_client.write_session_focus(
             session_id="s1",
             focus="auth",
@@ -210,7 +210,7 @@ class TestReadFocusHistory:
         assert entries == []
 
     async def test_reads_entries_from_single_day(self, valkey_client):
-        fixed_now = datetime(2026, 4, 7, 9, 0, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 4, 7, 9, 0, 0, tzinfo=UTC)
         for focus in ["deployment", "ui", "auth"]:
             await valkey_client.write_session_focus(
                 session_id=f"sess-{focus}",
@@ -236,7 +236,7 @@ class TestReadFocusHistory:
             (date(2026, 4, 6), "ui"),
             (date(2026, 4, 7), "auth"),
         ]:
-            now = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+            now = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
             await valkey_client.write_session_focus(
                 session_id=f"sess-{day}",
                 focus=focus,

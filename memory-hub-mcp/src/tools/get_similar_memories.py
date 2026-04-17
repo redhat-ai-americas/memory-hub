@@ -8,8 +8,6 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-logger = logging.getLogger(__name__)
-
 from src.core.app import mcp
 from src.core.authz import (
     AuthenticationError,
@@ -25,6 +23,8 @@ from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.curation.similarity import get_similar_memories as get_similar_memories_service
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import read_memory as read_memory_service
+
+logger = logging.getLogger(__name__)
 
 
 @mcp.tool(

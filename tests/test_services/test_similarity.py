@@ -14,11 +14,12 @@ import pytest
 from memoryhub_core.models.schemas import MemoryNodeCreate, MemoryScope
 from memoryhub_core.services.curation.similarity import (
     check_similarity as _svc_check_similarity,
+)
+from memoryhub_core.services.curation.similarity import (
     get_similar_memories as _svc_get_similar_memories,
 )
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import create_memory as _svc_create_memory
-
 
 _TEST_TENANT_ID = "default"
 

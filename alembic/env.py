@@ -35,9 +35,7 @@ _EXTERNAL_TABLES = {"oauth_clients", "refresh_tokens"}
 
 def include_object(object, name, type_, reflected, compare_to):  # noqa: A002
     """Skip external tables so autogenerate does not propose dropping them."""
-    if type_ == "table" and name in _EXTERNAL_TABLES:
-        return False
-    return True
+    return not (type_ == "table" and name in _EXTERNAL_TABLES)
 
 
 def run_migrations_offline() -> None:

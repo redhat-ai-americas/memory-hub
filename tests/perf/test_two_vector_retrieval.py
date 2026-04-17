@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from tests.perf.fixtures.queries import QUERIES
 from tests.perf.fixtures.topics import TOPICS, all_memories
 from tests.perf.two_vector_bench import (
@@ -44,7 +42,6 @@ from tests.perf.two_vector_bench import (
     reciprocal_rank_fusion,
     relevant_ids_for_query,
 )
-
 
 # ── Fixture sanity ───────────────────────────────────────────────────
 

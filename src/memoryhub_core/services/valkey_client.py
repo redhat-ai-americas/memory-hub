@@ -39,7 +39,7 @@ import base64
 import json
 import logging
 import struct
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from redis import asyncio as redis_async
@@ -147,7 +147,7 @@ class ValkeyClient:
                 pipeline fails.
         """
         ttl = ttl_seconds if ttl_seconds is not None else self._settings.session_ttl_seconds
-        created_at = now or datetime.now(timezone.utc)
+        created_at = now or datetime.now(UTC)
         expires_at = created_at + timedelta(seconds=ttl)
         history_retention = self._settings.history_retention_days * 86400
 

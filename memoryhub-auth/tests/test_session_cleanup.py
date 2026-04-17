@@ -1,19 +1,17 @@
 """Tests for the session_cleanup module."""
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
+
 from src.models import AuthSession
 from src.session_cleanup import cleanup_expired_sessions
 
 
 def _make_session(*, expired: bool, session_id: str | None = None) -> AuthSession:
     """Build an AuthSession with either a past or future expiry."""
-    now = datetime.now(timezone.utc)
-    if expired:
-        expires_at = now - timedelta(minutes=5)
-    else:
-        expires_at = now + timedelta(minutes=10)
+    now = datetime.now(UTC)
+    expires_at = now - timedelta(minutes=5) if expired else now + timedelta(minutes=10)
 
     return AuthSession(
         session_id=session_id or secrets.token_hex(32),

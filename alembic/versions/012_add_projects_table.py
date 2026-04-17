@@ -6,6 +6,7 @@ Create Date: 2026-04-15
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "012_add_projects_table"

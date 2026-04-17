@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
@@ -517,7 +517,7 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
     if node.deleted_at is not None:
         raise HTTPException(status_code=409, detail=f"Memory {memory_id!r} is already deleted")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Collect version chain (walk backwards with cycle guard)
     version_ids: set = {parsed_id}
@@ -1027,7 +1027,7 @@ async def update_contradiction(
     if report is None:
         raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
     report.resolved = body.resolved
-    report.resolved_at = datetime.now(timezone.utc) if body.resolved else None
+    report.resolved_at = datetime.now(UTC) if body.resolved else None
     await db.commit()
     await db.refresh(report)
     return _contradiction_to_response(report)

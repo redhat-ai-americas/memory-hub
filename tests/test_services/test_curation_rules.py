@@ -7,6 +7,7 @@ so pipeline tests with embeddings only verify the fallback path is clean.
 
 import pytest
 
+import memoryhub_core.services.curation.pipeline as curation_pipeline
 from memoryhub_core.models.schemas import (
     CuratorRuleCreate,
     RuleAction,
@@ -14,14 +15,16 @@ from memoryhub_core.models.schemas import (
     RuleTier,
     RuleTrigger,
 )
-import memoryhub_core.services.curation.pipeline as curation_pipeline
 from memoryhub_core.services.curation.pipeline import run_curation_pipeline as _svc_run_curation_pipeline
 from memoryhub_core.services.curation.rules import (
     create_rule as _svc_create_rule,
+)
+from memoryhub_core.services.curation.rules import (
     load_rules as _svc_load_rules,
+)
+from memoryhub_core.services.curation.rules import (
     seed_default_rules as _svc_seed_default_rules,
 )
-
 
 # Phase 3 (#46): create_rule now requires a tenant_id kwarg. Most curation
 # tests don't care which tenant owns the rule, so these wrappers supply a
@@ -407,6 +410,7 @@ async def test_pipeline_seed_idempotent_when_rules_exist(async_session, reset_ru
 async def test_create_rule_populates_tenant_from_param(async_session):
     """create_rule must stamp the passed tenant_id onto the persisted row."""
     from sqlalchemy import select
+
     from memoryhub_core.models.curation import CuratorRule
 
     data = _make_rule_create(name="tenant_a_rule")
@@ -559,7 +563,8 @@ async def test_seed_default_rules_is_per_tenant(async_session):
 async def test_pipeline_gates_near_duplicate(async_session, monkeypatch):
     """A similarity score in the gate range blocks with gated=True and returns existing memory info."""
     import uuid as _uuid
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
+
     from memoryhub_core.services.curation.similarity import SimilarityResult
 
     await seed_default_rules(async_session)
@@ -609,8 +614,9 @@ async def test_pipeline_gates_exact_duplicate(async_session, monkeypatch):
     """A similarity score above the reject threshold still uses the gated response path."""
     import uuid as _uuid
     from unittest.mock import AsyncMock
-    from memoryhub_core.services.curation.similarity import SimilarityResult
+
     from memoryhub_core.services.curation import pipeline as _pipeline
+    from memoryhub_core.services.curation.similarity import SimilarityResult
 
     await seed_default_rules(async_session)
 
@@ -655,6 +661,7 @@ async def test_pipeline_force_bypasses_gate(async_session, monkeypatch):
     """force=True allows a near-duplicate write to proceed."""
     import uuid as _uuid
     from unittest.mock import AsyncMock
+
     from memoryhub_core.services.curation.similarity import SimilarityResult
 
     await seed_default_rules(async_session)
@@ -693,7 +700,7 @@ async def test_pipeline_force_does_not_bypass_regex(async_session):
         force=True,
     )
 
-    assert result["blocked"] is True, f"Secrets should still be blocked with force=True"
+    assert result["blocked"] is True, "Secrets should still be blocked with force=True"
     assert result.get("gated") is not True, "Secrets block should not be a gate"
     assert result["reason"] == "secrets_scan"
 
@@ -702,6 +709,7 @@ async def test_pipeline_score_below_gate_writes(async_session, monkeypatch):
     """A similarity score below the gate threshold does not block; adds possible_duplicate flag."""
     import uuid as _uuid
     from unittest.mock import AsyncMock
+
     from memoryhub_core.services.curation.similarity import SimilarityResult
 
     await seed_default_rules(async_session)
@@ -727,8 +735,9 @@ async def test_pipeline_score_below_gate_writes(async_session, monkeypatch):
 
 def test_resolve_embedding_thresholds_gate():
     """_resolve_embedding_thresholds returns a 3-tuple with gate_threshold from rule config."""
-    from memoryhub_core.services.curation.pipeline import _resolve_embedding_thresholds
     from unittest.mock import MagicMock
+
+    from memoryhub_core.services.curation.pipeline import _resolve_embedding_thresholds
 
     # Build minimal mock rules matching the seeded defaults.
     exact_rule = MagicMock()

@@ -31,7 +31,15 @@ def test_set_curation_rule_has_required_parameters():
         f"Missing required params: {required - param_names}"
     )
 
-    optional = {"tier", "action", "config", "scope_filter", "enabled", "priority", "ctx"}
+    optional = {
+        "tier",
+        "action",
+        "config",
+        "scope_filter",
+        "enabled",
+        "priority",
+        "ctx",
+    }
     assert optional.issubset(param_names), (
         f"Missing optional params: {optional - param_names}"
     )
@@ -85,7 +93,10 @@ async def test_set_curation_rule_protected_system_rule():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(
+            "src.tools.set_curation_rule.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
         patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
         pytest.raises(ToolError, match="protected"),
     ):
@@ -113,7 +124,8 @@ async def test_set_curation_rule_create_success():
     mock_rule.created_at = "2026-04-04T00:00:00Z"
     mock_rule.updated_at = "2026-04-04T00:00:00Z"
 
-    # First execute returns None for protected check, second returns None for existing check
+    # First execute returns None for protected check,
+    # second returns None for existing check
     mock_session = AsyncMock()
     execute_results = [
         MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # protected check
@@ -123,11 +135,20 @@ async def test_set_curation_rule_create_success():
     mock_gen = AsyncMock()
 
     with (
-        patch("src.tools.set_curation_rule.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(
+            "src.tools.set_curation_rule.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
         patch("src.tools.set_curation_rule.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.set_curation_rule.create_rule", new_callable=AsyncMock, return_value=mock_rule) as mock_create,
+        patch(
+            "src.tools.set_curation_rule.create_rule",
+            new_callable=AsyncMock,
+            return_value=mock_rule,
+        ) as mock_create,
     ):
-        result = await set_curation_rule(name="my_threshold", config={"threshold": 0.98})
+        result = await set_curation_rule(
+            name="my_threshold", config={"threshold": 0.98}
+        )
     assert result["created"] is True
     assert result["updated"] is False
     # Phase 3 (#46): the tool must forward tenant_id from claims to

@@ -12,8 +12,8 @@ This module is pure logic — no I/O, no Valkey. Fully unit-testable.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -93,7 +93,7 @@ def compile_memory_set(
         A CompilationEpoch with a stable canonical ordering.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
     sorted_items = sorted(
         (item for item, _score in results),
@@ -198,6 +198,4 @@ def should_recompile(
     # ratio (e.g. 4/10 = 40%) is a normal cache-stable state — wait for the
     # absolute min_appendix count instead. For tiny corpora, proportional
     # growth is the right trigger.
-    if compiled_count < min_appendix and appendix_count / compiled_count > threshold:
-        return True
-    return False
+    return compiled_count < min_appendix and appendix_count / compiled_count > threshold

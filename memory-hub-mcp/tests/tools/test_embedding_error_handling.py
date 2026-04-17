@@ -58,18 +58,26 @@ async def test_write_memory_content_too_large_raises_tool_error():
     auth_mod._current_session = _SESSION
     try:
         with (
-            patch("src.tools.write_memory.get_claims_from_context", return_value=_CLAIMS),
-            patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+            patch(
+                "src.tools.write_memory.get_claims_from_context", return_value=_CLAIMS
+            ),
+            patch(
+                "src.tools.write_memory.get_db_session",
+                return_value=(MagicMock(), AsyncMock()),
+            ),
             patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
-            patch("src.tools.write_memory.get_embedding_service", return_value=_embedding_service_mock(exc)),
+            patch(
+                "src.tools.write_memory.get_embedding_service",
+                return_value=_embedding_service_mock(exc),
+            ),
             patch(
                 "src.tools.write_memory.create_memory",
                 new_callable=AsyncMock,
                 side_effect=exc,
             ),
+            pytest.raises(ToolError) as exc_info,
         ):
-            with pytest.raises(ToolError) as exc_info:
-                await write_memory(content="test", scope="user")
+            await write_memory(content="test", scope="user")
     finally:
         auth_mod._current_session = None
 
@@ -85,18 +93,26 @@ async def test_write_memory_service_unavailable_raises_tool_error():
     auth_mod._current_session = _SESSION
     try:
         with (
-            patch("src.tools.write_memory.get_claims_from_context", return_value=_CLAIMS),
-            patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+            patch(
+                "src.tools.write_memory.get_claims_from_context", return_value=_CLAIMS
+            ),
+            patch(
+                "src.tools.write_memory.get_db_session",
+                return_value=(MagicMock(), AsyncMock()),
+            ),
             patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
-            patch("src.tools.write_memory.get_embedding_service", return_value=_embedding_service_mock(exc)),
+            patch(
+                "src.tools.write_memory.get_embedding_service",
+                return_value=_embedding_service_mock(exc),
+            ),
             patch(
                 "src.tools.write_memory.create_memory",
                 new_callable=AsyncMock,
                 side_effect=exc,
             ),
+            pytest.raises(ToolError) as exc_info,
         ):
-            with pytest.raises(ToolError) as exc_info:
-                await write_memory(content="test", scope="user")
+            await write_memory(content="test", scope="user")
     finally:
         auth_mod._current_session = None
 
@@ -118,12 +134,18 @@ async def test_search_memory_service_unavailable_raises_tool_error():
     auth_mod._current_session = _SESSION
     try:
         with (
-            patch("src.tools.search_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(MagicMock(), AsyncMock()),
+            ),
             patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
-            patch("src.tools.search_memory.get_embedding_service", return_value=embedding_svc),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=embedding_svc,
+            ),
+            pytest.raises(ToolError) as exc_info,
         ):
-            with pytest.raises(ToolError) as exc_info:
-                await search_memory(query="test query")
+            await search_memory(query="test query")
     finally:
         auth_mod._current_session = None
 
@@ -145,11 +167,17 @@ async def test_set_session_focus_content_too_large_raises_tool_error():
     auth_mod._current_session = _SESSION
     try:
         with (
-            patch("src.tools.set_session_focus.get_claims_from_context", return_value=_CLAIMS),
-            patch("src.tools.set_session_focus.get_embedding_service", return_value=embedding_svc),
+            patch(
+                "src.tools.set_session_focus.get_claims_from_context",
+                return_value=_CLAIMS,
+            ),
+            patch(
+                "src.tools.set_session_focus.get_embedding_service",
+                return_value=embedding_svc,
+            ),
+            pytest.raises(ToolError) as exc_info,
         ):
-            with pytest.raises(ToolError) as exc_info:
-                await set_session_focus(focus="test focus", project="test-proj")
+            await set_session_focus(focus="test focus", project="test-proj")
     finally:
         auth_mod._current_session = None
 

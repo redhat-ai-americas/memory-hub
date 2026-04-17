@@ -7,7 +7,7 @@ auth session, then 302s the user to OpenShift's OAuth server.
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query
@@ -118,7 +118,7 @@ async def authorize_endpoint(
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
         status="pending",
-        expires_at=datetime.now(timezone.utc)
+        expires_at=datetime.now(UTC)
         + timedelta(seconds=settings.auth_session_pending_ttl),
     )
     session.add(auth_session)
