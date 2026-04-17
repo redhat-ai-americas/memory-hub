@@ -2,12 +2,18 @@
 
 All functions are async and accept an explicit AsyncSession. Relationships are
 directed edges between memory nodes with a constrained type vocabulary.
+
+Temporal validity (#170): edges have valid_from and valid_until columns.
+Active edges have valid_until IS NULL. The ``active_at`` helper builds the
+SQL filter for time-scoped queries. ``invalidate_relationship`` sets
+valid_until without deleting the row, preserving the audit trail.
 """
 
 import uuid
 from collections import deque
+from datetime import UTC, datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +31,55 @@ from memoryhub_core.services.memory import node_to_read
 
 _MAX_DEPTH_CAP = 10
 _MAX_HOPS_CAP = 5
+
+
+def _active_edges_filter(as_of: datetime | None = None):
+    """SQLAlchemy filter for temporally active relationship edges.
+
+    When as_of is None, returns only currently active edges (valid_until IS NULL).
+    When as_of is a datetime, returns edges active at that point in time.
+    """
+    if as_of is None:
+        return MemoryRelationship.valid_until.is_(None)
+    return and_(
+        MemoryRelationship.valid_from <= as_of,
+        or_(
+            MemoryRelationship.valid_until.is_(None),
+            MemoryRelationship.valid_until > as_of,
+        ),
+    )
+
+
+async def invalidate_relationship(
+    relationship_id: uuid.UUID,
+    session: AsyncSession,
+    *,
+    valid_until: datetime | None = None,
+) -> None:
+    """Invalidate a relationship by setting valid_until.
+
+    Does not delete the row — preserves the full edge lifecycle for audit.
+    Idempotent: no-ops if the edge is already invalidated.
+
+    Raises RelationshipNotFoundError if the edge does not exist.
+    """
+    now = valid_until or datetime.now(tz=UTC)
+
+    # Verify the relationship exists.
+    stmt = select(MemoryRelationship).where(MemoryRelationship.id == relationship_id)
+    result = await session.execute(stmt)
+    rel = result.scalar_one_or_none()
+    if rel is None:
+        raise RelationshipNotFoundError(relationship_id)
+
+    # Only update if currently active (idempotent).
+    update_stmt = (
+        update(MemoryRelationship)
+        .where(MemoryRelationship.id == relationship_id)
+        .where(MemoryRelationship.valid_until.is_(None))
+        .values(valid_until=now)
+    )
+    await session.execute(update_stmt)
 
 
 async def create_relationship(
@@ -104,21 +159,17 @@ async def get_relationships(
     tenant_id: str,
     relationship_type: str | None = None,
     direction: str = "both",
+    as_of: datetime | None = None,
 ) -> list[RelationshipRead]:
     """Return all relationships for a node, with optional type and direction filters.
 
     direction: "outgoing" (source=node), "incoming" (target=node), or "both".
+    as_of: when provided, returns edges active at that timestamp. When None
+           (default), returns only currently active edges.
 
     Tenant isolation: ``tenant_id`` is a required keyword argument. The
     starting node lookup, the edge query, and the neighbor hydrations
-    are all filtered by tenant at the SQL level. Cross-tenant callers
-    see ``MemoryNotFoundError`` for the starting node (indistinguishable
-    from nonexistent). Edge-level filtering is belt-and-suspenders:
-    because both endpoints of a relationship live in the same tenant
-    (enforced by ``create_relationship``), filtering on either the edge
-    or the node is equivalent, but applying both keeps the guarantee
-    robust against any future write path that might bypass the create
-    check.
+    are all filtered by tenant at the SQL level.
     """
     await _fetch_current_node(node_id, session, tenant_id=tenant_id)
 
@@ -135,6 +186,7 @@ async def get_relationships(
     filters = [
         direction_filter,
         MemoryRelationship.tenant_id == tenant_id,
+        _active_edges_filter(as_of),
     ]
     if relationship_type is not None:
         filters.append(MemoryRelationship.relationship_type == relationship_type)
@@ -241,11 +293,14 @@ async def trace_provenance(
     node_id: uuid.UUID,
     session: AsyncSession,
     max_hops: int = 10,
+    as_of: datetime | None = None,
 ) -> list[dict]:
     """Follow derived_from edges backward from a node to trace its provenance.
 
     Edge convention: source=derived → target=origin. We follow source_id matches
     outward to target_id (the origin) at each hop.
+
+    as_of: when provided, only follows edges active at that timestamp.
 
     Returns a list of steps ordered by hop (ascending):
       [{"node": MemoryNodeRead, "relationship": RelationshipRead, "hop": int}]
@@ -260,11 +315,12 @@ async def trace_provenance(
     current_id = node_id
 
     for hop in range(1, max_hops + 1):
-        # Look for a derived_from edge where the current node is the source (derived side)
+        # Look for an active derived_from edge where current node is the source
         stmt = select(MemoryRelationship).where(
             and_(
                 MemoryRelationship.source_id == current_id,
                 MemoryRelationship.relationship_type == "derived_from",
+                _active_edges_filter(as_of),
             )
         )
         result = await session.execute(stmt)
@@ -322,12 +378,13 @@ async def find_related(
         if distance >= max_hops:
             continue
 
-        # Fetch all edges from/to current node
+        # Fetch all active edges from/to current node
         filters = [
             or_(
                 MemoryRelationship.source_id == current_id,
                 MemoryRelationship.target_id == current_id,
-            )
+            ),
+            _active_edges_filter(),
         ]
         if relationship_types:
             filters.append(MemoryRelationship.relationship_type.in_(relationship_types))
@@ -377,6 +434,8 @@ def _relationship_to_read(
         created_at=rel.created_at,
         created_by=rel.created_by,
         tenant_id=rel.tenant_id,
+        valid_from=getattr(rel, "valid_from", None),
+        valid_until=getattr(rel, "valid_until", None),
         source_stub=source_stub,
         target_stub=target_stub,
     )

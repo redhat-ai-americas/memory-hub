@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -151,9 +151,16 @@ class MemoryNode(TimestampMixin, Base):
 class MemoryRelationship(Base):
     """A directed edge between two memory nodes.
 
-    Relationships are immutable — create or delete, never update. The type
-    vocabulary is intentionally constrained (see RelationshipType in schemas).
-    Self-referential edges are rejected at the DB level via a CHECK constraint.
+    Relationships are immutable except for valid_until, which can be set once
+    to invalidate the edge. The type vocabulary is intentionally constrained
+    (see RelationshipType in schemas). Self-referential edges are rejected at
+    the DB level via a CHECK constraint.
+
+    Temporal validity: valid_from records when the relationship became
+    semantically valid (usually equal to created_at). valid_until is NULL
+    for active edges; setting it invalidates the edge without deleting it.
+    A partial unique index enforces at most one active edge per
+    (source, target, type) triple.
     """
 
     __tablename__ = "memory_relationships"
@@ -191,6 +198,15 @@ class MemoryRelationship(Base):
         nullable=False,
         server_default=text("'default'"),
     )
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    valid_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     source: Mapped["MemoryNode"] = relationship(
         "MemoryNode",
@@ -204,12 +220,21 @@ class MemoryRelationship(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("source_id", "target_id", "relationship_type", name="uq_memory_relationships_edge"),
+        # Partial unique index: only one active edge per (source, target, type).
+        # Created in migration 013; SQLAlchemy can't express partial indexes in
+        # UniqueConstraint, so the DB-level index is the source of truth.
+        Index(
+            "uq_memory_relationships_active_edge",
+            "source_id", "target_id", "relationship_type",
+            unique=True,
+            postgresql_where=text("valid_until IS NULL"),
+        ),
         CheckConstraint("source_id != target_id", name="ck_memory_relationships_no_self_ref"),
         Index("ix_memory_relationships_source_type", "source_id", "relationship_type"),
         Index("ix_memory_relationships_target_type", "target_id", "relationship_type"),
         Index("ix_memory_relationships_type", "relationship_type"),
         Index("ix_memory_relationships_tenant", "tenant_id"),
+        Index("ix_memory_relationships_source_type_validity", "source_id", "relationship_type", "valid_until"),
     )
 
     def __repr__(self) -> str:

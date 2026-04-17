@@ -176,6 +176,10 @@ class RelationshipRead(BaseModel):
     # Required field — populated by the service layer from the ORM row.
     # Relationships inherit tenant from their source memory; see Phase 3 of #46.
     tenant_id: str
+    # Temporal validity (#170). valid_from is when the relationship became
+    # semantically valid; valid_until is NULL for active edges.
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
     # Optionally populated by the service layer from the linked node stubs
     source_stub: str | None = None
     target_stub: str | None = None
