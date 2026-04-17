@@ -18,10 +18,10 @@ import logging
 from typing import Annotated, Any
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from fastmcp.exceptions import ToolError
-
+from memoryhub_core.services.project import list_projects_for_tenant
 from memoryhub_core.services.push_subscriber import (
     ensure_memoryhub_subscriber_running,
     stop_memoryhub_subscriber,
@@ -31,9 +31,18 @@ from memoryhub_core.services.valkey_client import (
     get_valkey_client,
 )
 from src.core.app import mcp
+from src.core.authz import get_tenant_filter
+from src.tools._deps import get_db_session, release_db_session
 from src.tools.auth import authenticate, set_session
 
 logger = logging.getLogger(__name__)
+
+_QUICK_START = [
+    "Call search_memory(query='...') to load context relevant to your task.",
+    "Pass project_id='<name>' in search_memory and write_memory to scope "
+    "memories to a project.",
+    "Writing to a project you haven't joined? Auto-enrollment handles it.",
+]
 
 
 async def _start_push_for_session(session_id: str, ctx: Context | None) -> None:
@@ -119,6 +128,36 @@ async def _start_push_for_session(session_id: str, ctx: Context | None) -> None:
     session._memoryhub_push_cleanup_registered = True
 
 
+async def _fetch_user_projects(
+    user_id: str, tenant_id: str,
+) -> list[dict[str, Any]]:
+    """Fetch the user's projects for the registration response.
+
+    Returns a lightweight list of project summaries. Non-fatal: returns
+    an empty list on any failure so registration is never blocked.
+    """
+    gen = None
+    try:
+        session, gen = await get_db_session()
+        projects = await list_projects_for_tenant(
+            session, tenant_id=tenant_id, user_id=user_id,
+        )
+        return [
+            {
+                "project_id": p["name"],
+                "description": p.get("description", ""),
+                "memory_count": p.get("memory_count", 0),
+            }
+            for p in projects
+        ]
+    except Exception as exc:
+        logger.debug("Failed to fetch projects for %s: %s", user_id, exc)
+        return []
+    finally:
+        if gen is not None:
+            await release_db_session(gen)
+
+
 @mcp.tool(
     annotations={
         "readOnlyHint": False,
@@ -142,7 +181,10 @@ async def register_session(
 
     Call this once at the start of every conversation to establish your identity.
     After registration, write_memory and search_memory will automatically scope
-    operations to your user_id. Returns your identity and accessible memory scopes.
+    operations to your user_id.
+
+    Returns your identity, accessible scopes, project memberships (with
+    memory counts), and quick-start hints for getting oriented.
     """
     # When JWT auth is active, session registration is unnecessary
     try:
@@ -154,12 +196,16 @@ async def register_session(
     if token is not None:
         jwt_claims = token.claims
         session_id = jwt_claims.get("sub", token.client_id)
+        tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
+        projects = await _fetch_user_projects(session_id, tenant)
         return {
             "user_id": session_id,
             "name": jwt_claims.get("name", session_id),
             "scopes": list(token.scopes),
             "auth_method": "jwt",
+            "projects": projects,
+            "quick_start": _QUICK_START,
             "message": (
                 f"JWT authentication active for {session_id}. "
                 "Session registration is not needed when using JWT auth."
@@ -180,10 +226,17 @@ async def register_session(
     if ctx:
         await ctx.info(f"Session registered for user: {user['user_id']}")
 
+    tenant = get_tenant_filter(
+        {"sub": user["user_id"], "tenant_id": user.get("tenant_id", "default")}
+    )
+    projects = await _fetch_user_projects(user["user_id"], tenant)
+
     return {
         "user_id": user["user_id"],
         "name": user["name"],
         "scopes": user["scopes"],
+        "projects": projects,
+        "quick_start": _QUICK_START,
         "message": (
             f"Session registered for {user['name']} ({user['user_id']}). "
             f"Accessible scopes: {', '.join(user['scopes'])}."

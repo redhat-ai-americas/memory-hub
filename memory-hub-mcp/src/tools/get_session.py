@@ -4,14 +4,20 @@ Lightweight 'whoami' tool for agents to verify their identity and
 check whether a session is still active after errors or reconnects.
 """
 
+import logging
 from typing import Any
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
 from src.core.app import mcp
-from src.core.authz import AuthenticationError, get_claims_from_context
+from src.core.authz import AuthenticationError, get_claims_from_context, get_tenant_filter
+from src.tools._deps import get_db_session, release_db_session
 from src.tools.auth import get_current_user
+
+from memoryhub_core.services.project import list_projects_for_tenant
+
+logger = logging.getLogger(__name__)
 
 
 @mcp.tool(
@@ -27,7 +33,7 @@ async def get_session(
 ) -> dict[str, Any]:
     """Check your current session state.
 
-    Returns your user_id, name, and accessible scopes if authenticated.
+    Returns your user_id, name, accessible scopes, and project memberships.
     Raises an error if no session is registered — call register_session
     to fix.
     """
@@ -46,9 +52,33 @@ async def get_session(
         else claims.get("name", claims["sub"])
     )
 
+    # Fetch project memberships (non-fatal).
+    projects: list[dict[str, Any]] = []
+    tenant = get_tenant_filter(claims)
+    gen = None
+    try:
+        session, gen = await get_db_session()
+        raw = await list_projects_for_tenant(
+            session, tenant_id=tenant, user_id=claims["sub"],
+        )
+        projects = [
+            {
+                "project_id": p["name"],
+                "description": p.get("description", ""),
+                "memory_count": p.get("memory_count", 0),
+            }
+            for p in raw
+        ]
+    except Exception as exc:
+        logger.debug("Failed to fetch projects for get_session: %s", exc)
+    finally:
+        if gen is not None:
+            await release_db_session(gen)
+
     return {
         "user_id": claims["sub"],
         "name": display_name,
         "scopes": claims.get("scopes", []),
+        "projects": projects,
         "authenticated": True,
     }
