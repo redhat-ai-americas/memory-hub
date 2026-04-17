@@ -30,6 +30,7 @@ from memoryhub_core.services.valkey_client import (
     ValkeyUnavailableError,
     get_valkey_client,
 )
+from memoryhub_core.config import AppSettings
 from src.core.app import mcp
 from src.core.authz import get_tenant_filter
 from src.tools._deps import get_db_session, release_db_session
@@ -183,8 +184,12 @@ async def register_session(
     After registration, write_memory and search_memory will automatically scope
     operations to your user_id.
 
-    Returns your identity, accessible scopes, project memberships (with
-    memory counts), and quick-start hints for getting oriented.
+    Sessions have a configurable TTL (default 1 hour) and auto-extend on
+    activity — active agents never hit expiry. Check remaining time with
+    get_session.
+
+    Returns your identity, accessible scopes, session expiry, project
+    memberships (with memory counts), and quick-start hints.
     """
     # When JWT auth is active, session registration is unnecessary
     try:
@@ -220,7 +225,9 @@ async def register_session(
             "Keys follow the format: mh-dev-<hex>."
         )
 
-    set_session(user)
+    app_settings = AppSettings()
+    ttl = app_settings.session_ttl_seconds
+    expires_at = set_session(user, ttl_seconds=ttl)
     await _start_push_for_session(user["user_id"], ctx)
 
     if ctx:
@@ -235,10 +242,13 @@ async def register_session(
         "user_id": user["user_id"],
         "name": user["name"],
         "scopes": user["scopes"],
+        "expires_at": expires_at.isoformat(),
+        "session_ttl_seconds": ttl,
         "projects": projects,
         "quick_start": _QUICK_START,
         "message": (
             f"Session registered for {user['name']} ({user['user_id']}). "
-            f"Accessible scopes: {', '.join(user['scopes'])}."
+            f"Accessible scopes: {', '.join(user['scopes'])}. "
+            f"Session expires in {ttl}s (auto-extends on activity)."
         ),
     }

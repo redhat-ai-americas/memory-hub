@@ -84,7 +84,20 @@ def mock_authenticate():
 @pytest.fixture
 def mock_set_session():
     """Replace ``set_session`` so the API-key path is a no-op for identity."""
-    with patch("src.tools.register_session.set_session"):
+    from datetime import UTC, datetime, timedelta
+
+    expires_at = datetime.now(UTC) + timedelta(seconds=3600)
+    with patch("src.tools.register_session.set_session", return_value=expires_at):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_fetch_projects():
+    """Bypass DB access in _fetch_user_projects (tested separately)."""
+    with patch(
+        "src.tools.register_session._fetch_user_projects",
+        return_value=[],
+    ):
         yield
 
 
@@ -163,6 +176,9 @@ class TestValidApiKey:
         result = await register_session_fn(api_key="valid", ctx=ctx)
 
         assert result["user_id"] == "wjackson"
+        assert "expires_at" in result
+        assert "session_ttl_seconds" in result
+        assert result["session_ttl_seconds"] == 3600
         members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
         assert members == {"wjackson"}
 

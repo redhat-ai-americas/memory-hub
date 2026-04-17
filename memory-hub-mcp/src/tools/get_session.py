@@ -13,7 +13,7 @@ from fastmcp.exceptions import ToolError
 from src.core.app import mcp
 from src.core.authz import AuthenticationError, get_claims_from_context, get_tenant_filter
 from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import get_current_user
+from src.tools.auth import get_current_user, get_session_expiry
 
 from memoryhub_core.services.project import list_projects_for_tenant
 
@@ -33,10 +33,20 @@ async def get_session(
 ) -> dict[str, Any]:
     """Check your current session state.
 
-    Returns your user_id, name, accessible scopes, and project memberships.
-    Raises an error if no session is registered — call register_session
-    to fix.
+    Returns your user_id, name, accessible scopes, session expiry info,
+    and project memberships. Raises an error if no session is registered
+    or if the session has expired — call register_session to fix.
     """
+    # Check expiry before claims resolution so expired API-key sessions
+    # get a clear "expired" error rather than a generic "no session" error.
+    expiry = get_session_expiry()
+    if expiry is not None and expiry["expired"]:
+        raise ToolError(
+            "Session expired. Call register_session(api_key=...) to "
+            "re-authenticate. Sessions auto-extend on activity but expire "
+            f"after {expiry['ttl_seconds']}s of inactivity."
+        ) from None
+
     try:
         claims = get_claims_from_context()
     except AuthenticationError:
@@ -51,6 +61,9 @@ async def get_session(
         session_user.get("name", claims["sub"]) if session_user
         else claims.get("name", claims["sub"])
     )
+
+    # Session TTL info (None for JWT-authenticated sessions).
+    expiry_info = get_session_expiry()
 
     # Fetch project memberships (non-fatal).
     projects: list[dict[str, Any]] = []
@@ -75,10 +88,16 @@ async def get_session(
         if gen is not None:
             await release_db_session(gen)
 
-    return {
+    result: dict[str, Any] = {
         "user_id": claims["sub"],
         "name": display_name,
         "scopes": claims.get("scopes", []),
         "projects": projects,
         "authenticated": True,
     }
+    if expiry_info:
+        result["expires_at"] = expiry_info["expires_at"]
+        result["remaining_seconds"] = expiry_info["remaining_seconds"]
+        result["session_ttl_seconds"] = expiry_info["ttl_seconds"]
+
+    return result

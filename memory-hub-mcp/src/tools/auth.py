@@ -4,6 +4,10 @@ Users call register_session(api_key=...) once at the start of a conversation.
 The authenticated identity is stored in a module-level variable for that
 process/session and used automatically by tools that need an owner identity.
 
+Sessions have a configurable TTL (default 1 hour via MEMORYHUB_SESSION_TTL_SECONDS).
+Every authenticated tool call auto-extends the session, so active agents never
+hit expiry. Idle sessions expire and return a clear error directing re-registration.
+
 User records are loaded from MEMORYHUB_USERS_FILE (path to JSON) or
 MEMORYHUB_USERS_JSON (inline JSON string), falling back to
 /config/users.json for OpenShift (mounted from the memoryhub-users ConfigMap).
@@ -12,12 +16,15 @@ MEMORYHUB_USERS_JSON (inline JSON string), falling back to
 import json
 import logging
 import os
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Module-level session state (one session per MCP process/connection).
 _current_session: dict[str, Any] | None = None
+_session_expires_at: datetime | None = None
+_session_ttl_seconds: int = 3600
 
 # Loaded user records keyed by api_key for O(1) lookup.
 _users_by_key: dict[str, dict[str, Any]] = {}
@@ -80,30 +87,78 @@ def authenticate(api_key: str) -> dict[str, Any] | None:
     return _users_by_key.get(api_key)
 
 
-def set_session(user: dict[str, Any]) -> None:
-    """Store the authenticated user for this session."""
-    global _current_session
+def set_session(user: dict[str, Any], ttl_seconds: int = 3600) -> datetime:
+    """Store the authenticated user for this session with a TTL.
+
+    Returns the computed expires_at timestamp.
+    """
+    global _current_session, _session_expires_at, _session_ttl_seconds
     _current_session = user
+    _session_ttl_seconds = ttl_seconds
+    _session_expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+    return _session_expires_at
+
+
+def _extend_session() -> None:
+    """Reset the session expiry on activity (auto-extend)."""
+    global _session_expires_at
+    if _session_expires_at is not None:
+        _session_expires_at = datetime.now(UTC) + timedelta(seconds=_session_ttl_seconds)
+
+
+def is_session_expired() -> bool:
+    """Return True if the session has expired."""
+    if _session_expires_at is None:
+        return True
+    return datetime.now(UTC) >= _session_expires_at
+
+
+def get_session_expiry() -> dict[str, Any] | None:
+    """Return session TTL info, or None if no session is registered."""
+    if _session_expires_at is None:
+        return None
+    now = datetime.now(UTC)
+    remaining = max(0, int((_session_expires_at - now).total_seconds()))
+    return {
+        "expires_at": _session_expires_at.isoformat(),
+        "remaining_seconds": remaining,
+        "ttl_seconds": _session_ttl_seconds,
+        "expired": remaining == 0,
+    }
 
 
 def get_current_user() -> dict[str, Any] | None:
-    """Return the currently authenticated user, or None if not registered."""
-    return _current_session
+    """Return the currently authenticated user, or None if not registered.
+
+    Auto-extends the session on access (active sessions don't expire).
+    Returns None if the session has expired.
+    """
+    if _current_session is not None and not is_session_expired():
+        _extend_session()
+        return _current_session
+    return None
 
 
 def require_auth() -> dict[str, Any]:
     """Return the current user or raise a descriptive error.
 
     Raises:
-        RuntimeError: If no session has been registered.
+        RuntimeError: If no session has been registered or the session
+            has expired.
     """
-    user = get_current_user()
-    if user is None:
+    if _current_session is None:
         raise RuntimeError(
             "No session registered. Call register_session(api_key=...) "
             "at the start of every conversation to authenticate."
         )
-    return user
+    if is_session_expired():
+        raise RuntimeError(
+            "Session expired. Call register_session(api_key=...) to "
+            "re-authenticate. Sessions auto-extend on activity but expire "
+            f"after {_session_ttl_seconds} seconds of inactivity."
+        )
+    _extend_session()
+    return _current_session
 
 
 def has_scope(user: dict[str, Any], scope: str) -> bool:
