@@ -192,6 +192,33 @@ deploy_postgresql() {
         return 0
     fi
 
+    # Ensure namespace exists before creating the Secret
+    if ! oc get namespace "$DB_NAMESPACE" &>/dev/null; then
+        info "Creating namespace $DB_NAMESPACE..."
+        oc create namespace "$DB_NAMESPACE"
+    fi
+
+    # Ensure DB credentials Secret exists (generate password on first install,
+    # preserve on subsequent runs).  The Secret is NOT in the kustomization so
+    # re-applying kustomize never overwrites an existing password.
+    if ! oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" &>/dev/null; then
+        local db_pass
+        db_pass=$(openssl rand -hex 16)
+        info "Generating DB credentials Secret (first install)..."
+        oc create secret generic memoryhub-pg-credentials \
+            --from-literal=POSTGRES_USER=memoryhub \
+            --from-literal=POSTGRES_PASSWORD="$db_pass" \
+            --from-literal=POSTGRES_DB=memoryhub \
+            -n "$DB_NAMESPACE"
+        oc label secret memoryhub-pg-credentials \
+            app.kubernetes.io/name=memoryhub-pg \
+            app.kubernetes.io/part-of=memoryhub \
+            app.kubernetes.io/component=database \
+            -n "$DB_NAMESPACE"
+    else
+        info "Secret memoryhub-pg-credentials already exists in $DB_NAMESPACE"
+    fi
+
     info "Applying kustomize manifests..."
     oc apply -k "$REPO_ROOT/deploy/postgresql/"
 
@@ -344,7 +371,7 @@ deploy_auth() {
     fi
 
     info "Seeding OAuth clients..."
-    "$REPO_ROOT/.venv/bin/python" "$REPO_ROOT/scripts/seed-oauth-clients.py"
+    "$REPO_ROOT/scripts/run-seed-oauth-clients.sh"
 
     info "Building and deploying Auth server (project: $AUTH_PROJECT)..."
     pushd "$REPO_ROOT/memoryhub-auth" > /dev/null

@@ -3,7 +3,10 @@ kind: Kustomization
 namespace: memoryhub-db
 resources:
   - namespace.yaml
-  - secret.yaml
+  # secret.yaml is excluded — deploy-full.sh creates the Secret
+  # idempotently with a generated password on first install and
+  # preserves it on subsequent runs.  See secret.yaml for the
+  # expected schema (reference only).
   - pvc.yaml
   - configmap-init.yaml
   - statefulset.yaml

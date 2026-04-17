@@ -86,7 +86,11 @@ Every change must be deployable from code without manual steps. When implementin
 
 **SCC grants** — MinIO and Valkey require `anyuid` SCC on their ServiceAccounts. The deploy script must grant this after applying the kustomize manifests. Without it, pods fail with SCC validation errors on fresh namespaces.
 
-**The golden test** — `make uninstall --skip-db && make install` against a live cluster must succeed end-to-end with zero manual intervention. If it doesn't, `deploy-full.sh` is incomplete. Run this before marking any infrastructure change as done.
+**The golden test** — There are two variants, both must pass with zero manual intervention:
+- **Preserve-DB** (most common): `scripts/uninstall-full.sh --skip-db --yes && scripts/deploy-full.sh`
+- **Full fresh**: `scripts/uninstall-full.sh --yes && scripts/deploy-full.sh`
+
+The preserve-DB variant is the default smoke test after infrastructure changes. The full-fresh variant tests first-install password generation and DB bootstrap. If either fails, `deploy-full.sh` is incomplete. Run the preserve-DB variant before marking any infrastructure change as done.
 
 **The checklist** — Before marking a feature as deployed, verify:
 - [ ] Schema changes have an Alembic migration
@@ -96,7 +100,8 @@ Every change must be deployable from code without manual steps. When implementin
 - [ ] Cross-namespace Secrets are copied by deploy-full.sh, not created manually
 - [ ] Admin/management APIs expose all user-facing model fields
 - [ ] requirements.txt matches pyproject.toml dependencies (container builds use requirements.txt)
-- [ ] `make uninstall --skip-db && make install` succeeds on a clean namespace set
+- [ ] Golden test (preserve-DB): `scripts/uninstall-full.sh --skip-db --yes && scripts/deploy-full.sh` succeeds
+- [ ] Golden test (full fresh): `scripts/uninstall-full.sh --yes && scripts/deploy-full.sh` succeeds on a new cluster
 
 ## Testing
 - pytest for all Python testing
