@@ -1,98 +1,116 @@
 # Next Session Plan
 
-## Completed this session (2026-04-17)
+## Completed this session (2026-04-17, session 2)
 
-### Golden test — found and fixed
-- Ran `scripts/uninstall-full.sh --skip-db --yes && scripts/deploy-full.sh`.
-  Failed at seed-oauth-clients: deploy-full.sh was overwriting the DB
-  credentials Secret with a placeholder from `deploy/postgresql/secret.yaml`.
-- Fix: removed secret.yaml from kustomization, added idempotent Secret
-  generation to `deploy_postgresql()` (openssl rand on first install,
-  skip-if-exists). Created `scripts/run-seed-oauth-clients.sh` wrapper
-  (port-forward pattern matching run-migrations.sh).
-- Second bug found during test: MCP namespace `memoryhub-db-credentials`
-  Secret had a hardcoded placeholder in `openshift.yaml`. Added post-deploy
-  password sync step to `deploy_mcp()`.
-- Re-ran golden test (preserve-DB variant): full pass, all services up.
-- CLAUDE.md updated: golden test rule now documents both variants
-  (preserve-DB and full-fresh) with correct script invocations.
+### Ruff lint cleanup (439 → 0)
+- Added per-file-ignores for perf fixture data (E501), SQLAlchemy forward
+  refs (F821), and FastAPI Depends() idiom (B008)
+- Fixed E402 across MCP tools (moved logger below imports) and integration
+  tests (moved pytestmark below imports)
+- Fixed SIM103/SIM102/SIM108/SIM117, B904, N817, UP038, F841
+- Auto-fixed: unsorted imports, unused imports, datetime.timezone.utc,
+  deprecated imports
+- 694 unit tests pass across all three components after fixes
 
-### Agent DX improvements (MCP server v0.5.1 → v0.6.0)
-- Ran agent usability test (sub-agent self-enrollment). Initial DX rating: 4/5.
-- Fix 1: Corrected API key format hint (`mh-dev-<hex>` not `mh-dev-<username>-<year>`).
-- Fix 2: `search_memory` with `project_id` now filters to that project only
-  (was returning results from all member projects).
-- Fix 3: Added "Quick start" section to `search_memory` docstring.
-- Fix 4: New `get_session` tool (lightweight whoami, 15th tool).
-- Fix 5: `list_projects` now returns `memory_count` per project.
-- Fix 6: Labeled 11 search_memory params as "(Advanced)" to reduce
-  cognitive load for first-time users.
-- Fix 7: Added `project_description` param to `write_memory` for auto-create.
-- Final DX rating: 4.5/5.
-- Wrote `docs/agent-integration-guide.md` for onboarding other agent sessions.
+### Issue triage
+- Closed #188 (project membership friction) — auto-enrollment shipped in
+  v0.6.0, remaining structural items tracked in #166 and DX backlog
+- Created #189 (progressive discovery in register_session)
+- Created #190 (session TTL / explicit expiry)
+- Updated #166 with DX context (project management tools as DX blocker)
 
-### Resolved from prior session
-- CLAUDE.md pre-session modification (item #5): was already clean, no action needed.
+### Progressive discovery (#189)
+- register_session now returns project memberships (with memory_count)
+  and quick_start hints in the response
+- get_session also returns project memberships
+- SDK SessionInfo uses extra="allow", so new fields are backward-compatible
+- All 268 MCP server tests pass
+
+### OdhApplication investigation (item #1)
+- Read odh-dashboard source: validation is fully generic, no hardcoded
+  app allowlist. "Red Hat managed" category gets a convenience shortcut.
+  No upstream PR needed — the existing CR approach is confirmed correct.
+- Finding saved to MemoryHub memory for future reference.
+
+### Housekeeping
+- Cleaned up 7 stale worktrees from previous sessions
+- Updated CLAUDE.md cluster context: workshop-cluster → mcp-rhoai
 
 ## Priority items for next session
 
-### 1. Red Hat managed — read odh-dashboard source
+### 1. Close DX backlog: #166 (project governance) + #190 (session TTL)
 
-Before committing to Path 1 (submit upstream PR) or Path 2 (bundle into
-RHOAI operator), read the actual odh-dashboard source at
-github.com/opendatahub-io/odh-dashboard to confirm the "validation is
-hardcoded per-app" theory. If there IS a generic validator path, the fix
-is simpler than we think.
+These are the two remaining items blocking a 5/5 DX rating. Both are
+small enough to land in one session together.
 
-### 2. Close #188 (project membership friction)
+**#166 — Project governance (1-2 sessions)**
+The scope-isolation infrastructure (#46) already shipped. Remaining work:
+- Add `projects` table (id, name, description, tenant_id, invite_only,
+  created_at, created_by) — the implicit string IDs in
+  project_memberships work but lack discoverability
+- MCP tools: create_project, describe_project, list_members
+- Admin API endpoints for the dashboard
+- Use `/plan-tools` → `/create-tools` → `/exercise-tools` workflow for
+  the new MCP tools
+- Design reference: `planning/scope-isolation-project-role.md` (Open
+  Question 3)
 
-The auto-enrollment flow works end-to-end (verified this session). The
-remaining structural items from #188 (explicit project management tools,
-guided discovery, session TTL) should be triaged: close the issue with
-a comment documenting what shipped, or file new issues for the structural
-items and close #188 as the auto-enrollment fix.
+**#190 — Session TTL (1 session)**
+- Add configurable TTL to register_session (default 1h)
+- Return `expires_at` in response
+- get_session includes remaining TTL
+- Expired sessions return clear error directing re-registration
+- Decide: auto-extend on activity vs explicit renewal?
 
-### 3. Design doc implementation
+### 2. Design doc implementation roadmap
 
-The 6 design docs are candidates for implementation. In ascending scope:
-- **#166** (project-governance) — smallest, good warm-up
-- **#170** Phase 1 (graph-enhanced memory) — temporal validity + RRF
-- **#168** (conversation-persistence) — new subsystem
-- **#169** (context-compaction) — extends existing curator
-- **#171** (knowledge-compilation) — composes all three, largest scope
+After the DX backlog is closed, implementation proceeds in dependency
+order. Each item is standalone except #171 which composes the others.
 
-### 4. Ruff lint cleanup
+**#170 Phase 1 — Graph-enhanced retrieval (2-3 sessions)**
+- Temporal validity columns on relationships (valid_from, valid_to)
+- `collect_graph_neighbors` for graph-aware context injection
+- RRF blending of vector similarity + graph traversal scores
+- Standalone — no dependencies on other design docs
+- Design reference: `docs/graph-enhanced-retrieval.md`
 
-434 errors (was 71 last session — growth is from new code + ruff version
-changes). Not blocking but increasingly visible in session-close checks.
+**#168 — Conversation persistence (3-5 sessions)**
+- New subsystem: ConversationThread + ConversationMessage tables
+- Thread-level RBAC, retention policies, S3 offload for large messages
+- MCP tools: create/append/get/list threads, archive, fork, share
+- Extraction provenance (conversation_extractions) links to memories
+- Foundation that #169, #170 P2, and #171 all build on
+- Design reference: `planning/session-persistence.md`
 
-### 5. DX push to 5/5
+**#169 — Context compaction (5-7 sessions)**
+- Four-layer policy-driven compression (memory store, retrieval-time
+  token budget, conversation threads, cross-agent coordination)
+- Extends existing curator with compaction tier and ACE pattern
+- Hot/cold storage with MinIO, compaction provenance branches
+- Benefits from #168 (conversation threads to compact)
+- Design reference: `docs/context-compaction.md`
 
-Remaining structural items from the usability test:
-- Explicit project management tools (create, describe, list members)
-- Progressive discovery in register_session response
-- Session TTL / explicit expiry for predictable auth lifecycle
-These are the "second category" items deferred from this session.
+**#171 — Knowledge compilation (6-8 sessions)**
+- LLM-driven pipeline: threads + memories + entities → versioned
+  knowledge articles
+- Distributed workers with HPA, compilation epochs (#175 already shipped)
+- Depends on #168 + #170 Phase 2 + #169. Last in the sequence.
+- Design reference: `docs/knowledge-compilation.md`
 
 ## Context
 - SDK v0.6.0 on PyPI (v0.6.1 unreleased: project_id field in ProjectConfig)
 - CLI v0.4.0
-- MCP server **v0.6.0**, 15 tools deployed
+- MCP server **v0.6.0**, 15 tools deployed (register_session + get_session
+  enhanced locally, not yet redeployed)
 - Curation thresholds: exact_duplicate 0.98, near_duplicate gate 0.90,
   flag 0.80
 - min_appendix=5
+- Ruff: 0 errors (was 439 at start of session)
 
 ## Cluster state
-- Cluster: **mcp-rhoai** context (n7pd5, sandbox5167). The old
-  "workshop-cluster" context name no longer exists — it was renamed
-  to `mcp-rhoai`. **Pass `--context mcp-rhoai` on every `oc` / `kubectl`
-  command.**
-- `scripts/cluster-health-check.sh` uses the default context; its
-  output may be misleading if context drifts.
-- DB password was reset this session (golden test recovery). All
-  namespace Secrets are in sync. The password is NOT the original
-  `memoryhub-dev-password` — it was regenerated.
-- gpt-oss-20b: `gpt-oss-model-2` namespace
+- Cluster: **mcp-rhoai** context (n7pd5, sandbox5167)
+- DB password was reset last session (golden test recovery). All
+  namespace Secrets are in sync.
 - MCP server: memory-hub-mcp namespace (rebuilt 2026-04-17)
 - MinIO: memory-hub-mcp namespace
 - Valkey: memory-hub-mcp namespace
@@ -100,4 +118,4 @@ These are the "second category" items deferred from this session.
 - UI: memoryhub-ui namespace (rebuilt 2026-04-17)
 - DB: memoryhub-db namespace, migrations through 012 in sync
 - OdhApplication: `redhat-ods-applications/memoryhub` (category: Red Hat
-  managed — hack, see investigation notes)
+  managed — confirmed valid, no upstream PR needed)
