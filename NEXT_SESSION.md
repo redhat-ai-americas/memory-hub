@@ -1,128 +1,108 @@
 # Next Session Plan
 
-## Completed this session (2026-04-17, session 2)
+## Completed this session (2026-04-17, session 3)
 
-### Ruff lint cleanup (439 → 0)
-- Added per-file-ignores for perf fixture data (E501), SQLAlchemy forward
-  refs (F821), and FastAPI Depends() idiom (B008)
-- Fixed E402 across MCP tools (moved logger below imports) and integration
-  tests (moved pytestmark below imports)
-- Fixed SIM103/SIM102/SIM108/SIM117, B904, N817, UP038, F841
-- Auto-fixed: unsorted imports, unused imports, datetime.timezone.utc,
-  deprecated imports
-- 694 unit tests pass across all three components after fixes
+### MCP server redeploy (progressive discovery)
+- Verified deployed image was from build 8, predating progressive discovery
+  commit 7b9ee93. Redeployed (build 9), verified via mcp-test-mcp that
+  register_session returns projects and quick_start fields.
 
-### Issue triage
-- Closed #188 (project membership friction) — auto-enrollment shipped in
-  v0.6.0, remaining structural items tracked in #166 and DX backlog
-- Created #189 (progressive discovery in register_session)
-- Created #190 (session TTL / explicit expiry)
-- Updated #166 with DX context (project management tools as DX blocker)
+### #190 — Session TTL with auto-extend (closed)
+- API-key sessions now have configurable TTL (default 1h via
+  MEMORYHUB_SESSION_TTL_SECONDS) with auto-extend on every tool call
+- register_session returns expires_at and session_ttl_seconds
+- get_session returns expires_at, remaining_seconds, session_ttl_seconds
+- Expired sessions raise clear errors directing re-registration
+- JWT sessions unaffected (no TTL fields returned)
+- 15 new tests, review caught and fixed stale-user-on-expiry bug
 
-### Progressive discovery (#189)
-- register_session now returns project memberships (with memory_count)
-  and quick_start hints in the response
-- get_session also returns project memberships
-- SDK SessionInfo uses extra="allow", so new fields are backward-compatible
-- All 268 MCP server tests pass
+### #166 — Consolidated manage_project tool (closed)
+- Replaced list_projects with manage_project: list, create, describe
+  (with members + memory count), add_member, remove_member
+- Follows Anthropic's tool design guidance on consolidation
+- Security: add_member requires caller membership (admin for invite-only);
+  remove_member requires admin or self-removal; creator auto-enrolled as admin
+- Service layer gains create_project, get_project_members, add_project_member,
+  remove_project_member; promoted _memory_counts to public API
+- 28 tool tests; deployed as build 10; verified via mcp-test-mcp
 
-### OdhApplication investigation (item #1)
-- Read odh-dashboard source: validation is fully generic, no hardcoded
-  app allowlist. "Red Hat managed" category gets a convenience shortcut.
-  No upstream PR needed — the existing CR approach is confirmed correct.
-- Finding saved to MemoryHub memory for future reference.
-
-### Housekeeping
-- Cleaned up 7 stale worktrees from previous sessions
-- Updated CLAUDE.md cluster context: workshop-cluster → mcp-rhoai
+### #170 Phase 1 prep — Temporal validity on relationships
+- Alembic migration 013: valid_from (NOT NULL, default now(), backfilled from
+  created_at) and valid_until (nullable) on memory_relationships
+- Replaced absolute unique constraint with partial unique index on active
+  edges only (WHERE valid_until IS NULL)
+- ORM model updated with new columns and updated __table_args__
+- Service layer: invalidate_relationship(), _active_edges_filter() helper
+- get_relationships and trace_provenance accept as_of parameter
+- find_related filters to active edges only
+- RelationshipRead schema includes valid_from and valid_until
+- NOT YET DEPLOYED — migration needs to run on cluster DB
 
 ## Priority items for next session
 
-### 0. Redeploy MCP server
+### 0. Run migration 013 and redeploy
 
-register_session and get_session were enhanced with progressive discovery
-(#189) but the deployed image is still v0.6.0. Rebuild and redeploy to
-memory-hub-mcp namespace before starting new work. Verify with
-mcp-test-mcp that the new response fields appear.
+Migration 013 (temporal validity) is committed but not applied to the cluster
+DB. Run `alembic upgrade head` against memoryhub-db, then redeploy the MCP
+server to pick up the ORM/schema changes.
 
-### 1. Close DX backlog: #166 (project governance) + #190 (session TTL)
+### 1. #170 Phase 1 — Graph-enhanced retrieval (remaining work)
 
-These are the two remaining items blocking a 5/5 DX rating. Both are
-small enough to land in one session together.
+Temporal validity infrastructure is done. The remaining work is the retrieval
+enhancement itself:
 
-**#166 — Project governance (1-2 sessions)**
-The scope-isolation infrastructure (#46) already shipped. Remaining work:
-- Add `projects` table (id, name, description, tenant_id, invite_only,
-  created_at, created_by) — the implicit string IDs in
-  project_memberships work but lack discoverability
-- MCP tools: create_project, describe_project, list_members
-- Admin API endpoints for the dashboard
-- Use `/plan-tools` → `/create-tools` → `/exercise-tools` workflow for
-  the new MCP tools
-- Design reference: `planning/scope-isolation-project-role.md` (Open
-  Question 3)
+**collect_graph_neighbors** — New function in services/graph.py:
+- Recursive CTE bounded by max_depth (cap at 3)
+- Takes seed_ids from vector search top-N results
+- Returns {node_id: min_hop_distance} for all reachable neighbors
+- Filters: tenant, not deleted, active edges, RBAC
+- Design reference: docs/graph-enhanced-memory.md lines 121-134
 
-**#190 — Session TTL (1 session)**
-- Add configurable TTL to register_session (default 1h)
-- Return `expires_at` in response
-- get_session includes remaining TTL
-- Expired sessions return clear error directing re-registration
-- Decide: auto-extend on activity vs explicit renewal?
+**Wire into search_memories_with_focus** — Fourth RRF signal:
+- After vector search returns top-k, call collect_graph_neighbors
+- Graph proximity rank based on hop distance (1-hop > 2-hop)
+- RRF blend with existing query, focus, and domain signals
+- New graph_depth and graph_relationship_types parameters
+- graph_depth=0 (default) skips traversal entirely — backward compatible
+- FocusedSearchResult gains graph_neighbors_added field
 
-### 2. Design doc implementation roadmap
+**MCP tool changes** — search_memory gains two optional parameters:
+- graph_depth (int, default 0, max 3)
+- graph_relationship_types (list[str] | null)
+- Response gains graph_neighbors_added and graph_fallback_reason fields
 
-After the DX backlog is closed, implementation proceeds in dependency
-order. Each item is standalone except #171 which composes the others.
+**Tests needed**:
+- Unit tests for collect_graph_neighbors (varying depths, cycles, deleted nodes)
+- Unit tests for RRF integration
+- Integration test for full search path with graph enhancement
 
-**#170 Phase 1 — Graph-enhanced retrieval (2-3 sessions)**
-- Temporal validity columns on relationships (valid_from, valid_to)
-- `collect_graph_neighbors` for graph-aware context injection
-- RRF blending of vector similarity + graph traversal scores
-- Standalone — no dependencies on other design docs
-- Design reference: `docs/graph-enhanced-retrieval.md`
+Design reference: docs/graph-enhanced-memory.md (Phase 1, "Graph-Enhanced
+Retrieval" section)
+
+### 2. Design doc implementation roadmap (unchanged from last session)
+
+After #170 Phase 1 completes, implementation proceeds in dependency order:
 
 **#168 — Conversation persistence (3-5 sessions)**
-- New subsystem: ConversationThread + ConversationMessage tables
-- Thread-level RBAC, retention policies, S3 offload for large messages
-- MCP tools: create/append/get/list threads, archive, fork, share
-- Extraction provenance (conversation_extractions) links to memories
-- Foundation that #169, #170 P2, and #171 all build on
-- Design reference: `planning/session-persistence.md`
-
 **#169 — Context compaction (5-7 sessions)**
-- Four-layer policy-driven compression (memory store, retrieval-time
-  token budget, conversation threads, cross-agent coordination)
-- Extends existing curator with compaction tier and ACE pattern
-- Hot/cold storage with MinIO, compaction provenance branches
-- Benefits from #168 (conversation threads to compact)
-- Design reference: `docs/context-compaction.md`
-
 **#171 — Knowledge compilation (6-8 sessions)**
-- LLM-driven pipeline: threads + memories + entities → versioned
-  knowledge articles
-- Distributed workers with HPA, compilation epochs (#175 already shipped)
-- Depends on #168 + #170 Phase 2 + #169. Last in the sequence.
-- Design reference: `docs/knowledge-compilation.md`
+
+See docs/ and planning/ for design references.
 
 ## Context
-- SDK v0.6.0 on PyPI (v0.6.1 unreleased: project_id field in ProjectConfig)
+- SDK v0.6.0 on PyPI
 - CLI v0.4.0
-- MCP server **v0.6.0**, 15 tools deployed (register_session + get_session
-  enhanced locally, not yet redeployed)
-- Curation thresholds: exact_duplicate 0.98, near_duplicate gate 0.90,
-  flag 0.80
-- min_appendix=5
-- Ruff: 0 errors (was 439 at start of session)
+- MCP server **v0.6.0+**, 15 tools deployed (manage_project replaces
+  list_projects; session TTL added to register_session and get_session)
+- Alembic migrations through 013 committed (012 applied, 013 pending)
+- Ruff: 0 errors
+- All tests passing: 304 MCP + 324 core = 628 total
 
 ## Cluster state
 - Cluster: **mcp-rhoai** context (n7pd5, sandbox5167)
-- DB password was reset last session (golden test recovery). All
-  namespace Secrets are in sync.
-- MCP server: memory-hub-mcp namespace (rebuilt 2026-04-17)
+- MCP server: memory-hub-mcp namespace (build 10, 2026-04-17)
+- DB: memoryhub-db namespace, migrations through 012 applied (013 pending)
+- Auth: memoryhub-auth namespace
+- UI: memoryhub-ui namespace
 - MinIO: memory-hub-mcp namespace
 - Valkey: memory-hub-mcp namespace
-- Auth: memoryhub-auth namespace (rebuilt 2026-04-17)
-- UI: memoryhub-ui namespace (rebuilt 2026-04-17)
-- DB: memoryhub-db namespace, migrations through 012 in sync
-- OdhApplication: `redhat-ods-applications/memoryhub` (category: Red Hat
-  managed — confirmed valid, no upstream PR needed)
