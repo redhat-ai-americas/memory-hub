@@ -154,7 +154,7 @@ async def write_memory(
                 "Description for the project when auto-creating it on first "
                 "project-scoped write. Ignored if the project already exists. "
                 "Helps other agents understand what the project is about in "
-                "list_projects output."
+                "manage_project output."
             ),
         ),
     ] = None,

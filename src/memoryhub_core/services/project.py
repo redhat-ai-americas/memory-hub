@@ -19,7 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.models.project import Project, ProjectMembership
-from memoryhub_core.services.exceptions import ProjectInviteOnlyError
+from memoryhub_core.services.exceptions import (
+    LastAdminError,
+    MembershipNotFoundError,
+    ProjectAlreadyExistsError,
+    ProjectInviteOnlyError,
+    ProjectNotFoundError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +123,173 @@ async def ensure_project_membership(
     return project_ids, True
 
 
+async def create_project(
+    session: AsyncSession,
+    name: str,
+    tenant_id: str,
+    created_by: str,
+    description: str | None = None,
+    invite_only: bool = False,
+) -> Project:
+    """Create a new project.
+
+    Raises:
+        ProjectAlreadyExistsError: If a project with this name already exists.
+    """
+    existing = await get_project(session, name)
+    if existing is not None:
+        raise ProjectAlreadyExistsError(name)
+
+    project = Project(
+        name=name,
+        description=description,
+        invite_only=invite_only,
+        tenant_id=tenant_id,
+        created_by=created_by,
+    )
+    session.add(project)
+
+    # Auto-enroll the creator as admin.
+    membership = ProjectMembership(
+        id=uuid.uuid4(),
+        project_id=name,
+        user_id=created_by,
+        role="admin",
+        joined_by=created_by,
+    )
+    session.add(membership)
+
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ProjectAlreadyExistsError(name) from exc
+
+    logger.info("Created project %r by %r", name, created_by)
+    return project
+
+
+async def get_project_members(
+    session: AsyncSession,
+    project_name: str,
+) -> list[dict]:
+    """Return all members of a project with their roles.
+
+    Raises:
+        ProjectNotFoundError: If the project does not exist.
+    """
+    project = await get_project(session, project_name)
+    if project is None:
+        raise ProjectNotFoundError(project_name)
+
+    stmt = (
+        select(ProjectMembership)
+        .where(ProjectMembership.project_id == project_name)
+        .order_by(ProjectMembership.joined_at)
+    )
+    result = await session.execute(stmt)
+    members = result.scalars().all()
+
+    return [
+        {
+            "user_id": m.user_id,
+            "role": m.role,
+            "joined_at": m.joined_at.isoformat() if m.joined_at else None,
+        }
+        for m in members
+    ]
+
+
+async def add_project_member(
+    session: AsyncSession,
+    project_name: str,
+    user_id: str,
+    added_by: str,
+    role: str = "member",
+) -> bool:
+    """Add a user to a project.
+
+    Returns True if the user was newly added, False if already a member.
+
+    Raises:
+        ProjectNotFoundError: If the project does not exist.
+    """
+    project = await get_project(session, project_name)
+    if project is None:
+        raise ProjectNotFoundError(project_name)
+
+    membership = ProjectMembership(
+        id=uuid.uuid4(),
+        project_id=project_name,
+        user_id=user_id,
+        role=role,
+        joined_by=added_by,
+    )
+    session.add(membership)
+    try:
+        await session.flush()
+    except IntegrityError:
+        # Already a member.
+        await session.rollback()
+        logger.info("User %r already a member of project %r", user_id, project_name)
+        return False
+
+    logger.info(
+        "Added user %r to project %r as %r (by %r)",
+        user_id, project_name, role, added_by,
+    )
+    return True
+
+
+async def remove_project_member(
+    session: AsyncSession,
+    project_name: str,
+    user_id: str,
+) -> None:
+    """Remove a user from a project.
+
+    Raises:
+        ProjectNotFoundError: If the project does not exist.
+        MembershipNotFoundError: If the user is not a member.
+        LastAdminError: If removing this user would leave no admins.
+    """
+    project = await get_project(session, project_name)
+    if project is None:
+        raise ProjectNotFoundError(project_name)
+
+    stmt = (
+        select(ProjectMembership)
+        .where(
+            ProjectMembership.project_id == project_name,
+            ProjectMembership.user_id == user_id,
+        )
+    )
+    result = await session.execute(stmt)
+    membership = result.scalar_one_or_none()
+
+    if membership is None:
+        raise MembershipNotFoundError(project_name, user_id)
+
+    # Guard: don't remove the last admin.
+    if membership.role == "admin":
+        admin_count_stmt = (
+            select(func.count())
+            .select_from(ProjectMembership)
+            .where(
+                ProjectMembership.project_id == project_name,
+                ProjectMembership.role == "admin",
+            )
+        )
+        admin_count_result = await session.execute(admin_count_stmt)
+        if admin_count_result.scalar_one() <= 1:
+            raise LastAdminError(project_name)
+
+    await session.delete(membership)
+    await session.flush()
+
+    logger.info("Removed user %r from project %r", user_id, project_name)
+
+
 async def list_projects_for_tenant(
     session: AsyncSession,
     tenant_id: str,
@@ -147,7 +320,7 @@ async def list_projects_for_tenant(
             user_project_ids = await get_projects_for_user(session, user_id)
 
         project_names = [p.name for p in projects]
-        counts = await _memory_counts(session, tenant_id, project_names)
+        counts = await memory_counts(session, tenant_id, project_names)
 
         out = []
         for p in projects:
@@ -182,7 +355,7 @@ async def list_projects_for_tenant(
     result = await session.execute(stmt)
     projects = result.scalars().all()
     project_names = [p.name for p in projects]
-    counts = await _memory_counts(session, tenant_id, project_names)
+    counts = await memory_counts(session, tenant_id, project_names)
 
     return [
         {
@@ -198,7 +371,7 @@ async def list_projects_for_tenant(
     ]
 
 
-async def _memory_counts(
+async def memory_counts(
     session: AsyncSession,
     tenant_id: str,
     project_names: list[str],

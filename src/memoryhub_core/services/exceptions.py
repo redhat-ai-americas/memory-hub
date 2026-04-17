@@ -63,6 +63,39 @@ class ProjectInviteOnlyError(Exception):
         )
 
 
+class ProjectNotFoundError(Exception):
+    """Raised when a project does not exist."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Project '{project_id}' not found")
+
+
+class ProjectAlreadyExistsError(Exception):
+    """Raised when creating a project that already exists."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Project '{project_id}' already exists")
+
+
+class MembershipNotFoundError(Exception):
+    """Raised when a project membership does not exist."""
+
+    def __init__(self, project_id: str, user_id: str) -> None:
+        self.project_id = project_id
+        self.user_id = user_id
+        super().__init__(f"User '{user_id}' is not a member of project '{project_id}'")
+
+
+class LastAdminError(Exception):
+    """Raised when attempting to remove the last admin from a project."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Cannot remove the last admin from project '{project_id}'")
+
+
 class EmbeddingServiceError(Exception):
     """Base class for embedding service failures."""
 

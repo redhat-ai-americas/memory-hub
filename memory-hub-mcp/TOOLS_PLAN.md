@@ -474,49 +474,81 @@ Phase 4 adds two tools that make session focus a stored, analyzable signal rathe
 - **`ValkeyClient` wrapper** (`memoryhub_core.services.valkey_client`): Async client over `redis.asyncio` (Valkey is protocol-compatible). Provides `write_session_focus`, `read_focus_history`, `ping`, and vector base64 codec helpers. Tests use `fakeredis` for in-memory Valkey emulation.
 - **`MEMORYHUB_VALKEY_URL` env var**: Connection string passed to the MCP server pod, e.g. `redis://memoryhub-valkey.memory-hub-mcp.svc.cluster.local:6379/0`.
 
-### Phase 5 (current)
+### Phase 5 (current — #166 consolidation)
 
-16. **list_projects** — Depends on the `projects` table (Alembic 012) and the `list_projects_for_tenant()` service function in `memoryhub_core.services.project`. Read-only project discovery tool. Refs #188.
+16. **manage_project** — Replaces `list_projects`. Consolidates all project operations (list, create, describe with members, add_member, remove_member) into one tool following Anthropic's guidance: "Tools can consolidate functionality, handling potentially multiple discrete operations under the hood." Depends on the `projects` table (Alembic 012), `project_memberships` table, and `memoryhub_core.services.project`. Refs #166, #188.
 
 ### Phase 5 (resolved when shipped)
 
 - **`projects` table**: Alembic migration 012, creates `projects(name PK, description, invite_only, tenant_id, created_at, created_by)` with FK from `project_memberships.project_id`.
-- **`ensure_project_membership()`**: Service function that auto-enrolls users in open projects on first project-scoped write. Called by `write_memory` instead of the old hard-reject check.
+- **`project_memberships` table**: Alembic migration 011, maps user_id to project_id with role.
+- **`ensure_project_membership()`**: Service function that auto-enrolls users in open projects on first project-scoped write. Called by `write_memory`.
 - **`list_projects_for_tenant()`**: Service function returning project dicts with `is_member` flag. Supports `include_all_open` filter mode.
+- **New service helpers**: `create_project()`, `get_project_members()`, `add_project_member()`, `remove_project_member()` in `memoryhub_core.services.project`.
 
 ---
 
-## Phase 5 Tools: Project Discovery (#188)
+## Phase 5 Tools: Project Governance (#166)
 
-Phase 5 adds project discovery for agents. The companion change (auto-enrollment via `ensure_project_membership`) is wired directly into the existing `write_memory` tool rather than as a separate tool — the agent doesn't need a `join_project` tool because the act of writing creates the membership.
+Phase 5 consolidates project management into a single `manage_project` tool, replacing the previous `list_projects`. This follows the insight from Anthropic's tool design guidance that agents work better with fewer, more powerful tools than with many narrow ones. The previous `list_projects` was read-only; the consolidated tool adds create, describe, and membership management without adding tool count.
 
 ### Design Principles for Phase 5
 
-**Don't add tools where existing tools suffice.** Auto-enrollment is wired into `write_memory` because that's where the agent hits the friction. Adding `create_project` / `join_project` / `leave_project` tools would bloat the tool surface for operations that either happen automatically (join on write) or rarely (admin-only project creation). A single `list_projects` tool covers the remaining gap: discoverability.
+**Consolidation over proliferation.** Instead of separate `list_projects`, `create_project`, `describe_project`, `list_members`, `add_member`, `remove_member` tools (6 tools), one `manage_project` with an `action` parameter handles all project operations. Agents pick the action, not the tool — reducing tool selection confusion. This directly follows Anthropic's example: "Instead of implementing `list_users`, `list_events`, and `create_event` tools, consider implementing a `schedule_event` tool."
 
-**Filter, don't gate.** The `filter` parameter defaults to `"mine"` (only the user's projects) but supports `"all"` (all open projects in the tenant with an `is_member` flag). Invite-only projects that the user is NOT a member of are excluded from `"all"` results — they should not be discoverable.
+**Meaningful context in responses.** `describe` returns the project details, member list with roles, and memory count in a single call — everything an agent needs to understand a project without follow-up queries.
 
-### list_projects
+**Actionable errors.** Every error tells the agent what to do next. "Project 'X' is invite-only. Ask a project admin to add you, or use action='list' with filter='all' to find open projects." Not just "403 Forbidden."
 
-- **Purpose**: List projects you belong to or that are available to join. Use this to discover which projects exist and which you're a member of before writing project-scoped memories. Projects you are not yet a member of can be joined automatically by writing a project-scoped memory with that `project_id` (auto-enrollment).
+**Auto-enrollment stays in write_memory.** `manage_project` doesn't replace the auto-enrollment path. When an agent writes to an open project they're not a member of, `write_memory` still auto-enrolls. `manage_project` covers the governance cases: creating invite-only projects, explicit membership management, and project discovery.
+
+### manage_project (replaces list_projects)
+
+- **Purpose**: Single entry point for all project operations. List available projects, create new ones, get project details with members, and manage membership. Replaces the previous `list_projects` tool with expanded functionality.
 - **Parameters**:
-  - `filter` (string, optional, default "mine"): Which projects to return. `"mine"` returns only projects you're a member of. `"all"` also includes open projects you could join, with an `is_member` flag on each.
-- **Returns**: A dict with:
-  - `projects` (list of dicts): Each entry has `name`, `description`, `invite_only`, `created_at`, `created_by`, and `is_member` (boolean).
-  - `total` (integer): Number of projects returned.
+  - `action` (string, required): One of: `list`, `create`, `describe`, `add_member`, `remove_member`.
+  - `project_name` (string, optional): Required for `create`, `describe`, `add_member`, `remove_member`. The project identifier.
+  - `description` (string, optional): Project description. Used with `create`.
+  - `invite_only` (bool, optional, default false): Enrollment policy. Used with `create`. Open projects allow auto-enrollment on first write; invite-only projects require explicit `add_member`.
+  - `filter` (string, optional, default "mine"): `mine` or `all`. Used with `list`. `all` shows open projects you could join.
+  - `user_id` (string, optional): Target user. Required for `add_member` and `remove_member`.
+  - `role` (string, optional, default "member"): `member` or `admin`. Used with `add_member`.
+- **Returns by action**:
+  - `list`: `{projects: [{name, description, invite_only, memory_count, is_member, created_by}], total: N}`
+  - `create`: `{project: {name, description, invite_only, created_by}, message: "..."}`
+  - `describe`: `{project: {name, description, invite_only, created_at, created_by, memory_count}, members: [{user_id, role, joined_at}], total_members: N}`
+  - `add_member`: `{message: "User X added to project Y as member."}`
+  - `remove_member`: `{message: "User X removed from project Y."}`
 - **Error Cases**:
-  - "No authenticated session found. Call register_session first, or provide a JWT in the Authorization header." — No auth context. → SDK: `AuthenticationError`
-  - "Invalid filter value '[value]'. Must be one of: mine, all." → SDK: `ValidationError`
+  - "Invalid action 'X'. Must be one of: list, create, describe, add_member, remove_member." → SDK: `ValidationError`
+  - "action='create' requires a project_name." → SDK: `ValidationError`
+  - "Project 'X' already exists. Use action='describe' to see its details." → SDK: `ConflictError`
+  - "Project 'X' not found. Use action='list' with filter='all' to see available projects." → SDK: `NotFoundError`
+  - "Only project admins can add members to invite-only projects." → SDK: `PermissionDeniedError`
+  - "Cannot remove the last admin from project 'X'." → SDK: `ValidationError`
+  - "No authenticated session found. Call register_session first, or provide a JWT in the Authorization header." → SDK: `AuthenticationError`
 - **Tool Annotations**:
-  - `readOnlyHint: true` — Pure read.
-  - `destructiveHint: false`
-  - `idempotentHint: true` — Repeat calls return the same result (ignoring intervening writes).
+  - `readOnlyHint: false` — Some actions modify state.
+  - `destructiveHint: false` — No data is destroyed (remove_member removes a membership row, not data).
+  - `idempotentHint: false` — Create and membership operations are not idempotent.
   - `openWorldHint: false`
-- **Example Usage**: Discovering projects before a first write:
+- **Example Usage**:
   ```
-  list_projects(filter="all")
+  # Discover projects
+  manage_project(action="list", filter="all")
+
+  # Create an invite-only team project
+  manage_project(action="create", project_name="team-alpha", description="Alpha team shared memory", invite_only=true)
+
+  # Get project details with member list
+  manage_project(action="describe", project_name="memory-hub")
+
+  # Add a colleague
+  manage_project(action="add_member", project_name="team-alpha", user_id="jsmith")
+
+  # Remove a member
+  manage_project(action="remove_member", project_name="team-alpha", user_id="jsmith")
   ```
-  Returns: `{"projects": [{"name": "memory-hub", "description": null, "invite_only": false, "created_at": "2026-04-01T...", "created_by": "admin", "is_member": true}, {"name": "agent-template", "description": null, "invite_only": false, "created_at": "2026-04-15T...", "created_by": "wjackson", "is_member": false}], "total": 2}`. The agent sees it's not a member of `agent-template` yet; a `write_memory(scope="project", project_id="agent-template", ...)` call will auto-enroll.
 
 ## Open Questions (Phase 1 — Resolved)
 
