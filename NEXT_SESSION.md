@@ -36,15 +36,14 @@
 - get_relationships and trace_provenance accept as_of parameter
 - find_related filters to active edges only
 - RelationshipRead schema includes valid_from and valid_until
-- NOT YET DEPLOYED — migration needs to run on cluster DB
+- Migration 013 applied to cluster DB, MCP server redeployed (build 11)
+- Exercise-tools verified all 15 tools against live deployment
+- DB credential drift discovered and fixed (openshift.yaml reverted to
+  REPLACE-ME placeholder, cluster Secret patched directly)
+- Version bumped to v0.7.0; docs updated (list_projects → manage_project)
+- Filed #192 (deploy.sh should copy DB Secret instead of hardcoding)
 
 ## Priority items for next session
-
-### 0. Run migration 013 and redeploy
-
-Migration 013 (temporal validity) is committed but not applied to the cluster
-DB. Run `alembic upgrade head` against memoryhub-db, then redeploy the MCP
-server to pick up the ORM/schema changes.
 
 ### 1. #170 Phase 1 — Graph-enhanced retrieval (remaining work)
 
@@ -79,7 +78,13 @@ enhancement itself:
 Design reference: docs/graph-enhanced-memory.md (Phase 1, "Graph-Enhanced
 Retrieval" section)
 
-### 2. Design doc implementation roadmap (unchanged from last session)
+
+### 2. #192 — deploy.sh credential drift fix
+
+Standalone infrastructure fix. Remove hardcoded DB Secret from openshift.yaml,
+add copy_secret step to deploy.sh. Third consecutive retro flagging this.
+
+### 3. Design doc implementation roadmap (unchanged)
 
 After #170 Phase 1 completes, implementation proceeds in dependency order:
 
@@ -92,17 +97,18 @@ See docs/ and planning/ for design references.
 ## Context
 - SDK v0.6.0 on PyPI
 - CLI v0.4.0
-- MCP server **v0.6.0+**, 15 tools deployed (manage_project replaces
-  list_projects; session TTL added to register_session and get_session)
-- Alembic migrations through 013 committed (012 applied, 013 pending)
+- MCP server **v0.7.0**, 15 tools deployed, exercised and verified
+- Alembic migrations through 013 applied
 - Ruff: 0 errors
 - All tests passing: 304 MCP + 324 core = 628 total
 
 ## Cluster state
 - Cluster: **mcp-rhoai** context (n7pd5, sandbox5167)
-- MCP server: memory-hub-mcp namespace (build 10, 2026-04-17)
-- DB: memoryhub-db namespace, migrations through 012 applied (013 pending)
+- MCP server: memory-hub-mcp namespace (build 11, v0.7.0, 2026-04-17)
+- DB: memoryhub-db namespace, migrations through 013 applied
 - Auth: memoryhub-auth namespace
 - UI: memoryhub-ui namespace
 - MinIO: memory-hub-mcp namespace
 - Valkey: memory-hub-mcp namespace
+- DB Secret: cluster Secret patched manually; openshift.yaml has REPLACE-ME
+  placeholder (see #192 for permanent fix)
