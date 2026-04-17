@@ -6,7 +6,7 @@ What exists (migration 012, shipped 2026-04-15):
 - `projects` table with `name` (PK slug), `description`, `invite_only`, `tenant_id`, `created_at`, `created_by`
 - `project_memberships` with FK to `projects.name`; `role` column supports `member` and `admin`
 - Auto-enrollment: writing to an open project with `ensure_project_membership()` creates the project row and membership atomically
-- `list_projects` MCP tool with `filter=mine/all`
+- `manage_project` MCP tool with `action="list"` and `filter=mine/all`
 - `manage-memberships.py` script does raw SQL inserts, bypassing any future service-layer guards
 
 What is missing:
@@ -226,4 +226,4 @@ PatternFly components: `Table`, `Toolbar`, `Drawer`, `Modal` (for delete confirm
 
 **`manage-memberships.py` retirement timeline.** The script bypasses service-layer guards by writing raw SQL. Once the membership API is deployed and the UI panel is functional, the script should be deprecated. A migration note in the script's docstring is sufficient; a hard removal can happen once the cluster is confirmed running the new API.
 
-**Invite-only "request to join" flow.** Agents can discover open projects via `list_projects(filter="all")` but invite-only projects are hidden from non-members entirely. There is no API path for an agent to signal "I'd like to join this invite-only project" short of out-of-band contact with an admin. A `request_project_membership` MCP tool (or equivalent admin-notification path) is a plausible follow-up but is out of scope for this design.
+**Invite-only "request to join" flow.** Agents can discover open projects via `manage_project(action="list", filter="all")` but invite-only projects are hidden from non-members entirely. There is no API path for an agent to signal "I'd like to join this invite-only project" short of out-of-band contact with an admin. A `request_project_membership` MCP tool (or equivalent admin-notification path) is a plausible follow-up but is out of scope for this design.

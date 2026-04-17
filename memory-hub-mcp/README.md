@@ -26,7 +26,7 @@ governed by the curator pipeline, and every row is tenant-isolated.
 | `update_memory` | Create a new version of an existing memory, preserving the old one |
 | `delete_memory` | Soft-delete a memory and its entire version chain (destructive) |
 | `search_memory` | Semantic search across accessible memories via pgvector, with focus bias |
-| `list_projects` | Discover available projects with mine/all filter |
+| `manage_project` | Discover, create, and manage projects and memberships |
 | `report_contradiction` | Signal that observed behavior contradicts a stored memory |
 | `create_relationship` | Create a directed edge between two memory nodes (also handles merge suggestions, consolidated from `suggest_merge`) |
 | `get_relationships` | Query relationships for a node, optionally tracing provenance |
@@ -67,7 +67,7 @@ duplicates. If a curation rule blocks the write, a `ToolError` is raised with th
 (SDK maps to `CurationVetoError`).
 
 When `scope="project"`, the caller is auto-enrolled in open projects on
-first write. Invite-only projects reject non-members. Use `list_projects`
+first write. Invite-only projects reject non-members. Use `manage_project(action="list")`
 to discover available projects before writing.
 
 **Parameters:** `content` (str), `scope` (`user` | `project` | `role` |
@@ -130,14 +130,19 @@ default 0.0), `current_only` (bool, default true), `mode` (`full` |
 `focus` (str, optional), `session_focus_weight` (float 0.0-1.0, default
 0.4).
 
-##### `list_projects`
+##### `manage_project`
 
-Discover available projects. Returns projects the caller is a member of
-(filter `mine`), or all projects visible in the tenant (filter `all`).
-Useful for agents to discover which projects exist before writing
-project-scoped memories.
+Discover, create, and manage projects. The `action` parameter selects
+the operation: `list` returns projects the caller is a member of (filter
+`mine`) or all projects visible in the tenant (filter `all`); `create`
+creates a new project; `update` changes description or enrollment policy;
+`manage_membership` adds or removes a member.
 
-**Parameters:** `filter` (`mine` | `all`, default `mine`).
+**Parameters:** `action` (`list` | `create` | `update` | `manage_membership`),
+plus action-specific parameters: `filter` (`mine` | `all`, default `mine`)
+for listing; `project_id`, `description`, `invite_only` for create/update;
+`project_id`, `user_id`, `membership_action` (`add` | `remove`), `role`
+(`member` | `admin`) for membership management.
 
 ##### `report_contradiction`
 

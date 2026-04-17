@@ -44,7 +44,7 @@ write_memory(
 )
 ```
 
-If the project doesn't exist yet, it's **auto-created** and you're **auto-enrolled** on the first write. The `project_description` is set during auto-create and appears in `list_projects` output.
+If the project doesn't exist yet, it's **auto-created** and you're **auto-enrolled** on the first write. The `project_description` is set during auto-create and appears in `manage_project(action="list")` output.
 
 ## Tool Reference — What You Need
 
@@ -54,7 +54,7 @@ If the project doesn't exist yet, it's **auto-created** and you're **auto-enroll
 | `search_memory` | Find relevant memories (semantic search) |
 | `write_memory` | Store a preference, decision, or fact |
 | `read_memory` | Expand a stub or get version history |
-| `list_projects` | See available projects and memory counts |
+| `manage_project` | Discover, create, and manage projects and memberships |
 | `get_session` | Check your auth state (lightweight whoami) |
 
 ### Tools you probably won't need right away
@@ -130,8 +130,8 @@ get_session()  # Returns user_id, name, scopes, authenticated
 ### Discovering projects
 
 ```python
-list_projects()  # Returns name, description, memory_count, is_member
-list_projects(filter="all")  # Also shows open projects you could join
+manage_project(action="list")  # Returns name, description, memory_count, is_member
+manage_project(action="list", filter="all")  # Also shows open projects you could join
 ```
 
 ## Auto-Enrollment
@@ -147,7 +147,7 @@ Subsequent writes to the same project skip enrollment (you're already a member).
 ## Tips
 
 - **Be specific in search queries**: `"container runtime preferences"` works better than `"containers"`.
-- **Set project_description on first write**: It shows up in `list_projects` and helps other agents understand the project.
+- **Set project_description on first write**: It shows up in `manage_project(action="list")` and helps other agents understand the project.
 - **Keep memories concise and self-contained**: Another agent should understand the memory without additional context.
 - **Don't write trivial things**: Skip "user asked me to read a file." Do write preferences, decisions, architecture choices.
 - **Use `report_contradiction`** when you notice behavior contradicting a stored memory.
