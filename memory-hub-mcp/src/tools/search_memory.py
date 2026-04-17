@@ -553,6 +553,11 @@ async def search_memory(
 ) -> dict[str, Any]:
     """Search memories using semantic similarity.
 
+    Quick start — simplest call:
+      search_memory(query="deployment preferences")
+    With project filter:
+      search_memory(query="deployment preferences", project_id="my-project")
+
     By default, results are returned in cache-optimized order: a stable,
     deterministic ordering driven by compilation epochs (#175) that maximizes
     KV cache hit rates when the response is injected into prompts. New

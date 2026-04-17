@@ -13,10 +13,11 @@ project is invite-only.
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.services.exceptions import ProjectInviteOnlyError
 
@@ -143,6 +144,9 @@ async def list_projects_for_tenant(
         if user_id:
             user_project_ids = await get_projects_for_user(session, user_id)
 
+        project_names = [p.name for p in projects]
+        counts = await _memory_counts(session, tenant_id, project_names)
+
         out = []
         for p in projects:
             is_member = p.name in user_project_ids
@@ -156,6 +160,7 @@ async def list_projects_for_tenant(
                 "created_at": p.created_at.isoformat() if p.created_at else None,
                 "created_by": p.created_by,
                 "is_member": is_member,
+                "memory_count": counts.get(p.name, 0),
             })
         return out
 
@@ -173,6 +178,10 @@ async def list_projects_for_tenant(
         .where(Project.tenant_id == tenant_id)
     )
     result = await session.execute(stmt)
+    projects = result.scalars().all()
+    project_names = [p.name for p in projects]
+    counts = await _memory_counts(session, tenant_id, project_names)
+
     return [
         {
             "name": p.name,
@@ -181,6 +190,27 @@ async def list_projects_for_tenant(
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "created_by": p.created_by,
             "is_member": True,
+            "memory_count": counts.get(p.name, 0),
         }
-        for p in result.scalars().all()
+        for p in projects
     ]
+
+
+async def _memory_counts(
+    session: AsyncSession,
+    tenant_id: str,
+    project_names: list[str],
+) -> dict[str, int]:
+    """Count current project-scoped memories per project in one query."""
+    if not project_names:
+        return {}
+    stmt = (
+        select(MemoryNode.scope_id, func.count(MemoryNode.id))
+        .where(MemoryNode.scope == "project")
+        .where(MemoryNode.tenant_id == tenant_id)
+        .where(MemoryNode.is_current.is_(True))
+        .where(MemoryNode.scope_id.in_(project_names))
+        .group_by(MemoryNode.scope_id)
+    )
+    result = await session.execute(stmt)
+    return dict(result.all())

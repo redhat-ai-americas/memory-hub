@@ -25,6 +25,7 @@ from src.tools.set_curation_rule import set_curation_rule
 from src.tools.set_session_focus import set_session_focus
 from src.tools.get_focus_history import get_focus_history
 from src.tools.list_projects import list_projects
+from src.tools.get_session import get_session
 
 mcp = FastMCP(
     "MemoryHub",
@@ -50,7 +51,7 @@ for tool_fn in [register_session, write_memory, read_memory, update_memory,
                 report_contradiction, create_relationship, get_relationships,
                 get_similar_memories, set_curation_rule,
                 set_session_focus, get_focus_history,
-                list_projects]:
+                list_projects, get_session]:
     mcp.add_tool(tool_fn)
 
 
