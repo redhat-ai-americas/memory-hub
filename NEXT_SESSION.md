@@ -38,6 +38,13 @@
 
 ## Priority items for next session
 
+### 0. Redeploy MCP server
+
+register_session and get_session were enhanced with progressive discovery
+(#189) but the deployed image is still v0.6.0. Rebuild and redeploy to
+memory-hub-mcp namespace before starting new work. Verify with
+mcp-test-mcp that the new response fields appear.
+
 ### 1. Close DX backlog: #166 (project governance) + #190 (session TTL)
 
 These are the two remaining items blocking a 5/5 DX rating. Both are
