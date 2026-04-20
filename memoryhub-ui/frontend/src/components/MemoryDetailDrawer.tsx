@@ -29,8 +29,9 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
+  Tooltip,
 } from '@patternfly/react-core';
-import { ArrowRightIcon, TrashIcon } from '@patternfly/react-icons';
+import { ArrowRightIcon, OutlinedQuestionCircleIcon, TrashIcon } from '@patternfly/react-icons';
 import type { MemoryDetail, VersionEntry } from '@/types';
 import { fetchMemoryDetail, fetchMemoryHistory, deleteMemory } from '@/api/client';
 import ScopeBadge from './ScopeBadge';
@@ -327,7 +328,14 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
                 <DescriptionListDescription>{detail.owner_id}</DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
-                <DescriptionListTerm>Weight</DescriptionListTerm>
+                <DescriptionListTerm>
+                  Weight{' '}
+                  <Tooltip
+                    content="Controls injection priority (0.0–1.0), not relevance. High-weight memories get full content injected; low-weight ones arrive as stubs the agent can expand on demand. Typical: 1.0 = policy, 0.9 = strong preference, 0.7 = default."
+                  >
+                    <OutlinedQuestionCircleIcon style={{ color: 'var(--pf-v6-global--Color--200)', cursor: 'help' }} />
+                  </Tooltip>
+                </DescriptionListTerm>
                 <DescriptionListDescription>{detail.weight.toFixed(2)}</DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
