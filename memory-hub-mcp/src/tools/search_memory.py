@@ -38,6 +38,7 @@ from memoryhub_core.services.valkey_client import (
 )
 from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.services.memory import (
+    _build_search_filters,
     _bulk_branch_flags,
     count_search_matches,
     node_to_read,
@@ -260,6 +261,12 @@ async def _backfill_compiled_entries(
     tenant_id: str,
     owner_id: str,
     weight_threshold: float,
+    scope: str | None = None,
+    authorized_scopes: dict[str, str | None] | None = None,
+    campaign_ids: set[str] | None = None,
+    project_ids: set[str] | None = None,
+    role_names: set[str] | None = None,
+    current_only: bool = True,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Ensure compiled entries are present in the result set.
 
@@ -269,7 +276,8 @@ async def _backfill_compiled_entries(
 
     1. Peeks at the current compilation epoch from Valkey
     2. Finds epoch IDs missing from the similarity results
-    3. Loads those from the database
+    3. Loads those from the database applying the same scope/project filters
+       as the main search, so backfilled entries are always in-scope
     4. Appends them to the results so _apply_cache_optimized_ordering
        can place them in their correct epoch positions
 
@@ -312,13 +320,28 @@ async def _backfill_compiled_entries(
     if not missing_uuids:
         return results
 
+    # Build the same scope/project filters used by the main search so
+    # backfilled entries are always within the caller's authorized view.
+    # _build_search_filters returns None when authorized_scopes is non-None
+    # but empty — that means the caller can see nothing, so bail out.
+    scope_filters = _build_search_filters(
+        scope=scope,
+        owner_id=owner_id,
+        current_only=current_only,
+        authorized_scopes=authorized_scopes,
+        tenant_id=tenant_id,
+        campaign_ids=campaign_ids,
+        project_ids=project_ids,
+        role_names=role_names,
+    )
+    if scope_filters is None:
+        return results
+
     stmt = (
         select(MemoryNode)
         .where(
             MemoryNode.id.in_(missing_uuids),
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.deleted_at.is_(None),
-            MemoryNode.is_current.is_(True),
+            *scope_filters,
         )
     )
     db_result = await session.execute(stmt)
@@ -777,6 +800,12 @@ async def search_memory(
                 results, session, tenant,
                 owner_id=owner_id,
                 weight_threshold=effective_weight_threshold,
+                scope=scope,
+                authorized_scopes=authorized,
+                campaign_ids=campaign_ids,
+                project_ids=project_ids,
+                role_names=role_names,
+                current_only=current_only,
             )
 
         # --- Cache-optimized assembly (default, #175) ---
