@@ -12,7 +12,7 @@
 # also reads from the DB namespace, so credentials stay in sync even without
 # deploy-full.sh.
 #
-# Usage: scripts/uninstall-full.sh [--yes] [--skip-db] [--skip-tile]
+# Usage: scripts/uninstall-full.sh [--yes] [--skip-db] [--skip-tile] [--no-backup]
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
@@ -26,6 +26,7 @@ RHOAI_NAMESPACE="redhat-ods-applications"
 YES=false
 SKIP_DB=false
 SKIP_TILE=false
+NO_BACKUP=false
 
 START_TIME=$(date +%s)
 
@@ -70,15 +71,17 @@ elapsed() {
 parse_args() {
     for arg in "$@"; do
         case "$arg" in
-            --yes)       YES=true ;;
-            --skip-db)   SKIP_DB=true ;;
-            --skip-tile) SKIP_TILE=true ;;
+            --yes)        YES=true ;;
+            --skip-db)    SKIP_DB=true ;;
+            --skip-tile)  SKIP_TILE=true ;;
+            --no-backup)  NO_BACKUP=true ;;
             -h|--help)
-                echo "Usage: $SCRIPT_NAME [--yes] [--skip-db] [--skip-tile]"
+                echo "Usage: $SCRIPT_NAME [--yes] [--skip-db] [--skip-tile] [--no-backup]"
                 echo ""
                 echo "  --yes         Skip all confirmation prompts (non-interactive / CI mode)"
                 echo "  --skip-db     Preserve the database namespace and its PVC (no memory loss)"
                 echo "  --skip-tile   Leave RHOAI tile artifacts in redhat-ods-applications"
+                echo "  --no-backup   Skip automatic pre-uninstall database backup"
                 exit 0
                 ;;
             *)
@@ -146,6 +149,48 @@ confirm() {
     if [ "$answer" != "y" ] && [ "$answer" != "Y" ]; then
         echo "  Cancelled. No changes made."
         exit 0
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Pre-uninstall: Database backup
+# ---------------------------------------------------------------------------
+backup_before_uninstall() {
+    # Skip backup when DB is preserved (no data loss) or explicitly opted out.
+    if [ "$SKIP_DB" = true ]; then
+        return 0
+    fi
+    if [ "$NO_BACKUP" = true ]; then
+        warn "Skipping pre-uninstall backup (--no-backup)."
+        return 0
+    fi
+
+    banner "Pre-Uninstall Backup"
+
+    # Check if the DB pod is even running — can't back up a dead pod.
+    if ! oc get pod -l "app.kubernetes.io/name=memoryhub-pg" \
+            -n "$DB_NAMESPACE" &>/dev/null; then
+        warn "No PostgreSQL pod found in $DB_NAMESPACE — skipping backup."
+        return 0
+    fi
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    info "Running database backup before uninstall..."
+    if "$script_dir/backup-db.sh"; then
+        info "Backup saved. Proceeding with uninstall."
+    else
+        warn "Backup failed."
+        if [ "$YES" = true ]; then
+            warn "--yes flag set; continuing despite backup failure."
+        else
+            read -r -p "  Continue without backup? (y/N): " answer
+            if [ "$answer" != "y" ] && [ "$answer" != "Y" ]; then
+                echo "  Cancelled."
+                exit 0
+            fi
+        fi
     fi
 }
 
@@ -347,6 +392,7 @@ main() {
 
     preflight
     confirm
+    backup_before_uninstall
     remove_tile
     remove_ui_namespace
     remove_legacy_ui

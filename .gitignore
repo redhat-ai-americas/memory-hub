@@ -50,3 +50,6 @@ research/draft_survey-section-architectural-placement.md
 
 # Claude Code worktrees
 .claude/worktrees/
+
+# Local DB backups (created by scripts/backup-db.sh)
+backups/

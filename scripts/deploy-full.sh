@@ -21,6 +21,7 @@ SKIP_MCP=false
 SKIP_AUTH=false
 SKIP_UI=false
 SKIP_TILE=false
+RESTORE_FROM=""
 
 START_TIME=$(date +%s)
 
@@ -94,8 +95,8 @@ elapsed() {
 # Argument parsing
 # ---------------------------------------------------------------------------
 parse_args() {
-    for arg in "$@"; do
-        case "$arg" in
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
             --skip-prereqs)    SKIP_PREREQS=true ;;
             --skip-db)         SKIP_DB=true ;;
             --skip-migrations) SKIP_MIGRATIONS=true ;;
@@ -103,6 +104,16 @@ parse_args() {
             --skip-auth)       SKIP_AUTH=true ;;
             --skip-ui)         SKIP_UI=true ;;
             --skip-tile)       SKIP_TILE=true ;;
+            --restore-from)
+                shift
+                RESTORE_FROM="${1:-}"
+                if [[ -z "$RESTORE_FROM" ]]; then
+                    die "--restore-from requires a file path argument"
+                fi
+                if [[ ! -f "$RESTORE_FROM" ]]; then
+                    die "Restore file not found: $RESTORE_FROM"
+                fi
+                ;;
             -h|--help)
                 echo "Usage: $SCRIPT_NAME [OPTIONS]"
                 echo ""
@@ -113,12 +124,14 @@ parse_args() {
                 echo "  --skip-auth        Skip Auth server deployment"
                 echo "  --skip-ui          Skip UI deployment"
                 echo "  --skip-tile        Skip RHOAI OdhApplication tile"
+                echo "  --restore-from F   Restore database from a pg_dump file after DB deploy"
                 exit 0
                 ;;
             *)
-                die "Unknown argument: $arg (run with --help for usage)"
+                die "Unknown argument: $1 (run with --help for usage)"
                 ;;
         esac
+        shift
     done
 }
 
@@ -245,6 +258,30 @@ deploy_postgresql() {
 
     echo ""
     echo -e "  ${GREEN}PostgreSQL ready${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Section 2a: Restore from backup (optional)
+# ---------------------------------------------------------------------------
+restore_from_backup() {
+    if [[ -z "$RESTORE_FROM" ]]; then
+        return 0
+    fi
+
+    banner "2b. Restore from Backup"
+
+    info "Restoring database from: $RESTORE_FROM"
+    local restore_script="$REPO_ROOT/scripts/restore-db.sh"
+    if [[ ! -f "$restore_script" ]]; then
+        die "Restore script not found: $restore_script"
+    fi
+
+    if ! bash "$restore_script" --yes "$RESTORE_FROM"; then
+        die "Database restore failed. Check output above."
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}Database restored from backup${RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -537,6 +574,7 @@ main() {
     check_prereqs
     preflight
     deploy_postgresql
+    restore_from_backup
     run_migrations
     deploy_infra          # MinIO + Valkey before MCP
     deploy_mcp
