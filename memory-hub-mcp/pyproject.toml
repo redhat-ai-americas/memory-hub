@@ -1,6 +1,6 @@
 [project]
 name = "memory-hub-mcp"
-version = "0.7.0"
+version = "0.7.1"
 description = "MCP server exposing MemoryHub tools over streamable-HTTP for agent frameworks"
 license = "Apache-2.0"
 requires-python = ">=3.11"
