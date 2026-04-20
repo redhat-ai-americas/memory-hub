@@ -436,8 +436,20 @@ prepare_ui_infra() {
     info "Applying UI ServiceAccount..."
     oc apply -f "$REPO_ROOT/memoryhub-ui/openshift/oauth-proxy-sa.yaml" -n "$UI_NAMESPACE"
 
-    # DB credentials (renamed to memoryhub-db-credentials for the UI BFF)
-    copy_secret memoryhub-pg-credentials "$DB_NAMESPACE" memoryhub-db-credentials "$UI_NAMESPACE"
+    # DB credentials for the UI BFF — must use MEMORYHUB_DB_* key names
+    # (the UI's Pydantic settings uses env_prefix="MEMORYHUB_"). Cannot use
+    # copy_secret here because the source Secret has POSTGRES_* keys.
+    info "Creating/updating memoryhub-db-credentials in $UI_NAMESPACE..."
+    local ui_db_pass
+    ui_db_pass=$(oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" \
+        -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+    oc create secret generic memoryhub-db-credentials \
+        --from-literal=MEMORYHUB_DB_HOST=memoryhub-pg.memoryhub-db.svc.cluster.local \
+        --from-literal=MEMORYHUB_DB_PORT=5432 \
+        --from-literal=MEMORYHUB_DB_NAME=memoryhub \
+        --from-literal=MEMORYHUB_DB_USER=memoryhub \
+        --from-literal=MEMORYHUB_DB_PASSWORD="$ui_db_pass" \
+        --dry-run=client -o json | oc apply -f - -n "$UI_NAMESPACE"
 
     # OAuth proxy session secret (must be exactly 32 bytes, key must be "session-secret")
     if ! oc get secret memoryhub-ui-proxy -n "$UI_NAMESPACE" &>/dev/null; then
