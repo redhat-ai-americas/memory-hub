@@ -896,6 +896,8 @@ class FocusedSearchResult:
     pivot_reason: str | None = None
     used_reranker: bool = False
     fallback_reason: str | None = None
+    graph_neighbors_added: int = 0
+    graph_fallback_reason: str | None = None
 
 
 def _cosine_distance(a: list[float], b: list[float]) -> float:
@@ -944,6 +946,9 @@ async def search_memories_with_focus(
     role_names: set[str] | None = None,
     domains: list[str] | None = None,
     domain_boost_weight: float = 0.3,
+    graph_depth: int = 0,
+    graph_relationship_types: list[str] | None = None,
+    graph_boost_weight: float = 0.2,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -1061,6 +1066,42 @@ async def search_memories_with_focus(
             pivot_reason=pivot_reason,
         )
 
+    # Graph traversal: when graph_depth > 0, expand the candidate pool
+    # with nodes reachable from the vector-recall seeds via the graph.
+    graph_neighbors_added = 0
+    graph_fallback_reason: str | None = None
+    graph_neighbor_map: dict[uuid.UUID, int] = {}  # node_id -> hop_distance
+    if graph_depth > 0:
+        from memoryhub_core.services.graph import collect_graph_neighbors
+
+        seed_ids = [node.id for node in candidate_nodes]
+        graph_neighbor_map = await collect_graph_neighbors(
+            seed_ids=seed_ids,
+            session=session,
+            tenant_id=tenant_id,
+            max_depth=graph_depth,
+            relationship_types=graph_relationship_types,
+        )
+        if not graph_neighbor_map:
+            graph_fallback_reason = (
+                "no graph neighbors found for seed nodes"
+            )
+        else:
+            # Fetch neighbor nodes not already in the candidate set.
+            existing_ids = {node.id for node in candidate_nodes}
+            new_neighbor_ids = [
+                nid for nid in graph_neighbor_map if nid not in existing_ids
+            ]
+            if new_neighbor_ids:
+                neighbor_stmt = (
+                    select(MemoryNode)
+                    .where(*filters, MemoryNode.id.in_(new_neighbor_ids))
+                )
+                neighbor_result = await session.execute(neighbor_stmt)
+                new_nodes = list(neighbor_result.scalars().all())
+                candidate_nodes = candidate_nodes + new_nodes
+                graph_neighbors_added = len(new_nodes)
+
     # Cosine ranks of the recall pool by query (already in this
     # order from pgvector). 1-based ranks.
     rank_query: dict[uuid.UUID, int] = {
@@ -1134,19 +1175,36 @@ async def search_memories_with_focus(
             node.id: idx + 1 for idx, node in enumerate(domain_scored)
         }
 
+    # Graph ranks: when graph neighbors were found, rank candidates by
+    # hop distance (hop 1 = rank 1, hop 2 = rank N+1, etc.). Seeds
+    # that appear in graph_neighbor_map also receive a graph rank.
+    # Nodes not reachable via the graph get the miss rank.
+    use_graph_boost = graph_depth > 0 and bool(graph_neighbor_map)
+    rank_graph: dict[uuid.UUID, int] = {}
+    if use_graph_boost:
+        # Group nodes by hop distance and assign sequential ranks,
+        # closest hop first.
+        max_hop = max(graph_neighbor_map.values())
+        rank_counter = 1
+        for hop in range(1, max_hop + 1):
+            for nid, dist in graph_neighbor_map.items():
+                if dist == hop:
+                    rank_graph[nid] = rank_counter
+                    rank_counter += 1
+
     # RRF blend: rank_query carries the cross-encoder ranks (or
     # cosine fallback ranks); rank_focus carries the focus-cosine
-    # ranks; rank_domain carries domain-overlap ranks (when active).
-    # Domain weight is carved proportionally from query and focus.
+    # ranks; rank_domain carries domain-overlap ranks (when active);
+    # rank_graph carries graph proximity ranks (when active).
+    # Domain and graph weights are carved proportionally from query
+    # and focus so all weights always sum to 1.0.
     base_q = 1.0 - session_focus_weight
-    if use_domain_boost:
-        weight_d = domain_boost_weight
-        weight_q = base_q * (1.0 - weight_d)
-        weight_f = session_focus_weight * (1.0 - weight_d)
-    else:
-        weight_d = 0.0
-        weight_q = base_q
-        weight_f = session_focus_weight
+    weight_d = domain_boost_weight if use_domain_boost else 0.0
+    weight_g = graph_boost_weight if use_graph_boost else 0.0
+    carve_total = weight_d + weight_g
+    remaining = 1.0 - carve_total
+    weight_q = remaining * base_q
+    weight_f = remaining * session_focus_weight
 
     blended_scores: list[tuple[MemoryNode, float]] = []
     for node in candidate_nodes:
@@ -1159,7 +1217,12 @@ async def search_memories_with_focus(
             if use_domain_boost
             else 0.0
         )
-        blended_scores.append((node, score_q + score_f + score_d))
+        score_g = (
+            weight_g / (RRF_K + rank_graph.get(node.id, k_recall + 1))
+            if use_graph_boost
+            else 0.0
+        )
+        blended_scores.append((node, score_q + score_f + score_d + score_g))
     blended_scores.sort(key=lambda pair: pair[1], reverse=True)
 
     top_nodes = [node for node, _ in blended_scores[:max_results]]
@@ -1246,6 +1309,8 @@ async def search_memories_with_focus(
         pivot_reason=pivot_reason,
         used_reranker=used_reranker,
         fallback_reason=fallback_reason,
+        graph_neighbors_added=graph_neighbors_added,
+        graph_fallback_reason=graph_fallback_reason,
     )
 
 

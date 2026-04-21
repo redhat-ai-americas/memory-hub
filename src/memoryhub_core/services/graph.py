@@ -13,7 +13,7 @@ import uuid
 from collections import deque
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +48,103 @@ def _active_edges_filter(as_of: datetime | None = None):
             MemoryRelationship.valid_until > as_of,
         ),
     )
+
+
+_MAX_NEIGHBORS_CAP = 3
+_NEIGHBOR_ROW_LIMIT = 500
+
+
+async def collect_graph_neighbors(
+    seed_ids: list[uuid.UUID],
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    max_depth: int = 1,
+    relationship_types: list[str] | None = None,
+    as_of: datetime | None = None,
+) -> dict[uuid.UUID, int]:
+    """Return {node_id: min_hop_distance} for all neighbors reachable from seed_ids.
+
+    Uses a recursive CTE bounded by max_depth (hard cap 3). Filters on
+    tenant, excludes soft-deleted nodes, and respects temporal validity
+    via as_of. Seed IDs themselves are excluded from the result.
+    """
+    if not seed_ids:
+        return {}
+
+    max_depth = min(max_depth, _MAX_NEIGHBORS_CAP)
+
+    # Build the temporal edge filter clause. When as_of is None we only
+    # want currently active edges (valid_until IS NULL). When as_of is
+    # given, we want edges whose validity window contains that timestamp.
+    if as_of is None:
+        temporal_clause = "mr.valid_until IS NULL"
+        params: dict = {
+            "seed_ids": [str(sid) for sid in seed_ids],
+            "max_depth": max_depth,
+            "tenant_id": tenant_id,
+        }
+    else:
+        temporal_clause = (
+            "mr.valid_from <= :as_of AND (mr.valid_until IS NULL OR mr.valid_until > :as_of)"
+        )
+        params = {
+            "seed_ids": [str(sid) for sid in seed_ids],
+            "max_depth": max_depth,
+            "tenant_id": tenant_id,
+            "as_of": as_of,
+        }
+
+    rel_type_clause = ""
+    if relationship_types:
+        rel_type_clause = "AND mr.relationship_type = ANY(:rel_types)"
+        params["rel_types"] = relationship_types
+
+    sql = text(f"""
+        WITH RECURSIVE neighbors AS (
+            -- Base case: seed nodes at depth 0
+            SELECT unnest(CAST(:seed_ids AS uuid[])) AS node_id, 0 AS depth
+
+            UNION ALL
+
+            -- Recursive step: follow edges in both directions
+            SELECT
+                CASE
+                    WHEN mr.source_id = n.node_id THEN mr.target_id
+                    ELSE mr.source_id
+                END AS node_id,
+                n.depth + 1 AS depth
+            FROM neighbors n
+            JOIN memory_relationships mr
+                ON (mr.source_id = n.node_id OR mr.target_id = n.node_id)
+            JOIN memory_nodes mn
+                ON mn.id = CASE
+                    WHEN mr.source_id = n.node_id THEN mr.target_id
+                    ELSE mr.source_id
+                END
+            WHERE n.depth < :max_depth
+              AND {temporal_clause}
+              AND mr.tenant_id = :tenant_id
+              AND mn.deleted_at IS NULL
+              AND mn.tenant_id = :tenant_id
+              {rel_type_clause}
+        )
+        SELECT node_id, MIN(depth) AS min_depth
+        FROM neighbors
+        WHERE depth > 0
+        GROUP BY node_id
+        LIMIT {_NEIGHBOR_ROW_LIMIT}
+    """)
+
+    result = await session.execute(sql, params)
+    rows = result.all()
+
+    seed_set = set(seed_ids)
+    return {
+        uuid.UUID(str(row.node_id)): row.min_depth
+        for row in rows
+        if uuid.UUID(str(row.node_id)) not in seed_set
+    }
 
 
 async def invalidate_relationship(

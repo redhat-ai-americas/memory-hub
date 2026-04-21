@@ -539,6 +539,40 @@ async def search_memory(
             ),
         ),
     ] = None,
+    graph_depth: Annotated[
+        int,
+        Field(
+            description=(
+                "(Advanced) Hop depth for graph-enhanced retrieval. "
+                "When > 0, follows relationships from vector search results to "
+                "surface connected memories. 0 (default) disables graph traversal. Max 3."
+            ),
+            ge=0,
+            le=3,
+        ),
+    ] = 0,
+    graph_relationship_types: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "(Advanced) Limit graph traversal to these relationship types "
+                "(e.g., ['derived_from', 'related_to']). Null means all types. "
+                "Only used when graph_depth > 0."
+            ),
+        ),
+    ] = None,
+    graph_boost_weight: Annotated[
+        float,
+        Field(
+            description=(
+                "(Advanced) Graph proximity boost strength (0.0-1.0). Default 0.2. "
+                "Higher values favor graph-connected memories. "
+                "Ignored when graph_depth is 0."
+            ),
+            ge=0.0,
+            le=1.0,
+        ),
+    ] = 0.2,
     raw_results: Annotated[
         bool,
         Field(
@@ -589,6 +623,10 @@ async def search_memory(
         re-issuing search_memory with a fresh focus when this flag fires.
       - pivot_reason (only when 'focus' was set): human-readable explanation
         of the pivot signal -- query-to-focus distance and the threshold.
+      - graph_neighbors_added (int, only when graph_depth > 0): count of
+        unique nodes surfaced by graph traversal beyond the vector results.
+      - graph_fallback_reason (str, only when graph_depth > 0 and traversal
+        was skipped): human-readable reason graph traversal was not performed.
 
     Sizing controls:
       - mode controls full-vs-stub detail per result.
@@ -696,6 +734,7 @@ async def search_memory(
         # Route to the focused path when a focus is declared; otherwise
         # the original cosine-only path stays on the hot code path.
         focus_meta: dict[str, Any] | None = None
+        graph_bundle = None
         if focus and focus.strip():
             reranker = get_reranker_service()
             bundle = await search_memories_with_focus(
@@ -717,7 +756,11 @@ async def search_memory(
                 role_names=role_names,
                 domains=domains,
                 domain_boost_weight=domain_boost_weight,
+                graph_depth=graph_depth,
+                graph_relationship_types=graph_relationship_types,
+                graph_boost_weight=graph_boost_weight,
             )
+            graph_bundle = bundle
             results = bundle.results
             focus_meta = {
                 "pivot_suggested": bundle.pivot_suggested,
@@ -957,6 +1000,10 @@ async def search_memory(
             response["pivot_reason"] = focus_meta["pivot_reason"]
             if focus_meta["fallback_reason"]:
                 response["focus_fallback_reason"] = focus_meta["fallback_reason"]
+        if graph_depth > 0 and graph_bundle is not None:
+            response["graph_neighbors_added"] = graph_bundle.graph_neighbors_added
+            if graph_bundle.graph_fallback_reason:
+                response["graph_fallback_reason"] = graph_bundle.graph_fallback_reason
         return response
 
     except EmbeddingContentTooLargeError as exc:

@@ -1246,3 +1246,263 @@ async def test_raw_results_parameter_has_default():
     params = sig.parameters
     assert "raw_results" in params
     assert params["raw_results"].default is False
+
+
+# ---------------------------------------------------------------------------
+# Graph-enhanced retrieval parameters
+# ---------------------------------------------------------------------------
+
+
+def test_graph_parameters_have_defaults():
+    """Verify the new graph_depth / graph_relationship_types / graph_boost_weight
+    parameters exist with the expected defaults."""
+    sig = inspect.signature(search_memory)
+    params = sig.parameters
+
+    assert "graph_depth" in params
+    assert params["graph_depth"].default == 0
+
+    assert "graph_relationship_types" in params
+    assert params["graph_relationship_types"].default is None
+
+    assert "graph_boost_weight" in params
+    assert params["graph_boost_weight"].default == 0.2
+
+
+def _fake_focused_bundle_with_graph(
+    page_results,
+    *,
+    graph_neighbors_added: int = 0,
+    graph_fallback_reason: str | None = None,
+    pivot_suggested: bool = False,
+    pivot_distance: float | None = 0.4,
+    pivot_threshold: float = 0.55,
+    pivot_reason: str | None = None,
+    used_reranker: bool = True,
+    fallback_reason: str | None = None,
+):
+    """Build a FocusedSearchResult that includes graph traversal fields."""
+    from memoryhub_core.services.memory import FocusedSearchResult
+
+    return FocusedSearchResult(
+        results=page_results,
+        pivot_suggested=pivot_suggested,
+        pivot_distance=pivot_distance,
+        pivot_threshold=pivot_threshold,
+        pivot_reason=pivot_reason,
+        used_reranker=used_reranker,
+        fallback_reason=fallback_reason,
+        graph_neighbors_added=graph_neighbors_added,
+        graph_fallback_reason=graph_fallback_reason,
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_depth_zero_produces_no_graph_fields():
+    """graph_depth=0 (default) must not add graph fields to the response.
+
+    Backward compatibility: agents that don't opt in to graph traversal
+    should never see graph_neighbors_added or graph_fallback_reason.
+    """
+    full, score = _fake_full_result("plain memory", weight=0.9)
+    result = await _patched_search_call(
+        page_results=[(full, score)],
+        total_matching=1,
+    ).run()
+
+    assert "graph_neighbors_added" not in result
+    assert "graph_fallback_reason" not in result
+
+
+@pytest.mark.asyncio
+async def test_graph_depth_nonzero_with_focus_surfaces_graph_neighbors():
+    """graph_depth > 0 with a focus string routes to the focused path and the
+    response includes graph_neighbors_added."""
+    full, score = _fake_full_result("graph-aware memory", weight=0.9)
+    bundle = _fake_focused_bundle_with_graph(
+        [(full, score)],
+        graph_neighbors_added=3,
+    )
+    result = await _run_focused_search(
+        bundle,
+        total_matching=1,
+        focus="OpenShift deployment",
+        graph_depth=2,
+    )
+
+    assert result["graph_neighbors_added"] == 3
+    assert "graph_fallback_reason" not in result
+
+
+@pytest.mark.asyncio
+async def test_graph_depth_nonzero_without_focus_produces_no_graph_fields():
+    """graph_depth > 0 without a focus string falls through to the plain
+    search_memories path, which does not support graph traversal. The
+    response must contain no graph fields."""
+    full, score = _fake_full_result("plain memory", weight=0.9)
+    result = await _patched_search_call(
+        page_results=[(full, score)],
+        total_matching=1,
+        graph_depth=2,
+    ).run()
+
+    assert "graph_neighbors_added" not in result
+    assert "graph_fallback_reason" not in result
+
+
+@pytest.mark.asyncio
+async def test_graph_fallback_reason_surfaces_when_traversal_finds_nothing():
+    """When graph traversal finds no neighbors, graph_fallback_reason is
+    included in the response alongside graph_neighbors_added=0."""
+    full, score = _fake_full_result("seed memory", weight=0.9)
+    bundle = _fake_focused_bundle_with_graph(
+        [(full, score)],
+        graph_neighbors_added=0,
+        graph_fallback_reason="graph traversal returned no neighbors within depth 1",
+    )
+    result = await _run_focused_search(
+        bundle,
+        total_matching=1,
+        focus="some topic",
+        graph_depth=1,
+    )
+
+    assert result["graph_neighbors_added"] == 0
+    assert "graph_fallback_reason" in result
+    assert "no neighbors" in result["graph_fallback_reason"]
+
+
+@pytest.mark.asyncio
+async def test_graph_relationship_types_forwarded_to_service():
+    """graph_relationship_types is forwarded as-is to search_memories_with_focus."""
+    from unittest.mock import MagicMock
+
+    from memoryhub_core.services.memory import FocusedSearchResult
+
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    fake_reranker = AsyncMock()
+    mock_valkey = AsyncMock()
+    mock_valkey.read_compilation = AsyncMock(return_value=None)
+    mock_valkey.write_compilation = AsyncMock()
+
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:read:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.search_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.search_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.search_memory.get_embedding_service",
+            return_value=fake_embedding_service,
+        ),
+        patch(
+            "src.tools.search_memory.get_reranker_service",
+            return_value=fake_reranker,
+        ),
+        patch(
+            "src.tools.search_memory.search_memories_with_focus",
+            new_callable=AsyncMock,
+            return_value=FocusedSearchResult(results=[]),
+        ) as mock_focused,
+        patch(
+            "src.tools.search_memory.count_search_matches",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch(
+            "src.tools.search_memory.get_valkey_client",
+            return_value=mock_valkey,
+        ),
+    ):
+        await search_memory(
+            query="anything",
+            focus="some focus",
+            graph_depth=2,
+            graph_relationship_types=["derived_from", "related_to"],
+        )
+
+    _, focused_kwargs = mock_focused.call_args
+    assert focused_kwargs.get("graph_relationship_types") == ["derived_from", "related_to"], (
+        f"Expected graph_relationship_types forwarded, got {focused_kwargs}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_boost_weight_forwarded_to_service():
+    """graph_boost_weight is forwarded to search_memories_with_focus."""
+    from unittest.mock import MagicMock
+
+    from memoryhub_core.services.memory import FocusedSearchResult
+
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    fake_reranker = AsyncMock()
+    mock_valkey = AsyncMock()
+    mock_valkey.read_compilation = AsyncMock(return_value=None)
+    mock_valkey.write_compilation = AsyncMock()
+
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:read:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.search_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.search_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.search_memory.get_embedding_service",
+            return_value=fake_embedding_service,
+        ),
+        patch(
+            "src.tools.search_memory.get_reranker_service",
+            return_value=fake_reranker,
+        ),
+        patch(
+            "src.tools.search_memory.search_memories_with_focus",
+            new_callable=AsyncMock,
+            return_value=FocusedSearchResult(results=[]),
+        ) as mock_focused,
+        patch(
+            "src.tools.search_memory.count_search_matches",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch(
+            "src.tools.search_memory.get_valkey_client",
+            return_value=mock_valkey,
+        ),
+    ):
+        await search_memory(
+            query="anything",
+            focus="some focus",
+            graph_depth=1,
+            graph_boost_weight=0.7,
+        )
+
+    _, focused_kwargs = mock_focused.call_args
+    assert focused_kwargs.get("graph_boost_weight") == 0.7, (
+        f"Expected graph_boost_weight=0.7 forwarded, got {focused_kwargs}"
+    )
