@@ -45,13 +45,11 @@
 
 ## Priority items for next session
 
-### 1. Docs refresh for tool consolidation
-19 docs files reference old tool names (report_contradiction,
-create_relationship, get_relationships, etc.). These need updating to
-reflect the 10-tool surface. Run `/docs-refresh` or update manually:
-- docs/ARCHITECTURE.md, docs/mcp-server.md, docs/governance.md
-- docs/agent-integration-guide.md
-- docs/identity-model/authorization.md
+### 1. Quick fixes from retro
+- Fix `register_session` tool description: still says "Check remaining
+  time with get_session" — should reference `manage_session(action="status")`
+- File issue for SDK update to reflect consolidated tool names (if SDK
+  has tool-specific helpers that reference old names)
 
 ### 2. #170 Phase 2 — Entity extraction (next graph phase)
 Design doc is at docs/graph-enhanced-memory.md Phase 2. Adds:
@@ -61,11 +59,11 @@ Design doc is at docs/graph-enhanced-memory.md Phase 2. Adds:
 - Entity-aware search (filter by entity names)
 New dependencies: spaCy, GLiNER2
 
-### 3. Design doc implementation roadmap (unchanged)
+### 3. Design doc implementation roadmap (deferred per user request)
 After #170 Phase 2, implementation proceeds in dependency order:
 - #168 — Conversation persistence (3-5 sessions)
-- #169 — Context compaction (5-7 sessions)
-- #171 — Knowledge compilation (6-8 sessions)
+- #169 — Context compaction (5-7 sessions) — user wants to wait
+- #171 — Knowledge compilation (6-8 sessions) — user wants to wait
 
 ## Context
 - SDK v0.6.0 on PyPI
