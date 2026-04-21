@@ -135,7 +135,7 @@ For memories that exceed the threshold, only a truncated prefix (~1000 character
 
 ### Curator participation
 
-The curation engine runs on the full content string but uses the prefix embedding for similarity comparison when checking for near-duplicates. This may reduce dedup sensitivity for content that only differs deep in the body -- two long documents with identical openings but different conclusions could slip past. This is acceptable divergence: the curator is a best-effort dedup aid, not a guarantee. If precision matters, agents can call `get_similar_memories` explicitly after writing large content.
+The curation engine runs on the full content string but uses the prefix embedding for similarity comparison when checking for near-duplicates. This may reduce dedup sensitivity for content that only differs deep in the body -- two long documents with identical openings but different conclusions could slip past. This is acceptable divergence: the curator is a best-effort dedup aid, not a guarantee. If precision matters, agents can call `manage_graph(action="get_similar", ...)` explicitly after writing large content.
 
 ### Read-time behavior
 

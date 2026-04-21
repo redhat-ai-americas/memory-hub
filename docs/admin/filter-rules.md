@@ -4,7 +4,7 @@
 
 ## Problem
 
-Admins need to create, edit, and delete curation and filter rules at the system and organizational layers. The [curation pipeline](../curator-agent.md) defines a three-layer rule model (system, organizational, user) where higher layers can override lower ones. Users manage their own rules via `set_curation_rule`. Admins manage the rules that users cannot: system defaults that enforce security baselines, and organizational rules that reflect company policy.
+Admins need to create, edit, and delete curation and filter rules at the system and organizational layers. The [curation pipeline](../curator-agent.md) defines a three-layer rule model (system, organizational, user) where higher layers can override lower ones. Users manage their own rules via `manage_curation(action="set_rule", ...)`. Admins manage the rules that users cannot: system defaults that enforce security baselines, and organizational rules that reflect company policy.
 
 This is the admin view of the same `curator_rules` table and evaluation logic defined in [curator-agent.md](../curator-agent.md). The difference is scope, not mechanism.
 
@@ -14,7 +14,7 @@ Each operation below is a function in the core admin library at `src/core/admin/
 
 ### `set_rule`
 
-Creates or updates a curation rule at the system or organizational layer. This is a superset of the user-facing `set_curation_rule` (which is limited to user-layer rules). Upsert semantics: if a rule with the same `(layer, owner_id, name)` already exists, it is updated; otherwise a new rule is created.
+Creates or updates a curation rule at the system or organizational layer. This is a superset of the user-facing `manage_curation(action="set_rule", ...)` (which is limited to user-layer rules). Upsert semantics: if a rule with the same `(layer, owner_id, name)` already exists, it is updated; otherwise a new rule is created.
 
 Admin-created rules can set the `override` flag, which prevents lower layers from weakening the rule. A system rule with `override=True` for secrets scanning means no organizational rule and no user rule can reduce the sensitivity of that scan.
 
@@ -35,7 +35,7 @@ def set_rule(
 ) -> Rule
 ```
 
-`layer` is `system` or `organizational` (user-layer rules are managed via `set_curation_rule`). `tier` is `regex` or `embedding`. `trigger` is `on_write`, `on_read`, `periodic`, or `on_contradiction_count`. `action` is one of `block`, `quarantine`, `flag`, `reject_with_pointer`, `merge`, `decay_weight`.
+`layer` is `system` or `organizational` (user-layer rules are managed via `manage_curation(action="set_rule", ...)`). `tier` is `regex` or `embedding`. `trigger` is `on_write`, `on_read`, `periodic`, or `on_contradiction_count`. `action` is one of `block`, `quarantine`, `flag`, `reject_with_pointer`, `merge`, `decay_weight`.
 
 **Authorization.** Identity must carry `memory:admin`. Setting `override=True` at the `system` layer additionally requires `memory:admin:system_override`.
 

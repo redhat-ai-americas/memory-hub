@@ -20,7 +20,7 @@ At the START of every conversation, before doing any other work:
 - Add rationale branches (via `parent_id` + `branch_type: "rationale"`) when the "why" behind a preference matters
 - Use appropriate scopes: `user` for personal preferences, `project` for project-specific context, `organizational` for team/org patterns, `enterprise` for mandated policies
 - When writing project-scoped memories, pass `project_id="memory-hub"` — the server tags the memory to this project and verifies your membership
-- When you notice behavior contradicting a stored memory, call `report_contradiction`
+- When you notice behavior contradicting a stored memory, call `manage_curation(action="report_contradiction", ...)`
 - When updating an existing memory, use `update_memory` (not write_memory) to preserve version history
 
 ### Memory Hygiene

@@ -322,14 +322,14 @@ class RelationshipType(StrEnum):
     mentions = "mentions"  # Phase 2: memory → entity
 ```
 
-`MENTIONS` edges are automatically created by the extraction pipeline; they cannot be created manually via `create_relationship` (validate and reject). This keeps the vocabulary clean — agents link memories to memories; the system links memories to entities.
+`MENTIONS` edges are automatically created by the extraction pipeline; they cannot be created manually via `manage_graph(action="create_relationship", ...)` (validate and reject). This keeps the vocabulary clean — agents link memories to memories; the system links memories to entities.
 
 Alembic migration `014_add_entity_scope.py`:
 1. Add `mentions` to the `relationship_type` CHECK constraint (if one exists) or document the VARCHAR approach.
 2. Add the GIN index on entity content.
 3. Add the partial index on `valid_until` for MENTIONS edges: `WHERE relationship_type = 'mentions'`.
 
-The `create_relationship` tool's docstring updates to list `mentions` in the type vocabulary and explain it is system-managed.
+The `manage_graph(action="create_relationship", ...)` tool's docstring updates to list `mentions` in the type vocabulary and explain it is system-managed.
 
 ## Phase 3: Strategic Decision Point (Deferred)
 
@@ -390,8 +390,8 @@ Deployment order: migrate first, deploy new code second. Phase 1 search enhancem
 
 **What depends on this**:
 - `search_memory` MCP tool: gains `graph_depth` and `entities` parameters; backward compatible.
-- `create_relationship` MCP tool: gains `mentions` in the type vocabulary (system-managed only).
-- `get_relationships` MCP tool: gains `as_of` parameter for temporal queries.
+- `manage_graph(action="create_relationship", ...)` MCP tool: gains `mentions` in the type vocabulary (system-managed only).
+- `manage_graph(action="get_relationships", ...)` MCP tool: gains `as_of` parameter for temporal queries.
 - Any consumer that calls `search_memories_with_focus` directly — no interface break.
 - Phase 3 backend decision: depends on observability data from Phase 1 and 2 production runs.
 
@@ -407,4 +407,4 @@ Deployment order: migrate first, deploy new code second. Phase 1 search enhancem
 
 5. **Invalidation API surface**: Should `invalidate_relationship` be exposed as an MCP tool, or only callable internally (e.g., when `supersedes` is created automatically)? Explicit invalidation by agents could be useful for temporal modeling but creates a footgun if misused. Start internal-only; promote to a tool in a follow-on issue.
 
-6. **Conflict between temporal filter and existing `get_relationships` behavior**: The current `get_relationships` tool returns all edges regardless of validity (since `valid_until` does not yet exist). After migration 013, the default must change to return only active edges. Callers relying on historical edges must use `as_of`. Document this as a behavior change in the Phase 1 migration notes.
+6. **Conflict between temporal filter and existing `manage_graph(action="get_relationships", ...)` behavior**: The current `get_relationships` action returns all edges regardless of validity (since `valid_until` does not yet exist). After migration 013, the default must change to return only active edges. Callers relying on historical edges must use `as_of`. Document this as a behavior change in the Phase 1 migration notes.

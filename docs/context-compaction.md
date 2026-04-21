@@ -46,7 +46,7 @@ Four compaction layers, each with a distinct trigger and scope:
    └────────────────────────────────────────────────────────────────┘
 ```
 
-**Layer 1 — Memory Store Compaction (background):** Periodic background job that deduplicates, merges near-duplicates, archives stale memories, and decays weights. Evolves from the existing curation pipeline (duplicate detection, `get_similar_memories`, weight decay). Compaction events produce `compaction_provenance` branches and trigger compilation epoch invalidation.
+**Layer 1 — Memory Store Compaction (background):** Periodic background job that deduplicates, merges near-duplicates, archives stale memories, and decays weights. Evolves from the existing curation pipeline (duplicate detection, `manage_graph(action="get_similar", ...)`, weight decay). Compaction events produce `compaction_provenance` branches and trigger compilation epoch invalidation.
 
 **Layer 2 — Retrieval-Time Token Budget Assembly:** At `search_memory` time, if the caller specifies a `max_response_tokens` budget, results are structured-summarized to fit. Operates on the already-retrieved result set; no LLM call unless the caller opts into summarization. This is filtering and structured truncation, not lossy compression.
 
@@ -129,7 +129,7 @@ The background compaction job runs on a configurable schedule. It does not call 
 2. Query `memory_nodes` for candidates matching rule predicates: `weight < threshold`, `created_at < cutoff`, `domain_tags intersection`, `is_current = true`, `deleted_at IS NULL`.
 3. For each candidate, check contradiction block (see §Contradiction-Aware Compaction). Skip if blocked.
 4. For each candidate, check `protect` rules. Skip if protected.
-5. For similarity-merge candidates, call `get_similar_memories` with the candidate's embedding to find merge partners above the configured merge threshold (default: 0.92).
+5. For similarity-merge candidates, call `manage_graph(action="get_similar", ...)` with the candidate's embedding to find merge partners above the configured merge threshold (default: 0.92).
 
 **Generator/Reflector/Curator pattern (ACE):**
 
@@ -326,7 +326,7 @@ Compaction is blocked only when at least one unresolved contradiction has `confi
 
 **For merge candidates:** If any memory in a merge group has unresolved contradictions, the entire group is blocked — not just the individual memory. This prevents a merge from obscuring which source memory was contradicted.
 
-**Resolution path:** Contradictions must be resolved (via `report_contradiction`'s resolution mechanism, or via direct admin action) before compaction can proceed. After resolution, the memory is eligible for the next compaction sweep.
+**Resolution path:** Contradictions must be resolved (via `manage_curation(action="report_contradiction", ...)`'s resolution mechanism, or via direct admin action) before compaction can proceed. After resolution, the memory is eligible for the next compaction sweep.
 
 **Operator override:** Admin users can force compaction despite unresolved contradictions by calling `compact_memories` with `force_contradiction_override: true`. This is logged with the actor's identity and the count of overridden contradictions.
 

@@ -81,7 +81,7 @@ If omitted, defaults to the agent's own `user_id` (autonomous mode). The
 session default is held in the existing `_current_session` dict in
 `memory-hub-mcp/src/tools/auth.py:20`.
 
-### `write_memory`, `update_memory`, `delete_memory`, `report_contradiction`
+### `write_memory`, `update_memory`, `delete_memory`, `manage_curation(action="report_contradiction", ...)`
 
 Each gains an optional `driver_id` parameter that, if provided, overrides the
 session default for *this call only*. If both the parameter and session
@@ -90,7 +90,7 @@ default are absent, defaults to `actor_id`.
 `actor_id` is **not** a parameter — it is always derived from the
 authenticated identity (`claims["sub"]`) and cannot be claimed by the caller.
 
-### `search_memory`, `read_memory`, `get_relationships`, `get_memory_history`
+### `search_memory`, `read_memory`, `manage_graph(action="get_relationships", ...)`
 
 Read paths gain `driver_id` as an optional *filter*. Memories returned to the
 caller include both `actor_id` and `driver_id` so the calling agent can
@@ -179,6 +179,6 @@ Use these terms consistently:
   on writes, with a future migration to add the constraint after the demo.
 - *Should an additional composite index `(driver_id, scope, is_current)` be
   created up front?* Defer until we see the demo's dominant query pattern.
-- *Should `report_contradiction` capture a separate `reporter_id` distinct
+- *Should `manage_curation(action="report_contradiction", ...)` capture a separate `reporter_id` distinct
   from `actor_id`?* Probably not — the actor at the time of the report is
   the reporter. Conflating them keeps the model smaller.

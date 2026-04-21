@@ -124,7 +124,7 @@ When updating an existing memory, use `update_memory` (not `write_memory`)
 to preserve version history.
 
 When you notice the user contradicting a stored memory, call
-`report_contradiction` with both memory IDs.
+`manage_curation(action="report_contradiction", ...)` with both memory IDs.
 
 When the topic shifts mid-conversation, search memory again. Memories are
 retrieved on demand, not loaded once.

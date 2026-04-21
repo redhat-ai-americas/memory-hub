@@ -16,7 +16,7 @@ graph TB
     end
 
     subgraph "memory-hub-mcp namespace"
-        MCP[MCP Server<br/>FastMCP 3<br/>14 tools]
+        MCP[MCP Server<br/>FastMCP 3<br/>10 tools]
         UI_BE[Dashboard BFF<br/>FastAPI]
         OAP[oauth-proxy<br/>sidecar]
     end
@@ -163,7 +163,7 @@ JWTs are RSA-2048-signed, short-lived (5-15 min), and refreshed via DB-backed re
 
 - `get_claims_from_context()` extracts JWT claims (or falls back to a session shim from `register_session` for the dev path).
 - `build_authorized_scopes()` maps the token's access-tier scopes onto a SQL filter that limits visible memories to those the caller is authorized to read.
-- `authorize_read()` and `authorize_write()` are called by every tool before any service-layer call. Cross-reference tools (`get_similar_memories`, `get_relationships`) do post-fetch filtering and report an `omitted_count` so callers know when they hit something they couldn't see.
+- `authorize_read()` and `authorize_write()` are called by every tool before any service-layer call. Cross-reference tools (`manage_graph(action="get_similar", ...)`, `manage_graph(action="get_relationships", ...)`) do post-fetch filtering and report an `omitted_count` so callers know when they hit something they couldn't see.
 - `search_memory` applies the authorized-scopes filter at the SQL level so RBAC violations are impossible by construction.
 
 The dev-path API key flow (`register_session(api_key="mh-dev-...")`) is a compatibility shim that produces the same claim structure as a real JWT. It is intended to be removed once all consumers move to OAuth.

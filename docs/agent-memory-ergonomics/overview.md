@@ -2,7 +2,7 @@
 
 ## What This Is
 
-An effort to make memory-hub usable — not just functional — from the consuming agent's perspective. memory-hub ships 13 MCP tools that cover every operation an agent needs, but tools without policy don't get used well, and response shapes that are "technically correct" can still force agents into multi-round-trip dances or silent misses. This effort captures the current rough edges and proposes targeted changes.
+An effort to make memory-hub usable — not just functional — from the consuming agent's perspective. memory-hub ships 10 MCP tools that cover every operation an agent needs, but tools without policy don't get used well, and response shapes that are "technically correct" can still force agents into multi-round-trip dances or silent misses. This effort captures the current rough edges and proposes targeted changes.
 
 This folder is the design artifact for that effort. It is not a spec; it is a living set of proposals, research notes, and open questions that seven GitHub issues (#56–#62) pulled implementation from. **Layers 1-3 shipped 2026-04-07; Phase 2 (#61, #62) is unblocked but not yet started.** See the [Implementation Status](#implementation-status) section below for the per-issue picture.
 
@@ -10,7 +10,7 @@ This folder is the design artifact for that effort. It is not a spec; it is a li
 
 Two forcing functions converged in early April 2026:
 
-1. **The `/exercise-tools` session on 2026-04-06** surfaced seven structural issues with the Phase 1/2 tool set, most of them about response shape (empty results from `get_similar_memories`, `total_accessible` ambiguity, `read_memory`'s `depth` footgun, etc.). Those eight shipped fixes landed in the 2026-04-07 Wave 1–4 session (see `retrospectives/2026-04-07_wave1-4-mcp-fixes/RETRO.md`). While fixing them, a second, deeper category of issues surfaced: the tools were fine but the *loading patterns* around them were underdefined.
+1. **The `/exercise-tools` session on 2026-04-06** surfaced seven structural issues with the Phase 1/2 tool set, most of them about response shape (empty results from `manage_graph(action="get_similar", ...)`, `total_accessible` ambiguity, `read_memory`'s `depth` footgun, etc.). Those eight shipped fixes landed in the 2026-04-07 Wave 1–4 session (see `retrospectives/2026-04-07_wave1-4-mcp-fixes/RETRO.md`). While fixing them, a second, deeper category of issues surfaced: the tools were fine but the *loading patterns* around them were underdefined.
 2. **Kagenti integration research** started in parallel. Swarm-style deployments have fundamentally different memory-loading needs than the single-developer single-thread workflow memory-hub has been tuned for. Sitting down to write the kagenti integration docs made it clear that "how should agents actually use memory-hub" was not something we had an answer for.
 
 The result is this effort: document the two problems (response shape, loading policy), propose designs for each, and carve out the research that needs to happen before the bigger pieces can ship.

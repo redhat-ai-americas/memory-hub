@@ -45,7 +45,7 @@ Admin capabilities are organized into three domains, each with its own design do
 
 **[Agent and User Management](agent-user-management.md)** covers locking and unlocking agents and users in response to security incidents, compliance actions, or operational needs. This includes session management -- viewing active sessions, revoking specific sessions, and blocking new session creation for compromised or misbehaving identities.
 
-**[Filter Rule Management](filter-rules.md)** covers admin-level management of curation and filter rules at the system and organizational layers. This is the admin complement to the user-facing `set_curation_rule` tool -- where users manage their own rules, admins manage the rules that apply across the organization and the system defaults that users cannot override.
+**[Filter Rule Management](filter-rules.md)** covers admin-level management of curation and filter rules at the system and organizational layers. This is the admin complement to the user-facing `manage_curation(action="set_rule", ...)` tool action -- where users manage their own rules, admins manage the rules that apply across the organization and the system defaults that users cannot override.
 
 ## Relationship to Existing Infrastructure
 

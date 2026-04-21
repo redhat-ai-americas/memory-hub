@@ -121,7 +121,7 @@ for at least:
 
 The detection patterns ship as a curation policy file (proposed:
 `memory-hub-mcp/policies/healthcare.yaml`) loadable via the existing
-`set_curation_rule` tool. Three actions configurable per pattern:
+`manage_curation(action="set_rule", ...)` tool action. Three actions configurable per pattern:
 flag-and-alert, quarantine, block. The demo uses `quarantine` for most
 patterns so the demo presenter can show the quarantined memory and explain
 what happened.
@@ -133,13 +133,13 @@ end-to-end before designing the patterns.
 
 ### 5. Contradiction detection demo flow validation
 
-`report_contradiction` exists as a tool. Before the demo, the full flow
+`manage_curation(action="report_contradiction", ...)` exists as a tool action. Before the demo, the full flow
 needs to be exercised end-to-end:
 
 - Agent A writes finding F1 to project scope.
 - Agent B searches and finds F1.
 - Agent B writes finding F2 that contradicts F1 (also to project scope).
-- Some agent (B itself, or a curator agent) calls `report_contradiction`
+- Some agent (B itself, or a curator agent) calls `manage_curation(action="report_contradiction", ...)`
   pointing at F1 with F2 as the contradicting evidence.
 - A query surfaces the contradiction in some queryable form.
 - The demo shows resolution: either F1 is marked obsolete, F2 is marked

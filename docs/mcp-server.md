@@ -2,7 +2,7 @@
 
 The MCP server is the sole external interface to MemoryHub. Every agent interaction -- reading, writing, searching, versioning -- goes through MCP tools. There is no REST API, no direct database access, no alternative path. This simplifies security (one interface to secure) and governance (one interface to audit).
 
-**Status: implemented.** 13 tools deployed on OpenShift via streamable-http transport. Layer 1 (response shape, #56/#57) and Layer 2 (session focus retrieval, #58) of the agent-memory-ergonomics work are both shipped. Tool consolidation (#173/#174) merged `suggest_merge` into `create_relationship` and `get_memory_history` into `read_memory`. See `memory-hub-mcp/TOOLS_PLAN.md` for the full tool specifications and [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) for the design behind the search-memory parameters.
+**Status: implemented.** 10 tools deployed on OpenShift via streamable-http transport. Layer 1 (response shape, #56/#57) and Layer 2 (session focus retrieval, #58) of the agent-memory-ergonomics work are both shipped. Tool consolidation (#173/#174) merged `suggest_merge` into `create_relationship` and `get_memory_history` into `read_memory`. See `memory-hub-mcp/TOOLS_PLAN.md` for the full tool specifications and [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) for the design behind the search-memory parameters.
 
 ## Transport and Deployment
 
@@ -23,16 +23,16 @@ Deployment is automated via `deploy/deploy.sh` which stages a build context, tri
 | `read_memory` | Retrieve memory by ID, with optional paginated version history (history_offset, history_max_versions). Consolidated from `get_memory_history` (#174) | Read |
 | `update_memory` | Create new version of a memory, preserving history | Write |
 | `search_memory` | Semantic search via pgvector embeddings, with optional session focus / two-vector retrieval (Layer 2, #58), campaign inclusion, and domain-aware boosting (#154) | Read |
-| `report_contradiction` | Accumulate staleness signals against a memory | Write |
+| `manage_curation(action="report_contradiction", ...)` | Accumulate staleness signals against a memory | Write |
 
-### Phase 2: Graph Relationships & Curation (4 tools)
+### Phase 2: Graph Relationships & Curation (2 consolidated tools)
 
 | Tool | Purpose | Read/Write |
 |------|---------|------------|
-| `create_relationship` | Create directed edges between memories (derived_from, supersedes, conflicts_with, related_to). Use `conflicts_with` with merge metadata to suggest merges (consolidated from `suggest_merge`, #173) | Write |
-| `get_relationships` | Query edges for a node with optional provenance tracing | Read |
-| `get_similar_memories` | Paged similar memory lookup by embedding similarity | Read |
-| `set_curation_rule` | Create/update user-layer curation rules (dedup thresholds, custom regex) | Write |
+| `manage_graph(action="create_relationship", ...)` | Create directed edges between memories (derived_from, supersedes, conflicts_with, related_to). Use `conflicts_with` with merge metadata to suggest merges (consolidated from `suggest_merge`, #173) | Write |
+| `manage_graph(action="get_relationships", ...)` | Query edges for a node with optional provenance tracing | Read |
+| `manage_graph(action="get_similar", ...)` | Paged similar memory lookup by embedding similarity | Read |
+| `manage_curation(action="set_rule", ...)` | Create/update user-layer curation rules (dedup thresholds, custom regex) | Write |
 
 ### Phase 3: Lifecycle (1 tool)
 
@@ -51,7 +51,7 @@ The write response includes curation feedback: `similar_count`, `nearest_id`, `n
 
 ### Curation Rules Engine
 
-Three-layer rules (system > organizational > user) with override protection. System rules for secrets scanning are marked `override=true` and cannot be weakened by user rules. Users tune their own dedup thresholds via `set_curation_rule`.
+Three-layer rules (system > organizational > user) with override protection. System rules for secrets scanning are marked `override=true` and cannot be weakened by user rules. Users tune their own dedup thresholds via `manage_curation(action="set_rule", ...)`.
 
 ## Search response shape (Layer 1, #56/#57)
 
@@ -103,7 +103,7 @@ The MCP server is a **resource server** in OAuth 2.1 terms — it validates JWTs
 
 FastMCP's `JWTVerifier` validates tokens at the transport layer before any tool code executes. Tools access the authenticated identity via `get_claims_from_context()` in `core/authz.py`, which prefers JWT claims when present and falls back to a session shim when the dev-path API key flow is in use. The claims provide `sub` (user ID), `identity_type` (user/service), `tenant_id` (multi-tenant isolation), and `scopes` (operational permissions like `memory:read:user`, `memory:write:project`).
 
-Service-layer RBAC enforcement shipped with the auth work: every tool calls `authorize_read()` or `authorize_write()` from `core/authz.py` before any service-layer call. `search_memory` builds the authorized-scopes filter at the SQL level so RBAC violations are impossible by construction. Cross-reference tools (`get_similar_memories`, `get_relationships`) do post-fetch filtering and report an `omitted_count` so callers know when something was hidden. See [governance.md](governance.md) for the full enforcement architecture.
+Service-layer RBAC enforcement shipped with the auth work: every tool calls `authorize_read()` or `authorize_write()` from `core/authz.py` before any service-layer call. `search_memory` builds the authorized-scopes filter at the SQL level so RBAC violations are impossible by construction. Cross-reference tools (`manage_graph(action="get_similar", ...)`, `manage_graph(action="get_relationships", ...)`) do post-fetch filtering and report an `omitted_count` so callers know when something was hidden. See [governance.md](governance.md) for the full enforcement architecture.
 
 The `register_session` tool is retained as a compatibility shim for MCP clients that cannot send HTTP Authorization headers (due to client bugs or limitations). It accepts an API key and writes a session shim that produces the same claim structure as a real JWT. It is not the primary auth path and is intended to be removed once all consumers move to OAuth.
 

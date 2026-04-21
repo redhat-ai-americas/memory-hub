@@ -304,7 +304,7 @@ The extraction pipeline calls `write_memory` with the same parameters an agent w
 
 ### Conflict Resolution
 
-When extracted content contradicts an existing memory, the pipeline calls the existing `report_contradiction` mechanism. The contradiction report's `metadata_` includes the `thread_id` and `source_messages` of the conflicting evidence, making the source of conflict auditable.
+When extracted content contradicts an existing memory, the pipeline calls the existing `manage_curation(action="report_contradiction", ...)` mechanism. The contradiction report's `metadata_` includes the `thread_id` and `source_messages` of the conflicting evidence, making the source of conflict auditable.
 
 Temporal ordering is the tiebreaker for automatic resolution: the more recent extraction supersedes the older one. Conflicts that cannot be automatically resolved are flagged with `ConflictStatus.pending` and surface through the existing contradiction report query.
 

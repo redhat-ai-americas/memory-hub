@@ -88,16 +88,16 @@ When a write is blocked (secrets scan, exact duplicate), the response includes:
 
 The tool description for `write_memory` includes guidance like:
 
-> If `curation.similar_count` is greater than 0, consider reviewing existing similar memories before creating more. Use `search_memory` to find them, or call `get_similar_memories` with the memory ID to see what's similar. If the existing memory says the same thing, consider calling `update_memory` on it instead of creating a duplicate.
+> If `curation.similar_count` is greater than 0, consider reviewing existing similar memories before creating more. Use `search_memory` to find them, or call `manage_graph(action="get_similar", memory_id=...)` to see what's similar. If the existing memory says the same thing, consider calling `update_memory` on it instead of creating a duplicate.
 
 This nudges the agent toward good memory hygiene without blocking writes. The agent's LLM makes the judgment call -- "is this actually a duplicate or a legitimately different memory?" -- using its full conversation context, which is richer than anything we could provide in a sampling prompt.
 
-### `get_similar_memories` tool
+### `manage_graph(action="get_similar", ...)` tool
 
-A new read-only tool that returns paged similar memories for a given memory ID:
+A read-only action that returns paged similar memories for a given memory ID:
 
 ```
-get_similar_memories(memory_id, threshold=0.80, max_results=10, offset=0)
+manage_graph(action="get_similar", memory_id=..., threshold=0.80, max_results=10, offset=0)
 ```
 
 Returns a list of similar memories with their similarity scores. This is how the agent drills into `similar_count > 0` without getting context-bombed -- it controls the page size. The tool uses the stored embedding from the source memory, so no re-embedding is needed.
@@ -148,7 +148,7 @@ Rules are scoped to three layers, evaluated bottom-up (most specific wins, with 
 
 The `override` flag is the key mechanism. System-layer rules for secrets scanning are marked `override=true`, which means no user or org rule can weaken them. But the dedup threshold? Users can adjust that -- the system default is a recommendation, not a mandate.
 
-User-layer rules evolve with the user's working style. An agent that notices frequent false-positive duplicate warnings can call `set_curation_rule` to adjust the user's threshold. Over time, each user's curation rules become tuned to their memory patterns.
+User-layer rules evolve with the user's working style. An agent that notices frequent false-positive duplicate warnings can call `manage_curation(action="set_rule", ...)` to adjust the user's threshold. Over time, each user's curation rules become tuned to their memory patterns.
 
 ### Rule Evaluation Logic
 
@@ -185,27 +185,27 @@ Every agent that uses MemoryHub contributes to curation from its RBAC-limited pe
 
 The similarity feedback on `write_memory` is the primary curation signal. When an agent writes a memory and gets `similar_count: 3` back, its LLM can reason about what to do:
 
-- Read the similar memories via `get_similar_memories`
+- Read the similar memories via `manage_graph(action="get_similar", ...)`
 - Decide: "these are genuinely different" (do nothing) or "I should update the existing one instead" (call `update_memory`)
-- Or: "these should be merged" (call `suggest_merge`)
+- Or: "these should be merged" (call `manage_graph(action="create_relationship", ...)` with `conflicts_with` type and merge metadata)
 
 This works because the calling agent has full conversation context -- it knows *why* it's writing this memory and can judge similarity better than any isolated curation check could.
 
 ### Existing tools that contribute
 
-- `report_contradiction` -- accumulates staleness signals when an agent observes behavior contradicting a stored memory. These contradiction counts feed into the `staleness_trigger` rule.
+- `manage_curation(action="report_contradiction", ...)` -- accumulates staleness signals when an agent observes behavior contradicting a stored memory. These contradiction counts feed into the `staleness_trigger` rule.
 
 ### New tools
 
-**`get_similar_memories(memory_id, threshold=0.80, max_results=10, offset=0)`** -- Returns paged similar memories for a given memory ID with similarity scores. Read-only. This is how agents drill into similarity counts without context bloat.
+**`manage_graph(action="get_similar", memory_id=..., threshold=0.80, max_results=10, offset=0)`** -- Returns paged similar memories for a given memory ID with similarity scores. Read-only. This is how agents drill into similarity counts without context bloat.
 
-**`suggest_merge(memory_a_id, memory_b_id, reasoning)`** -- Queues a merge suggestion for evaluation. The agent noticed two memories that should be one. Constrained to the agent's RBAC scope -- an agent can only suggest merges for memories it can read. Creates a `conflicts_with` or `supersedes` relationship between the memories and flags both for review.
+**Merge suggestion** -- Create a `conflicts_with` relationship via `manage_graph(action="create_relationship", ...)` with merge metadata. The agent noticed two memories that should be one. Constrained to the agent's RBAC scope -- an agent can only suggest merges for memories it can read. Flags both memories for review.
 
-**`set_curation_rule(name, config)`** -- Lets agents (within user scope) create or update user-layer curation rules. Example: the agent notices the user keeps getting false-positive duplicate warnings and adjusts the threshold. This tool can only create rules at the `user` layer for the authenticated owner_id. Cannot override system rules marked with `override=true`.
+**`manage_curation(action="set_rule", name=..., config=...)`** -- Lets agents (within user scope) create or update user-layer curation rules. Example: the agent notices the user keeps getting false-positive duplicate warnings and adjusts the threshold. This tool can only create rules at the `user` layer for the authenticated owner_id. Cannot override system rules marked with `override=true`.
 
 ### Sampling for Explicit Review
 
-**`review_my_memories(scope=None, max_results=20)`** -- Triggers a sampling-powered self-audit. The tool fetches the agent's memories, uses `ctx.sample()` to have the LLM review them, and returns suggestions: merge candidates, stale memories, conflicts. The agent can then act on the suggestions by calling `suggest_merge`, `update_memory`, or `report_contradiction`.
+**`review_my_memories(scope=None, max_results=20)`** -- Triggers a sampling-powered self-audit. The tool fetches the agent's memories, uses `ctx.sample()` to have the LLM review them, and returns suggestions: merge candidates, stale memories, conflicts. The agent can then act on the suggestions by calling `manage_graph(action="create_relationship", ...)` for merges, `update_memory`, or `manage_curation(action="report_contradiction", ...)`.
 
 Unlike write-time curation, sampling here is appropriate because:
 - The user explicitly initiated it (or their agent did as a deliberate action)
@@ -260,13 +260,13 @@ These were open in the original design. Here's where we landed:
 
 ## Design Questions (Open)
 
-- How should `set_curation_rule` validate that user rules don't create security gaps? Users need guardrails on what they can adjust. Thresholds are safe to change; disabling secrets scanning is not. The `override` flag on system rules prevents weakening, but we need clear error messages when a user tries to override a protected rule.
+- How should `manage_curation(action="set_rule", ...)` validate that user rules don't create security gaps? Users need guardrails on what they can adjust. Thresholds are safe to change; disabling secrets scanning is not. The `override` flag on system rules prevents weakening, but we need clear error messages when a user tries to override a protected rule.
 
 - Should `review_my_memories` be proactive (runs automatically after N writes) or only on-demand? On-demand is simpler to start. Proactive could be a curation rule with trigger `periodic` and a write-count threshold.
 
 - How do we define "similarity" in the tool description guidance? The 0.80 threshold is based on all-MiniLM-L6-v2 embeddings, which cluster differently than larger models. The threshold should be calibrated against real memory data. Starting conservative (0.80) and adjusting based on false-positive rates is the right approach.
 
-- Should `get_similar_memories` also return memories that have been flagged as similar to the given memory (reverse lookup via curation metadata), or only do a fresh embedding search? Fresh search is simpler; reverse lookup is faster for previously-flagged pairs.
+- Should `manage_graph(action="get_similar", ...)` also return memories that have been flagged as similar to the given memory (reverse lookup via curation metadata), or only do a fresh embedding search? Fresh search is simpler; reverse lookup is faster for previously-flagged pairs.
 
 ## Implementation Phases
 
@@ -277,9 +277,9 @@ These were open in the original design. Here's where we landed:
 - Tier 1 regex scanning in `write_memory`
 - Tier 2 embedding similarity in `write_memory` with similar_count response
 - Default system rules: `secrets_scan`, `pii_scan`, `exact_duplicate`, `near_duplicate`, `staleness_trigger`
-- `get_similar_memories` MCP tool
-- `suggest_merge` MCP tool
-- `set_curation_rule` MCP tool
+- `manage_graph(action="get_similar", ...)` (part of `manage_graph` MCP tool)
+- merge suggestion via `manage_graph(action="create_relationship", ...)` with `conflicts_with` type
+- `manage_curation(action="set_rule", ...)` (part of `manage_curation` MCP tool)
 - Update `write_memory` response format with curation feedback
 - Tests for rule evaluation, regex patterns, embedding thresholds, response format
 

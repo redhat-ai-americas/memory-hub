@@ -146,15 +146,13 @@ The enforcement architecture:
 | `update_memory` | Required | `authorize_read` + `authorize_write` |
 | `delete_memory` | Required | `authorize_read` + `authorize_write` |
 | `search_memory` | Required | SQL-level scope filter via `build_authorized_scopes` (RBAC violations are impossible by construction) |
-| `get_memory_history` | Required | `authorize_read` on the head node, propagates to all versions |
-| `get_similar_memories` | Required | Post-fetch filtering with `omitted_count` reported in the response |
-| `get_relationships` | Required | Post-fetch filtering with `omitted_count` |
-| `create_relationship` | Required | `authorize_write` on both source and target |
-| `suggest_merge` | Required | `authorize_read` on both candidates |
-| `set_curation_rule` | Required | `authorize_write` on the rule scope |
-| `report_contradiction` | Required | `authorize_read` on the target memory |
+| `manage_graph(action="get_similar", ...)` | Required | Post-fetch filtering with `omitted_count` reported in the response |
+| `manage_graph(action="get_relationships", ...)` | Required | Post-fetch filtering with `omitted_count` |
+| `manage_graph(action="create_relationship", ...)` | Required | `authorize_write` on both source and target |
+| `manage_curation(action="set_rule", ...)` | Required | `authorize_write` on the rule scope |
+| `manage_curation(action="report_contradiction", ...)` | Required | `authorize_read` on the target memory |
 
-Cross-reference tools (`get_similar_memories`, `get_relationships`) intentionally do post-fetch filtering rather than SQL-level filtering because the caller is asking "what is connected to this memory?" — the hidden-results count is itself information the caller may need (it tells them whether a relationship exists that they cannot see). The `omitted_count` field in the response surfaces that count without leaking the underlying data.
+Cross-reference tools (`manage_graph(action="get_similar", ...)`, `manage_graph(action="get_relationships", ...)`) intentionally do post-fetch filtering rather than SQL-level filtering because the caller is asking "what is connected to this memory?" — the hidden-results count is itself information the caller may need (it tells them whether a relationship exists that they cannot see). The `omitted_count` field in the response surfaces that count without leaking the underlying data.
 
 #### Implementation reference
 
@@ -535,9 +533,9 @@ For search operations, `request_context` must include: the query text, the scope
 
 ### Visibility Rules for Cross-Reference Tools
 
-**`get_similar_memories`**: Currently returns similar memories scoped to the source node's owner and scope. This is correct for user-scope memories but insufficient for broader scopes. The fix: after retrieving similar nodes, filter through `authorize_read(user, node)` before returning results. Nodes the caller can't access are silently omitted.
+**`manage_graph(action="get_similar", ...)`**: Currently returns similar memories scoped to the source node's owner and scope. This is correct for user-scope memories but insufficient for broader scopes. The fix: after retrieving similar nodes, filter through `authorize_read(user, node)` before returning results. Nodes the caller can't access are silently omitted.
 
-**`get_relationships`**: Returns all relationships for a given node. The node itself and all related nodes must pass `authorize_read`. Relationships pointing to inaccessible nodes are omitted from the result, with a count of omitted relationships included so the caller knows the graph is incomplete.
+**`manage_graph(action="get_relationships", ...)`**: Returns all relationships for a given node. The node itself and all related nodes must pass `authorize_read`. Relationships pointing to inaccessible nodes are omitted from the result, with a count of omitted relationships included so the caller knows the graph is incomplete.
 
 **`search_memory`**: The SQL query must include an ownership predicate. For user-scope memories, filter to `owner_id = authenticated_user_id`. For broader scopes, include memories where the caller `has_scope(scope)`. This filtering happens at the SQL level (not post-query) for performance.
 

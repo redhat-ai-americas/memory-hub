@@ -66,7 +66,7 @@ Compilation runs on dedicated cluster pods, not in the requesting agent's contex
 
 Rationale: compiling a knowledge article for a project scope may require reading hundreds of memory nodes, running multiple LLM passes (entity disambiguation, cross-reference resolution, article synthesis), and validating against existing articles for contradictions. These operations would consume an unacceptable fraction of an agent's context budget and add unbounded latency to tool calls.
 
-Compilation pods are themselves agents that use MemoryHub's own MCP tools (`search_memory`, `read_memory`, `create_relationship`, `write_memory`) with a service identity. They do not have a human user; they authenticate with a service API key scoped to the `compilation-service` role. This role has read access to all memories within the tenant (bounded by scope) and write access only to `compiled_article` nodes and their relationships.
+Compilation pods are themselves agents that use MemoryHub's own MCP tools (`search_memory`, `read_memory`, `manage_graph(action="create_relationship", ...)`, `write_memory`) with a service identity. They do not have a human user; they authenticate with a service API key scoped to the `compilation-service` role. This role has read access to all memories within the tenant (bounded by scope) and write access only to `compiled_article` nodes and their relationships.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -225,7 +225,7 @@ Circular topic references (concept A links to concept B which links to concept A
 `file_finding` submissions pass a lightweight pre-flight check before the memory is written:
 
 1. Content must be non-empty and at least 50 characters.
-2. Content must not duplicate an existing memory with cosine similarity > 0.92 (checked via `get_similar_memories`).
+2. Content must not duplicate an existing memory with cosine similarity > 0.92 (checked via `manage_graph(action="get_similar", ...)`).
 3. Content must not be an article abstract (detect `branch_type = "compiled_article"` in the similar memories result — prevents agents from re-filing compiled content as source material, which would create a circular source chain).
 
 If any check fails, `file_finding` returns an error with an explanation. The agent is not blocked from writing memories directly via `write_memory`; the quality gate applies only to the compilation-triggering path.

@@ -16,8 +16,8 @@ functions plus a helper:
 - `build_authorized_scopes(claims) -> dict` — pushes the read decision into
   SQL as a per-tier `WHERE` predicate for `search_memory`.
 
-Every tool except `set_curation_rule` calls one of these enforcement
-functions. `set_curation_rule` pins `owner_id` silently to `claims["sub"]`
+Every tool except `manage_curation(action="set_rule", ...)` calls one of these enforcement
+functions. `manage_curation(action="set_rule", ...)` pins `owner_id` silently to `claims["sub"]`
 and is effectively user-scope-only by construction.
 
 The framework correctly enforces:
@@ -236,8 +236,8 @@ auditors care about most.
 | `search_memory` | `memory.search` |
 | `update_memory` | `memory.update` |
 | `delete_memory` | `memory.delete` |
-| `report_contradiction` | `memory.contradiction_reported` |
-| `create_relationship` | `memory.relationship_created` |
+| `manage_curation(action="report_contradiction", ...)` | `memory.contradiction_reported` |
+| `manage_graph(action="create_relationship", ...)` | `memory.relationship_created` |
 | `register_session` | `session.registered` |
 
 `search_memory` records the search but not individual results. Result-level
@@ -321,7 +321,7 @@ The intersection model's hooks identified during research:
 | SQL filter builder | `src/memoryhub/services/memory.py:336-372` | Consumes the project-scope membership list in the filter. |
 | Session loader | `memory-hub-mcp/src/tools/auth.py:27-74` | Loads `project_memberships` from each user record. |
 | `write_memory` body | `memory-hub-mcp/src/tools/write_memory.py:108-121` | Captures `driver_id` parameter, persists `actor_id`/`driver_id` on the new memory, calls `audit.record_event`. |
-| Other write tools | `update_memory.py`, `delete_memory.py`, `report_contradiction.py`, etc. | Same pattern: capture driver, persist on the row, record audit event. |
+| Other write tools | `update_memory.py`, `delete_memory.py`, `manage_curation.py` (report_contradiction action), etc. | Same pattern: capture driver, persist on the row, record audit event. |
 | Read tools | `read_memory.py`, `search_memory.py`, etc. | Return `actor_id`/`driver_id` in payload. Record audit event. |
 
 For the demo, the *signatures* of `authorize_read` and `authorize_write`

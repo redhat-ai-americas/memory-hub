@@ -55,7 +55,7 @@ If the project doesn't exist yet, it's **auto-created** and you're **auto-enroll
 | `write_memory` | Store a preference, decision, or fact |
 | `read_memory` | Expand a stub or get version history |
 | `manage_project` | Discover, create, and manage projects and memberships |
-| `get_session` | Check your auth state (lightweight whoami) |
+| `manage_session(action="status")` | Check your auth state (lightweight whoami) |
 
 ### Tools you probably won't need right away
 
@@ -63,13 +63,13 @@ If the project doesn't exist yet, it's **auto-created** and you're **auto-enroll
 |------|---------|
 | `update_memory` | Revise existing memory (preserves version history) |
 | `delete_memory` | Remove a memory and its branches |
-| `report_contradiction` | Flag a memory that conflicts with current reality |
-| `create_relationship` | Link two memories (supports, contradicts, etc.) |
-| `get_relationships` | Read links between memories |
-| `get_similar_memories` | Inspect near-duplicates flagged during write |
-| `set_curation_rule` | Tune duplicate-detection thresholds |
-| `set_session_focus` | Bias retrieval toward a topic across calls |
-| `get_focus_history` | View focus changes over time |
+| `manage_curation(action="report_contradiction", ...)` | Flag a memory that conflicts with current reality |
+| `manage_graph(action="create_relationship", ...)` | Link two memories (supports, contradicts, etc.) |
+| `manage_graph(action="get_relationships", ...)` | Read links between memories |
+| `manage_graph(action="get_similar", ...)` | Inspect near-duplicates flagged during write |
+| `manage_curation(action="set_rule", ...)` | Tune duplicate-detection thresholds |
+| `manage_session(action="set_focus", ...)` | Bias retrieval toward a topic across calls |
+| `manage_session(action="focus_history", ...)` | View focus changes over time |
 
 ## Scopes
 
@@ -124,7 +124,7 @@ write_memory(
 ### Checking if you're still authenticated
 
 ```python
-get_session()  # Returns user_id, name, scopes, authenticated
+manage_session(action="status")  # Returns user_id, name, scopes, authenticated
 ```
 
 ### Discovering projects
@@ -150,5 +150,5 @@ Subsequent writes to the same project skip enrollment (you're already a member).
 - **Set project_description on first write**: It shows up in `manage_project(action="list")` and helps other agents understand the project.
 - **Keep memories concise and self-contained**: Another agent should understand the memory without additional context.
 - **Don't write trivial things**: Skip "user asked me to read a file." Do write preferences, decisions, architecture choices.
-- **Use `report_contradiction`** when you notice behavior contradicting a stored memory.
+- **Use `manage_curation(action="report_contradiction", ...)`** when you notice behavior contradicting a stored memory.
 - **Use `update_memory`** (not `write_memory`) to revise an existing memory — it preserves version history.
