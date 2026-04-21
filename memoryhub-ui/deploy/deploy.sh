@@ -153,20 +153,21 @@ echo "  OK: running digest matches imagestream :latest"
 # The `routeNamespace` field in OdhApplication is defined in the CRD but
 # the dashboard backend does not read it (logs "namespace undefined").
 #
-# Workaround: create a Service (no selector) + Endpoints + Route in the
-# dashboard namespace that forward to the UI pod in memory-hub-mcp.
-# The Endpoints object uses the pod IP directly, so it must be refreshed
-# on every deploy (pod restart = new IP).
+# Workaround: create a selectorless Service + Endpoints + Route in the
+# dashboard namespace. The Endpoints point at the ClusterIP of the real
+# memoryhub-ui Service (not the pod IP), so the proxy is stable across
+# pod restarts, rollouts, and node migrations. The ClusterIP only changes
+# if the Service in memoryhub-ui is deleted and recreated (full uninstall).
 RHOAI_NS="redhat-ods-applications"
 echo ""
 echo "Syncing RHOAI dashboard proxy route in $RHOAI_NS..."
-UI_POD_IP=$(oc get pod -n "$NAMESPACE" -l app="$DEPLOYMENT" \
-    -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || echo "")
-if [ -z "$UI_POD_IP" ]; then
-    echo "  WARNING: could not resolve UI pod IP. RHOAI tile will not link correctly."
-    echo "  Re-run this script after the UI pod is running."
+UI_CLUSTER_IP=$(oc get svc memoryhub-ui -n "$NAMESPACE" \
+    -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
+if [ -z "$UI_CLUSTER_IP" ]; then
+    echo "  WARNING: could not resolve memoryhub-ui Service ClusterIP."
+    echo "  Re-run this script after the UI Service exists in $NAMESPACE."
 else
-    echo "  UI pod IP: $UI_POD_IP"
+    echo "  UI Service ClusterIP: $UI_CLUSTER_IP"
     cat <<PROXY_EOF | oc apply -f - 2>/dev/null
 apiVersion: v1
 kind: Service
@@ -186,7 +187,7 @@ metadata:
   namespace: $RHOAI_NS
 subsets:
 - addresses:
-  - ip: $UI_POD_IP
+  - ip: $UI_CLUSTER_IP
   ports:
   - port: 8080
     protocol: TCP
