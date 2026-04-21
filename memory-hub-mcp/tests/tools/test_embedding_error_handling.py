@@ -15,8 +15,8 @@ from memoryhub_core.services.exceptions import (
     EmbeddingContentTooLargeError,
     EmbeddingServiceUnavailableError,
 )
+from src.tools.manage_session import manage_session
 from src.tools.search_memory import search_memory
-from src.tools.set_session_focus import set_session_focus
 from src.tools.write_memory import write_memory
 
 # ---------------------------------------------------------------------------
@@ -159,8 +159,8 @@ async def test_search_memory_service_unavailable_raises_tool_error():
 
 @pytest.mark.asyncio
 async def test_set_session_focus_content_too_large_raises_tool_error():
-    """set_session_focus wraps EmbeddingContentTooLargeError as ToolError with
-    a message that starts with 'Invalid focus text'."""
+    """manage_session(action='set_focus') wraps EmbeddingContentTooLargeError as
+    ToolError with a message that starts with 'Invalid focus text'."""
     exc = EmbeddingContentTooLargeError(content_length=50_000)
     embedding_svc = _embedding_service_mock(exc)
 
@@ -168,16 +168,16 @@ async def test_set_session_focus_content_too_large_raises_tool_error():
     try:
         with (
             patch(
-                "src.tools.set_session_focus.get_claims_from_context",
+                "src.tools.manage_session.get_claims_from_context",
                 return_value=_CLAIMS,
             ),
             patch(
-                "src.tools.set_session_focus.get_embedding_service",
+                "src.tools.manage_session.get_embedding_service",
                 return_value=embedding_svc,
             ),
             pytest.raises(ToolError) as exc_info,
         ):
-            await set_session_focus(focus="test focus", project="test-proj")
+            await manage_session(action="set_focus", focus="test focus", project="test-proj")
     finally:
         auth_mod._current_session = None
 

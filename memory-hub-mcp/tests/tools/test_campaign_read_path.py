@@ -146,7 +146,7 @@ async def test_read_memory_campaign_with_project_id():
 
 @pytest.mark.asyncio
 async def test_get_similar_memories_campaign_requires_project_id():
-    from src.tools.get_similar_memories import get_similar_memories
+    from src.tools.manage_graph import manage_graph
 
     fake_source = SimpleNamespace(
         scope="campaign", owner_id=CAMPAIGN_UUID, tenant_id="default"
@@ -156,29 +156,29 @@ async def test_get_similar_memories_campaign_requires_project_id():
 
     with (
         patch(
-            "src.tools.get_similar_memories.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=_campaign_claims(),
         ),
         patch(
-            "src.tools.get_similar_memories.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock
+            "src.tools.manage_graph.release_db_session", new_callable=AsyncMock
         ),
         patch(
-            "src.tools.get_similar_memories.read_memory_service",
+            "src.tools.manage_graph.read_memory_service",
             new_callable=AsyncMock,
             return_value=fake_source,
         ),
         pytest.raises(ToolError, match="project_id is required"),
     ):
-        await get_similar_memories(memory_id=MEMORY_UUID)
+        await manage_graph(action="get_similar", memory_id=MEMORY_UUID)
 
 
 @pytest.mark.asyncio
 async def test_get_similar_memories_campaign_with_project_id():
-    from src.tools.get_similar_memories import get_similar_memories
+    from src.tools.manage_graph import manage_graph
 
     fake_source = SimpleNamespace(
         scope="campaign", owner_id=CAMPAIGN_UUID, tenant_id="default"
@@ -188,34 +188,34 @@ async def test_get_similar_memories_campaign_with_project_id():
 
     with (
         patch(
-            "src.tools.get_similar_memories.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=_campaign_claims(),
         ),
         patch(
-            "src.tools.get_similar_memories.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.get_similar_memories.release_db_session", new_callable=AsyncMock
+            "src.tools.manage_graph.release_db_session", new_callable=AsyncMock
         ),
         patch(
-            "src.tools.get_similar_memories.read_memory_service",
+            "src.tools.manage_graph.read_memory_service",
             new_callable=AsyncMock,
             return_value=fake_source,
         ),
         patch(
-            "src.tools.get_similar_memories.get_campaigns_for_project",
+            "src.tools.manage_graph.get_campaigns_for_project",
             new_callable=AsyncMock,
             return_value={CAMPAIGN_UUID},
         ),
         patch(
-            "src.tools.get_similar_memories.get_similar_memories_service",
+            "src.tools.manage_graph.get_similar_memories_service",
             new_callable=AsyncMock,
             return_value={"results": [], "total": 0, "has_more": False},
         ),
     ):
-        result = await get_similar_memories(
-            memory_id=MEMORY_UUID, project_id="my-project"
+        result = await manage_graph(
+            action="get_similar", memory_id=MEMORY_UUID, project_id="my-project"
         )
 
     assert result["total"] == 0
@@ -226,7 +226,7 @@ async def test_get_similar_memories_campaign_with_project_id():
 
 @pytest.mark.asyncio
 async def test_report_contradiction_campaign_requires_project_id():
-    from src.tools.report_contradiction import report_contradiction
+    from src.tools.manage_curation import manage_curation
 
     fake_node = _fake_campaign_node()
     mock_session = AsyncMock()
@@ -234,24 +234,25 @@ async def test_report_contradiction_campaign_requires_project_id():
 
     with (
         patch(
-            "src.tools.report_contradiction.get_claims_from_context",
+            "src.tools.manage_curation.get_claims_from_context",
             return_value=_campaign_claims(),
         ),
         patch(
-            "src.tools.report_contradiction.get_db_session",
+            "src.tools.manage_curation.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.report_contradiction.release_db_session", new_callable=AsyncMock
+            "src.tools.manage_curation.release_db_session", new_callable=AsyncMock
         ),
         patch(
-            "src.tools.report_contradiction._read_memory",
+            "src.tools.manage_curation._read_memory",
             new_callable=AsyncMock,
             return_value=fake_node,
         ),
         pytest.raises(ToolError, match="project_id is required"),
     ):
-        await report_contradiction(
+        await manage_curation(
+            action="report_contradiction",
             memory_id=MEMORY_UUID,
             observed_behavior="user used Docker instead of Podman",
         )
@@ -259,7 +260,7 @@ async def test_report_contradiction_campaign_requires_project_id():
 
 @pytest.mark.asyncio
 async def test_report_contradiction_campaign_with_project_id():
-    from src.tools.report_contradiction import report_contradiction
+    from src.tools.manage_curation import manage_curation
 
     fake_node = _fake_campaign_node()
     mock_session = AsyncMock()
@@ -267,33 +268,34 @@ async def test_report_contradiction_campaign_with_project_id():
 
     with (
         patch(
-            "src.tools.report_contradiction.get_claims_from_context",
+            "src.tools.manage_curation.get_claims_from_context",
             return_value=_campaign_claims(),
         ),
         patch(
-            "src.tools.report_contradiction.get_db_session",
+            "src.tools.manage_curation.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.report_contradiction.release_db_session", new_callable=AsyncMock
+            "src.tools.manage_curation.release_db_session", new_callable=AsyncMock
         ),
         patch(
-            "src.tools.report_contradiction._read_memory",
+            "src.tools.manage_curation._read_memory",
             new_callable=AsyncMock,
             return_value=fake_node,
         ),
         patch(
-            "src.tools.report_contradiction.get_campaigns_for_project",
+            "src.tools.manage_curation.get_campaigns_for_project",
             new_callable=AsyncMock,
             return_value={CAMPAIGN_UUID},
         ),
         patch(
-            "src.tools.report_contradiction._report_contradiction",
+            "src.tools.manage_curation._report_contradiction",
             new_callable=AsyncMock,
             return_value=1,
         ),
     ):
-        result = await report_contradiction(
+        result = await manage_curation(
+            action="report_contradiction",
             memory_id=MEMORY_UUID,
             observed_behavior="user used Docker instead of Podman",
             project_id="my-project",
@@ -307,7 +309,7 @@ async def test_report_contradiction_campaign_with_project_id():
 
 @pytest.mark.asyncio
 async def test_create_relationship_campaign_requires_project_id():
-    from src.tools.create_relationship import create_relationship
+    from src.tools.manage_graph import manage_graph
 
     fake_node = _fake_campaign_node()
     target_uuid = str(uuid.uuid4())
@@ -316,24 +318,25 @@ async def test_create_relationship_campaign_requires_project_id():
 
     with (
         patch(
-            "src.tools.create_relationship.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=_campaign_claims(),
         ),
         patch(
-            "src.tools.create_relationship.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.create_relationship.release_db_session", new_callable=AsyncMock
+            "src.tools.manage_graph.release_db_session", new_callable=AsyncMock
         ),
         patch(
-            "src.tools.create_relationship._read_memory",
+            "src.tools.manage_graph.read_memory_service",
             new_callable=AsyncMock,
             return_value=fake_node,
         ),
         pytest.raises(ToolError, match="project_id is required"),
     ):
-        await create_relationship(
+        await manage_graph(
+            action="create_relationship",
             source_id=MEMORY_UUID,
             target_id=target_uuid,
             relationship_type="related_to",
@@ -342,7 +345,7 @@ async def test_create_relationship_campaign_requires_project_id():
 
 @pytest.mark.asyncio
 async def test_create_relationship_campaign_with_project_id():
-    from src.tools.create_relationship import create_relationship
+    from src.tools.manage_graph import manage_graph
 
     fake_source = _fake_campaign_node()
     target_id = uuid.uuid4()
@@ -361,33 +364,34 @@ async def test_create_relationship_campaign_with_project_id():
 
     with (
         patch(
-            "src.tools.create_relationship.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=_campaign_claims(),
         ),
         patch(
-            "src.tools.create_relationship.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.create_relationship.release_db_session", new_callable=AsyncMock
+            "src.tools.manage_graph.release_db_session", new_callable=AsyncMock
         ),
         patch(
-            "src.tools.create_relationship._read_memory",
+            "src.tools.manage_graph.read_memory_service",
             new_callable=AsyncMock,
             return_value=fake_source,
         ),
         patch(
-            "src.tools.create_relationship.get_campaigns_for_project",
+            "src.tools.manage_graph.get_campaigns_for_project",
             new_callable=AsyncMock,
             return_value={CAMPAIGN_UUID},
         ),
         patch(
-            "src.tools.create_relationship.create_relationship_service",
+            "src.tools.manage_graph.create_relationship_service",
             new_callable=AsyncMock,
             return_value=fake_rel,
         ),
     ):
-        result = await create_relationship(
+        result = await manage_graph(
+            action="create_relationship",
             source_id=MEMORY_UUID,
             target_id=str(target_id),
             relationship_type="related_to",
@@ -486,7 +490,7 @@ async def test_delete_memory_campaign_with_project_id():
 @pytest.mark.asyncio
 async def test_get_relationships_campaign_nodes_filtered_without_project_id():
     """Without project_id, campaign-scoped related nodes are silently filtered."""
-    from src.tools.get_relationships import get_relationships
+    from src.tools.manage_graph import manage_graph
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
@@ -509,31 +513,31 @@ async def test_get_relationships_campaign_nodes_filtered_without_project_id():
 
     with (
         patch(
-            "src.tools.get_relationships.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=_campaign_claims(),
         ),
         patch(
-            "src.tools.get_relationships.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
-        patch("src.tools.get_relationships.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock),
         patch(
-            "src.tools.get_relationships.get_relationships_service",
+            "src.tools.manage_graph.get_relationships_service",
             new_callable=AsyncMock,
             return_value=[fake_rel],
         ),
         patch(
-            "src.tools.get_relationships.get_projects_for_user",
+            "src.tools.manage_graph.get_projects_for_user",
             new_callable=AsyncMock,
             return_value=set(),
         ),
         patch(
-            "src.tools.get_relationships.get_roles_for_user",
+            "src.tools.manage_graph.get_roles_for_user",
             new_callable=AsyncMock,
             return_value=set(),
         ),
     ):
-        result = await get_relationships(node_id=MEMORY_UUID)
+        result = await manage_graph(action="get_relationships", node_id=MEMORY_UUID)
 
     # Without project_id, campaign_ids is None → campaign node filtered out
     assert result["count"] == 0
@@ -543,7 +547,7 @@ async def test_get_relationships_campaign_nodes_filtered_without_project_id():
 @pytest.mark.asyncio
 async def test_get_relationships_campaign_nodes_accessible_with_project_id():
     """With project_id, campaign-scoped related nodes pass the RBAC filter."""
-    from src.tools.get_relationships import get_relationships
+    from src.tools.manage_graph import manage_graph
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()
@@ -565,36 +569,36 @@ async def test_get_relationships_campaign_nodes_accessible_with_project_id():
 
     with (
         patch(
-            "src.tools.get_relationships.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=_campaign_claims(),
         ),
         patch(
-            "src.tools.get_relationships.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
-        patch("src.tools.get_relationships.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock),
         patch(
-            "src.tools.get_relationships.get_relationships_service",
+            "src.tools.manage_graph.get_relationships_service",
             new_callable=AsyncMock,
             return_value=[fake_rel],
         ),
         patch(
-            "src.tools.get_relationships.get_campaigns_for_project",
+            "src.tools.manage_graph.get_campaigns_for_project",
             new_callable=AsyncMock,
             return_value={CAMPAIGN_UUID},
         ),
         patch(
-            "src.tools.get_relationships.get_projects_for_user",
+            "src.tools.manage_graph.get_projects_for_user",
             new_callable=AsyncMock,
             return_value=set(),
         ),
         patch(
-            "src.tools.get_relationships.get_roles_for_user",
+            "src.tools.manage_graph.get_roles_for_user",
             new_callable=AsyncMock,
             return_value=set(),
         ),
     ):
-        result = await get_relationships(node_id=MEMORY_UUID, project_id="my-project")
+        result = await manage_graph(action="get_relationships", node_id=MEMORY_UUID, project_id="my-project")
 
     assert result["count"] == 1
     assert "omitted_count" not in result
@@ -607,11 +611,9 @@ async def test_get_relationships_campaign_nodes_accessible_with_project_id():
     "tool_module,tool_name",
     [
         ("src.tools.read_memory", "read_memory"),
-        ("src.tools.get_similar_memories", "get_similar_memories"),
-        ("src.tools.report_contradiction", "report_contradiction"),
-        ("src.tools.create_relationship", "create_relationship"),
+        ("src.tools.manage_graph", "manage_graph"),
+        ("src.tools.manage_curation", "manage_curation"),
         ("src.tools.delete_memory", "delete_memory"),
-        ("src.tools.get_relationships", "get_relationships"),
     ],
 )
 def test_tool_has_project_id_parameter(tool_module, tool_name):

@@ -1051,7 +1051,7 @@ async def test_get_relationships_cross_tenant_returns_not_found():
     """Phase 5 (#46): a relationship created by tenant A is invisible to
     tenant B's get_relationships call. The starting node lookup tenant-
     filters, so tenant B sees "not found" for the A node."""
-    from src.tools.get_relationships import get_relationships
+    from src.tools.manage_graph import manage_graph
     from src.tools.write_memory import write_memory
 
     store = FakeMemoryStore()
@@ -1109,30 +1109,30 @@ async def test_get_relationships_cross_tenant_returns_not_found():
     # Tenant B asks for relationships of the tenant-A source → "not found".
     with (
         patch(
-            "src.tools.get_relationships.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=CLAIMS_B_USER_B,
         ),
         patch(
-            "src.tools.get_relationships.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.get_relationships.release_db_session",
+            "src.tools.manage_graph.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.get_relationships.get_relationships_service",
+            "src.tools.manage_graph.get_relationships_service",
             new=AsyncMock(side_effect=_fake_get_rels),
         ),
         pytest.raises(ToolError, match="not found"),
     ):
-        await get_relationships(node_id=str(src_id))
+        await manage_graph(action="get_relationships", node_id=str(src_id))
 
 
 @pytest.mark.asyncio
 async def test_get_relationships_same_tenant_returns_edges():
     """Baseline: tenant A sees its own relationships."""
-    from src.tools.get_relationships import get_relationships
+    from src.tools.manage_graph import manage_graph
     from src.tools.write_memory import write_memory
 
     store = FakeMemoryStore()
@@ -1208,33 +1208,33 @@ async def test_get_relationships_same_tenant_returns_edges():
 
     with (
         patch(
-            "src.tools.get_relationships.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=CLAIMS_A_USER_A,
         ),
         patch(
-            "src.tools.get_relationships.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.get_relationships.release_db_session",
+            "src.tools.manage_graph.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.get_relationships.get_relationships_service",
+            "src.tools.manage_graph.get_relationships_service",
             new=AsyncMock(side_effect=_fake_get_rels),
         ),
         patch(
-            "src.tools.get_relationships.get_projects_for_user",
+            "src.tools.manage_graph.get_projects_for_user",
             new_callable=AsyncMock,
             return_value=set(),
         ),
         patch(
-            "src.tools.get_relationships.get_roles_for_user",
+            "src.tools.manage_graph.get_roles_for_user",
             new_callable=AsyncMock,
             return_value=set(),
         ),
     ):
-        result = await get_relationships(node_id=str(src_id))
+        result = await manage_graph(action="get_relationships", node_id=str(src_id))
 
     assert result.get("error") is not True
     assert result["count"] == 1
@@ -1250,7 +1250,7 @@ async def test_get_similar_memories_cross_tenant_returns_not_found():
     """Phase 5 (#46): a tenant-B caller targeting a tenant-A memory as
     the similarity source gets "not found" — the source lookup tenant-
     filters at the SQL level."""
-    from src.tools.get_similar_memories import get_similar_memories
+    from src.tools.manage_graph import manage_graph
     from src.tools.write_memory import write_memory
 
     store = FakeMemoryStore()
@@ -1295,28 +1295,28 @@ async def test_get_similar_memories_cross_tenant_returns_not_found():
 
     with (
         patch(
-            "src.tools.get_similar_memories.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=CLAIMS_B_USER_B,
         ),
         patch(
-            "src.tools.get_similar_memories.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.get_similar_memories.release_db_session",
+            "src.tools.manage_graph.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.get_similar_memories.read_memory_service",
+            "src.tools.manage_graph.read_memory_service",
             new=AsyncMock(side_effect=_fake_read),
         ),
         patch(
-            "src.tools.get_similar_memories.get_similar_memories_service",
+            "src.tools.manage_graph.get_similar_memories_service",
             new=AsyncMock(side_effect=_fake_similar),
         ),
         pytest.raises(ToolError, match="(?i)not found"),
     ):
-        await get_similar_memories(memory_id=memory_id)
+        await manage_graph(action="get_similar", memory_id=memory_id)
 
 
 @pytest.mark.asyncio
@@ -1326,7 +1326,7 @@ async def test_get_similar_memories_does_not_see_cross_tenant_candidates():
     under the same owner_id and scope, tenant A's candidate pool must
     not include tenant B's memory. This is the last-mile curation
     invariant from Phase 4c."""
-    from src.tools.get_similar_memories import get_similar_memories
+    from src.tools.manage_graph import manage_graph
     from src.tools.write_memory import write_memory
 
     store = FakeMemoryStore()
@@ -1412,27 +1412,27 @@ async def test_get_similar_memories_does_not_see_cross_tenant_candidates():
 
     with (
         patch(
-            "src.tools.get_similar_memories.get_claims_from_context",
+            "src.tools.manage_graph.get_claims_from_context",
             return_value=CLAIMS_A_USER_A,
         ),
         patch(
-            "src.tools.get_similar_memories.get_db_session",
+            "src.tools.manage_graph.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.get_similar_memories.release_db_session",
+            "src.tools.manage_graph.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.get_similar_memories.read_memory_service",
+            "src.tools.manage_graph.read_memory_service",
             new=AsyncMock(side_effect=_fake_read),
         ),
         patch(
-            "src.tools.get_similar_memories.get_similar_memories_service",
+            "src.tools.manage_graph.get_similar_memories_service",
             new=AsyncMock(side_effect=_fake_similar),
         ),
     ):
-        result = await get_similar_memories(memory_id=a1["memory"]["id"])
+        result = await manage_graph(action="get_similar", memory_id=a1["memory"]["id"])
 
     # Tenant A's similar search should see exactly one similar candidate
     # (the second A memory), never the B memory.
@@ -1460,7 +1460,7 @@ async def test_report_contradiction_cross_tenant_fails():
     inserting a contradiction report."""
     from fastmcp.exceptions import ToolError
 
-    from src.tools.report_contradiction import report_contradiction
+    from src.tools.manage_curation import manage_curation
     from src.tools.write_memory import write_memory
 
     store = FakeMemoryStore()
@@ -1504,28 +1504,29 @@ async def test_report_contradiction_cross_tenant_fails():
 
     with (
         patch(
-            "src.tools.report_contradiction.get_claims_from_context",
+            "src.tools.manage_curation.get_claims_from_context",
             return_value=CLAIMS_B_USER_B,
         ),
         patch(
-            "src.tools.report_contradiction.get_db_session",
+            "src.tools.manage_curation.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.report_contradiction.release_db_session",
+            "src.tools.manage_curation.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.report_contradiction._read_memory",
+            "src.tools.manage_curation._read_memory",
             new=AsyncMock(side_effect=_fake_read),
         ),
         patch(
-            "src.tools.report_contradiction._report_contradiction",
+            "src.tools.manage_curation._report_contradiction",
             new=fake_svc_report,
         ),
     ):
         with pytest.raises(ToolError, match="not found"):
-            await report_contradiction(
+            await manage_curation(
+                action="report_contradiction",
                 memory_id=memory_id,
                 observed_behavior="user used docker",
             )
@@ -1538,7 +1539,7 @@ async def test_report_contradiction_cross_tenant_fails():
 @pytest.mark.asyncio
 async def test_report_contradiction_same_tenant_succeeds():
     """Baseline: same-tenant owner can report a contradiction."""
-    from src.tools.report_contradiction import report_contradiction
+    from src.tools.manage_curation import manage_curation
     from src.tools.write_memory import write_memory
 
     store = FakeMemoryStore()
@@ -1580,28 +1581,29 @@ async def test_report_contradiction_same_tenant_succeeds():
 
     with (
         patch(
-            "src.tools.report_contradiction.get_claims_from_context",
+            "src.tools.manage_curation.get_claims_from_context",
             return_value=CLAIMS_A_USER_A,
         ),
         patch(
-            "src.tools.report_contradiction.get_db_session",
+            "src.tools.manage_curation.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.report_contradiction.release_db_session",
+            "src.tools.manage_curation.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.report_contradiction._read_memory",
+            "src.tools.manage_curation._read_memory",
             new=AsyncMock(side_effect=_fake_read),
         ),
         patch(
-            "src.tools.report_contradiction._report_contradiction",
+            "src.tools.manage_curation._report_contradiction",
             new_callable=AsyncMock,
             return_value=1,
         ),
     ):
-        result = await report_contradiction(
+        result = await manage_curation(
+            action="report_contradiction",
             memory_id=memory_id,
             observed_behavior="user used docker",
         )
@@ -1622,7 +1624,7 @@ async def test_set_curation_rule_cross_tenant_name_collision_allowed():
     same name as tenant A's does not collide. Phase 3 validated this
     at the service level; this test proves the tool layer passes the
     tenant filter through correctly."""
-    from src.tools.set_curation_rule import set_curation_rule
+    from src.tools.manage_curation import manage_curation
 
     mock_session, mock_gen = _mock_session()
 
@@ -1668,46 +1670,46 @@ async def test_set_curation_rule_cross_tenant_name_collision_allowed():
 
     with (
         patch(
-            "src.tools.set_curation_rule.get_claims_from_context",
+            "src.tools.manage_curation.get_claims_from_context",
             return_value=CLAIMS_A_USER_A,
         ),
         patch(
-            "src.tools.set_curation_rule.get_db_session",
+            "src.tools.manage_curation.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.set_curation_rule.release_db_session",
+            "src.tools.manage_curation.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.set_curation_rule.create_rule",
+            "src.tools.manage_curation.create_rule",
             new=AsyncMock(side_effect=_fake_create_rule),
         ),
     ):
-        result_a = await set_curation_rule(name="foo", config={"threshold": 0.95})
+        result_a = await manage_curation(action="set_rule", name="foo", config={"threshold": 0.95})
 
     assert result_a["created"] is True
     assert result_a["rule"]["tenant_id"] == TENANT_A
 
     with (
         patch(
-            "src.tools.set_curation_rule.get_claims_from_context",
+            "src.tools.manage_curation.get_claims_from_context",
             return_value=CLAIMS_B_USER_B,
         ),
         patch(
-            "src.tools.set_curation_rule.get_db_session",
+            "src.tools.manage_curation.get_db_session",
             return_value=(mock_session, mock_gen),
         ),
         patch(
-            "src.tools.set_curation_rule.release_db_session",
+            "src.tools.manage_curation.release_db_session",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.tools.set_curation_rule.create_rule",
+            "src.tools.manage_curation.create_rule",
             new=AsyncMock(side_effect=_fake_create_rule),
         ),
     ):
-        result_b = await set_curation_rule(name="foo", config={"threshold": 0.90})
+        result_b = await manage_curation(action="set_rule", name="foo", config={"threshold": 0.90})
 
     assert result_b["created"] is True
     assert result_b["rule"]["tenant_id"] == TENANT_B

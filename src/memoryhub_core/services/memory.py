@@ -1439,15 +1439,37 @@ async def report_contradiction(
     return count
 
 
+VALID_RESOLUTION_ACTIONS = frozenset({
+    "accept_new", "keep_old", "mark_both_invalid", "manual_merge",
+})
+
+
 async def resolve_contradiction(
     contradiction_id: uuid.UUID,
     session: AsyncSession,
+    *,
+    resolution_action: str | None = None,
+    actor_id: str | None = None,
 ) -> ContradictionReport:
-    """Mark a contradiction report as resolved.
+    """Mark a contradiction report as resolved with an optional disposition.
+
+    Args:
+        contradiction_id: The report to resolve.
+        session: Database session.
+        resolution_action: One of accept_new, keep_old, mark_both_invalid,
+            manual_merge. Optional for backward compatibility.
+        actor_id: Identity of the resolver. Optional.
 
     Returns the updated ContradictionReport. Raises ContradictionNotFoundError
-    if the ID doesn't exist, or ValueError if already resolved.
+    if the ID doesn't exist, or ValueError if already resolved or if
+    resolution_action is invalid.
     """
+    if resolution_action is not None and resolution_action not in VALID_RESOLUTION_ACTIONS:
+        raise ValueError(
+            f"Invalid resolution_action '{resolution_action}'. "
+            f"Must be one of: {', '.join(sorted(VALID_RESOLUTION_ACTIONS))}"
+        )
+
     stmt = select(ContradictionReport).where(ContradictionReport.id == contradiction_id)
     result = await session.execute(stmt)
     report = result.scalar_one_or_none()
@@ -1460,6 +1482,8 @@ async def resolve_contradiction(
 
     report.resolved = True
     report.resolved_at = datetime.now(UTC)
+    report.resolution_action = resolution_action
+    report.resolved_by = actor_id
 
     await session.commit()
     return report

@@ -50,6 +50,16 @@ class ContradictionReport(Base):
         nullable=True,
         default=None,
     )
+    resolution_action: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        default=None,
+    )
+    resolved_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        default=None,
+    )
     tenant_id: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
