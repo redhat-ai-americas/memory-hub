@@ -550,6 +550,174 @@ Phase 5 consolidates project management into a single `manage_project` tool, rep
   manage_project(action="remove_member", project_name="team-alpha", user_id="jsmith")
   ```
 
+## Phase 6: Tool Consolidation (15 → 9 tools)
+
+Motivated by Anthropic's "Writing effective tools for AI agents" guidance:
+agents perform better with fewer, more powerful tools that consolidate
+related operations under a single entry point. At 15 tools, MemoryHub's
+tool list is becoming unwieldy — agents waste context reading descriptions
+for tools they rarely call, and overlapping tools create selection confusion.
+
+Phase 6 consolidates 6 low-traffic tools into 3 action-dispatched tools,
+following the `manage_project` pattern that already proved effective. It
+also adds the `resolve_contradiction` capability (#103) as an action on
+the new `manage_curation` tool rather than as a standalone 16th tool.
+
+### Design Principles for Phase 6
+
+**Memory CRUD stays atomic.** `write_memory`, `read_memory`, `update_memory`,
+`delete_memory`, and `search_memory` are high-traffic tools with distinct
+intents. Consolidating them would hide meaningful decisions behind an action
+parameter. These 5 tools stay as-is.
+
+**`register_session` stays separate.** It's a one-time prerequisite gate with
+a fundamentally different lifecycle from session status queries. Folding it
+into `manage_session` would muddy the intent.
+
+**Session, graph, and curation operations consolidate.** These are
+lower-frequency tools where the agent rarely calls one without eventually
+calling another in the same family. Grouping them reduces tool count and
+makes the tool list scannable.
+
+**Action-dispatched tools follow the `manage_project` pattern.** A required
+`action` string parameter selects the operation. Parameters are validated
+per-action with clear error messages.
+
+### Tool inventory after Phase 6
+
+| # | Tool | Actions | Replaces |
+|---|------|---------|----------|
+| 1 | `register_session` | — | (unchanged) |
+| 2 | `write_memory` | — | (unchanged) |
+| 3 | `read_memory` | — | (unchanged) |
+| 4 | `update_memory` | — | (unchanged) |
+| 5 | `delete_memory` | — | (unchanged) |
+| 6 | `search_memory` | — | (unchanged) |
+| 7 | `manage_session` | `status`, `set_focus`, `focus_history` | `get_session` + `set_session_focus` + `get_focus_history` |
+| 8 | `manage_graph` | `create_relationship`, `get_relationships`, `get_similar` | `create_relationship` + `get_relationships` + `get_similar_memories` |
+| 9 | `manage_curation` | `report_contradiction`, `resolve_contradiction`, `set_rule` | `report_contradiction` + `set_curation_rule` + new resolve_contradiction |
+| 10 | `manage_project` | — | (unchanged) |
+
+### manage_session (replaces get_session + set_session_focus + get_focus_history)
+
+- **Purpose**: Manage session lifecycle — check status, declare focus, and
+  query focus history. All session-state operations in one tool.
+- **Parameters**:
+  - `action` (string, required): One of: `status`, `set_focus`, `focus_history`.
+  - `focus` (string, optional): Required for `set_focus`. Short topic (5-10 words).
+  - `project` (string, optional): Required for `set_focus` and `focus_history`.
+  - `start_date` (string, optional): For `focus_history`. ISO date YYYY-MM-DD. Defaults to 30 days ago.
+  - `end_date` (string, optional): For `focus_history`. ISO date YYYY-MM-DD. Defaults to today.
+- **Returns by action**:
+  - `status`: Session identity, scopes, expiry info, project memberships (same as current `get_session`).
+  - `set_focus`: Confirmation with session_id, focus echo, expires_at (same as current `set_session_focus`).
+  - `focus_history`: Histogram of focus declarations (same as current `get_focus_history`).
+- **Error Cases**: Union of errors from the three replaced tools, each with the same actionable messages.
+- **Tool Annotations**: `readOnlyHint: false` (set_focus writes), `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
+- **Example Usage**:
+  ```
+  manage_session(action="status")
+  manage_session(action="set_focus", focus="MCP tool consolidation", project="memory-hub")
+  manage_session(action="focus_history", project="memory-hub", start_date="2026-04-01")
+  ```
+
+### manage_graph (replaces create_relationship + get_relationships + get_similar_memories)
+
+- **Purpose**: Create and query graph relationships between memories, and
+  find similar memories by embedding distance. All graph and similarity
+  operations in one tool.
+- **Parameters**:
+  - `action` (string, required): One of: `create_relationship`, `get_relationships`, `get_similar`.
+  - `source_id` (string, optional): Required for `create_relationship`. UUID of the source node.
+  - `target_id` (string, optional): Required for `create_relationship`. UUID of the target node.
+  - `relationship_type` (string, optional): Required for `create_relationship`, optional filter for `get_relationships`. One of: derived_from, supersedes, conflicts_with, related_to.
+  - `metadata` (object, optional): For `create_relationship`. Edge metadata.
+  - `node_id` (string, optional): Required for `get_relationships`. UUID of the node to query.
+  - `direction` (string, optional): For `get_relationships`. One of: outgoing, incoming, both. Default: both.
+  - `include_provenance` (boolean, optional): For `get_relationships`. Trace derived_from chain.
+  - `memory_id` (string, optional): Required for `get_similar`. UUID of the memory.
+  - `threshold` (float, optional): For `get_similar`. Min cosine similarity. Default: 0.80.
+  - `max_results` (integer, optional): For `get_similar`. Default: 10.
+  - `offset` (integer, optional): For `get_similar`. Pagination offset.
+  - `project_id` (string, optional): For campaign-scoped memory operations.
+- **Returns by action**:
+  - `create_relationship`: Created edge with UUID, timestamps, source/target stubs (same as current `create_relationship`).
+  - `get_relationships`: Relationships list with count, optional provenance chain (same as current `get_relationships`).
+  - `get_similar`: Similar memories with scores, pagination (same as current `get_similar_memories`).
+- **Error Cases**: Union of errors from the three replaced tools.
+- **Tool Annotations**: `readOnlyHint: false` (create writes), `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
+- **Example Usage**:
+  ```
+  manage_graph(action="create_relationship", source_id="<org>", target_id="<user>", relationship_type="derived_from")
+  manage_graph(action="get_relationships", node_id="<id>", include_provenance=true)
+  manage_graph(action="get_similar", memory_id="<id>", threshold=0.9)
+  ```
+
+### manage_curation (replaces report_contradiction + set_curation_rule; adds resolve_contradiction)
+
+- **Purpose**: Contradiction lifecycle and curation rule management. Report
+  contradictions against stale memories, resolve them with a disposition,
+  and tune curation thresholds. This is the governance tool for memory
+  quality; agents doing routine memory work rarely need it.
+- **Parameters**:
+  - `action` (string, required): One of: `report_contradiction`, `resolve_contradiction`, `set_rule`.
+  - For `report_contradiction`:
+    - `memory_id` (string, required): The contradicted memory.
+    - `observed_behavior` (string, required): What was observed.
+    - `confidence` (float, optional, default 0.7): Contradiction confidence.
+  - For `resolve_contradiction`:
+    - `contradiction_id` (string, required): The contradiction to resolve.
+    - `resolution_action` (string, required): One of: `accept_new` (update/supersede the memory), `keep_old` (dismiss the contradiction), `mark_both_invalid` (flag both for review), `manual_merge` (resolve with a note).
+    - `resolution_note` (string, optional): Rationale for the resolution.
+  - For `set_rule`:
+    - `name` (string, required): Rule name (unique identifier).
+    - `tier` (string, optional, default "embedding"): `regex` or `embedding`.
+    - `action_type` (string, optional, default "flag"): `flag`, `block`, `quarantine`, `reject_with_pointer`, `decay_weight`.
+    - `config` (object, optional): Tier-specific config.
+    - `scope_filter` (string, optional): Limit to a scope.
+    - `enabled` (boolean, optional, default true): Active flag.
+    - `priority` (integer, optional, default 10): Evaluation priority.
+  - `project_id` (string, optional): For campaign-scoped memory operations on report_contradiction.
+- **Returns by action**:
+  - `report_contradiction`: Contradiction count, threshold, revision_triggered flag (same as current `report_contradiction`).
+  - `resolve_contradiction`: Updated contradiction record with resolution_action, resolved_by, resolved_at timestamp.
+  - `set_rule`: Created/updated rule with UUID (same as current `set_curation_rule`).
+- **Error Cases**: Union of errors from replaced tools, plus:
+  - "Contradiction [id] not found." → SDK: `NotFoundError`
+  - "Contradiction [id] is already resolved." → SDK: `ConflictError`
+  - "Invalid resolution_action 'X'. Must be one of: accept_new, keep_old, mark_both_invalid, manual_merge." → SDK: `ValidationError`
+- **Tool Annotations**: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
+- **Example Usage**:
+  ```
+  manage_curation(action="report_contradiction", memory_id="<id>", observed_behavior="User used Docker", confidence=0.8)
+  manage_curation(action="resolve_contradiction", contradiction_id="<id>", resolution_action="keep_old", resolution_note="One-off client requirement")
+  manage_curation(action="set_rule", name="my_dedup_threshold", tier="embedding", config={"threshold": 0.98})
+  ```
+
+### Schema migration for resolve_contradiction (#103)
+
+Alembic migration 014: Add `resolution_action` (VARCHAR(50), nullable) and
+`resolved_by` (VARCHAR(255), nullable) columns to `contradiction_reports`.
+Non-destructive; existing resolved contradictions will have NULL for both
+new columns.
+
+### Implementation Order for Phase 6
+
+1. **Alembic migration 014** — Add resolution columns to contradiction_reports.
+2. **Update `resolve_contradiction` service function** — Accept resolution_action and actor_id.
+3. **Create `manage_session`** — Consolidate get_session + set_session_focus + get_focus_history.
+4. **Create `manage_graph`** — Consolidate create_relationship + get_relationships + get_similar_memories.
+5. **Create `manage_curation`** — Consolidate report_contradiction + set_curation_rule; add resolve_contradiction.
+6. **Remove old tools** — Delete the 8 replaced tool files, update main.py imports. `manage_project` stays.
+7. **Migrate tests** — Consolidate test files for the merged tools.
+8. **Update SDK** — If the SDK has tool-specific helpers, update them (separate issue).
+
+### Dependencies
+
+- Contradiction model columns (migration 014)
+- resolve_contradiction service function update
+- All existing tool implementations (being merged, not rewritten)
+
 ## Open Questions (Phase 1 — Resolved)
 
 - **Embedding strategy**: all-MiniLM-L6-v2 on OpenShift AI via HTTP API. MockEmbeddingService for tests.

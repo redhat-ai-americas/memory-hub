@@ -14,18 +14,11 @@ from src.tools.read_memory import read_memory
 from src.tools.update_memory import update_memory
 from src.tools.delete_memory import delete_memory
 from src.tools.search_memory import search_memory
-from src.tools.report_contradiction import report_contradiction
 from src.tools.register_session import register_session
-
-from src.tools.create_relationship import create_relationship
-from src.tools.get_relationships import get_relationships
-from src.tools.get_similar_memories import get_similar_memories
-from src.tools.set_curation_rule import set_curation_rule
-
-from src.tools.set_session_focus import set_session_focus
-from src.tools.get_focus_history import get_focus_history
+from src.tools.manage_session import manage_session
+from src.tools.manage_graph import manage_graph
+from src.tools.manage_curation import manage_curation
 from src.tools.manage_project import manage_project
-from src.tools.get_session import get_session
 
 mcp = FastMCP(
     "MemoryHub",
@@ -36,22 +29,21 @@ mcp = FastMCP(
         "conversation to authenticate. Then use write_memory to create, "
         "search_memory to find, read_memory to expand details (with optional "
         "paginated version history via include_versions), update_memory "
-        "to revise, and report_contradiction for staleness detection. "
-        "Curation tools: get_similar_memories to inspect near-duplicates flagged "
-        "during write, create_relationship to link memories (use "
-        "relationship_type='conflicts_with' with merge metadata to suggest "
-        "merges), and set_curation_rule to tune duplicate-detection thresholds. "
-        "Use manage_project to discover, create, and manage projects and "
-        "their members; writing to a new project auto-enrolls you."
+        "to revise, and delete_memory to remove. Use manage_session to "
+        "check session status, declare focus, and view focus history. "
+        "Use manage_graph to create relationships between memories, "
+        "query relationships, and find similar memories. Use "
+        "manage_curation to report and resolve contradictions and tune "
+        "curation rules. Use manage_project to discover, create, and "
+        "manage projects and their members; writing to a new project "
+        "auto-enrolls you."
     ),
 )
 
 for tool_fn in [register_session, write_memory, read_memory, update_memory,
                 delete_memory, search_memory,
-                report_contradiction, create_relationship, get_relationships,
-                get_similar_memories, set_curation_rule,
-                set_session_focus, get_focus_history,
-                manage_project, get_session]:
+                manage_session, manage_graph, manage_curation,
+                manage_project]:
     mcp.add_tool(tool_fn)
 
 

@@ -9,6 +9,7 @@ from memoryhub_core.services.exceptions import (
     MemoryNotFoundError,
 )
 from memoryhub_core.services.memory import (
+    VALID_RESOLUTION_ACTIONS,
     create_memory,
     get_memory_history,
     read_memory,
@@ -32,6 +33,7 @@ __all__ = [
     "init_db",
     "read_memory",
     "ContradictionNotFoundError",
+    "VALID_RESOLUTION_ACTIONS",
     "report_contradiction",
     "resolve_contradiction",
     "search_memories",
