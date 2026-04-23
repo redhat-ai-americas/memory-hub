@@ -8,18 +8,25 @@ import os
 
 import httpx
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from memoryhub_cli.config import CONFIG_DIR, load_config
+from memoryhub_cli.output import (
+    EXIT_AUTH_ERROR,
+    EXIT_CLIENT_ERROR,
+    EXIT_SERVER_ERROR,
+    OutputFormat,
+    console,
+    err_console,
+    handle_error,
+    json_success,
+)
 
 admin_app = typer.Typer(
     name="admin",
     help="Manage agents and OAuth clients.",
     no_args_is_help=True,
 )
-console = Console()
-err_console = Console(stderr=True)
 
 
 def _run(coro):
@@ -27,7 +34,7 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _get_admin_key() -> str:
+def _get_admin_key(output: OutputFormat) -> str:
     """Resolve the admin key from env var or config file."""
     key = os.environ.get("MEMORYHUB_ADMIN_KEY")
     if key:
@@ -38,15 +45,15 @@ def _get_admin_key() -> str:
     if key:
         return key
 
-    err_console.print(
-        "[red]No admin key found.[/red]\n"
-        "Set MEMORYHUB_ADMIN_KEY or add 'admin_key' to "
-        "~/.config/memoryhub/config.json."
+    handle_error(
+        "missing_config",
+        "No admin key found. Set MEMORYHUB_ADMIN_KEY or add 'admin_key' to ~/.config/memoryhub/config.json.",
+        output,
+        EXIT_CLIENT_ERROR,
     )
-    raise typer.Exit(1)
 
 
-def _get_auth_url() -> str:
+def _get_auth_url(output: OutputFormat) -> str:
     """Resolve the auth service base URL (without trailing slash)."""
     url = os.environ.get("MEMORYHUB_AUTH_URL")
     if url:
@@ -59,16 +66,14 @@ def _get_auth_url() -> str:
 
     url = config.get("url")
     if url:
-        # Fall back to base MCP URL with /admin stripped — assume auth
-        # is co-located at the base URL.
         return url.rstrip("/")
 
-    err_console.print(
-        "[red]No auth URL found.[/red]\n"
-        "Set MEMORYHUB_AUTH_URL, or add 'auth_url' to "
-        "~/.config/memoryhub/config.json."
+    handle_error(
+        "missing_config",
+        "No auth URL found. Set MEMORYHUB_AUTH_URL, or add 'auth_url' to ~/.config/memoryhub/config.json.",
+        output,
+        EXIT_CLIENT_ERROR,
     )
-    raise typer.Exit(1)
 
 
 def _admin_headers(admin_key: str) -> dict[str, str]:
@@ -97,14 +102,16 @@ def create_agent(
         "--write-config",
         help="Write the client_secret to ~/.config/memoryhub/api-key",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Create a new agent (OAuth client).
 
     The client_secret is shown only once. Save it immediately.
     """
-    admin_key = _get_admin_key()
-    auth_url = _get_auth_url()
+    admin_key = _get_admin_key(output)
+    auth_url = _get_auth_url(output)
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
 
     body = {
@@ -128,11 +135,13 @@ def create_agent(
     try:
         data = _run(_do())
     except httpx.HTTPStatusError as exc:
-        _handle_http_error(exc)
+        _handle_http_error(exc, output)
         return
 
-    if json_output:
-        console.print_json(json.dumps(data))
+    if output == OutputFormat.json:
+        json_success(data)
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print("[green]Agent created successfully.[/green]\n")
@@ -159,11 +168,13 @@ def create_agent(
 
 @admin_app.command("list-agents")
 def list_agents(
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """List all registered agents (OAuth clients)."""
-    admin_key = _get_admin_key()
-    auth_url = _get_auth_url()
+    admin_key = _get_admin_key(output)
+    auth_url = _get_auth_url(output)
 
     async def _do():
         async with httpx.AsyncClient() as client:
@@ -178,11 +189,13 @@ def list_agents(
     try:
         data = _run(_do())
     except httpx.HTTPStatusError as exc:
-        _handle_http_error(exc)
+        _handle_http_error(exc, output)
         return
 
-    if json_output:
-        console.print_json(json.dumps(data))
+    if output == OutputFormat.json:
+        json_success(data)
+        return
+    if output == OutputFormat.quiet:
         return
 
     if not data:
@@ -214,14 +227,16 @@ def list_agents(
 @admin_app.command("rotate-secret")
 def rotate_secret(
     client_id: str = typer.Argument(..., help="Client ID of the agent"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Rotate the client secret for an agent.
 
     The new secret is shown only once. Save it immediately.
     """
-    admin_key = _get_admin_key()
-    auth_url = _get_auth_url()
+    admin_key = _get_admin_key(output)
+    auth_url = _get_auth_url(output)
 
     async def _do():
         async with httpx.AsyncClient() as client:
@@ -236,11 +251,13 @@ def rotate_secret(
     try:
         data = _run(_do())
     except httpx.HTTPStatusError as exc:
-        _handle_http_error(exc)
+        _handle_http_error(exc, output)
         return
 
-    if json_output:
-        console.print_json(json.dumps(data))
+    if output == OutputFormat.json:
+        json_success(data)
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(f"[green]Secret rotated for {data['client_id']}.[/green]\n")
@@ -255,10 +272,13 @@ def rotate_secret(
 @admin_app.command("disable-agent")
 def disable_agent(
     client_id: str = typer.Argument(..., help="Client ID of the agent to disable"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Disable an agent (set active=false)."""
-    admin_key = _get_admin_key()
-    auth_url = _get_auth_url()
+    admin_key = _get_admin_key(output)
+    auth_url = _get_auth_url(output)
 
     async def _do():
         async with httpx.AsyncClient() as client:
@@ -274,7 +294,13 @@ def disable_agent(
     try:
         data = _run(_do())
     except httpx.HTTPStatusError as exc:
-        _handle_http_error(exc)
+        _handle_http_error(exc, output)
+        return
+
+    if output == OutputFormat.json:
+        json_success(data)
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(
@@ -285,8 +311,8 @@ def disable_agent(
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _handle_http_error(exc: httpx.HTTPStatusError) -> None:
-    """Print a user-friendly error for HTTP failures."""
+def _handle_http_error(exc: httpx.HTTPStatusError, output: OutputFormat) -> None:
+    """Emit a structured error for HTTP failures and exit."""
     status = exc.response.status_code
     try:
         detail = exc.response.json().get("detail", exc.response.text)
@@ -294,14 +320,12 @@ def _handle_http_error(exc: httpx.HTTPStatusError) -> None:
         detail = exc.response.text
 
     if status == 401:
-        err_console.print(
-            "[red]Authentication failed.[/red] Check your admin key."
-        )
+        handle_error("auth_failed", "Authentication failed. Check your admin key.", output, EXIT_AUTH_ERROR)
     elif status == 404:
-        err_console.print(f"[red]Not found:[/red] {detail}")
+        handle_error("not_found", str(detail), output, EXIT_CLIENT_ERROR)
     elif status == 409:
-        err_console.print(f"[red]Conflict:[/red] {detail}")
+        handle_error("conflict", str(detail), output, EXIT_CLIENT_ERROR)
+    elif status >= 500:
+        handle_error("server_error", f"HTTP {status}: {detail}", output, EXIT_SERVER_ERROR)
     else:
-        err_console.print(f"[red]HTTP {status}:[/red] {detail}")
-
-    raise typer.Exit(1)
+        handle_error("http_error", f"HTTP {status}: {detail}", output, EXIT_CLIENT_ERROR)

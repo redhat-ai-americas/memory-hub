@@ -93,13 +93,13 @@ class TestCreateAgent:
         with patch.dict("os.environ", _env_with_admin_key(), clear=False):
             with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
                 result = runner.invoke(
-                    app, ["admin", "create-agent", "test-agent", "--json"]
+                    app, ["admin", "create-agent", "test-agent", "--output", "json"]
                 )
 
         assert result.exit_code == 0
         parsed = json.loads(result.output)
-        assert parsed["client_id"] == "test-agent"
-        assert parsed["client_secret"] == "super-secret-value"
+        assert parsed["data"]["client_id"] == "test-agent"
+        assert parsed["data"]["client_secret"] == "super-secret-value"
 
     def test_write_config(self, tmp_path):
         mock_client = AsyncMock()
@@ -138,7 +138,7 @@ class TestCreateAgent:
                 result = runner.invoke(app, ["admin", "create-agent", "test-agent"])
 
         assert result.exit_code == 1
-        assert "Conflict" in result.output
+        assert "conflict" in result.output.lower()
 
 
 # ── list-agents ──────────────────────────────────────────────────────────────
@@ -171,12 +171,12 @@ class TestListAgents:
 
         with patch.dict("os.environ", _env_with_admin_key(), clear=False):
             with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
-                result = runner.invoke(app, ["admin", "list-agents", "--json"])
+                result = runner.invoke(app, ["admin", "list-agents", "--output", "json"])
 
         assert result.exit_code == 0
         parsed = json.loads(result.output)
-        assert len(parsed) == 1
-        assert parsed[0]["client_id"] == "test-agent"
+        assert len(parsed["data"]) == 1
+        assert parsed["data"][0]["client_id"] == "test-agent"
 
     def test_empty_list(self):
         mock_client = AsyncMock()
@@ -225,12 +225,12 @@ class TestRotateSecret:
         with patch.dict("os.environ", _env_with_admin_key(), clear=False):
             with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
                 result = runner.invoke(
-                    app, ["admin", "rotate-secret", "test-agent", "--json"]
+                    app, ["admin", "rotate-secret", "test-agent", "--output", "json"]
                 )
 
         assert result.exit_code == 0
         parsed = json.loads(result.output)
-        assert parsed["client_secret"] == "new-secret-value"
+        assert parsed["data"]["client_secret"] == "new-secret-value"
 
     def test_not_found(self):
         error_resp = _mock_error_response(404, "Client 'ghost' not found")
@@ -248,7 +248,7 @@ class TestRotateSecret:
                 result = runner.invoke(app, ["admin", "rotate-secret", "ghost"])
 
         assert result.exit_code == 1
-        assert "Not found" in result.output
+        assert "not_found" in result.output
 
 
 # ── disable-agent ────────────────────────────────────────────────────────────
@@ -307,7 +307,7 @@ class TestHttpErrors:
             with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
                 result = runner.invoke(app, ["admin", "list-agents"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Authentication failed" in result.output
 
     def test_generic_http_error(self):
@@ -325,5 +325,5 @@ class TestHttpErrors:
             with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
                 result = runner.invoke(app, ["admin", "list-agents"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "HTTP 500" in result.output
