@@ -10,10 +10,30 @@ from pathlib import Path
 
 import typer
 from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
-from rich.console import Console
+from memoryhub.exceptions import (
+    AuthenticationError,
+    ConnectionFailedError,
+    ConflictError,
+    CurationVetoError,
+    MemoryHubError,
+    NotFoundError,
+    PermissionDeniedError,
+    ToolError,
+    ValidationError,
+)
 from rich.table import Table
 
 from memoryhub_cli.admin import admin_app
+from memoryhub_cli.output import (
+    EXIT_AUTH_ERROR,
+    EXIT_CLIENT_ERROR,
+    EXIT_SERVER_ERROR,
+    OutputFormat,
+    console,
+    err_console,
+    handle_error,
+    json_success,
+)
 from memoryhub_cli.config import get_connection_params, save_config
 from memoryhub_cli.project_config import (
     FocusSource,
@@ -85,22 +105,21 @@ session_app = typer.Typer(
 )
 app.add_typer(session_app, name="session")
 
-console = Console()
-err_console = Console(stderr=True)
 
-
-def _get_client():
+def _get_client(output: OutputFormat = OutputFormat.table):
     """Create a MemoryHubClient from config/env."""
     from memoryhub import MemoryHubClient
 
     params = get_connection_params()
     missing = [k for k, v in params.items() if not v]
     if missing:
-        err_console.print(
-            f"[red]Missing configuration: {', '.join(missing)}[/red]\n"
-            "Run [bold]memoryhub login[/bold] or set environment variables."
+        handle_error(
+            "missing_config",
+            f"Missing configuration: {', '.join(missing)}. "
+            "Run 'memoryhub login' or set environment variables.",
+            output,
+            EXIT_CLIENT_ERROR,
         )
-        raise typer.Exit(1)
 
     return MemoryHubClient(
         url=params["url"],
@@ -134,6 +153,22 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _run_command(coro, output: OutputFormat):
+    """Run an async coroutine with structured error handling."""
+    try:
+        return asyncio.run(coro)
+    except AuthenticationError as exc:
+        handle_error("auth_failed", str(exc), output, EXIT_AUTH_ERROR)
+    except (PermissionDeniedError, ValidationError, ConflictError, CurationVetoError) as exc:
+        handle_error(type(exc).__name__.lower(), str(exc), output, EXIT_CLIENT_ERROR)
+    except NotFoundError as exc:
+        handle_error("not_found", str(exc), output, EXIT_CLIENT_ERROR)
+    except (ConnectionFailedError, ToolError) as exc:
+        handle_error("server_error", str(exc), output, EXIT_SERVER_ERROR)
+    except MemoryHubError as exc:
+        handle_error("error", str(exc), output, EXIT_SERVER_ERROR)
+
+
 @app.command()
 def login(
     url: str = typer.Option(..., prompt="MemoryHub MCP URL", help="MCP server URL"),
@@ -141,6 +176,9 @@ def login(
     client_id: str = typer.Option(..., prompt="Client ID", help="OAuth client ID"),
     client_secret: str = typer.Option(
         ..., prompt="Client secret", hide_input=True, help="OAuth client secret"
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
     ),
 ):
     """Configure connection to a MemoryHub instance.
@@ -154,7 +192,8 @@ def login(
         "client_id": client_id,
         "client_secret": client_secret,
     })
-    console.print("[green]Configuration saved.[/green]")
+    if output == OutputFormat.table:
+        console.print("[green]Configuration saved.[/green]")
 
     # Test connectivity
     async def _test():
@@ -170,10 +209,16 @@ def login(
 
     try:
         _run(_test())
-        console.print("[green]Connection verified.[/green]")
+        if output == OutputFormat.json:
+            json_success({"saved": True, "connection": "verified"})
+        elif output == OutputFormat.table:
+            console.print("[green]Connection verified.[/green]")
     except Exception as exc:
-        err_console.print(f"[yellow]Warning: connection test failed: {exc}[/yellow]")
-        err_console.print("Credentials saved anyway. Check URL and credentials.")
+        if output == OutputFormat.json:
+            json_success({"saved": True, "connection": "failed", "warning": str(exc)})
+        elif output == OutputFormat.table:
+            err_console.print(f"[yellow]Warning: connection test failed: {exc}[/yellow]")
+            err_console.print("Credentials saved anyway. Check URL and credentials.")
 
 
 @app.command()
@@ -187,10 +232,12 @@ def search(
     domains: list[str] | None = typer.Option(
         None, "--domain", help="Domain tags to boost",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Search memories using semantic similarity."""
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
@@ -200,10 +247,12 @@ def search(
                 project_id=_project_id, domains=domains or None,
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(result.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     if not result.results:
@@ -240,20 +289,24 @@ def read(
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Read a memory by ID."""
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
         async with client:
             return await client.read(memory_id, project_id=_project_id)
 
-    memory = _run(_do())
+    memory = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(memory.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(memory.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(f"[bold]{memory.scope}[/bold] | v{memory.version} | weight {memory.weight:.2f}")
@@ -282,7 +335,9 @@ def write(
     domains: list[str] | None = typer.Option(
         None, "--domain", help="Domain tags",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Write a new memory.
 
@@ -290,15 +345,17 @@ def write(
     """
     if content is None:
         if sys.stdin.isatty():
-            err_console.print("[red]Provide content as argument or pipe via stdin.[/red]")
-            raise typer.Exit(1)
+            handle_error(
+                "missing_content",
+                "Provide content as argument or pipe via stdin.",
+                output, EXIT_CLIENT_ERROR,
+            )
         content = sys.stdin.read().strip()
 
     if not content:
-        err_console.print("[red]Content cannot be empty.[/red]")
-        raise typer.Exit(1)
+        handle_error("empty_content", "Content cannot be empty.", output, EXIT_CLIENT_ERROR)
 
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
@@ -309,11 +366,22 @@ def write(
                 project_id=_project_id, domains=domains or None,
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(result.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
         return
+    if output == OutputFormat.quiet:
+        return
+
+    if result.curation.gated:
+        err_console.print("[yellow]Write gated by curation.[/yellow]")
+        err_console.print(f"  Reason: {result.curation.reason}")
+        if result.curation.existing_memory_id:
+            err_console.print(f"  Existing: {result.curation.existing_memory_id}")
+        if result.curation.recommendation:
+            err_console.print(f"  Recommendation: {result.curation.recommendation}")
+        raise typer.Exit(EXIT_CLIENT_ERROR)
 
     mem = result.memory
     console.print(f"[green]Memory created:[/green] {mem.id}")
@@ -334,25 +402,36 @@ def delete(
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Soft-delete a memory and its version chain."""
-    if not force:
+    if not force and output == OutputFormat.table:
         confirm = typer.confirm(f"Delete memory {memory_id} and all versions?")
         if not confirm:
             raise typer.Abort()
+    elif not force:
+        handle_error(
+            "confirmation_required",
+            "Delete requires --force in non-interactive mode.",
+            output,
+            EXIT_CLIENT_ERROR,
+        )
 
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
         async with client:
             return await client.delete(memory_id, project_id=_project_id)
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(result.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(
@@ -372,7 +451,9 @@ def update(
     domains: list[str] | None = typer.Option(
         None, "--domain", help="Domain tags",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Update an existing memory's content, weight, or domains.
 
@@ -384,16 +465,16 @@ def update(
         content = sys.stdin.read().strip() or None
 
     if content is None and weight is None and not domains:
-        err_console.print(
-            "[red]Provide at least one of: content, --weight, or --domain.[/red]"
+        handle_error(
+            "missing_input",
+            "Provide at least one of: content, --weight, or --domain.",
+            output, EXIT_CLIENT_ERROR,
         )
-        raise typer.Exit(1)
 
     if content is not None and not content:
-        err_console.print("[red]Content cannot be empty.[/red]")
-        raise typer.Exit(1)
+        handle_error("empty_content", "Content cannot be empty.", output, EXIT_CLIENT_ERROR)
 
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
@@ -406,10 +487,12 @@ def update(
                 domains=domains or None,
             )
 
-    memory = _run(_do())
+    memory = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(memory.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(memory.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(f"[green]Memory updated:[/green] {memory.id}")
@@ -423,10 +506,12 @@ def history(
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Show version history for a memory."""
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
@@ -436,10 +521,12 @@ def history(
                 project_id=_project_id,
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(result.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     if not result.versions:
@@ -564,6 +651,9 @@ def config_init(
         "--non-interactive",
         help="Use defaults for all prompts, skip interactive setup.",
     ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Walk through project setup and write `.memoryhub.yaml` + the
     generated `.claude/rules/memoryhub-loading.md` rule file."""
@@ -633,8 +723,17 @@ def config_init(
     try:
         result = write_init_files(config, project_dir, overwrite=force)
     except FileExistsError as exc:
-        err_console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+        handle_error("file_exists", str(exc), output, EXIT_CLIENT_ERROR)
+
+    if output == OutputFormat.json:
+        json_success({
+            "yaml_path": str(result.yaml_path),
+            "rule_path": str(result.rule_path),
+            "legacy_backup": str(result.legacy_backup) if result.legacy_backup else None,
+        })
+        return
+    if output == OutputFormat.quiet:
+        return
 
     console.print(f"\n[green]Wrote {result.yaml_path}[/green]")
     console.print(f"[green]Wrote {result.rule_path}[/green]")
@@ -682,6 +781,9 @@ def config_regenerate(
         help="Project directory (defaults to cwd).",
         file_okay=False,
     ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Re-render `.claude/rules/memoryhub-loading.md` from `.memoryhub.yaml`.
 
@@ -691,17 +793,18 @@ def config_regenerate(
     project_dir = project_dir.resolve()
     yaml_path = project_dir / CONFIG_FILENAME
     if not yaml_path.is_file():
-        err_console.print(
-            f"[red]No {CONFIG_FILENAME} in {project_dir}.[/red]\n"
-            "Run [bold]memoryhub config init[/bold] first."
+        handle_error(
+            "missing_config",
+            f"No {CONFIG_FILENAME} in {project_dir}. "
+            "Run 'memoryhub config init' first.",
+            output,
+            EXIT_CLIENT_ERROR,
         )
-        raise typer.Exit(1)
 
     try:
         config = load_project_config(yaml_path)
     except ConfigError as exc:
-        err_console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+        handle_error("invalid_config", str(exc), output, EXIT_CLIENT_ERROR)
 
     result = rewrite_rule_file(config, project_dir)
     console.print(f"[green]Regenerated {result.rule_path}[/green]")
@@ -722,10 +825,12 @@ def graph_relate(
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Create a directed relationship between two memories."""
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
@@ -735,10 +840,12 @@ def graph_relate(
                 project_id=_project_id,
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(result.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(
@@ -760,10 +867,12 @@ def graph_list(
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """List relationships for a memory node."""
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
@@ -775,10 +884,12 @@ def graph_list(
                 project_id=_project_id,
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(result.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     if not result.relationships:
@@ -814,10 +925,12 @@ def graph_similar(
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Find memories semantically similar to a given memory."""
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
@@ -829,10 +942,12 @@ def graph_similar(
                 project_id=_project_id,
             )
 
-    results = _run(_do())
+    results = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps([m.model_dump() for m in results], default=str))
+    if output == OutputFormat.json:
+        json_success([m.model_dump() for m in results])
+        return
+    if output == OutputFormat.quiet:
         return
 
     if not results:
@@ -870,10 +985,12 @@ def curation_report(
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Report a contradiction between a stored memory and observed behavior."""
-    client = _get_client()
+    client = _get_client(output)
     _project_id = project_id or _get_project_id_default()
 
     async def _do():
@@ -884,10 +1001,12 @@ def curation_report(
                 project_id=_project_id,
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(result.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     triggered = "Yes" if result.revision_triggered else "No"
@@ -904,10 +1023,12 @@ def curation_resolve(
         help="Resolution action: accept_new, keep_old, mark_both_invalid, manual_merge",
     ),
     note: str | None = typer.Option(None, "--note", help="Optional resolution note"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Resolve a reported contradiction."""
-    client = _get_client()
+    client = _get_client(output)
 
     async def _do():
         async with client:
@@ -916,10 +1037,12 @@ def curation_resolve(
                 resolution_note=note,
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps(result, default=str))
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(f"[green]Contradiction {contradiction_id[:12]} resolved:[/green] {action}")
@@ -943,10 +1066,12 @@ def curation_rule(
     ),
     enabled: bool = typer.Option(True, "--enabled/--disabled", help="Enable or disable the rule"),
     priority: int = typer.Option(10, "--priority", help="Rule priority"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Create or update a curation rule."""
-    client = _get_client()
+    client = _get_client(output)
 
     config: dict | None = {"threshold": threshold} if threshold is not None else None
 
@@ -962,10 +1087,12 @@ def curation_rule(
                 priority=priority,
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(result.model_dump_json())
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
         return
 
     verb = "updated" if result.updated else "created"
@@ -981,19 +1108,23 @@ def curation_rule(
 @project_app.command("list")
 def project_list(
     filter: str = typer.Option("mine", "--filter", "-f", help='"mine" (default) or "all"'),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """List projects you belong to (or all projects with --filter all)."""
-    client = _get_client()
+    client = _get_client(output)
 
     async def _do():
         async with client:
             return await client.list_projects(filter=filter)
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps(result, default=str))
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
         return
 
     projects = result.get("projects", [])
@@ -1026,10 +1157,12 @@ def project_create(
     name: str = typer.Argument(..., help="Project name"),
     description: str | None = typer.Option(None, "--description", help="Optional description"),
     invite_only: bool = typer.Option(False, "--invite-only", help="Restrict membership to invites"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Create a new project."""
-    client = _get_client()
+    client = _get_client(output)
 
     async def _do():
         async with client:
@@ -1037,10 +1170,12 @@ def project_create(
                 name, description=description, invite_only=invite_only
             )
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps(result, default=str))
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(f"[green]Project created:[/green] {name}")
@@ -1055,19 +1190,23 @@ def project_add_member(
     project_name: str = typer.Argument(..., help="Project name"),
     user_id: str = typer.Argument(..., help="User ID to add"),
     role: str = typer.Option("member", "--role", "-r", help='"member" (default) or "admin"'),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Add a member to a project."""
-    client = _get_client()
+    client = _get_client(output)
 
     async def _do():
         async with client:
             return await client.add_project_member(project_name, user_id, role=role)
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps(result, default=str))
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(f"[green]Added[/green] {user_id} to {project_name} as {role}")
@@ -1077,19 +1216,23 @@ def project_add_member(
 def project_remove_member(
     project_name: str = typer.Argument(..., help="Project name"),
     user_id: str = typer.Argument(..., help="User ID to remove"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Remove a member from a project."""
-    client = _get_client()
+    client = _get_client(output)
 
     async def _do():
         async with client:
             return await client.remove_project_member(project_name, user_id)
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps(result, default=str))
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(f"[green]Removed[/green] {user_id} from {project_name}")
@@ -1100,19 +1243,23 @@ def project_remove_member(
 
 @session_app.command("status")
 def session_status(
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Show current session info: user, scopes, expiry, and project memberships."""
-    client = _get_client()
+    client = _get_client(output)
 
     async def _do():
         async with client:
             return await client.get_session()
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps(result, default=str))
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
         return
 
     user_id = result.get("user_id", "-")
@@ -1131,19 +1278,23 @@ def session_status(
 def session_focus(
     focus_text: str = typer.Argument(..., help="Short topic description for this session"),
     project: str = typer.Option(..., "--project", "-p", help="Project identifier"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Set the focus topic for the current session."""
-    client = _get_client()
+    client = _get_client(output)
 
     async def _do():
         async with client:
             return await client.set_session_focus(focus_text, project)
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps(result, default=str))
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
         return
 
     console.print(f"Focus set: {focus_text} (project: {project})")
@@ -1154,19 +1305,23 @@ def session_focus_history(
     project: str = typer.Argument(..., help="Project identifier"),
     start: str | None = typer.Option(None, "--start", help="Start date YYYY-MM-DD"),
     end: str | None = typer.Option(None, "--end", help="End date YYYY-MM-DD"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
 ):
     """Show focus topic history for a project."""
-    client = _get_client()
+    client = _get_client(output)
 
     async def _do():
         async with client:
             return await client.get_focus_history(project, start_date=start, end_date=end)
 
-    result = _run(_do())
+    result = _run_command(_do(), output)
 
-    if json_output:
-        console.print_json(json.dumps(result, default=str))
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
         return
 
     histogram = result.get("histogram", [])
