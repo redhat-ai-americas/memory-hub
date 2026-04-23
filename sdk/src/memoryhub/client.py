@@ -948,6 +948,17 @@ class MemoryHubClient:
 
     # ── Session focus (#61) ─────────────────────────────────────────
 
+    async def get_session(self) -> dict[str, Any]:
+        """Check the current session's status.
+
+        Returns your user_id, name, scopes, session expiry, and project
+        memberships without re-authenticating.
+        """
+        return await self._call(
+            "manage_session",
+            {"action": "status"},
+        )
+
     async def set_session_focus(
         self,
         focus: str,

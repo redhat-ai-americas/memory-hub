@@ -78,6 +78,13 @@ project_app = typer.Typer(
 )
 app.add_typer(project_app, name="project")
 
+session_app = typer.Typer(
+    name="session",
+    help="Check session status and manage focus topics.",
+    no_args_is_help=True,
+)
+app.add_typer(session_app, name="session")
+
 console = Console()
 err_console = Console(stderr=True)
 
@@ -1086,6 +1093,98 @@ def project_remove_member(
         return
 
     console.print(f"[green]Removed[/green] {user_id} from {project_name}")
+
+
+# ── memoryhub session ─────────────────────────────────────────────────────────
+
+
+@session_app.command("status")
+def session_status(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Show current session info: user, scopes, expiry, and project memberships."""
+    client = _get_client()
+
+    async def _do():
+        async with client:
+            return await client.get_session()
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+        return
+
+    user_id = result.get("user_id", "-")
+    name = result.get("name", "")
+    scopes = result.get("scopes", [])
+    expires_at = result.get("expires_at", "-")
+    projects = [p.get("project_id", p) if isinstance(p, dict) else p for p in result.get("projects", [])]
+
+    console.print(f"Session: {user_id} ({name})")
+    console.print(f"  Scopes: {', '.join(scopes) if scopes else '-'}")
+    console.print(f"  Expires: {expires_at}")
+    console.print(f"  Projects: {', '.join(projects) if projects else '-'}")
+
+
+@session_app.command("focus")
+def session_focus(
+    focus_text: str = typer.Argument(..., help="Short topic description for this session"),
+    project: str = typer.Argument(..., help="Project identifier"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Set the focus topic for the current session."""
+    client = _get_client()
+
+    async def _do():
+        async with client:
+            return await client.set_session_focus(focus_text, project)
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+        return
+
+    console.print(f"Focus set: {focus_text} (project: {project})")
+
+
+@session_app.command("focus-history")
+def session_focus_history(
+    project: str = typer.Argument(..., help="Project identifier"),
+    start: str | None = typer.Option(None, "--start", help="Start date YYYY-MM-DD"),
+    end: str | None = typer.Option(None, "--end", help="End date YYYY-MM-DD"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Show focus topic history for a project."""
+    client = _get_client()
+
+    async def _do():
+        async with client:
+            return await client.get_focus_history(project, start_date=start, end_date=end)
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+        return
+
+    histogram = result.get("histogram", [])
+    total = result.get("total_sessions", 0)
+
+    if not histogram:
+        console.print("[dim]No focus history found.[/dim]")
+    else:
+        table = Table(title=f"Focus History: {project}")
+        table.add_column("Focus", style="cyan")
+        table.add_column("Count", justify="right")
+
+        for entry in histogram:
+            table.add_row(entry.get("focus", "-"), str(entry.get("count", 0)))
+
+        console.print(table)
+
+    console.print(f"[dim]Total sessions: {total}[/dim]")
 
 
 if __name__ == "__main__":
