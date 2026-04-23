@@ -856,6 +856,96 @@ class MemoryHubClient:
         )
         return CurationRuleResult.model_validate(data)
 
+    # ── Projects ──────────────────────────────────────────────────────
+
+    async def list_projects(
+        self,
+        *,
+        filter: str = "mine",
+    ) -> dict[str, Any]:
+        """List projects.
+
+        Args:
+            filter: 'mine' (default) for your projects, 'all' to include
+                open projects you could join.
+        """
+        return await self._call(
+            "manage_project",
+            {
+                "action": "list",
+                "filter": filter,
+            },
+        )
+
+    async def create_project(
+        self,
+        project_name: str,
+        *,
+        description: str | None = None,
+        invite_only: bool = False,
+    ) -> dict[str, Any]:
+        """Create a new project.
+
+        Args:
+            project_name: Project identifier.
+            description: Optional project description.
+            invite_only: If True, members must be added explicitly.
+                Default False allows auto-enrollment.
+        """
+        return await self._call(
+            "manage_project",
+            {
+                "action": "create",
+                "project_name": project_name,
+                "description": description,
+                "invite_only": invite_only,
+            },
+        )
+
+    async def add_project_member(
+        self,
+        project_name: str,
+        user_id: str,
+        *,
+        role: str = "member",
+    ) -> dict[str, Any]:
+        """Add a member to a project.
+
+        Args:
+            project_name: Project identifier.
+            user_id: User to add.
+            role: 'member' (default) or 'admin'.
+        """
+        return await self._call(
+            "manage_project",
+            {
+                "action": "add_member",
+                "project_name": project_name,
+                "user_id": user_id,
+                "role": role,
+            },
+        )
+
+    async def remove_project_member(
+        self,
+        project_name: str,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Remove a member from a project.
+
+        Args:
+            project_name: Project identifier.
+            user_id: User to remove.
+        """
+        return await self._call(
+            "manage_project",
+            {
+                "action": "remove_member",
+                "project_name": project_name,
+                "user_id": user_id,
+            },
+        )
+
     # ── Session focus (#61) ─────────────────────────────────────────
 
     async def set_session_focus(

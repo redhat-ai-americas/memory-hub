@@ -71,6 +71,13 @@ curation_app = typer.Typer(
 )
 app.add_typer(curation_app, name="curation")
 
+project_app = typer.Typer(
+    name="project",
+    help="Manage projects and membership.",
+    no_args_is_help=True,
+)
+app.add_typer(project_app, name="project")
+
 console = Console()
 err_console = Console(stderr=True)
 
@@ -959,6 +966,126 @@ def curation_rule(
     enabled_label = "enabled" if rule.enabled else "disabled"
     console.print(f"[green]Rule {verb}:[/green] {name}")
     console.print(f"  Tier: {rule.tier} | Action: {rule.action} | Priority: {rule.priority} | {enabled_label}")
+
+
+# ── memoryhub project ─────────────────────────────────────────────────────────
+
+
+@project_app.command("list")
+def project_list(
+    filter: str = typer.Option("mine", "--filter", "-f", help='"mine" (default) or "all"'),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List projects you belong to (or all projects with --filter all)."""
+    client = _get_client()
+
+    async def _do():
+        async with client:
+            return await client.list_projects(filter=filter)
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+        return
+
+    projects = result.get("projects", [])
+    if not projects:
+        console.print("[dim]No projects found.[/dim]")
+        return
+
+    table = Table(title="Projects")
+    table.add_column("Name", style="bold")
+    table.add_column("Description")
+    table.add_column("Members", justify="right")
+    table.add_column("Policy", style="cyan")
+
+    for proj in projects:
+        name = proj.get("name", "")
+        description = proj.get("description") or ""
+        if len(description) > 40:
+            description = description[:37] + "..."
+        members = proj.get("members", [])
+        member_count = proj.get("member_count", len(members) if isinstance(members, list) else 0)
+        invite_only = proj.get("invite_only", False)
+        policy = "invite-only" if invite_only else "open"
+        table.add_row(name, description, str(member_count), policy)
+
+    console.print(table)
+
+
+@project_app.command("create")
+def project_create(
+    name: str = typer.Argument(..., help="Project name"),
+    description: str | None = typer.Option(None, "--description", help="Optional description"),
+    invite_only: bool = typer.Option(False, "--invite-only", help="Restrict membership to invites"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a new project."""
+    client = _get_client()
+
+    async def _do():
+        async with client:
+            return await client.create_project(
+                name, description=description, invite_only=invite_only
+            )
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+        return
+
+    console.print(f"[green]Project created:[/green] {name}")
+    if description:
+        console.print(f"  Description: {description}")
+    policy = "invite-only" if invite_only else "open"
+    console.print(f"  Policy: {policy}")
+
+
+@project_app.command("add-member")
+def project_add_member(
+    project_name: str = typer.Argument(..., help="Project name"),
+    user_id: str = typer.Argument(..., help="User ID to add"),
+    role: str = typer.Option("member", "--role", "-r", help='"member" (default) or "admin"'),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Add a member to a project."""
+    client = _get_client()
+
+    async def _do():
+        async with client:
+            return await client.add_project_member(project_name, user_id, role=role)
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+        return
+
+    console.print(f"[green]Added[/green] {user_id} to {project_name} as {role}")
+
+
+@project_app.command("remove-member")
+def project_remove_member(
+    project_name: str = typer.Argument(..., help="Project name"),
+    user_id: str = typer.Argument(..., help="User ID to remove"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Remove a member from a project."""
+    client = _get_client()
+
+    async def _do():
+        async with client:
+            return await client.remove_project_member(project_name, user_id)
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+        return
+
+    console.print(f"[green]Removed[/green] {user_id} from {project_name}")
 
 
 if __name__ == "__main__":
