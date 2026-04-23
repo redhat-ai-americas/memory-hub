@@ -332,6 +332,61 @@ def delete(
 
 
 @app.command()
+def update(
+    memory_id: str = typer.Argument(..., help="Memory UUID to update"),
+    content: str | None = typer.Argument(None, help="New content (reads from stdin if omitted and stdin is not a tty)"),
+    weight: float | None = typer.Option(None, "--weight", "-w", help="New priority weight 0.0-1.0"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    domains: list[str] | None = typer.Option(
+        None, "--domain", help="Domain tags",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Update an existing memory's content, weight, or domains.
+
+    Content can be passed as an argument or piped via stdin.
+    At least one of content or --weight must be provided.
+    """
+    # Resolve content from stdin if not provided as an argument
+    if content is None and not sys.stdin.isatty():
+        content = sys.stdin.read().strip() or None
+
+    if content is None and weight is None and not domains:
+        err_console.print(
+            "[red]Provide at least one of: content, --weight, or --domain.[/red]"
+        )
+        raise typer.Exit(1)
+
+    if content is not None and not content:
+        err_console.print("[red]Content cannot be empty.[/red]")
+        raise typer.Exit(1)
+
+    client = _get_client()
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.update(
+                memory_id,
+                content=content,
+                weight=weight,
+                project_id=_project_id,
+                domains=domains or None,
+            )
+
+    memory = _run(_do())
+
+    if json_output:
+        console.print_json(memory.model_dump_json())
+        return
+
+    console.print(f"[green]Memory updated:[/green] {memory.id}")
+    console.print(f"  Scope: {memory.scope} | Weight: {memory.weight:.2f} | Version: {memory.version}")
+
+
+@app.command()
 def history(
     memory_id: str = typer.Argument(..., help="Memory UUID"),
     max_versions: int = typer.Option(20, "--max", "-n", help="Maximum versions to show"),
