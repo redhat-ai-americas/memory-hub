@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -55,6 +56,14 @@ config_app = typer.Typer(
 )
 app.add_typer(config_app, name="config")
 app.add_typer(admin_app, name="admin", help="Manage agents and OAuth clients")
+
+graph_app = typer.Typer(
+    name="graph",
+    help="Manage memory relationships and similarity.",
+    no_args_is_help=True,
+)
+app.add_typer(graph_app, name="graph")
+
 console = Console()
 err_console = Console(stderr=True)
 
@@ -679,6 +688,152 @@ def config_regenerate(
         console.print(
             f"[yellow]Backed up legacy rule to {result.legacy_backup}.[/yellow]"
         )
+
+
+# ── memoryhub graph ───────────────────────────────────────────────────────────
+
+
+@graph_app.command("relate")
+def graph_relate(
+    source_id: str = typer.Argument(..., help="Source memory UUID"),
+    target_id: str = typer.Argument(..., help="Target memory UUID"),
+    relationship_type: str = typer.Argument(..., help="Relationship type label"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a directed relationship between two memories."""
+    client = _get_client()
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.create_relationship(
+                source_id, target_id, relationship_type,
+                project_id=_project_id,
+            )
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(result.model_dump_json())
+        return
+
+    console.print(
+        f"[green]Relationship created:[/green] "
+        f"{source_id[:12]} --[{relationship_type}]--> {target_id[:12]}"
+    )
+
+
+@graph_app.command("list")
+def graph_list(
+    node_id: str = typer.Argument(..., help="Memory UUID to query relationships for"),
+    rel_type: str | None = typer.Option(
+        None, "--type", "-t", help="Filter by relationship type",
+    ),
+    direction: str = typer.Option(
+        "both", "--direction", "-d",
+        help="Relationship direction: both (default), outgoing, incoming",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List relationships for a memory node."""
+    client = _get_client()
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.get_relationships(
+                node_id,
+                relationship_type=rel_type,
+                direction=direction,
+                project_id=_project_id,
+            )
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(result.model_dump_json())
+        return
+
+    if not result.relationships:
+        console.print("[dim]No relationships found.[/dim]")
+        return
+
+    table = Table(title=f"Relationships: {node_id[:12]}...")
+    table.add_column("Direction", justify="center")
+    table.add_column("Related ID", style="dim", max_width=12)
+    table.add_column("Type", style="cyan")
+    table.add_column("Created", style="dim")
+
+    for rel in result.relationships:
+        if rel.source_id == node_id:
+            dir_arrow = "→"
+            related = str(rel.target_id)[:12]
+        else:
+            dir_arrow = "←"
+            related = str(rel.source_id)[:12]
+        created = str(rel.created_at)[:19] if getattr(rel, "created_at", None) else "-"
+        table.add_row(dir_arrow, related, rel.relationship_type, created)
+
+    console.print(table)
+
+
+@graph_app.command("similar")
+def graph_similar(
+    memory_id: str = typer.Argument(..., help="Memory UUID to find similar memories for"),
+    threshold: float = typer.Option(
+        0.80, "--threshold", help="Minimum cosine similarity score",
+    ),
+    max_results: int = typer.Option(10, "--max", "-n", help="Maximum results"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Find memories semantically similar to a given memory."""
+    client = _get_client()
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.get_similar(
+                memory_id,
+                threshold=threshold,
+                max_results=max_results,
+                project_id=_project_id,
+            )
+
+    results = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps([m.model_dump() for m in results], default=str))
+        return
+
+    if not results:
+        console.print("[dim]No similar memories found.[/dim]")
+        return
+
+    table = Table(title=f"Similar to: {memory_id[:12]}...")
+    table.add_column("ID", style="dim", max_width=12)
+    table.add_column("Score", justify="right")
+    table.add_column("Scope", style="cyan")
+    table.add_column("Stub", max_width=60)
+
+    for mem in results:
+        score = f"{mem.relevance_score:.3f}" if getattr(mem, "relevance_score", None) else "-"
+        table.add_row(
+            str(mem.id)[:12],
+            score,
+            mem.scope,
+            (mem.stub or mem.content)[:60],
+        )
+
+    console.print(table)
 
 
 if __name__ == "__main__":
