@@ -792,7 +792,7 @@ def graph_list(
     table.add_column("Created", style="dim")
 
     for rel in result.relationships:
-        if rel.source_id == node_id:
+        if str(rel.source_id) == node_id:
             dir_arrow = "→"
             related = str(rel.target_id)[:12]
         else:
@@ -1130,7 +1130,7 @@ def session_status(
 @session_app.command("focus")
 def session_focus(
     focus_text: str = typer.Argument(..., help="Short topic description for this session"),
-    project: str = typer.Argument(..., help="Project identifier"),
+    project: str = typer.Option(..., "--project", "-p", help="Project identifier"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Set the focus topic for the current session."""
