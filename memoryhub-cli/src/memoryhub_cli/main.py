@@ -64,6 +64,13 @@ graph_app = typer.Typer(
 )
 app.add_typer(graph_app, name="graph")
 
+curation_app = typer.Typer(
+    name="curation",
+    help="Report contradictions, resolve them, and manage curation rules.",
+    no_args_is_help=True,
+)
+app.add_typer(curation_app, name="curation")
+
 console = Console()
 err_console = Console(stderr=True)
 
@@ -834,6 +841,124 @@ def graph_similar(
         )
 
     console.print(table)
+
+
+# ── memoryhub curation ────────────────────────────────────────────────────────
+
+
+@curation_app.command("report")
+def curation_report(
+    memory_id: str = typer.Argument(..., help="Memory UUID with contradicting behavior"),
+    observed_behavior: str = typer.Argument(..., help="Description of the observed behavior"),
+    confidence: float = typer.Option(
+        0.7, "--confidence", "-c", help="Confidence in the contradiction report (0.0-1.0)",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Report a contradiction between a stored memory and observed behavior."""
+    client = _get_client()
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.report_contradiction(
+                memory_id, observed_behavior,
+                confidence=confidence,
+                project_id=_project_id,
+            )
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(result.model_dump_json())
+        return
+
+    triggered = "Yes" if result.revision_triggered else "No"
+    console.print(f"[green]Contradiction reported for[/green] {memory_id[:12]}")
+    console.print(f"  Count: {result.contradiction_count} / {result.threshold} threshold")
+    console.print(f"  Revision triggered: {triggered}")
+
+
+@curation_app.command("resolve")
+def curation_resolve(
+    contradiction_id: str = typer.Argument(..., help="Contradiction UUID to resolve"),
+    action: str = typer.Option(
+        ..., "--action", "-a",
+        help="Resolution action: accept_new, keep_old, mark_both_invalid, manual_merge",
+    ),
+    note: str | None = typer.Option(None, "--note", help="Optional resolution note"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Resolve a reported contradiction."""
+    client = _get_client()
+
+    async def _do():
+        async with client:
+            return await client.resolve_contradiction(
+                contradiction_id, action,
+                resolution_note=note,
+            )
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+        return
+
+    console.print(f"[green]Contradiction {contradiction_id[:12]} resolved:[/green] {action}")
+
+
+@curation_app.command("rule")
+def curation_rule(
+    name: str = typer.Argument(..., help="Rule name"),
+    tier: str = typer.Option(
+        "embedding", "--tier", help="Rule tier: embedding or regex",
+    ),
+    action: str = typer.Option(
+        "flag", "--action", "-a",
+        help="Action: flag, block, quarantine, etc.",
+    ),
+    threshold: float | None = typer.Option(
+        None, "--threshold", help="Similarity threshold (for embedding tier)",
+    ),
+    scope_filter: str | None = typer.Option(
+        None, "--scope-filter", help="Scope filter",
+    ),
+    enabled: bool = typer.Option(True, "--enabled/--disabled", help="Enable or disable the rule"),
+    priority: int = typer.Option(10, "--priority", help="Rule priority"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create or update a curation rule."""
+    client = _get_client()
+
+    config: dict | None = {"threshold": threshold} if threshold is not None else None
+
+    async def _do():
+        async with client:
+            return await client.set_curation_rule(
+                name,
+                tier=tier,
+                action=action,
+                config=config,
+                scope_filter=scope_filter,
+                enabled=enabled,
+                priority=priority,
+            )
+
+    result = _run(_do())
+
+    if json_output:
+        console.print_json(result.model_dump_json())
+        return
+
+    verb = "updated" if result.updated else "created"
+    rule = result.rule
+    enabled_label = "enabled" if rule.enabled else "disabled"
+    console.print(f"[green]Rule {verb}:[/green] {name}")
+    console.print(f"  Tier: {rule.tier} | Action: {rule.action} | Priority: {rule.priority} | {enabled_label}")
 
 
 if __name__ == "__main__":

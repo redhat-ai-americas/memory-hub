@@ -709,6 +709,32 @@ class MemoryHubClient:
         )
         return ContradictionResult.model_validate(data)
 
+    async def resolve_contradiction(
+        self,
+        contradiction_id: str,
+        resolution_action: str,
+        *,
+        resolution_note: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve a contradiction report with a disposition.
+
+        Args:
+            contradiction_id: UUID of the contradiction report to resolve.
+            resolution_action: One of 'accept_new' (observation supersedes
+                memory), 'keep_old' (memory stands), 'mark_both_invalid',
+                or 'manual_merge'.
+            resolution_note: Optional rationale for the resolution.
+        """
+        return await self._call(
+            "manage_curation",
+            {
+                "action": "resolve_contradiction",
+                "contradiction_id": contradiction_id,
+                "resolution_action": resolution_action,
+                "resolution_note": resolution_note,
+            },
+        )
+
     # ── Similarity & relationships ──────────────────────────────────
 
     async def get_similar(
