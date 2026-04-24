@@ -67,7 +67,9 @@ POST /api/v1/connectors
 
 The `streamable_http` transport matches MemoryHub's current deployment, which uses FastMCP with streamable-HTTP (SSE is deprecated and not used).
 
-MCP servers in Kagenti are deployed as standard Kubernetes Deployment and Service resources. There is no CRD-based MCP server registration. MemoryHub resources should carry labels and annotations that identify them to Kagenti's tooling:
+> **PoC finding (2026-04-23):** Kagenti also supports CRD-based MCP server registration via `MCPServerRegistration` (`apiVersion: mcp.kagenti.com/v1alpha1`). However, the MCP Gateway's Istio listeners are configured with dev-oriented hostnames (`mcp.127-0-0-1.sslip.io`, `*.mcp.local`), and Istio rejects HTTPRoutes that don't match these hostnames. Registering external MCP servers on production OCP clusters requires either reconfiguring Gateway listeners, placing the MCPServerRegistration in the `mcp-system` namespace, or bypassing the gateway entirely with direct MCP connections. This is tracked as kagenti/kagenti#1275 and is the primary blocker for Layer 1 gateway-mediated registration. Direct MCP connections (agent pod → MemoryHub service, bypassing the gateway) work today.
+
+MCP servers in Kagenti are deployed as standard Kubernetes Deployment and Service resources. For direct connectivity (bypassing the gateway), no CRD registration is needed. MemoryHub resources should carry labels and annotations that identify them to Kagenti's tooling:
 
 ```yaml
 labels:
@@ -102,7 +104,8 @@ async def my_agent(
             # Register session — Phase 1 uses API key auth
             await session.call_tool("register_session", {"api_key": "<agent1-api-key>"})
 
-            # Load relevant context before processing the request
+            # Full-profile tool names shown; compact profile uses
+            # memory(action="search", query="...") instead
             results = await session.call_tool("search_memory", {
                 "query": "user deployment preferences",
                 "max_results": 5
@@ -118,7 +121,7 @@ async def my_agent(
             })
 ```
 
-Agents always see the original tool names (`register_session`, `search_memory`, `write_memory`, etc.) regardless of connection path. There is no tool prefix namespacing applied by the connector registration.
+Agents can use either the legacy tool names (`search_memory`, `write_memory`, etc.) or the compact profile's `memory(action=...)` dispatcher. The compact profile (default, 2 tools) is recommended for frontier models; the full profile (10 tools) is available via `MEMORYHUB_TOOL_PROFILE=full` for mid-range models. There is no tool prefix namespacing applied by the connector registration.
 
 ---
 
@@ -150,6 +153,8 @@ The extension server wraps all MCP calls behind a typed interface with domain-ap
 When `auto_search` is enabled, the extension pre-loads memories relevant to the current task during initialization. This mirrors the recommended pattern from MemoryHub's session setup instructions: register, then search for context before acting. The `search_query` field in the spec lets agents declare their initial context query declaratively, without imperative setup code.
 
 The `MemoryHubExtensionClient` is the outbound-facing counterpart. When an agent sends an A2A message to another agent, the client can attach memory context identifiers as message metadata. The receiving agent's extension can resolve this metadata to load relevant shared memories, enabling lightweight context propagation across agent-to-agent calls without duplicating memory content.
+
+> **PoC finding (2026-04-23):** ADK's `Depends.__call__` is synchronous and does not `await` async dependency callables (kagenti/adk#229). This means `Depends(get_memory_store_instance)` where `get_memory_store_instance` is `async def` will not work — the callable is invoked but the returned coroutine is not awaited. The validated workaround is a synchronous callable that returns a lazy-initializing proxy (`_MemoryProxy`), which defers the async MCP client setup to first use. This pattern is implemented on branch `feat/memory-store-protocol` on `rdwj/adk`. Extension authors using `MemoryHubExtensionServer` are not affected — the extension system handles async lifecycle correctly via `lifespan()`.
 
 ---
 
@@ -263,3 +268,7 @@ To promote patterns observed across user-scope memories to organizational knowle
 **ContextStore weight tuning.** The `weight=0.3` choice for conversation history nodes is a starting value. If semantic search results become polluted by conversation turns, the weight should be lowered further or a dedicated `branch_type` exclusion should be added to the search index filter.
 
 **Observability is MemoryHub-side only.** Since agents connect directly to MemoryHub's MCP server (no intermediate routing layer), all observability for memory operations comes from MemoryHub's own Prometheus metrics and Grafana dashboards. There is no platform-level view of MCP tool calls from Kagenti's side — Kiali shows network traffic but not MCP-level tool invocations.
+
+**MCP Gateway hostname configuration required for Layer 1.** The default MCP Gateway Istio listeners use dev hostnames. Production clusters need gateway listener reconfiguration or direct MCP connections that bypass the gateway. See kagenti/kagenti#1275.
+
+**MemoryHub deploy scripts assume a specific cluster context.** `deploy-full.sh` hardcodes the `mcp-rhoai` context in ~53 `oc` commands (redhat-ai-americas/memory-hub#196). Deploying to a kagenti cluster requires sed-replacing the context or parameterizing the scripts.

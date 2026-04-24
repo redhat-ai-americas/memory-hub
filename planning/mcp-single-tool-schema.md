@@ -1,11 +1,13 @@
 # MCP Action-Dispatch Schema Design
 
 **Issue:** #201 | **Parent:** #198 (context weight reduction)
-**Status:** Draft | **Date:** 2026-04-23
+**Status:** Shipped (#201 design, #202 implementation — both closed 2026-04-24) | **Date:** 2026-04-23
 
 ## Context
 
-MemoryHub's MCP server exposes 10 tools consuming ~13K tokens in agent
+> **This design is now shipped.** The compact profile (2 tools) is the default as of v0.9.0. The old 10 tools are retained as deprecated aliases. See `docs/agent-integration-guide.md` for the user-facing documentation and `docs/mcp-server.md` for the current tool reference.
+
+MemoryHub's MCP server previously exposed 10 tools consuming ~13K tokens in agent
 context. With models handling ~40-50 tools effectively, MemoryHub alone
 uses 25% of an agent's tool budget before the agent loads any other MCP
 servers. The Phase 6 consolidation (15 -> 10 tools) was a good first step
@@ -500,6 +502,8 @@ tool budget.
 
 ## Migration Strategy
 
+> **Current status:** Phase 1 (parallel deployment) is shipped. The `memory` tool is registered alongside the old 9 tools, which delegate to the shared dispatcher. Phase 2 (deprecation notices) is the next step.
+
 ### Phase 1: Parallel deployment (v0.9.0)
 
 - Register `memory` tool alongside existing 9 tools
@@ -614,12 +618,10 @@ The handlers in `memory.py` import service-layer functions from the
 existing tool files to avoid duplicating business logic. As old tools
 are removed in Phase 3, the handler code moves fully into `memory.py`.
 
-## Open Questions
+## Resolved and Open Questions
 
-1. **Action name length:** Should `describe_project` be shortened to
-   `describe`? The `_project` suffix aids discoverability in a 19-action
-   list, but adds verbosity. Same question for `list_projects`,
-   `create_project`, `add_member`, `remove_member`.
+1. **Action name length:** ~~Should `describe_project` be shortened to
+   `describe`?~~ **Resolved:** Kept the `_project` suffix for discoverability in the 19-action list. Verbosity cost is minimal compared to disambiguation benefit.
 
 2. **`options` discoverability:** Capable models (Claude, GPT-4) read
    docstrings well and handle free-form dicts. Less capable models may

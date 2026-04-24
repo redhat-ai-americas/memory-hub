@@ -10,6 +10,8 @@ How to connect an AI agent to MemoryHub for persistent, project-scoped memory.
 
 ## Quick Start — 3 steps
 
+> **Note:** These examples use the full-profile tool names (`search_memory`, `write_memory`). In the compact profile (default), use `memory(action="search", ...)` and `memory(action="write", ...)` instead. See [Tiered Integration Model](#tiered-integration-model) for profile details.
+
 ### 1. Register your session
 
 Call this **once at the start of every conversation**.
@@ -18,7 +20,9 @@ Call this **once at the start of every conversation**.
 register_session(api_key="<your key>")
 ```
 
-Returns your `user_id`, display `name`, and accessible `scopes`. All subsequent tool calls are scoped to your identity automatically.
+Returns your `user_id`, display `name`, accessible `scopes`, session `expires_at` timestamp, a list of your `projects` (with `memory_count` per project), and `quick_start` hints for next steps. All subsequent tool calls are scoped to your identity automatically.
+
+**Session TTL:** Sessions expire after a configurable TTL (default 1 hour). The `expires_at` field tells you when. On expiry, call `register_session` again — you'll get a clear error directing you to re-register. Check TTL via `manage_session(action="status")`.
 
 ### 2. Search for existing memories
 
@@ -26,11 +30,13 @@ Returns your `user_id`, display `name`, and accessible `scopes`. All subsequent 
 search_memory(query="deployment preferences")
 ```
 
-With project filter (restricts to that project only):
+With project filter (restricts results to that project's memories):
 
 ```
 search_memory(query="deployment preferences", project_id="my-project")
 ```
+
+The `project_id` filter restricts project-scoped results to the specified project while still including user-scope and higher-scope memories. This filtering is reliable as of the #194 fix.
 
 ### 3. Write a memory
 
@@ -47,6 +53,8 @@ write_memory(
 If the project doesn't exist yet, it's **auto-created** and you're **auto-enrolled** on the first write. The `project_description` is set during auto-create and appears in `manage_project(action="list")` output.
 
 ## Tool Reference — What You Need
+
+> The tables below use the **full-profile** tool names (e.g., `search_memory`, `write_memory`). In the **compact profile** (default, `MEMORYHUB_TOOL_PROFILE=compact`), these are consolidated into a single `memory(action=...)` dispatcher — see [Tiered Integration Model](#tiered-integration-model) for details. Both forms work; the compact profile is recommended for frontier models.
 
 | Tool | When to use |
 |------|-------------|
@@ -153,7 +161,7 @@ tool-calling ability.
 | Model tier | Integration path | Tool tokens | Tools |
 |---|---|---|---|
 | Small (7B, Granite 8B) | Framework connector (`self.memory`) | 0 | n/a |
-| Mid-range (Llama 70B, Mixtral) | Full MCP profile | ~6,800 | 10 |
+| Mid-range (Llama 70B, Mixtral) | Full MCP profile (`MEMORYHUB_TOOL_PROFILE=full`) | ~6,800 | 10 |
 | Frontier (Claude, GPT-4) | Compact MCP profile | ~895 | 2 |
 
 ### Path 1: Framework connector (small models)

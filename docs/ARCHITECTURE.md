@@ -16,7 +16,7 @@ graph TB
     end
 
     subgraph "memory-hub-mcp namespace"
-        MCP[MCP Server<br/>FastMCP 3<br/>10 tools]
+        MCP[MCP Server<br/>FastMCP 3<br/>2 tools &#40;compact profile&#41;]
         UI_BE[Dashboard BFF<br/>FastAPI]
         OAP[oauth-proxy<br/>sidecar]
     end
@@ -114,6 +114,8 @@ sequenceDiagram
     Svc->>Svc: compute pivot_suggested<br/>(distance from focus > 0.55)
     MCP-->>Agent: results + pivot_suggested<br/>+ focus_fallback_reason
 ```
+
+> **Note:** The diagram uses legacy tool names (`write_memory`, `search_memory`) which remain as deprecated aliases. The compact profile (default) consolidates these into a single `memory` tool with an `action` parameter. See [agent-integration-guide.md](agent-integration-guide.md) for the current tool surface.
 
 The session-focus path (#58) is the most architecturally interesting addition. It is **stateless** by design — the focus string is passed per call rather than stored on a session — which avoided every coordination question that a stateful focus would have raised. The cost is one re-embed of the focus string per call (~50ms with a warm vLLM), which is negligible relative to the cross-encoder rerank latency. When the user has not set a focus, the entire path short-circuits and the server falls through to the plain Layer 1 cosine retrieval — there is no rerank latency on the no-focus hot path.
 
@@ -224,7 +226,7 @@ External cluster routes:
 
 ## What's decided and what's open
 
-**Decided and shipped.** Tree-based memory model. PostgreSQL + pgvector for relational + vector + graph in one database. MCP as the primary agent interface. OAuth 2.1 with `client_credentials` and short-lived JWTs. Service-layer RBAC enforced via `core/authz.py`. Stateless session focus with cross-encoder reranking and graceful cosine fallback. `.memoryhub.yaml` schema with Pydantic v2 in the SDK. CLI with `memoryhub config init` for project-level setup. Single-namespace co-location of MCP + UI; separate namespaces for auth and database. Dashboard with six panels behind oauth-proxy. Three-namespace deployment topology. Server-side library renamed to `memoryhub-core` (distribution name) / `memoryhub_core` (import name) so it no longer collides with the published SDK (#55 closed). Campaign & domain framework MVP — campaign as a new scope between project and organizational with enrollment-based RBAC, crosscutting domain tags on memories with RRF-integrated retrieval boosting (#154). Project auto-enrollment (#188) — `projects` table with `enrollment_policy` (open/invite_only), agents writing to open projects are auto-enrolled on first project-scoped write, `manage_project` tool for project discovery and lifecycle management.
+**Decided and shipped.** Tree-based memory model. PostgreSQL + pgvector for relational + vector + graph in one database. MCP as the primary agent interface. OAuth 2.1 with `client_credentials` and short-lived JWTs. Service-layer RBAC enforced via `core/authz.py`. Stateless session focus with cross-encoder reranking and graceful cosine fallback. `.memoryhub.yaml` schema with Pydantic v2 in the SDK. CLI with `memoryhub config init` for project-level setup, feature parity with MCP tool surface (#199), structured `--output json` for agent consumption (#200), and `--version` flag (#165). Single-namespace co-location of MCP + UI; separate namespaces for auth and database. Dashboard with six panels behind oauth-proxy. Three-namespace deployment topology. Server-side library renamed to `memoryhub-core` (distribution name) / `memoryhub_core` (import name) so it no longer collides with the published SDK (#55 closed). SDK v0.6.0 on PyPI with stub result parsing fix (#205). Campaign & domain framework MVP — campaign as a new scope between project and organizational with enrollment-based RBAC, crosscutting domain tags on memories with RRF-integrated retrieval boosting (#154). Project auto-enrollment (#188) — `projects` table with `enrollment_policy` (open/invite_only), agents writing to open projects are auto-enrolled on first project-scoped write, `manage_project` tool for project discovery and lifecycle management. MCP tool compaction (#201/#202) — 10 tools consolidated to 2 (`register_session` + `memory` action-dispatch); old tools retained as deprecated aliases during migration. Session enhancements (#189/#190) — `register_session` returns project list with memory counts, quick-start hints, and `expires_at` for session TTL. `search_memory` project_id filtering (#194) — `project_id` parameter now correctly restricts results to the specified project. PostgreSQL backup and restore scripts (#191).
 
 **Decided, not yet implemented.** Kubernetes Operator with CRDs (skeleton only). Valkey-backed session vector store (deferred until #61 or #62 lands). Audit logging stub interface (#67). FIPS end-to-end validation. `token_exchange` grant for platform-integrated agents. Campaign promotion pipeline (Phase 3+) — curator-driven cross-project knowledge promotion with HITL approval queue. Emergent domain ontology — automatic synonym detection and normalization of domain tags.
 

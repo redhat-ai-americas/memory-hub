@@ -18,7 +18,7 @@ LlamaStack has a first-class MCP tool runtime provider (`remote::model-context-p
 - Provide an example agent using the `Agent` helper class with inline MCP tools for multi-turn sessions.
 - Provide an example using the Responses API with inline MCP tool definition.
 - Test tool discovery (LlamaStack calls `list_tools` on the MCP server at startup from run.yaml config) and invocation end-to-end.
-- Verify and publish the `memoryhub` Python SDK (v0.1.0 exists) to PyPI for agents that want typed access without going through LlamaStack's tool runtime.
+- Verify connectivity using the `memoryhub` Python SDK (v0.6.0, available on PyPI) for agents that want typed access without going through LlamaStack's tool runtime.
 
 ### Registration Paths
 

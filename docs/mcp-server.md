@@ -2,7 +2,7 @@
 
 The MCP server is the sole external interface to MemoryHub. Every agent interaction -- reading, writing, searching, versioning -- goes through MCP tools. There is no REST API, no direct database access, no alternative path. This simplifies security (one interface to secure) and governance (one interface to audit).
 
-**Status: implemented.** 10 tools deployed on OpenShift via streamable-http transport. Layer 1 (response shape, #56/#57) and Layer 2 (session focus retrieval, #58) of the agent-memory-ergonomics work are both shipped. Tool consolidation (#173/#174) merged `suggest_merge` into `create_relationship` and `get_memory_history` into `read_memory`. See `memory-hub-mcp/TOOLS_PLAN.md` for the full tool specifications and [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) for the design behind the search-memory parameters.
+**Status: implemented.** Compact profile (default): 2 tools (`register_session` + `memory` action-dispatch with 19 actions, #201/#202). Full profile: 10 flat-parameter tools available via `MEMORYHUB_TOOL_PROFILE=full`. Old 10 tools retained as deprecated aliases during migration. Deployed on OpenShift via streamable-http transport. Layer 1 (response shape, #56/#57) and Layer 2 (session focus retrieval, #58) of the agent-memory-ergonomics work are both shipped. Tool consolidation (#173/#174) merged `suggest_merge` into `create_relationship` and `get_memory_history` into `read_memory`. See `memory-hub-mcp/TOOLS_PLAN.md` for the full tool specifications and [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) for the design behind the search-memory parameters.
 
 ## Transport and Deployment
 

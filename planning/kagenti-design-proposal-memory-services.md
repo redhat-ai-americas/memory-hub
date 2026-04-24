@@ -1,7 +1,7 @@
 # Governed Agent Memory Services for Kagenti
 
 **Date:** 2026-04-22
-**Status:** Draft
+**Status:** Draft (Layer 3 validated via PoC 2026-04-23; Layer 1 gateway blocked)
 **Authors:** Wes Jackson (Red Hat)
 
 ## Problem Statement
@@ -121,7 +121,7 @@ spec:
     - name: memory-hub-mcp
       port: 8000
 ---
-apiVersion: mcp.kuadrant.io/v1alpha1
+apiVersion: mcp.kagenti.com/v1alpha1
 kind: MCPServerRegistration
 metadata:
   name: memoryhub-tools
@@ -143,6 +143,8 @@ Any agent on the platform — regardless of framework — can then discover and 
 **What this gives you:** Every agent gains access to governed memory. The MCP Gateway handles routing. Agents use their existing MCP client patterns. No new abstractions to learn.
 
 **What it doesn't give you:** Identity propagation. At this layer, all agents authenticate to MemoryHub with a shared gateway credential. Memory scoping works (agents can self-declare their identity via `register_session`), but it's trust-based rather than cryptographically enforced.
+
+> **PoC finding (2026-04-23):** Gateway-mediated registration is currently blocked. The MCP Gateway's Istio listeners use dev-oriented hostnames (`mcp.127-0-0-1.sslip.io`, `*.mcp.local`), and Istio rejects HTTPRoutes that don't match (kagenti/kagenti#1275). Direct MCP connections (agent pod → MemoryHub service URL, bypassing the gateway) work today and are the recommended path for initial deployments. The `MCPServerRegistration` API group is confirmed as `mcp.kagenti.com/v1alpha1` (not `mcp.kuadrant.io`). Additionally, the `path` field defaults to `/mcp` — MemoryHub serves at `/mcp/` (with trailing slash) so this must be set explicitly.
 
 ### Layer 2: Identity Integration via Keycloak Federation
 
@@ -272,6 +274,8 @@ async def my_agent_handler(
     )
 ```
 
+> **PoC finding (2026-04-23):** This DI pattern has been validated end-to-end. Memory write, semantic search recall, and pod restart survival all confirmed. One caveat: ADK's `Depends.__call__` is synchronous and does not `await` async callables (kagenti/adk#229). The workaround is a synchronous callable returning a lazy proxy (`_MemoryProxy`) that defers async MCP client setup to first use. Implementation on branch `feat/memory-store-protocol` on `rdwj/adk`.
+
 The `ContextStore` and `MemoryStore` remain separate abstractions with different lifecycles:
 
 | Concern | ContextStore | MemoryStore |
@@ -338,11 +342,11 @@ Option 1 is recommended for the initial integration. Option 2 can follow if ther
 
 ## Risks and Open Questions
 
-**MCP Gateway transport compatibility.** MemoryHub uses streamable-HTTP (the current MCP transport standard). The MCP Gateway is Envoy-based and routes HTTP traffic, so this should work, but it has not been validated. If the gateway assumes SSE-only MCP servers, Layer 1 is blocked until the gateway is updated. This is the highest-priority item to validate before any implementation work.
+**MCP Gateway transport compatibility.** ~~MemoryHub uses streamable-HTTP (the current MCP transport standard). The MCP Gateway is Envoy-based and routes HTTP traffic, so this should work, but it has not been validated.~~ **Validated 2026-04-23:** The transport itself is not the issue. The blocker is that the MCP Gateway's Istio listeners are configured with dev hostnames, causing Istio to reject HTTPRoutes for external services. Direct MCP connections work. Filed as kagenti/kagenti#1275. This remains the highest-priority item for Layer 1 gateway-mediated registration.
 
-**SPIRE workload identity.** MemoryHub pods in `memory-system` will need SPIRE entries for workload identity. This is likely handled automatically by the kagenti operator's namespace onboarding, but should be confirmed.
+**SPIRE workload identity.** MemoryHub pods in `memory-system` will need SPIRE entries for workload identity. This is likely handled automatically by the kagenti operator's namespace onboarding, but has not been tested in the PoC (deferred to Layer 2 validation).
 
-**ADK API stability.** The ADK is pre-1.0 and the `ContextStore` interface may change. The `MemoryStore` protocol proposed in Layer 3 mirrors the current `ContextStore` pattern; if that pattern changes, `MemoryStore` would need to follow. This risk is mitigated by the MemoryHub team owning the implementation code.
+**ADK API stability.** The ADK is pre-1.0 and the `ContextStore` interface may change. The `MemoryStore` protocol proposed in Layer 3 mirrors the current `ContextStore` pattern; if that pattern changes, `MemoryStore` would need to follow. This risk is mitigated by the MemoryHub team owning the implementation code. **Additional ADK concern (PoC):** `Depends.__call__` does not `await` async callables (kagenti/adk#229). The lazy proxy workaround is functional but the underlying bug should be fixed in the ADK.
 
 **Resource footprint.** MemoryHub requires PostgreSQL with pgvector and an embedding model endpoint. On a cluster already running RHOAI, the embedding model can be shared. PostgreSQL resource requirements are modest (1 CPU, 2 GiB RAM for typical workloads, storage scaling with memory count). Detailed sizing guidance will be included in the Helm chart documentation.
 
@@ -366,9 +370,9 @@ Option 1 is recommended for the initial integration. Option 2 can follow if ther
 ### Short-Term (Layer 1 — configuration only)
 
 - [ ] Helm template for MemoryHub deployment in `memory-system` namespace
-- [ ] `MCPServerRegistration` and `HTTPRoute` for gateway integration
-- [ ] Documentation: "Adding governed memory to your Kagenti installation"
-- [ ] Example agent demonstrating memory tool usage via MCP Gateway
+- [ ] `MCPServerRegistration` and `HTTPRoute` for gateway integration — **blocked** by kagenti/kagenti#1275 (gateway hostname config)
+- [ ] Documentation: "Adding governed memory to your Kagenti installation" — direct MCP connection path can be documented now
+- [ ] Example agent demonstrating memory tool usage via direct MCP connection (gateway path deferred)
 
 ### Medium-Term (Layer 2 — identity integration)
 
@@ -380,15 +384,17 @@ Option 1 is recommended for the initial integration. Option 2 can follow if ther
 
 ### Long-Term (Layer 3 — ADK integration)
 
-- [ ] `MemoryStore` protocol definition in `kagenti_adk.server.store`
-- [ ] `MemoryHubMemoryStore` implementation
+- [x] `MemoryStore` protocol definition in `kagenti_adk.server.store` — **validated in PoC**, branch `feat/memory-store-protocol` on `rdwj/adk`
+- [x] `MemoryHubMemoryStore` implementation — **validated in PoC** (write, search, read, pod restart survival)
 - [ ] ADK Platform API: `/api/v1/memory/` endpoints (proxied to MemoryHub)
 - [ ] Feature flag in ADK Helm chart
 - [ ] ADK documentation update
+- [ ] Fix ADK `Depends` async issue (kagenti/adk#229) to remove lazy proxy workaround
 
 ## Next Steps
 
 1. Review this proposal with Kagenti maintainers for architectural fit
-2. Validate MCP Gateway transport compatibility (see Risks)
-3. Prototype Layer 1 on a shared cluster to identify gateway configuration gaps
-4. If accepted, open tracking issues in `kagenti/kagenti` for each implementation horizon
+2. ~~Validate MCP Gateway transport compatibility~~ — **Done** (PoC 2026-04-23). Transport works; gateway hostname configuration is the blocker (kagenti/kagenti#1275)
+3. ~~Prototype Layer 1 on a shared cluster~~ — **Done** (PoC). Direct connection validated; gateway registration blocked. PRs submitted: kagenti/kagenti#1322, kagenti/kagenti#1323
+4. Submit ADK MemoryStore PR from `feat/memory-store-protocol` branch
+5. If accepted, open tracking issues in `kagenti/kagenti` for each implementation horizon

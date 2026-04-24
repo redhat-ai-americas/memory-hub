@@ -16,7 +16,7 @@ Kagenti has a connector system — a REST API (`POST /api/v1/connectors` on the 
 - Document the connector registration process, including the `POST /api/v1/connectors` payload and how agents declare `MCPDemand`.
 - Provide an example agent demonstrating the `register_session` → `search_memory` → `write_memory` flow through kagenti's MCP client pattern.
 - Test connectivity from kagenti-deployed agent pods to the MemoryHub MCP service (in-cluster Service URL and OpenShift Route).
-- Verify and publish the `memoryhub` Python SDK (v0.1.0 exists) to PyPI for agents that prefer typed access over raw MCP calls.
+- Verify connectivity using the `memoryhub` Python SDK (v0.6.0, available on PyPI) for agents that prefer typed access over raw MCP calls.
 
 ### Auth Story
 
@@ -33,6 +33,14 @@ None on the kagenti side. This phase only requires the MemoryHub MCP server to b
 ### Success Criteria
 
 A kagenti-deployed LangGraph agent can search and write memories through the connector. The integration survives pod restarts — meaning no session state is lost because MemoryHub, not the agent pod, holds the memory.
+
+### Validation Status (PoC 2026-04-23)
+
+**Gateway registration: BLOCKED.** The MCP Gateway's Istio listeners use dev-oriented hostnames (`mcp.127-0-0-1.sslip.io`, `*.mcp.local`), and Istio rejects HTTPRoutes that don't match. Registering external MCP servers on production OCP clusters requires gateway listener reconfiguration. Filed as kagenti/kagenti#1275.
+
+**Direct MCP connection: PASS.** Agent pods connecting directly to the MemoryHub MCP service (bypassing the gateway) works. This is the recommended path until the gateway hostname issue is resolved.
+
+**Implication:** Phase 1 is deliverable today via direct MCP connections. Gateway-mediated registration is deferred until kagenti/kagenti#1275 is resolved. The connector documentation should cover both paths.
 
 ---
 
@@ -82,45 +90,58 @@ The OAuth 2.1 auth service design is already complete; see the auth architecture
 
 A kagenti agent authenticates via token exchange (no API key involved), accesses MemoryHub through the typed extension interface, and memories are tenant-isolated by namespace. The `MemoryHubExtensionSpec(scope="project")` annotation determines which memories the agent can read and write.
 
+### Validation Status (PoC 2026-04-23)
+
+**Not yet attempted.** Keycloak identity federation and token exchange testing were deferred to a follow-up session. The OAuth 2.1 auth service design is complete and deployed for standalone use; the Keycloak federation path has not been validated.
+
 ---
 
-## Phase 3: MemoryHubContextStore
+## Phase 3: MemoryStore (ADK Platform Integration)
 
-**Goal:** Implement kagenti's `ContextStore` Protocol so every kagenti agent gets durable conversation history across pod restarts with zero code changes.
+**Goal:** Implement a `MemoryStore` protocol in the ADK so every kagenti agent gets governed cross-session memory through dependency injection — separate from `ContextStore`, which handles conversation replay.
 
 ### How It Works
 
-Kagenti's `ContextStore` abstraction defines three operations: `load_history()`, `store()`, and `delete_history_from_id()`. The default `InMemoryContextStore` uses a TTL-based cache that is lost on restart. `MemoryHubContextStore` persists conversation messages to MemoryHub's storage layer and replays them on `load_history()`.
+A new `MemoryStore` protocol is defined in `kagenti_adk.server.store` alongside the existing `ContextStore`. The two are separate abstractions: `ContextStore` handles per-conversation message replay (append-only, context-owner-only); `MemoryStore` handles cross-session governed knowledge (semantic search, full RBAC, version history). `MemoryHubMemoryStore` implements `MemoryStore` by calling MemoryHub's MCP server over HTTP, authenticated with the agent's Keycloak-issued Bearer token.
 
 ### Scope
 
-Conversation persistence only. This is deliberately narrow — the `ContextStore` interface is append-only with no search or branching. Agents that want semantic search, cross-session memory, or governance still use the MCP tools or extension directly. The `ContextStore` is an adoption wedge, not a replacement for the richer MCP interface.
+Governed cross-session memory via ADK dependency injection. Agents access `MemoryStoreInstance` through `Depends(get_memory_store_instance)` — the standard ADK pattern. The `MemoryStore` is complementary to `ContextStore`, not a replacement. Agents that need both conversation replay and governed memory use both.
 
 ### Deliverables
 
-- `MemoryHubContextStore` class satisfying kagenti's `ContextStoreInstance` Protocol (`load_history`, `store`, `delete_history_from_id`).
+- `MemoryStore` protocol definition in `kagenti_adk.server.store` with `MemoryStoreInstance` (search, write, read, update, delete).
+- `MemoryHubMemoryStore` implementation calling MemoryHub's MCP server over HTTP.
 - Integrated into the `kagenti-memoryhub` package from Phase 2 — no separate install required.
-- Configuration: agents opt in by setting `context_store=MemoryHubContextStore()` in `create_app()`.
-- Documentation showing how to switch from `InMemoryContextStore`.
+- DI wiring: agents access via `Annotated[MemoryStoreInstance, Depends(get_memory_store_instance)]`.
+- Documentation and example agent.
 
 ### Dependencies
 
-Phase 2 (auth and extension package). The `context_id` that kagenti uses to key conversation history needs to map cleanly to MemoryHub's scoping model — this mapping needs to be confirmed against kagenti's `ContextStore` lifecycle documentation before implementation.
+Phase 2 (auth and extension package). The `MemoryStore` abstraction lives alongside `ContextStore` in the ADK — it requires an ADK PR to be accepted. The MemoryHub team contributes and maintains the implementation code; the kagenti team's review obligation is limited to the protocol definition and DI wiring.
 
 ### Success Criteria
 
-A kagenti agent using `MemoryHubContextStore` survives pod restarts with full conversation history intact. No changes to agent business logic are required — the context store is wired at the `create_app()` level.
+A kagenti agent using `MemoryHubMemoryStore` can search, write, and recall memories through the DI interface. Memories survive pod restarts. No MemoryHub-specific imports are needed in agent business logic — only the protocol type from `kagenti_adk.server.store`.
+
+### Validation Status (PoC 2026-04-23)
+
+**MemoryStore DI integration: PASS.** Memory written with ID `7fadd4e8-...`, recalled via semantic search, and survived pod restart. All three core operations (write, search, read) validated.
+
+**ADK `Depends` async workaround required.** ADK's `Depends.__call__` does not `await` async dependency callables (kagenti/adk#229). Workaround: synchronous callable returning a lazy-initializing proxy (`_MemoryProxy`). This pattern is implemented on branch `feat/memory-store-protocol` on `rdwj/adk`.
+
+**Implication:** Phase 3 is validated before Phases 1 (gateway) and 2 (identity). The phases are independent, not sequential as originally assumed — an agent can use the MemoryStore DI path today via direct MCP connection with API key auth, without waiting for gateway registration or Keycloak federation.
 
 ---
 
 ## Phase Summary
 
-| Phase | What | Auth | Kagenti Changes | MemoryHub Work |
-|---|---|---|---|---|
-| 1 | MCP Connector | API key | None | Connector docs, example agent, SDK publish |
-| 2 | Extension + OAuth | Token exchange | None (uses extension system) | Extension package, OAuth 2.1 service |
-| 3 | ContextStore | Inherited from Phase 2 | None (uses ContextStore ABC) | ContextStore implementation |
+| Phase | What | Auth | Kagenti Changes | MemoryHub Work | PoC Status |
+|---|---|---|---|---|---|
+| 1 | MCP Connector | API key | None | Connector docs, example agent, SDK publish | Direct: PASS; Gateway: BLOCKED (kagenti#1275) |
+| 2 | Extension + OAuth | Token exchange | None (uses extension system) | Extension package, OAuth 2.1 service | Not yet attempted |
+| 3 | MemoryStore | API key (direct) or inherited | ADK PR (protocol + DI) | MemoryStore implementation | PASS (with Depends workaround) |
 
-All three phases require zero changes to the kagenti platform itself. The integration builds entirely on kagenti's published extension points: the connector registration API, the extension system, and the `ContextStore` ABC.
+Phases 1 and 2 require zero changes to the kagenti platform itself. Phase 3 requires an ADK PR to add the `MemoryStore` protocol and DI wiring — contributed and maintained by the MemoryHub team. The phases are independently deliverable and can be adopted in any order; the PoC validated Phase 3 before Phase 1, demonstrating that the assumed sequential dependency is not a hard constraint.
 
 The CLI client option is planned separately and is not scoped in this integration plan.
