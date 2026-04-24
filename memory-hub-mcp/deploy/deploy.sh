@@ -73,11 +73,17 @@ files = {
 # Tools imported into main.py via `from src.tools.NAME import NAME`.
 imports = set(re.findall(r"^from src\.tools\.([a-z_][a-z_0-9]*) import", src, re.M))
 
-# Tools actually registered via the `for tool_fn in [...]:` loop.
+# Tools registered — supports both the old single-list format:
+#   for tool_fn in [register_session, write_memory, ...]:
+# and the new profile-based format with _TOOLS_* lists:
+#   _TOOLS_COMPACT = [register_session, memory]
+#   _TOOLS_FULL = [register_session, write_memory, ...]
 loop = re.search(r"for tool_fn in \[(.*?)\]:", src, re.DOTALL)
-if not loop:
-    sys.exit("ERROR: could not find `for tool_fn in [...]:` loop in src/main.py")
-registered = set(re.findall(r"[a-z_][a-z_0-9]*", loop.group(1)))
+profile_lists = re.findall(r"_TOOLS_\w+\s*=\s*\[(.*?)\]", src, re.DOTALL)
+if not loop and not profile_lists:
+    sys.exit("ERROR: could not find tool registration list(s) in src/main.py")
+all_registered_text = (loop.group(1) if loop else "") + " ".join(profile_lists)
+registered = set(re.findall(r"[a-z_][a-z_0-9]*", all_registered_text))
 
 errors = []
 missing_imports = files - imports
