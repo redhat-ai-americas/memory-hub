@@ -10,7 +10,7 @@ The platform ships with a production-oriented security stack. SPIFFE/SPIRE provi
 
 ## Why Integrate
 
-Kagenti provides strong deployment infrastructure but its memory model is shallow by design. Conversation history is managed through a `ContextStore` abstraction with two implementations: `InMemoryContextStore`, which is the default and is lost on pod restart, and `PlatformContextStore`, which is durable but still append-only. A `VectorStore` API exists for semantic search, but it is scoped per-agent rather than shared across the platform. There is no cross-session memory, no cross-agent memory sharing, no contradiction detection, no provenance tracking, and no governance layer.
+Kagenti provides strong deployment infrastructure but its memory model is minimal by design. Conversation history is managed through a `ContextStore` abstraction with two implementations: `InMemoryContextStore`, which is the default and is lost on pod restart, and `PlatformContextStore`, which is durable but still append-only. A `VectorStore` API exists for semantic search, but it is scoped per-agent rather than shared across the platform. There is no cross-session memory, no cross-agent memory sharing, no contradiction detection, no provenance tracking, and no governance layer.
 
 MemoryHub fills this gap completely. The table below shows the capability delta.
 

@@ -6,7 +6,7 @@
 
 ## Problem Statement
 
-Kagenti provides strong infrastructure for deploying and operating AI agents on Kubernetes — identity, networking, observability, and lifecycle management — but its memory model is minimal by design. The ADK's `ContextStore` (in `kagenti_adk.server.store`) provides per-context conversation replay, and the `VectorStore` (in `kagenti_adk.platform`) provides per-agent embedding search via the Platform API, but neither addresses the broader memory problem that production agent deployments face:
+Kagenti provides strong infrastructure for deploying and operating AI agents on Kubernetes — identity, networking, observability, and lifecycle management — but its memory model is minimal by design. The ADK's `ContextStore` (in `kagenti_adk.server.store`) provides per-context conversation replay, and the `VectorStore` (in `kagenti_adk.platform`) provides per-agent embedding search via the Platform API, but neither is designed for the broader memory problem that production agent deployments face:
 
 - **Cross-session continuity.** Agents lose all learned preferences, decisions, and context when a conversation ends. The next session starts from zero.
 - **Cross-agent knowledge sharing.** Agents on the same platform cannot share what they learn. One agent's discovery of a user preference or a project constraint stays siloed.
