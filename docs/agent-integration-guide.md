@@ -144,6 +144,107 @@ You don't need to create projects or request membership ahead of time. When you 
 
 Subsequent writes to the same project skip enrollment (you're already a member).
 
+## Tiered Integration Model
+
+MemoryHub supports three integration paths, each optimized for a different
+model capability tier. Choose based on your model's context budget and
+tool-calling ability.
+
+| Model tier | Integration path | Tool tokens | Tools |
+|---|---|---|---|
+| Small (7B, Granite 8B) | Framework connector (`self.memory`) | 0 | n/a |
+| Mid-range (Llama 70B, Mixtral) | Full MCP profile | ~6,800 | 10 |
+| Frontier (Claude, GPT-4) | Compact MCP profile | ~895 | 2 |
+
+### Path 1: Framework connector (small models)
+
+For models with limited context windows (8K–16K tokens), MCP tool
+definitions alone can consume a significant fraction of the budget. The
+framework connector path avoids this entirely: memories are loaded via the
+SDK at session startup and injected as a text prefix — no tool tokens at
+all.
+
+Example using the fipsagents framework:
+
+```python
+from fipsagents.memory import build_memory_prefix
+
+memories = self.memory.search("deployment preferences", project_id="my-project")
+prefix = build_memory_prefix(memories)
+# Inject prefix into system prompt or first message
+```
+
+**Requirements:**
+- SDK v0.6.0+ (`pip install memoryhub>=0.6.0`). Earlier versions fail on
+  stub results returned by cache-optimized search.
+
+**Known issue:** The fipsagents `build_memory_prefix()` default calls
+`search("")`, which MemoryHub rejects (empty queries are not allowed).
+Pass a non-empty query, or catch the error and fall back to no memories.
+
+**Limitations:**
+- Memories are read-only from the model's perspective (the framework loads
+  them; the model doesn't call tools to retrieve them).
+- Small models may not reliably follow prefix-injected memories as hard
+  constraints. RAG-style extraction tends to work better (see
+  [Granite 8B findings](#granite-8b-findings) below).
+
+### Path 2: Full MCP profile (mid-range models)
+
+Ten flat-parameter tools, each with its own JSON schema. Mid-range models
+benefit from explicit parameter schemas that make each operation
+independently discoverable.
+
+Set the profile via environment variable on the MCP server deployment:
+
+```
+MEMORYHUB_TOOL_PROFILE=full
+```
+
+Tools: `register_session`, `search_memory`, `write_memory`, `read_memory`,
+`update_memory`, `delete_memory`, `manage_session`, `manage_graph`,
+`manage_curation`, `manage_project`.
+
+### Path 3: Compact MCP profile (frontier models)
+
+Two tools: `register_session` and a single `memory` dispatcher that
+accepts an `action` parameter with 19 possible actions. Frontier models
+handle the action-dispatch pattern well, and the reduced tool count
+leaves more context for the actual conversation.
+
+```
+MEMORYHUB_TOOL_PROFILE=compact   # default
+```
+
+Tools: `register_session`, `memory(action=...)`.
+
+### Why not the minimal profile for small models?
+
+The minimal profile (4 tools: `register_session`, `search_memory`,
+`write_memory`, `read_memory`) was designed as a middle ground for small
+models. In practice, even 4 tools are too heavy for 7B context budgets:
+`search_memory`'s docstring alone is ~2K tokens. The framework connector
+path is the better choice for small models because it uses zero tool
+tokens.
+
+The minimal profile remains available (`MEMORYHUB_TOOL_PROFILE=minimal`)
+for cases where a small model needs write-back capability and the token
+budget can tolerate it.
+
+### Granite 8B findings
+
+Testing with Granite 8B on RHOAI validated the framework connector path
+but surfaced a grounding gap: small models don't reliably treat
+prefix-injected memories as constraints. When memories are injected as a
+block of context at the start of the conversation, the model may
+acknowledge them but not consistently apply them to answers.
+
+This is an agent-design problem, not a MemoryHub problem. Mitigations:
+
+- **RAG-style extraction** — retrieve memories relevant to the current question and weave them into the answer, rather than relying on the model to internalize a block of prefixed facts.
+- **Structured prompting** — explicitly reference specific memories in the prompt (e.g., "According to memory X, the policy is Y").
+- **Fewer, higher-weight memories** — filter to only the most relevant memories rather than injecting everything.
+
 ## Tips
 
 - **Be specific in search queries**: `"container runtime preferences"` works better than `"containers"`.
