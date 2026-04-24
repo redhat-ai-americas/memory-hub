@@ -391,7 +391,7 @@ prepare_auth_infra() {
     fi
 
     copy_secret memoryhub-pg-credentials "$DB_NAMESPACE" memoryhub-pg-credentials "$AUTH_PROJECT"
-    ensure_random_secret auth-admin-key "$AUTH_PROJECT" MEMORYHUB_ADMIN_KEY
+    ensure_random_secret auth-admin-key "$AUTH_PROJECT" AUTH_ADMIN_KEY
 
     echo -e "  ${GREEN}Auth infrastructure ready${RESET}"
 }
@@ -461,8 +461,19 @@ prepare_ui_infra() {
         info "Secret memoryhub-ui-proxy already exists in $UI_NAMESPACE"
     fi
 
-    # Admin key for the UI BFF
-    ensure_random_secret memoryhub-ui-admin-key "$UI_NAMESPACE" MEMORYHUB_ADMIN_KEY
+    # Admin key for the UI BFF — copy from auth service's secret, remapping
+    # the key name to match the UI's MEMORYHUB_ env prefix.
+    if oc get secret auth-admin-key -n "$AUTH_PROJECT" &>/dev/null; then
+        info "Creating/updating memoryhub-ui-admin-key in $UI_NAMESPACE..."
+        local admin_key_val
+        admin_key_val=$(oc get secret auth-admin-key -n "$AUTH_PROJECT" \
+            -o jsonpath='{.data.AUTH_ADMIN_KEY}' | base64 -d)
+        oc create secret generic memoryhub-ui-admin-key \
+            --from-literal=MEMORYHUB_ADMIN_KEY="$admin_key_val" \
+            --dry-run=client -o json | oc apply -f - -n "$UI_NAMESPACE"
+    else
+        warn "auth-admin-key not found in $AUTH_PROJECT — skipping memoryhub-ui-admin-key (deploy auth first or re-run without --skip-auth)"
+    fi
 
     echo -e "  ${GREEN}UI infrastructure ready${RESET}"
 }
