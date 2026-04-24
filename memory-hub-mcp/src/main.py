@@ -19,6 +19,7 @@ from src.tools.manage_session import manage_session
 from src.tools.manage_graph import manage_graph
 from src.tools.manage_curation import manage_curation
 from src.tools.manage_project import manage_project
+from src.tools.memory import memory
 
 mcp = FastMCP(
     "MemoryHub",
@@ -43,7 +44,7 @@ mcp = FastMCP(
 for tool_fn in [register_session, write_memory, read_memory, update_memory,
                 delete_memory, search_memory,
                 manage_session, manage_graph, manage_curation,
-                manage_project]:
+                manage_project, memory]:
     mcp.add_tool(tool_fn)
 
 
