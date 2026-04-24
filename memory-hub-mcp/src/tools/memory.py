@@ -172,7 +172,7 @@ async def memory(
         Close contradiction: accept_new|keep_old|mark_both_invalid|manual_merge.
       set_rule(options: {name}, [options: tier, action_type, config])
         Create/update curation rule.
-      create_project(options: {project_name})
+      create_project(project_id -or- options: {project_name})
         Create a new project.
       add_member(project_id, options: {user_id})
         Add user to project.
@@ -225,7 +225,7 @@ async def memory(
     if action == "set_rule":
         return await _dispatch_set_rule(opts, ctx)
     if action == "create_project":
-        return await _dispatch_create_project(opts, ctx)
+        return await _dispatch_create_project(project_id, opts, ctx)
     if action == "add_member":
         return await _dispatch_add_member(project_id, opts, ctx)
     # remove_member (last remaining action)
@@ -395,16 +395,24 @@ async def _dispatch_set_rule(opts, ctx):
     )
 
 
-async def _dispatch_create_project(opts, ctx):
+async def _dispatch_create_project(project_id, opts, ctx):
     from src.tools.manage_project import manage_project
-    _opt_require("create_project", "project_name", opts)
+    # Accept project_id as the project name for consistency with
+    # describe_project, add_member, remove_member. options.project_name
+    # takes precedence if both are set.
+    project_name = opts.get("project_name") or project_id
+    if not project_name or (isinstance(project_name, str) and not project_name.strip()):
+        raise ToolError(
+            "action='create_project' requires project_id or options.project_name. "
+            "Example: memory(action='create_project', project_id='new-proj')"
+        )
     kwargs = {}
     if "description" in opts:
         kwargs["description"] = opts["description"]
     if "invite_only" in opts:
         kwargs["invite_only"] = opts["invite_only"]
     return await manage_project(
-        action="create", project_name=opts["project_name"], ctx=ctx,
+        action="create", project_name=project_name, ctx=ctx,
         **kwargs,
     )
 

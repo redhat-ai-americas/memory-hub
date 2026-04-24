@@ -162,8 +162,8 @@ class TestRequiredParams:
             await memory(action="set_rule")
 
     @pytest.mark.asyncio
-    async def test_create_project_requires_project_name(self):
-        with pytest.raises(ToolError, match="requires 'project_name' in options"):
+    async def test_create_project_requires_project_id_or_project_name(self):
+        with pytest.raises(ToolError, match="requires project_id or options.project_name"):
             await memory(action="create_project")
 
     @pytest.mark.asyncio
@@ -348,7 +348,7 @@ class TestDispatchRouting:
 
     @pytest.mark.asyncio
     @patch("src.tools.manage_project.manage_project", new_callable=AsyncMock)
-    async def test_create_project_dispatches(self, mock_proj):
+    async def test_create_project_dispatches_via_options(self, mock_proj):
         mock_proj.return_value = {"project": {}}
         result = await memory(
             action="create_project",
@@ -358,6 +358,29 @@ class TestDispatchRouting:
         assert kw["action"] == "create"
         assert kw["project_name"] == "new-proj"
         assert kw["description"] == "A project"
+
+    @pytest.mark.asyncio
+    @patch("src.tools.manage_project.manage_project", new_callable=AsyncMock)
+    async def test_create_project_accepts_project_id(self, mock_proj):
+        """project_id works as the project name for consistency."""
+        mock_proj.return_value = {"project": {}}
+        result = await memory(
+            action="create_project", project_id="my-new-proj",
+        )
+        kw = mock_proj.call_args[1]
+        assert kw["project_name"] == "my-new-proj"
+
+    @pytest.mark.asyncio
+    @patch("src.tools.manage_project.manage_project", new_callable=AsyncMock)
+    async def test_create_project_options_takes_precedence(self, mock_proj):
+        """options.project_name overrides project_id when both set."""
+        mock_proj.return_value = {"project": {}}
+        result = await memory(
+            action="create_project", project_id="fallback",
+            options={"project_name": "explicit"},
+        )
+        kw = mock_proj.call_args[1]
+        assert kw["project_name"] == "explicit"
 
 
 # ── Options isolation ──────────────────────────────────────────────────────
