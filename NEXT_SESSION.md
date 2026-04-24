@@ -1,85 +1,89 @@
 # Next Session Plan
 
-## Completed this session (2026-04-23)
+## Completed since last session
 
-### MCP single-tool action-dispatch (#201) — CLOSED
-- Design doc: `planning/mcp-single-tool-schema.md`
-- Decision: 1 dispatched `memory()` tool + `register_session` = 2 tools (compact profile)
-- 19 actions (8 read, 11 write), hybrid param layout (6 top-level + options dict)
-- Token savings: ~85% reduction (~1,050 tokens from ~6,800)
-- `create_project` consistency fix: accepts `project_id` matching other project actions
+### Issues closed
+- #201 — MCP single-tool action-dispatch design (planning/mcp-single-tool-schema.md)
+- #202 — Compacted memory() tool implementation (19 actions, tiered profiles)
+- #205 — SDK v0.6.0 stub result parsing fix
+- #206 — Tiered tool profiles and framework connector documentation
+- fips-agents/agent-template#83 — build_memory_prefix() empty-query fix (upstream)
 
-### Compacted tool implementation (#202) — CLOSED
-- `memory-hub-mcp/src/tools/memory.py`: dispatcher with 19 action handlers
-- Delegates to existing tool functions — zero business logic duplication
-- 47 tests covering action validation, param forwarding, routing, options isolation
-- Exercise-tools: 4/5 ergonomics score, two subjective items discussed and resolved
+### Implementation shipped
+- `memory()` dispatcher: 19 actions, hybrid param layout, 47 tests
+- Tiered tool profiles: compact/full/minimal via MEMORYHUB_TOOL_PROFILE env var
+- Minimal-profile MCP instance deployed (memory-hub-mcp-minimal, 4 tools)
+- Granite 8B test agent scaffolded at ~/Developer/AGENTS/memoryhub-granite-test
 
-### Tiered tool profiles (#201/#202)
-- `MEMORYHUB_TOOL_PROFILE` env var with three profiles:
-  - `compact` (default): register_session + memory (2 tools) — frontier models
-  - `full`: register_session + 9 flat-param tools (10 tools) — mid-range models
-  - `minimal`: register_session + search/write/read (4 tools) — small models
-- Profile-specific FastMCP instructions
-- 19 profile tests, deploy script for minimal instance
-- Updated main deploy.sh preflight to handle profile-based tool registration
-
-### Granite 8B testing
-- Deployed minimal-profile instance alongside primary (memory-hub-mcp-minimal)
-- Granite successfully called register_session via MCP tools on first turn
-- Context overflow on second turn: search_memory docstring (~2K tokens) + tool round-trip exceeded 16K
-- Pivoted to fipsagents framework memory connector (self.memory): zero tool tokens, memories injected as prefix
-- Framework connector works: SDK authenticates, retrieves memories, injects ~2K token prefix
-- Grounding gap: Granite 8B doesn't reliably use prefix memories as constraints — gives generic answers instead. This is a model instruction-following limitation, not a MemoryHub issue.
-
-### Key architectural insight
-Two distinct integration surfaces serve different purposes:
-- **Framework connector** (`self.memory`): put/get primitives for ALL models, zero tool tokens
-- **MCP tools**: governance/power-user surface (graph ops, curation, projects) for capable models
-- Small models should use framework connector only; advanced MCP tools are loaded on demand via skills
+### Key findings
+- Framework memory connector (fipsagents `self.memory`) is the right integration for small models: zero tool tokens, ~2K token prefix
+- Granite 8B can call MCP tools (register_session worked) but context overflows on multi-turn tool calling
+- Granite 8B doesn't reliably ground answers in prefix-injected memories — gives generic answers instead of using stored preferences
 
 ## Priority items for next session
 
-### 1. Publish SDK v0.6.0 to PyPI (#205)
-Quick release — the code fix (stub result parsing) is already in the repo. SDK v0.5.1 on PyPI can't parse search results that include stubs, causing silent memory loss for agents using the framework connector.
+### 1. Finish Granite test agent — fix grounding gap
 
-### 2. Kagenti demo prep
-Demo memory-hub to the primary kagenti maintainer. Existing deployment is untouched (compact profile not yet active on primary — still running pre-profile code with all 10 tools). The minimal-profile instance runs alongside it.
+The agent scaffolding is done. The blocking issue is that Granite ignores memory-prefix content. The agent at `~/Developer/AGENTS/memoryhub-granite-test` has:
+- Framework connector wired (`.memoryhub.yaml` → SDK → MCP server)
+- Custom `build_memory_prefix()` override (fipsagents default still calls `search("")`)
+- SDK v0.6.0 installed (stub parsing works)
+- Template artifacts cleaned (no code_executor/web_search/citation_required)
+- System prompt simplified, grounding instruction in prefix header
 
-### 3. Document tiered integration model (#206)
-Update `docs/agent-integration-guide.md` with the three-tier model (framework connector / compact MCP / full MCP), profile configuration, and guidance on which path to use per model tier.
+What to try next:
+- **RAG-style injection**: Instead of dumping raw memories, have the agent code summarize relevant memories into a direct "Based on your stored preferences..." preamble that the model treats as facts, not suggestions.
+- **Structured prefix**: Format memories as explicit constraint blocks: `REQUIREMENT: Use Podman, not Docker` rather than free-text paragraphs.
+- **Prompt engineering**: Test whether Granite responds better to memories framed as `[USER RULE]` or `[POLICY]` tags vs narrative text.
+- **Smaller prefix**: Limit to top-3 most relevant memories instead of 10. Less context = more attention per memory for a small model.
 
-### 4. Improve small-model memory grounding
-The framework connector delivers memories but Granite 8B ignores them. Options:
-- RAG-style extraction: summarize relevant memories into a direct answer prefix
-- Structured prefix: format memories as explicit Q&A pairs instead of raw content
-- Fine-tuning: train on grounding tasks (longer term)
-This is an agent-design problem — file in fipsagents, not memory-hub.
+Once grounding works, run a proper exercise session:
+1. Start agent locally: `cd ~/Developer/AGENTS/memoryhub-granite-test && OPENAI_API_KEY=not-required make run-local`
+2. Test via curl: `curl localhost:8080/v1/chat/completions -d '{"model":"test","messages":[{"role":"user","content":"What container runtime should I use?"}]}'`
+3. Verify response references Podman/UBI (from memories), not generic Docker/Alpine advice
+4. Test memory write: ask agent to remember something, verify it persists
 
-### 5. Upstream: fipsagents empty-query fix
-`build_memory_prefix()` default calls `search("")` which MemoryHub rejects. File upstream issue to use a non-empty default query or handle empty-query errors.
+### 2. Deploy agent with gateway to cluster
 
-### 6. Stretch: skill wrappers evaluation (#203)
-Low priority. Only relevant after the integration guide update. Assess whether Claude Code skills reduce context weight for infrequent governance operations.
+Once the agent works locally, deploy to mcp-rhoai:
+- `fips-agents create gateway memoryhub-granite-gateway --local` (if not already done)
+- Configure gateway BACKEND_URL to point at the agent service
+- Deploy both via Helm to the cluster
+- Test via gateway route
+
+### 3. Kagenti demo prep
+
+Demo to kagenti primary maintainer. The primary MCP deployment is untouched (pre-profile, 10 tools). Key demo points:
+- Memory tree with branches (rationale, provenance)
+- Scope-based governance (user/project/organizational/enterprise)
+- Tiered integration: framework connector vs MCP tools
+- The "remember this" / "what do I need to know" agent experience
+
+### 4. Stretch: evaluate compact profile for Claude Code
+
+The compact profile (2 tools: register_session + memory dispatcher) hasn't been tested as the primary MCP server configuration yet. Before switching the primary deployment:
+- Test locally with cmcp to verify all 19 actions work end-to-end
+- Measure actual token savings vs the current 10-tool deployment
+- Update `.claude/rules/memoryhub-integration.md` for memory() usage patterns
+- Consider: should Claude Code use compact profile (action dispatch) or stay on full profile (flat params)?
 
 ## Context
-- SDK v0.6.0 in repo, v0.5.1 on PyPI (needs release)
-- CLI v0.5.0 (--output flag, JSON envelope, exit codes)
-- MCP server: 10 tools on primary (pre-profile), 4 tools on minimal instance
-- memory() dispatcher implemented but not yet active on primary deployment
-- Alembic migrations through 014 applied
-- 376+ MCP tests passing (47 dispatcher + 19 profile + 310 existing)
-- Tracking issue: #198 (3 of 5 sub-issues closed: #199, #200, #201; #202 also closed)
-- New issues: #205 (SDK release), #206 (integration guide)
+- SDK v0.6.0 in repo and installed locally in test agent (check if published to PyPI)
+- CLI v0.5.0
+- MCP server: 10 tools on primary (pre-profile code), 4 tools on minimal instance
+- memory() dispatcher implemented but not active on primary deployment
+- Alembic migrations through 014
+- 376+ MCP tests passing
+- Tracking issue: #198 (4 of 5 closed: #199, #200, #201, #202)
 - Uncommitted research files on main — don't disturb them
 
 ## Cluster state
 - Cluster: **mcp-rhoai** context
 - MCP server primary: memory-hub-mcp namespace (v0.8.0, 10 tools, untouched)
-- MCP server minimal: memory-hub-mcp namespace (memory-hub-mcp-minimal, 4 tools, new)
+- MCP server minimal: memory-hub-mcp namespace (memory-hub-mcp-minimal, 4 tools)
 - Granite 8B: granite-model namespace (RedHatAI/granite-3.3-8b-instruct)
 - DB: memoryhub-db namespace, migrations through 014
 - Auth: memoryhub-auth namespace
 - UI: memoryhub-ui namespace
 - MinIO + Valkey: memory-hub-mcp namespace
-- Granite test agent: ~/Developer/AGENTS/memoryhub-granite-test (local, not deployed)
+- Granite test agent: ~/Developer/AGENTS/memoryhub-granite-test (local only, framework connector, no MCP tools)
