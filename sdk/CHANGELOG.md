@@ -2,6 +2,14 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.6.0] — 2026-04-23
+
+- **Stub result compatibility**: Default `content` and `owner_id` fields to
+  empty strings in the `Memory` model so cache-optimized search responses
+  containing stub results parse without Pydantic validation errors. Fixes
+  SDK failures when used with the fipsagents framework memory connector
+  (#205).
+
 ## [0.5.1] — 2026-04-14
 
 - **Edge-case fix**: Normalize empty URL string (`""`) to `None` to avoid
