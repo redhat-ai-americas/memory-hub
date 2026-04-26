@@ -47,6 +47,7 @@ research/agent-memory-protocol-rfc.md
 research/agent-memory-survey-paper.md
 research/draft_blog-everyone-trying-to-own-memory.md
 research/draft_survey-section-architectural-placement.md
+research/agent-memory-benchmarks/
 
 # Claude Code worktrees
 .claude/worktrees/
