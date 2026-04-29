@@ -322,6 +322,42 @@ class MemoryHubClient:
             self._mcp = None
         self._message_handler = None
 
+    async def _call_action(
+        self,
+        action: str,
+        *,
+        memory_id: str | None = None,
+        query: str | None = None,
+        content: str | None = None,
+        scope: str | None = None,
+        project_id: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch an action through the unified ``memory`` tool (#198/#202).
+
+        Builds the ``memory(action=..., ...)`` payload accepted by the
+        compacted server tool surface and forwards it through ``_call``.
+        Top-level keys are only included when their value is not None;
+        ``options`` is included only when non-empty.
+
+        See ``planning/sdk-compacted-tool-rework.md`` for the action
+        mapping.
+        """
+        payload: dict[str, Any] = {"action": action}
+        if memory_id is not None:
+            payload["memory_id"] = memory_id
+        if query is not None:
+            payload["query"] = query
+        if content is not None:
+            payload["content"] = content
+        if scope is not None:
+            payload["scope"] = scope
+        if project_id is not None:
+            payload["project_id"] = project_id
+        if options:
+            payload["options"] = options
+        return await self._call("memory", payload)
+
     async def _call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call an MCP tool and return the parsed response dict.
 
@@ -464,29 +500,35 @@ class MemoryHubClient:
         if session_focus_weight is None:
             session_focus_weight = loading.session_focus_weight
 
-        payload: dict[str, Any] = {
-            "query": query,
-            "scope": scope,
-            "owner_id": owner_id,
+        opts: dict[str, Any] = {
             "max_results": max_results,
             "weight_threshold": weight_threshold,
             "current_only": current_only,
             "mode": mode,
             "max_response_tokens": max_response_tokens,
             "include_branches": include_branches,
-            "project_id": project_id,
-            "domains": domains,
-            "domain_boost_weight": domain_boost_weight,
             "raw_results": raw_results,
         }
+        if owner_id is not None:
+            opts["owner_id"] = owner_id
+        if domains is not None:
+            opts["domains"] = domains
+        if domain_boost_weight is not None:
+            opts["domain_boost_weight"] = domain_boost_weight
         # Only forward focus params when the caller actually supplied a
         # focus string. Sending session_focus_weight without focus would
         # be a no-op on the server but adds noise to the wire format.
         if focus is not None:
-            payload["focus"] = focus
-            payload["session_focus_weight"] = session_focus_weight
+            opts["focus"] = focus
+            opts["session_focus_weight"] = session_focus_weight
 
-        data = await self._call("search_memory", payload)
+        data = await self._call_action(
+            "search",
+            query=query,
+            scope=scope,
+            project_id=project_id,
+            options=opts,
+        )
         return SearchResult.model_validate(data)
 
     @staticmethod
@@ -564,15 +606,16 @@ class MemoryHubClient:
             history_max_versions: Max versions to return (1-100, default 10).
             project_id: Project identifier for campaign enrollment verification.
         """
-        payload: dict[str, Any] = {
-            "memory_id": memory_id,
-            "include_versions": include_versions,
-            "project_id": project_id,
-        }
+        opts: dict[str, Any] = {"include_versions": include_versions}
         if include_versions:
-            payload["history_offset"] = history_offset
-            payload["history_max_versions"] = history_max_versions
-        data = await self._call("read_memory", payload)
+            opts["history_offset"] = history_offset
+            opts["history_max_versions"] = history_max_versions
+        data = await self._call_action(
+            "read",
+            memory_id=memory_id,
+            project_id=project_id,
+            options=opts,
+        )
         return Memory.model_validate(data)
 
     async def write(
@@ -611,20 +654,26 @@ class MemoryHubClient:
             cache_impact fields populated. Check curation.gated before accessing
             memory.
         """
-        payload: dict[str, Any] = {
-            "content": content,
-            "scope": scope,
-            "owner_id": owner_id,
-            "weight": weight,
-            "parent_id": parent_id,
-            "branch_type": branch_type,
-            "metadata": metadata,
-            "project_id": project_id,
-            "domains": domains,
-        }
+        opts: dict[str, Any] = {"weight": weight}
+        if owner_id is not None:
+            opts["owner_id"] = owner_id
+        if parent_id is not None:
+            opts["parent_id"] = parent_id
+        if branch_type is not None:
+            opts["branch_type"] = branch_type
+        if metadata is not None:
+            opts["metadata"] = metadata
+        if domains is not None:
+            opts["domains"] = domains
         if force:
-            payload["force"] = True
-        data = await self._call("write_memory", payload)
+            opts["force"] = True
+        data = await self._call_action(
+            "write",
+            content=content,
+            scope=scope,
+            project_id=project_id,
+            options=opts,
+        )
         return WriteResult.model_validate(data)
 
     async def update(
@@ -651,16 +700,19 @@ class MemoryHubClient:
         """
         if content is None and weight is None and metadata is None:
             raise ValueError("update() requires at least one of: content, weight, metadata")
-        data = await self._call(
-            "update_memory",
-            {
-                "memory_id": memory_id,
-                "content": content,
-                "weight": weight,
-                "metadata": metadata,
-                "project_id": project_id,
-                "domains": domains,
-            },
+        opts: dict[str, Any] = {}
+        if weight is not None:
+            opts["weight"] = weight
+        if metadata is not None:
+            opts["metadata"] = metadata
+        if domains is not None:
+            opts["domains"] = domains
+        data = await self._call_action(
+            "update",
+            memory_id=memory_id,
+            content=content,
+            project_id=project_id,
+            options=opts,
         )
         return Memory.model_validate(data)
 
@@ -671,12 +723,10 @@ class MemoryHubClient:
             memory_id: ID of the memory to delete.
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call(
-            "delete_memory",
-            {
-                "memory_id": memory_id,
-                "project_id": project_id,
-            },
+        data = await self._call_action(
+            "delete",
+            memory_id=memory_id,
+            project_id=project_id,
         )
         return DeleteResult.model_validate(data)
 
@@ -698,13 +748,13 @@ class MemoryHubClient:
             confidence: Reporter's confidence in the contradiction (0.0-1.0, default 0.7).
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call(
-            "report_contradiction",
-            {
-                "memory_id": memory_id,
+        data = await self._call_action(
+            "report",
+            memory_id=memory_id,
+            project_id=project_id,
+            options={
                 "observed_behavior": observed_behavior,
                 "confidence": confidence,
-                "project_id": project_id,
             },
         )
         return ContradictionResult.model_validate(data)
@@ -725,15 +775,13 @@ class MemoryHubClient:
                 or 'manual_merge'.
             resolution_note: Optional rationale for the resolution.
         """
-        return await self._call(
-            "manage_curation",
-            {
-                "action": "resolve_contradiction",
-                "contradiction_id": contradiction_id,
-                "resolution_action": resolution_action,
-                "resolution_note": resolution_note,
-            },
-        )
+        opts: dict[str, Any] = {
+            "contradiction_id": contradiction_id,
+            "resolution_action": resolution_action,
+        }
+        if resolution_note is not None:
+            opts["resolution_note"] = resolution_note
+        return await self._call_action("resolve", options=opts)
 
     # ── Similarity & relationships ──────────────────────────────────
 
@@ -755,14 +803,14 @@ class MemoryHubClient:
             offset: Pagination offset (default 0).
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call(
-            "get_similar_memories",
-            {
-                "memory_id": memory_id,
+        data = await self._call_action(
+            "similar",
+            memory_id=memory_id,
+            project_id=project_id,
+            options={
                 "threshold": threshold,
                 "max_results": max_results,
                 "offset": offset,
-                "project_id": project_id,
             },
         )
         results = data.get("results", [])
@@ -786,15 +834,20 @@ class MemoryHubClient:
             include_provenance: If True, include provenance metadata on each edge.
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call(
-            "get_relationships",
-            {
-                "node_id": node_id,
-                "relationship_type": relationship_type,
-                "direction": direction,
-                "include_provenance": include_provenance,
-                "project_id": project_id,
-            },
+        opts: dict[str, Any] = {
+            "direction": direction,
+            "include_provenance": include_provenance,
+        }
+        if relationship_type is not None:
+            opts["relationship_type"] = relationship_type
+        # The dispatcher accepts `memory_id` at the top level and renames
+        # it to `node_id` server-side; the SDK keeps the public `node_id`
+        # parameter for backward compatibility.
+        data = await self._call_action(
+            "relationships",
+            memory_id=node_id,
+            project_id=project_id,
+            options=opts,
         )
         return RelationshipsResult.model_validate(data)
 
@@ -816,15 +869,17 @@ class MemoryHubClient:
             metadata: Arbitrary metadata for the relationship edge.
             project_id: Project identifier for campaign enrollment verification.
         """
-        data = await self._call(
-            "create_relationship",
-            {
-                "source_id": source_id,
-                "target_id": target_id,
-                "relationship_type": relationship_type,
-                "metadata": metadata,
-                "project_id": project_id,
-            },
+        opts: dict[str, Any] = {
+            "source_id": source_id,
+            "target_id": target_id,
+            "relationship_type": relationship_type,
+        }
+        if metadata is not None:
+            opts["metadata"] = metadata
+        data = await self._call_action(
+            "relate",
+            project_id=project_id,
+            options=opts,
         )
         return RelationshipInfo.model_validate(data)
 
@@ -842,18 +897,20 @@ class MemoryHubClient:
         priority: int = 10,
     ) -> CurationRuleResult:
         """Create or update a curation rule."""
-        data = await self._call(
-            "set_curation_rule",
-            {
-                "name": name,
-                "tier": tier,
-                "action": action,
-                "config": config,
-                "scope_filter": scope_filter,
-                "enabled": enabled,
-                "priority": priority,
-            },
-        )
+        # Dispatcher uses `action_type` for the rule action to avoid
+        # colliding with the top-level `action` parameter.
+        opts: dict[str, Any] = {
+            "name": name,
+            "tier": tier,
+            "action_type": action,
+            "enabled": enabled,
+            "priority": priority,
+        }
+        if config is not None:
+            opts["config"] = config
+        if scope_filter is not None:
+            opts["scope_filter"] = scope_filter
+        data = await self._call_action("set_rule", options=opts)
         return CurationRuleResult.model_validate(data)
 
     # ── Projects ──────────────────────────────────────────────────────
@@ -869,12 +926,9 @@ class MemoryHubClient:
             filter: 'mine' (default) for your projects, 'all' to include
                 open projects you could join.
         """
-        return await self._call(
-            "manage_project",
-            {
-                "action": "list",
-                "filter": filter,
-            },
+        return await self._call_action(
+            "list_projects",
+            options={"filter": filter},
         )
 
     async def create_project(
@@ -892,14 +946,15 @@ class MemoryHubClient:
             invite_only: If True, members must be added explicitly.
                 Default False allows auto-enrollment.
         """
-        return await self._call(
-            "manage_project",
-            {
-                "action": "create",
-                "project_name": project_name,
-                "description": description,
-                "invite_only": invite_only,
-            },
+        # The dispatcher accepts the project name at the top level as
+        # `project_id` for consistency with other project actions.
+        opts: dict[str, Any] = {"invite_only": invite_only}
+        if description is not None:
+            opts["description"] = description
+        return await self._call_action(
+            "create_project",
+            project_id=project_name,
+            options=opts,
         )
 
     async def add_project_member(
@@ -916,14 +971,10 @@ class MemoryHubClient:
             user_id: User to add.
             role: 'member' (default) or 'admin'.
         """
-        return await self._call(
-            "manage_project",
-            {
-                "action": "add_member",
-                "project_name": project_name,
-                "user_id": user_id,
-                "role": role,
-            },
+        return await self._call_action(
+            "add_member",
+            project_id=project_name,
+            options={"user_id": user_id, "role": role},
         )
 
     async def remove_project_member(
@@ -937,13 +988,10 @@ class MemoryHubClient:
             project_name: Project identifier.
             user_id: User to remove.
         """
-        return await self._call(
-            "manage_project",
-            {
-                "action": "remove_member",
-                "project_name": project_name,
-                "user_id": user_id,
-            },
+        return await self._call_action(
+            "remove_member",
+            project_id=project_name,
+            options={"user_id": user_id},
         )
 
     # ── Session focus (#61) ─────────────────────────────────────────
@@ -954,10 +1002,7 @@ class MemoryHubClient:
         Returns your user_id, name, scopes, session expiry, and project
         memberships without re-authenticating.
         """
-        return await self._call(
-            "manage_session",
-            {"action": "status"},
-        )
+        return await self._call_action("status")
 
     async def set_session_focus(
         self,
@@ -983,12 +1028,12 @@ class MemoryHubClient:
             A dict with ``session_id``, ``user_id``, ``project``, ``focus``,
             ``expires_at``, and ``message``.
         """
-        return await self._call(
-            "set_session_focus",
-            {
-                "focus": focus,
-                "project": project,
-            },
+        # Dispatcher takes the project at the top level as `project_id`
+        # and `focus` as an option key.
+        return await self._call_action(
+            "set_focus",
+            project_id=project,
+            options={"focus": focus},
         )
 
     async def get_focus_history(
@@ -1016,13 +1061,15 @@ class MemoryHubClient:
             ``total_sessions``, and ``histogram`` (list of ``{focus, count}``
             sorted by count descending, ties alphabetical).
         """
-        return await self._call(
-            "get_focus_history",
-            {
-                "project": project,
-                "start_date": start_date,
-                "end_date": end_date,
-            },
+        opts: dict[str, Any] = {}
+        if start_date is not None:
+            opts["start_date"] = start_date
+        if end_date is not None:
+            opts["end_date"] = end_date
+        return await self._call_action(
+            "focus_history",
+            project_id=project,
+            options=opts,
         )
 
     # ── Push notifications (#62, Pattern E) ─────────────────────────
