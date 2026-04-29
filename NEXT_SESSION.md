@@ -25,19 +25,29 @@
 - Ruff clean across all surfaces.
 - gitleaks: 392 commits scanned, no leaks.
 
+## Strategic frame
+
+The active milestone is **#176 — First 3 real users actively consuming MemoryHub**. Kagenti-adk is user 1. Every priority below should be evaluated against "does this move us toward an actual user finding MemoryHub useful?" If a candidate item doesn't answer that, it's a backlog item, not a next-session item.
+
 ## Priority items for next session
 
 ### 1. Server-side `max_results` over-return on search (#212)
-Concrete and bounded. Reproduce against the deployed primary, decide whether `max_results` should cap the compiled block, the appendix, or both, and ship a fix. Update the dispatcher docstring to match shipped semantics. Useful agent ergonomics issue — agents asking for 5 memories should not get 80+.
+Concrete and bounded. Reproduce against the deployed primary, decide whether `max_results` should cap the compiled block, the appendix, or both, and ship a fix. Update the dispatcher docstring to match shipped semantics. Direct kagenti-relevance: agents asking for 5 memories should not get 80+.
 
-### 2. Watch for / respond to JanPokorny's review pass on PR #231
-He may approve, request the lock update inline, or wait the 3-day window and re-test. Be ready to push the lock update commit if he chooses option 2 from my comment. Branch: `feat/memory-store-protocol` in `~/Developer/adk-fork`. Latest commit: `79ad3d28`.
+### 2. Cleanup strategy for kagenti-ci E2E test memories (#207)
+Locks down the kagenti-adk integration as a clean, repeatable test target — the single best structural defense against another "we shipped a buggy SDK to kagenti" episode. Planning doc has options + recommendation; pick one and ship. Higher leverage than #209.
 
-### 3. Address #207, #209 when ready
-Carried over — neither blocks anything. #207 (kagenti-tests scope-down + cleanup) and #209 (cluster URL stability) both have planning docs and recommendations. Pick up when the schedule is open.
+### 3. PR-template version-consistency checkbox (#213)
+Small, structural, ~30 min. Prevents recurrence of the exact `__init__.py` mismatch that drove the third direct-push to `main` this last session. Cheap to land alongside the bigger work above.
 
-### 4. Verify carry-over items still relevant
-- **Granite agent gateway demo**: confirm the demo is still wired correctly against the granite stack in `memoryhub-granite` namespace.
+## Watch list (passive — no work unless triggered)
+
+- **PR kagenti/adk#231** — JanPokorny may approve, request the lock update inline, or wait the 3-day `exclude-newer` window. If he asks for the lock update, push it via `UV_EXCLUDE_NEWER="0 days" uv lock --upgrade-package memoryhub`. Branch: `feat/memory-store-protocol` in `~/Developer/adk-fork`. Latest commit: `79ad3d28`.
+- **#209 (cluster URL stability for kagenti-adk E2E)** — recommendation in the planning doc is "document and accept rotations." Pick up when an actual rotation hurts; not worth a session slot on its own.
+
+## Carry-over to verify when convenient
+
+- **Granite agent gateway demo**: confirm wired correctly against the granite stack in `memoryhub-granite` namespace.
 - **Compact profile for Claude Code**: still no compact-profile references in `.claude/rules/`.
 
 ## Process / retro flags
