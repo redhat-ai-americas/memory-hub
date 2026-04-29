@@ -60,6 +60,27 @@ MINIMAL_CURATION = {
 }
 
 
+def _payload(mock_mcp) -> dict:
+    """Return the SDK's forwarded call as a flat key->value dict.
+
+    Since the rework against the compacted ``memory(action=..., options={...})``
+    tool surface, top-level params and option keys live at different levels of
+    the wire payload. This helper merges them so existing assertions on
+    individual keys keep working without nesting.
+    """
+    args = mock_mcp.call_tool.call_args[0][1]
+    flat = {k: v for k, v in args.items() if k != "options"}
+    flat.update(args.get("options") or {})
+    return flat
+
+
+def _tool_and_action(mock_mcp) -> tuple[str, str | None]:
+    """Return (tool_name, action) for the most recent forwarded call."""
+    tool = mock_mcp.call_tool.call_args[0][0]
+    payload = mock_mcp.call_tool.call_args[0][1]
+    return tool, payload.get("action") if isinstance(payload, dict) else None
+
+
 def _make_client() -> MemoryHubClient:
     return MemoryHubClient(
         url="https://fake.example.com/mcp/",
@@ -300,9 +321,8 @@ async def test_search(client):
     assert result.has_more is False
 
     mock_mcp.call_tool.assert_awaited_once()
-    call_args = mock_mcp.call_tool.call_args
-    assert call_args[0][0] == "search_memory"
-    assert call_args[0][1]["query"] == "Podman vs Docker"
+    assert _tool_and_action(mock_mcp) == ("memory", "search")
+    assert _payload(mock_mcp)["query"] == "Podman vs Docker"
 
 
 async def test_search_defaults_pass_through_new_params(client):
@@ -314,7 +334,7 @@ async def test_search_defaults_pass_through_new_params(client):
 
     await c.search("any")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["mode"] == "full"
     assert forwarded["max_response_tokens"] == 4000
     assert forwarded["include_branches"] is False
@@ -334,7 +354,7 @@ async def test_search_explicit_new_params(client):
         include_branches=True,
     )
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["mode"] == "index"
     assert forwarded["max_response_tokens"] == 1500
     assert forwarded["include_branches"] is True
@@ -362,7 +382,7 @@ async def test_search_applies_project_config_retrieval_defaults():
 
     await c.search("anything")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["max_results"] == 25
     assert forwarded["max_response_tokens"] == 8000
     assert forwarded["mode"] == "index"
@@ -390,7 +410,7 @@ async def test_search_explicit_args_override_project_config():
 
     await c.search("anything", max_results=5, max_response_tokens=500, mode="full_only")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["max_results"] == 5
     assert forwarded["max_response_tokens"] == 500
     assert forwarded["mode"] == "full_only"
@@ -437,7 +457,7 @@ async def test_search_no_focus_omits_focus_params_from_payload(client):
 
     await c.search("any query")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert "focus" not in forwarded
     assert "session_focus_weight" not in forwarded
 
@@ -455,7 +475,7 @@ async def test_search_focus_string_forwards_with_default_weight(client):
 
     await c.search("any query", focus="OpenShift deployment")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["focus"] == "OpenShift deployment"
     assert forwarded["session_focus_weight"] == 0.4
 
@@ -468,7 +488,7 @@ async def test_search_explicit_session_focus_weight_overrides_default(client):
 
     await c.search("query", focus="auth", session_focus_weight=0.2)
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["focus"] == "auth"
     assert forwarded["session_focus_weight"] == 0.2
 
@@ -495,7 +515,7 @@ async def test_search_session_focus_weight_from_project_config():
 
     await c.search("query", focus="auth")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["session_focus_weight"] == 0.6
 
 
@@ -607,9 +627,8 @@ async def test_read(client):
     assert result.id == "mem-001"
     assert result.content == "Use Podman, not Docker."
 
-    call_args = mock_mcp.call_tool.call_args
-    assert call_args[0][0] == "read_memory"
-    assert call_args[0][1]["memory_id"] == "mem-001"
+    assert _tool_and_action(mock_mcp) == ("memory", "read")
+    assert _payload(mock_mcp)["memory_id"] == "mem-001"
 
 
 # ── write ─────────────────────────────────────────────────────────────────────
@@ -631,10 +650,10 @@ async def test_write(client):
     assert result.curation.blocked is False
     assert result.curation.similar_count == 0
 
-    call_args = mock_mcp.call_tool.call_args
-    assert call_args[0][0] == "write_memory"
-    assert call_args[0][1]["content"] == "Use Podman, not Docker."
-    assert call_args[0][1]["scope"] == "user"
+    assert _tool_and_action(mock_mcp) == ("memory", "write")
+    forwarded = _payload(mock_mcp)
+    assert forwarded["content"] == "Use Podman, not Docker."
+    assert forwarded["scope"] == "user"
 
 
 def test_write_result_gated_response():
@@ -705,12 +724,12 @@ async def test_write_force_in_payload(client):
 
     # force=True — key must be present and True
     await c.write("something", force=True)
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded.get("force") is True
 
     # force=False (default) — key must be absent (backward compat)
     await c.write("something else")
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert "force" not in forwarded
 
 
@@ -728,9 +747,8 @@ async def test_update(client):
     assert result.version == 2
     assert "never Docker" in result.content
 
-    call_args = mock_mcp.call_tool.call_args
-    assert call_args[0][0] == "update_memory"
-    assert call_args[0][1]["memory_id"] == "mem-001"
+    assert _tool_and_action(mock_mcp) == ("memory", "update")
+    assert _payload(mock_mcp)["memory_id"] == "mem-001"
 
 
 # ── report_contradiction ──────────────────────────────────────────────────────
@@ -755,9 +773,8 @@ async def test_report_contradiction(client):
     assert result.contradiction_count == 2
     assert result.revision_triggered is False
 
-    call_args = mock_mcp.call_tool.call_args
-    assert call_args[0][0] == "report_contradiction"
-    assert call_args[0][1]["memory_id"] == "mem-001"
+    assert _tool_and_action(mock_mcp) == ("memory", "report")
+    assert _payload(mock_mcp)["memory_id"] == "mem-001"
 
 
 # ── error handling ────────────────────────────────────────────────────────────
@@ -773,7 +790,7 @@ async def test_tool_error_raised(client):
     with pytest.raises(ToolError) as exc_info:
         await c.search("anything")
 
-    assert exc_info.value.tool_name == "search_memory"
+    assert exc_info.value.tool_name == "memory"
     assert "database unavailable" in exc_info.value.detail
 
 
@@ -828,7 +845,7 @@ async def test_permission_denied_error(client):
     )
     with pytest.raises(PermissionDeniedError) as exc_info:
         await c.read("mem-001")
-    assert exc_info.value.tool_name == "read_memory"
+    assert exc_info.value.tool_name == "memory"
     assert "Not authorized" in exc_info.value.detail
 
 
@@ -850,7 +867,7 @@ async def test_validation_error(client):
     )
     with pytest.raises(ValidationError) as exc_info:
         await c.read("bad-id")
-    assert exc_info.value.tool_name == "read_memory"
+    assert exc_info.value.tool_name == "memory"
 
 
 async def test_validation_error_must_be(client):
@@ -902,7 +919,7 @@ async def test_curation_veto_error(client):
     )
     with pytest.raises(CurationVetoError) as exc_info:
         await c.write("duplicate stuff", scope="user")
-    assert exc_info.value.tool_name == "write_memory"
+    assert exc_info.value.tool_name == "memory"
     assert "Curation rule blocked" in exc_info.value.detail
 
 
@@ -980,9 +997,10 @@ async def test_set_session_focus_forwards_arguments(client):
     assert result["focus"] == "deployment"
 
     mock_mcp.call_tool.assert_awaited_once()
-    call_args = mock_mcp.call_tool.call_args
-    assert call_args[0][0] == "set_session_focus"
-    assert call_args[0][1] == {"focus": "deployment", "project": "memory-hub"}
+    assert _tool_and_action(mock_mcp) == ("memory", "set_focus")
+    forwarded = _payload(mock_mcp)
+    assert forwarded["project_id"] == "memory-hub"
+    assert forwarded["focus"] == "deployment"
 
 
 async def test_get_focus_history_forwards_date_range(client):
@@ -1010,8 +1028,9 @@ async def test_get_focus_history_forwards_date_range(client):
     assert result["total_sessions"] == 3
     assert result["histogram"][0] == {"focus": "deployment", "count": 2}
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
-    assert forwarded["project"] == "memory-hub"
+    assert _tool_and_action(mock_mcp) == ("memory", "focus_history")
+    forwarded = _payload(mock_mcp)
+    assert forwarded["project_id"] == "memory-hub"
     assert forwarded["start_date"] == "2026-04-01"
     assert forwarded["end_date"] == "2026-04-07"
 
@@ -1033,9 +1052,9 @@ async def test_get_focus_history_strips_none_dates(client):
 
     await c.get_focus_history("memory-hub")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
-    assert forwarded["project"] == "memory-hub"
-    # None values are stripped by _call before sending
+    forwarded = _payload(mock_mcp)
+    assert forwarded["project_id"] == "memory-hub"
+    # None values are stripped before sending
     assert "start_date" not in forwarded
     assert "end_date" not in forwarded
 
@@ -1057,7 +1076,7 @@ async def test_search_forwards_project_id_and_domains(client):
         domain_boost_weight=0.5,
     )
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["project_id"] == "proj-123"
     assert forwarded["domains"] == ["React", "Spring Boot"]
     assert forwarded["domain_boost_weight"] == 0.5
@@ -1072,7 +1091,7 @@ async def test_search_omits_campaign_params_when_none(client):
 
     await c.search("query")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert "project_id" not in forwarded
     assert "domains" not in forwarded
     assert "domain_boost_weight" not in forwarded
@@ -1087,7 +1106,7 @@ async def test_write_forwards_project_id_and_domains(client):
 
     await c.write("content", project_id="proj-123", domains=["React"])
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["project_id"] == "proj-123"
     assert forwarded["domains"] == ["React"]
 
@@ -1100,7 +1119,7 @@ async def test_update_forwards_project_id_and_domains(client):
 
     await c.update("mem-001", content="updated", project_id="proj-123", domains=["React"])
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["project_id"] == "proj-123"
     assert forwarded["domains"] == ["React"]
 
@@ -1142,41 +1161,42 @@ _CREATE_REL_RESPONSE = {
 
 
 @pytest.mark.parametrize(
-    "method,tool_name,call_kwargs,response",
+    "method,action,call_kwargs,response",
     [
-        ("read", "read_memory", {"memory_id": "mem-001"}, MINIMAL_MEMORY),
-        ("write", "write_memory", {"content": "test"}, _WRITE_RESPONSE),
+        ("read", "read", {"memory_id": "mem-001"}, MINIMAL_MEMORY),
+        ("write", "write", {"content": "test"}, _WRITE_RESPONSE),
         (
             "update",
-            "update_memory",
+            "update",
             {"memory_id": "mem-001", "content": "updated"},
             {**MINIMAL_MEMORY, "version": 2},
         ),
-        ("delete", "delete_memory", {"memory_id": "mem-001"}, _DELETE_RESPONSE),
+        ("delete", "delete", {"memory_id": "mem-001"}, _DELETE_RESPONSE),
         (
             "report_contradiction",
-            "report_contradiction",
+            "report",
             {"memory_id": "mem-001", "observed_behavior": "changed"},
             _CONTRADICTION_RESPONSE,
         ),
-        ("get_similar", "get_similar_memories", {"memory_id": "mem-001"}, {"results": []}),
+        ("get_similar", "similar", {"memory_id": "mem-001"}, {"results": []}),
         (
             "get_relationships",
-            "get_relationships",
+            "relationships",
             {"node_id": "mem-001"},
             _RELATIONSHIPS_RESPONSE,
         ),
-        ("create_relationship", "create_relationship", _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
+        ("create_relationship", "relate", _CREATE_REL_KWARGS, _CREATE_REL_RESPONSE),
     ],
 )
 async def test_project_id_forwarded_when_provided(
     client,
     method,
-    tool_name,
+    action,
     call_kwargs,
     response,
 ):
-    """project_id is forwarded to the MCP tool when provided."""
+    """project_id is forwarded to the dispatcher when provided, and the
+    dispatched action matches the expected per-method action name."""
     c, mock_mcp = client
     mock_mcp.call_tool.return_value = FakeCallToolResult(
         structured_content=response,
@@ -1185,7 +1205,8 @@ async def test_project_id_forwarded_when_provided(
     func = getattr(c, method)
     await func(**call_kwargs, project_id="proj-123")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    assert _tool_and_action(mock_mcp) == ("memory", action)
+    forwarded = _payload(mock_mcp)
     assert forwarded["project_id"] == "proj-123"
 
 
@@ -1218,7 +1239,7 @@ async def test_project_id_omitted_when_none(
 
     await getattr(c, method)(**call_kwargs)
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert "project_id" not in forwarded
 
 
@@ -1489,7 +1510,7 @@ async def test_search_forwards_raw_results_false_by_default(client):
 
     await c.search("any")
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["raw_results"] is False
 
 
@@ -1502,7 +1523,7 @@ async def test_search_forwards_raw_results_true(client):
 
     await c.search("any", raw_results=True)
 
-    forwarded = mock_mcp.call_tool.call_args[0][1]
+    forwarded = _payload(mock_mcp)
     assert forwarded["raw_results"] is True
 
 
