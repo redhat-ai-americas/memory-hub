@@ -196,7 +196,7 @@ class TestDispatchRouting:
     @patch("src.tools.search_memory.search_memory", new_callable=AsyncMock)
     async def test_search_dispatches(self, mock_search):
         mock_search.return_value = {"results": []}
-        result = await memory(
+        await memory(
             action="search", query="test query",
             scope="user", project_id="proj",
             options={"max_results": 5, "focus": "deployment"},
@@ -213,7 +213,7 @@ class TestDispatchRouting:
     @patch("src.tools.read_memory.read_memory", new_callable=AsyncMock)
     async def test_read_dispatches(self, mock_read):
         mock_read.return_value = {"id": "abc"}
-        result = await memory(
+        await memory(
             action="read", memory_id="abc-123",
             options={"include_versions": True},
         )
@@ -226,7 +226,7 @@ class TestDispatchRouting:
     @patch("src.tools.manage_session.manage_session", new_callable=AsyncMock)
     async def test_status_dispatches(self, mock_session):
         mock_session.return_value = {"user_id": "test"}
-        result = await memory(action="status")
+        await memory(action="status")
         mock_session.assert_called_once()
         assert mock_session.call_args[1]["action"] == "status"
 
@@ -234,7 +234,7 @@ class TestDispatchRouting:
     @patch("src.tools.manage_session.manage_session", new_callable=AsyncMock)
     async def test_set_focus_dispatches(self, mock_session):
         mock_session.return_value = {"focus": "test"}
-        result = await memory(
+        await memory(
             action="set_focus", project_id="my-proj",
             options={"focus": "deployment work"},
         )
@@ -248,7 +248,7 @@ class TestDispatchRouting:
     @patch("src.tools.manage_graph.manage_graph", new_callable=AsyncMock)
     async def test_relationships_maps_memory_id_to_node_id(self, mock_graph):
         mock_graph.return_value = {"relationships": []}
-        result = await memory(
+        await memory(
             action="relationships", memory_id="node-uuid",
         )
         kw = mock_graph.call_args[1]
@@ -259,7 +259,7 @@ class TestDispatchRouting:
     @patch("src.tools.manage_project.manage_project", new_callable=AsyncMock)
     async def test_describe_project_maps_project_id_to_project_name(self, mock_proj):
         mock_proj.return_value = {"project": {}}
-        result = await memory(
+        await memory(
             action="describe_project", project_id="my-proj",
         )
         kw = mock_proj.call_args[1]
@@ -270,7 +270,7 @@ class TestDispatchRouting:
     @patch("src.tools.write_memory.write_memory", new_callable=AsyncMock)
     async def test_write_dispatches(self, mock_write):
         mock_write.return_value = {"memory": {"id": "new"}}
-        result = await memory(
+        await memory(
             action="write", content="test content", scope="user",
             options={"weight": 0.9, "domains": ["test"]},
         )
@@ -285,7 +285,7 @@ class TestDispatchRouting:
     @patch("src.tools.manage_graph.manage_graph", new_callable=AsyncMock)
     async def test_relate_dispatches(self, mock_graph):
         mock_graph.return_value = {"id": "rel-1"}
-        result = await memory(
+        await memory(
             action="relate",
             options={
                 "source_id": "aaa",
@@ -302,7 +302,7 @@ class TestDispatchRouting:
     @patch("src.tools.manage_curation.manage_curation", new_callable=AsyncMock)
     async def test_set_rule_forwards_all_opts(self, mock_cur):
         mock_cur.return_value = {"created": True}
-        result = await memory(
+        await memory(
             action="set_rule",
             options={
                 "name": "my_rule",
@@ -324,7 +324,7 @@ class TestDispatchRouting:
     @patch("src.tools.update_memory.update_memory", new_callable=AsyncMock)
     async def test_update_forwards_content_from_top_level(self, mock_update):
         mock_update.return_value = {"id": "upd"}
-        result = await memory(
+        await memory(
             action="update", memory_id="mem-1",
             content="new content",
             options={"weight": 0.5},
@@ -338,7 +338,7 @@ class TestDispatchRouting:
     @patch("src.tools.manage_project.manage_project", new_callable=AsyncMock)
     async def test_list_projects_forwards_filter(self, mock_proj):
         mock_proj.return_value = {"projects": []}
-        result = await memory(
+        await memory(
             action="list_projects",
             options={"filter": "all"},
         )
@@ -350,7 +350,7 @@ class TestDispatchRouting:
     @patch("src.tools.manage_project.manage_project", new_callable=AsyncMock)
     async def test_create_project_dispatches_via_options(self, mock_proj):
         mock_proj.return_value = {"project": {}}
-        result = await memory(
+        await memory(
             action="create_project",
             options={"project_name": "new-proj", "description": "A project"},
         )
@@ -364,7 +364,7 @@ class TestDispatchRouting:
     async def test_create_project_accepts_project_id(self, mock_proj):
         """project_id works as the project name for consistency."""
         mock_proj.return_value = {"project": {}}
-        result = await memory(
+        await memory(
             action="create_project", project_id="my-new-proj",
         )
         kw = mock_proj.call_args[1]
@@ -375,7 +375,7 @@ class TestDispatchRouting:
     async def test_create_project_options_takes_precedence(self, mock_proj):
         """options.project_name overrides project_id when both set."""
         mock_proj.return_value = {"project": {}}
-        result = await memory(
+        await memory(
             action="create_project", project_id="fallback",
             options={"project_name": "explicit"},
         )
@@ -392,7 +392,7 @@ class TestOptionsIsolation:
     @patch("src.tools.read_memory.read_memory", new_callable=AsyncMock)
     async def test_search_opts_not_forwarded_to_read(self, mock_read):
         mock_read.return_value = {"id": "abc"}
-        result = await memory(
+        await memory(
             action="read", memory_id="abc",
             options={"max_results": 5, "focus": "should-be-ignored"},
         )

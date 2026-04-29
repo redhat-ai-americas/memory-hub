@@ -3,7 +3,6 @@ import base64
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
-
 from src.keys import (
     _int_to_base64url,
     get_jwks,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 
 import httpx
@@ -17,7 +16,6 @@ from memoryhub_cli.output import (
     EXIT_SERVER_ERROR,
     OutputFormat,
     console,
-    err_console,
     handle_error,
     json_success,
 )
@@ -47,7 +45,8 @@ def _get_admin_key(output: OutputFormat) -> str:
 
     handle_error(
         "missing_config",
-        "No admin key found. Set MEMORYHUB_ADMIN_KEY or add 'admin_key' to ~/.config/memoryhub/config.json.",
+        "No admin key found. Set MEMORYHUB_ADMIN_KEY or add 'admin_key' to "
+        "~/.config/memoryhub/config.json.",
         output,
         EXIT_CLIENT_ERROR,
     )
@@ -70,7 +69,8 @@ def _get_auth_url(output: OutputFormat) -> str:
 
     handle_error(
         "missing_config",
-        "No auth URL found. Set MEMORYHUB_AUTH_URL, or add 'auth_url' to ~/.config/memoryhub/config.json.",
+        "No auth URL found. Set MEMORYHUB_AUTH_URL, or add 'auth_url' to "
+        "~/.config/memoryhub/config.json.",
         output,
         EXIT_CLIENT_ERROR,
     )
@@ -320,7 +320,12 @@ def _handle_http_error(exc: httpx.HTTPStatusError, output: OutputFormat) -> None
         detail = exc.response.text
 
     if status == 401:
-        handle_error("auth_failed", "Authentication failed. Check your admin key.", output, EXIT_AUTH_ERROR)
+        handle_error(
+            "auth_failed",
+            "Authentication failed. Check your admin key.",
+            output,
+            EXIT_AUTH_ERROR,
+        )
     elif status == 404:
         handle_error("not_found", str(detail), output, EXIT_CLIENT_ERROR)
     elif status == 409:

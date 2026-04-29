@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -12,8 +11,8 @@ import typer
 from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
 from memoryhub.exceptions import (
     AuthenticationError,
-    ConnectionFailedError,
     ConflictError,
+    ConnectionFailedError,
     CurationVetoError,
     MemoryHubError,
     NotFoundError,
@@ -24,6 +23,7 @@ from memoryhub.exceptions import (
 from rich.table import Table
 
 from memoryhub_cli.admin import admin_app
+from memoryhub_cli.config import get_connection_params, save_config
 from memoryhub_cli.output import (
     EXIT_AUTH_ERROR,
     EXIT_CLIENT_ERROR,
@@ -34,7 +34,6 @@ from memoryhub_cli.output import (
     handle_error,
     json_success,
 )
-from memoryhub_cli.config import get_connection_params, save_config
 from memoryhub_cli.project_config import (
     FocusSource,
     InitChoices,
@@ -443,8 +442,13 @@ def delete(
 @app.command()
 def update(
     memory_id: str = typer.Argument(..., help="Memory UUID to update"),
-    content: str | None = typer.Argument(None, help="New content (reads from stdin if omitted and stdin is not a tty)"),
-    weight: float | None = typer.Option(None, "--weight", "-w", help="New priority weight 0.0-1.0"),
+    content: str | None = typer.Argument(
+        None,
+        help="New content (reads from stdin if omitted and stdin is not a tty)",
+    ),
+    weight: float | None = typer.Option(
+        None, "--weight", "-w", help="New priority weight 0.0-1.0",
+    ),
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
@@ -496,7 +500,10 @@ def update(
         return
 
     console.print(f"[green]Memory updated:[/green] {memory.id}")
-    console.print(f"  Scope: {memory.scope} | Weight: {memory.weight:.2f} | Version: {memory.version}")
+    console.print(
+        f"  Scope: {memory.scope} | Weight: {memory.weight:.2f} | "
+        f"Version: {memory.version}"
+    )
 
 
 @app.command()
@@ -1099,7 +1106,10 @@ def curation_rule(
     rule = result.rule
     enabled_label = "enabled" if rule.enabled else "disabled"
     console.print(f"[green]Rule {verb}:[/green] {name}")
-    console.print(f"  Tier: {rule.tier} | Action: {rule.action} | Priority: {rule.priority} | {enabled_label}")
+    console.print(
+        f"  Tier: {rule.tier} | Action: {rule.action} | "
+        f"Priority: {rule.priority} | {enabled_label}"
+    )
 
 
 # ── memoryhub project ─────────────────────────────────────────────────────────
@@ -1156,7 +1166,9 @@ def project_list(
 def project_create(
     name: str = typer.Argument(..., help="Project name"),
     description: str | None = typer.Option(None, "--description", help="Optional description"),
-    invite_only: bool = typer.Option(False, "--invite-only", help="Restrict membership to invites"),
+    invite_only: bool = typer.Option(
+        False, "--invite-only", help="Restrict membership to invites",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
     ),
@@ -1266,7 +1278,10 @@ def session_status(
     name = result.get("name", "")
     scopes = result.get("scopes", [])
     expires_at = result.get("expires_at", "-")
-    projects = [p.get("project_id", p) if isinstance(p, dict) else p for p in result.get("projects", [])]
+    projects = [
+        p.get("project_id", p) if isinstance(p, dict) else p
+        for p in result.get("projects", [])
+    ]
 
     console.print(f"Session: {user_id} ({name})")
     console.print(f"  Scopes: {', '.join(scopes) if scopes else '-'}")

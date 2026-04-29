@@ -6,7 +6,6 @@ rather than reloading the module (which would require env var
 manipulation at import time).
 """
 
-import pytest
 
 from src.main import (
     _TOOLS_COMPACT,

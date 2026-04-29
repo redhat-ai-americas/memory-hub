@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from src.models import AuthSession
+
 from tests.conftest import TEST_CLIENT_SECRET
 
 
@@ -99,7 +99,6 @@ class TestAuthorizationCodeHappyPath:
 
     async def test_jwt_claims_correct(self, client, sample_client, db_engine):
         import jwt as pyjwt
-
         from src.keys import get_public_key
 
         factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
