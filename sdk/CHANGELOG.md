@@ -2,7 +2,21 @@
 
 All notable changes to the `memoryhub` SDK package.
 
-## [0.6.0] — 2026-04-23
+## [0.7.0] — 2026-04-29
+
+- **BREAKING (wire format)**: `MemoryHubClient` now dispatches every
+  operation through the unified `memory(action=..., options={...})` MCP
+  tool introduced by the server-side consolidation in #198/#202.
+  Per-action tool names (`search_memory`, `read_memory`, `write_memory`,
+  `update_memory`, `delete_memory`, `report_contradiction`,
+  `get_similar_memories`, `get_relationships`, `create_relationship`,
+  `set_curation_rule`, `manage_session`, `manage_project`,
+  `set_session_focus`, `get_focus_history`) are no longer called.
+  This release **cannot** talk to a server that only exposes the legacy
+  per-action tools; older releases (≤ 0.6.0) **cannot** talk to the
+  primary `memory-hub-mcp` deployment. The Python API is unchanged —
+  consumers only need to update the dependency pin. Tracks #210, closes
+  the alias gap left by #202.
 
 - **Stub result compatibility**: Default `content` and `owner_id` fields to
   empty strings in the `Memory` model so cache-optimized search responses
