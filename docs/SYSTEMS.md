@@ -91,6 +91,24 @@ External RHOAI services that MemoryHub depends on but does not own:
 - **Embedding model** — `all-MiniLM-L6-v2` deployed via vLLM, 384-dimensional embeddings. URL configured via `MEMORYHUB_EMBEDDING_URL`.
 - **Cross-encoder reranker** — `ms-marco-MiniLM-L12-v2` deployed via vLLM. Optional; the focus-path retrieval (#58) gracefully falls back to plain pgvector cosine when `MEMORYHUB_RERANKER_URL` is unset or unreachable.
 
+## Downstream consumers
+
+External projects that consume MemoryHub's public surfaces. Listed here so SDK and MCP API changes can be coordinated with their authors.
+
+| Consumer | Repo | Surfaces consumed | Notes |
+|---|---|---|---|
+| kagenti-adk | https://github.com/kagenti/adk | `memoryhub` Python SDK + public MCP route | First known external SDK consumer. Adds a MemoryStore extension to IBM's Python ADK. |
+
+### kagenti-adk
+
+The IBM Python Agent Development Kit (ADK) ships a MemoryStore extension that wraps the `memoryhub` SDK. The integration baseline is `kagenti/adk` PR #231.
+
+- **Integration points**: A2A service extension at `apps/adk-py/src/kagenti_adk/a2a/extensions/services/memoryhub.py` plus the per-context wrapper at `kagenti_adk/server/store/memoryhub_memory_store.py`.
+- **SDK surface used**: `MemoryHubClient` constructor, `search`/`write`/`read`/`update`/`delete`, `WriteResult.curation.reason`, `NotFoundError`.
+- **Authentication**: API key (default) or OAuth 2.1 `client_credentials`.
+- **E2E tests**: gated behind `MEMORYHUB_E2E_URL` and `MEMORYHUB_E2E_API_KEY` repo secrets on `kagenti/adk`; skipped without them.
+- **Stability promise**: SDK breaking changes (renamed fields, signature changes, new exceptions on the happy path) need to be coordinated with the kagenti-adk maintainers before release.
+
 ## What's not yet shipped
 
 - **operator** is a skeleton. CRDs for memory tiers, policies, and storage configuration are designed but not implemented. The current deployment is plain manifests + scripts.
