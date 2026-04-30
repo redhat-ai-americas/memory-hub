@@ -6,6 +6,7 @@ pyjwt>=2.10.1
 redis>=5.0
 # memoryhub_core library dependencies
 sqlalchemy>=2.0
+greenlet>=3.0
 asyncpg
 pgvector
 pydantic>=2.0
