@@ -257,7 +257,34 @@ else
     dim "image age:" "[skipped — no running pod]"
 fi
 
-# ── Check 8 (--full): Migration state ─────────────────────────────────────
+# ── Check 8: ConfigMap users ──────────────────────────────────────────────
+# Surfaces drift between the live memoryhub-users ConfigMap and any
+# cached/expected user list. Print-only — operator eyeballs the list.
+# Pre-emptive of #221 (template drift); upgrade to a hard diff against
+# users-configmap.example.yaml once that issue lands.
+
+USERS_JSON=$(oc get configmap memoryhub-users -n "$NAMESPACE" \
+    -o jsonpath='{.data.users\.json}' 2>/dev/null || echo "")
+
+if [[ -n "$USERS_JSON" ]]; then
+    USER_LIST=$(echo "$USERS_JSON" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(', '.join(u['user_id'] for u in data.get('users', [])))
+" 2>/dev/null || echo "")
+
+    if [[ -n "$USER_LIST" ]]; then
+        dim "users:" "$USER_LIST"
+    else
+        warn "users:" "ConfigMap present but user list could not be parsed"
+        ISSUES=$((ISSUES + 1))
+    fi
+else
+    warn "users:" "memoryhub-users ConfigMap not found in $NAMESPACE"
+    ISSUES=$((ISSUES + 1))
+fi
+
+# ── Check 9 (--full): Migration state ─────────────────────────────────────
 
 if [[ "$FULL" == "true" ]]; then
     echo ""
