@@ -892,6 +892,25 @@ async def search_memory(
                 for item, score, is_app in compilation_meta["ordered_results"]
                 if str(item.id) not in branch_ids
             ]
+            # #212: cap to max_results. _backfill_compiled_entries inflates the
+            # set with every compiled epoch ID, and the format loop below has
+            # no inherent page bound — without this clamp the response can
+            # carry the entire cache-stable prefix regardless of caller intent.
+            # Compiled entries lead the order, so the cache-stable prefix is
+            # preserved up to max_results before any appendix fills the tail.
+            ordered = compilation_meta["ordered_results"]
+            if len(ordered) > max_results:
+                kept_ids = {str(item.id) for item, _, _ in ordered[:max_results]}
+                appendix_kept = sum(
+                    1 for _, _, is_app in ordered[:max_results] if is_app
+                )
+                compilation_meta["ordered_results"] = ordered[:max_results]
+                compilation_meta["appendix_count"] = appendix_kept
+                # Drop nested branches whose parent was clipped, so they
+                # don't become orphaned top-level entries.
+                nested_by_parent = {
+                    pid: bs for pid, bs in nested_by_parent.items() if pid in kept_ids
+                }
 
         # Token-budget packing. Walk results in order; full-form entries
         # that exceed the remaining budget (and everything after them)
