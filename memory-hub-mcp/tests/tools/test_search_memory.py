@@ -294,6 +294,169 @@ async def test_search_memory_has_more_false_when_page_holds_all():
 
 
 @pytest.mark.asyncio
+async def test_search_memory_caps_response_to_max_results_when_backfill_inflates():
+    """Regression for #212: cache-optimized backfill must not over-return.
+
+    `_backfill_compiled_entries` loads every missing compiled epoch ID into
+    the result set so the cache-stable prefix is preserved. Without a final
+    clamp, an epoch with N compiled entries returns all N regardless of the
+    caller's `max_results`. This test fakes a 30-entry backfill against a
+    `max_results=5` request and asserts the response is capped at 5 with
+    `has_more=True`. Compiled entries lead the order, so all 5 returned
+    items must be non-appendix (the cache-stable prefix wins the budget).
+    """
+    similarity_hits = [_fake_full_result(f"hit-{i}", score=0.9 - i * 0.01) for i in range(3)]
+    inflated = similarity_hits + [
+        _fake_full_result(f"compiled-{i}", score=0.0) for i in range(30)
+    ]
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=similarity_hits,
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=33,
+            ),
+            patch(
+                "src.tools.search_memory._backfill_compiled_entries",
+                new_callable=AsyncMock,
+                return_value=inflated,
+            ),
+            patch(
+                "src.tools.search_memory._apply_cache_optimized_ordering",
+                new_callable=AsyncMock,
+                return_value={
+                    "ordered_results": [(item, score, False) for item, score in inflated],
+                    "compilation_hash": "deadbeef",
+                    "compilation_epoch": 1,
+                    "appendix_count": 0,
+                },
+            ),
+            patch(
+                "src.tools.search_memory.ROLE_ISOLATION_ENABLED",
+                False,
+            ),
+            patch(
+                "src.tools.search_memory.PROJECT_ISOLATION_ENABLED",
+                False,
+            ),
+        ):
+            result = await search_memory(query="memory", max_results=5)
+    finally:
+        auth_mod._current_session = None
+
+    assert len(result["results"]) == 5
+    assert result["total_matching"] == 33
+    assert result["has_more"] is True
+    assert result["appendix_count"] == 0
+    assert all(not entry["is_appendix"] for entry in result["results"])
+
+
+@pytest.mark.asyncio
+async def test_search_memory_cap_preserves_appendix_in_remaining_budget():
+    """#212: when compiled prefix is shorter than max_results, appendix fills the tail.
+
+    Compiled entries lead, then appendix entries fill the rest of the budget
+    up to `max_results`. The reported `appendix_count` reflects only the
+    appendix entries that survived the cap, not the pre-cap total.
+    """
+    compiled = [_fake_full_result(f"compiled-{i}", score=0.0) for i in range(3)]
+    appendix = [_fake_full_result(f"appendix-{i}", score=0.0) for i in range(10)]
+    ordered = (
+        [(item, score, False) for item, score in compiled]
+        + [(item, score, True) for item, score in appendix]
+    )
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=compiled + appendix,
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=13,
+            ),
+            patch(
+                "src.tools.search_memory._backfill_compiled_entries",
+                new_callable=AsyncMock,
+                return_value=compiled + appendix,
+            ),
+            patch(
+                "src.tools.search_memory._apply_cache_optimized_ordering",
+                new_callable=AsyncMock,
+                return_value={
+                    "ordered_results": ordered,
+                    "compilation_hash": "deadbeef",
+                    "compilation_epoch": 1,
+                    "appendix_count": 10,
+                },
+            ),
+            patch(
+                "src.tools.search_memory.ROLE_ISOLATION_ENABLED",
+                False,
+            ),
+            patch(
+                "src.tools.search_memory.PROJECT_ISOLATION_ENABLED",
+                False,
+            ),
+        ):
+            result = await search_memory(query="memory", max_results=5)
+    finally:
+        auth_mod._current_session = None
+
+    assert len(result["results"]) == 5
+    # First three are compiled (cache-stable prefix), last two are appendix.
+    is_appendix_flags = [entry["is_appendix"] for entry in result["results"]]
+    assert is_appendix_flags == [False, False, False, True, True]
+    assert result["appendix_count"] == 2
+    assert result["has_more"] is True
+
+
+@pytest.mark.asyncio
 async def test_search_memory_empty_returns_zero_total():
     """Empty results must still emit total_matching and has_more=False."""
     mock_session = AsyncMock()
