@@ -54,3 +54,6 @@ research/agent-memory-benchmarks/
 
 # Local DB backups (created by scripts/backup-db.sh)
 backups/
+
+medium_article_1.pdf
+
