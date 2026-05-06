@@ -101,6 +101,20 @@ dance for you:
   python -c 'import asyncio; from memoryhub import MemoryHubClient; \\
     asyncio.run((lambda: print("ok"))())'
 
+Setting up MemoryHub in a Claude Code project
+---------------------------------------------
+The CLI bootstraps a project end-to-end:
+
+  pip install memoryhub-cli
+  memoryhub login --url ${mcpUrl} --auth-url ${authUrl} \\
+    --client-id ${clientId} --client-secret '<your secret>'
+  memoryhub config init
+
+login caches credentials at ~/.config/memoryhub/config.json (mode 0600).
+config init writes .memoryhub.yaml (your retrieval preferences) and
+.claude/rules/memoryhub-loading.md (the rule Claude Code auto-loads at
+session start). Re-run memoryhub config regenerate after editing the YAML.
+
 Then open ${CONTRIBUTING_URL}
 for the local dev setup, coding conventions, and PR flow.
 
