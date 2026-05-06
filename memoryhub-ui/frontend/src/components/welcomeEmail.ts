@@ -34,7 +34,7 @@ export interface WelcomeEmailParams {
 
 const DOCS_URL = 'https://github.com/redhat-ai-americas/memory-hub';
 const CONTRIBUTING_URL = 'https://github.com/redhat-ai-americas/memory-hub/blob/main/CONTRIBUTING.md';
-const CLUSTER_ACCESS_DOC = 'https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/contributor-cluster-access.md';
+const CLUSTER_ACCESS_DOC = 'https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/admin/contributor-cluster-access.md';
 
 const SECRET_PLACEHOLDER = '<ask the maintainer — rotate via the dashboard>';
 

@@ -4,7 +4,7 @@ This document is for the project maintainer (currently `@rdwj`). It is the check
 
 The goal is to make the invitation process mechanical enough that you do not have to remember what the steps are, but thorough enough that the new person lands in a working state with the context they need.
 
-If you are the new contributor and somebody just pointed you at this document by mistake, you want [`CONTRIBUTING.md`](../CONTRIBUTING.md) instead.
+If you are the new contributor and somebody just pointed you at this document by mistake, you want [`CONTRIBUTING.md`](../../CONTRIBUTING.md) instead.
 
 ## When to use this document
 
@@ -26,7 +26,7 @@ Confirm all of the following are true before you send anybody an invite:
 3. **`CODEOWNERS` is current.** `.github/CODEOWNERS` should list `@rdwj` and whichever Red Hat colleagues have agreed to act as code owners. Adding a new contributor as a code owner is a separate step and requires their explicit agreement — do not do it at invite time.
 4. **PR and issue templates exist.** Verify `.github/pull_request_template.md` and `.github/ISSUE_TEMPLATE/*.yml` are present (commit `3b4b1d8`). These are what set expectations on the contributor's first PR and first issue without you having to re-explain the conventions.
 5. **Backlog has starter work.** Run `gh issue list --label "good first issue"` and confirm at least three open issues exist. If the backlog is empty, triage before sending invitations — an empty starter pile makes the invite feel performative.
-6. **The cluster access policy doc is current.** [`docs/contributor-cluster-access.md`](contributor-cluster-access.md) needs to exist and the cluster route identifiers in it need to match the current sandbox rebuild. New contributors do not get cluster access at first, and the doc explains the policy.
+6. **The cluster access policy doc is current.** [`docs/admin/contributor-cluster-access.md`](contributor-cluster-access.md) needs to exist and the cluster route identifiers in it need to match the current sandbox rebuild. New contributors do not get cluster access at first, and the doc explains the policy.
 
 If any of the above is missing, fix it before inviting.
 
@@ -73,7 +73,7 @@ Compose a message with the following pieces, in this order:
 
 1. **Welcome and context.** Two sentences: what MemoryHub is, why you invited them. Do not link the architecture doc here — that comes later.
 2. **Link to `CONTRIBUTING.md`.** This is the single most important link. It has the repo layout, the per-subproject venv setup, the commit-message format, and the PR flow. Every other doc is optional; this one is not.
-3. **Link to `docs/contributor-cluster-access.md`.** Call out specifically that new contributors default to no cluster access and that this is deliberate policy, not a slight.
+3. **Link to `docs/admin/contributor-cluster-access.md`.** Call out specifically that new contributors default to no cluster access and that this is deliberate policy, not a slight.
 4. **A specific starter issue.** Not "look at the good-first-issue label" — a specific issue number. Pick one that matches their stated interests from step 1, read the issue yourself to confirm it is still a good fit, and link it. Include one line of context on why you picked it.
 5. **How to contact you.** Slack, email, whatever the fastest channel is. Set expectations: "I review PRs within a business day; ping me if I go quiet."
 6. **What their first PR should look like.** One sentence: "Your first PR should close the starter issue above. Keep the diff focused on that one issue and follow the PR template."
@@ -89,7 +89,7 @@ Example template:
 >
 > Start here: [`CONTRIBUTING.md`](https://github.com/redhat-ai-americas/memory-hub/blob/main/CONTRIBUTING.md). It has the per-subproject venv setup, the commit-message format, and the PR flow. Everything else is optional.
 >
-> One thing to know up front: new contributors default to no OpenShift cluster access. The policy is in [`docs/contributor-cluster-access.md`](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/contributor-cluster-access.md). Almost nothing in the repo actually needs the cluster — local dev is enough.
+> One thing to know up front: new contributors default to no OpenShift cluster access. The policy is in [`docs/admin/contributor-cluster-access.md`](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/admin/contributor-cluster-access.md). Almost nothing in the repo actually needs the cluster — local dev is enough.
 >
 > Your starter issue: [#<NNN>](https://github.com/redhat-ai-americas/memory-hub/issues/<NNN>). I picked it because it matches the <auth / curator / UI / storage> interest you mentioned, is tightly scoped, and has a clear acceptance criterion. Keep your first PR focused on closing just that issue.
 >
@@ -139,7 +139,7 @@ When a contributor leaves the project (finished their tour, moved to a different
 
 1. Remove them from the `redhat-ai-americas` org via https://github.com/orgs/redhat-ai-americas/people
 2. If they were added as a direct collaborator on the repo, also remove them from `gh api repos/redhat-ai-americas/memory-hub/collaborators`
-3. If they had a `memoryhub-auth` client credential, rotate it (see [`docs/contributor-cluster-access.md`](contributor-cluster-access.md#rotation)) and remove them from the `memoryhub-users` ConfigMap
+3. If they had a `memoryhub-auth` client credential, rotate it (see [`docs/admin/contributor-cluster-access.md`](contributor-cluster-access.md#rotation)) and remove them from the `memoryhub-users` ConfigMap
 4. If they were listed in `.github/CODEOWNERS`, remove them in a separate commit
 5. If they had cluster-level role bindings, delete those: `oc delete rolebinding <name> -n <namespace>`
 6. Do **not** delete their past commits, close their open PRs without explanation, or rewrite git history. Their contributions stay in the log under their authorship.
@@ -154,13 +154,13 @@ A few failure modes and their fixes:
 - **Contributor accepts but never opens a PR.** See the 7/14/30-day check-in schedule above. Do not nag beyond day 30.
 - **Contributor opens a PR but it is massively out of scope** (e.g., a sweeping refactor instead of the specific starter issue). Close or convert to a draft with a kind explanation: *"This is much bigger than #NNN — can we split it? Let's start with the specific thing in #NNN and file follow-up issues for the rest."*
 - **Contributor pushes directly to `main` by accident.** This should be blocked by branch protection, but if it somehow gets through (admin override, compromised account), revert the direct push, explain the protection policy, and point them at the PR flow.
-- **Contributor's first PR is excellent but has AI attribution in the commits** (Co-authored-by, Signed-off-by: Claude Code). Comment on the PR asking them to amend with `Assisted-by:` instead (see [`CLAUDE.md`](../CLAUDE.md)). Do not merge with non-conforming trailers — future contributors will copy the pattern.
-- **Contributor asks for cluster access before shipping any PRs.** Say no, and point them at `docs/contributor-cluster-access.md`. The policy exists precisely for this case.
+- **Contributor's first PR is excellent but has AI attribution in the commits** (Co-authored-by, Signed-off-by: Claude Code). Comment on the PR asking them to amend with `Assisted-by:` instead (see [`CLAUDE.md`](../../CLAUDE.md)). Do not merge with non-conforming trailers — future contributors will copy the pattern.
+- **Contributor asks for cluster access before shipping any PRs.** Say no, and point them at `docs/admin/contributor-cluster-access.md`. The policy exists precisely for this case.
 
 ## Related documents
 
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — the doc you send new contributors to; local setup, PR flow, coding conventions
-- [`docs/contributor-cluster-access.md`](contributor-cluster-access.md) — the cluster access policy and the GitHub IdP reference
-- [`CLAUDE.md`](../CLAUDE.md) — agent-facing conventions that overlap with the human-facing `CONTRIBUTING.md`
-- [`.github/CODEOWNERS`](../.github/CODEOWNERS) — who reviews what
-- [`.github/pull_request_template.md`](../.github/pull_request_template.md) — what new contributors see when they open a PR
+- [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — the doc you send new contributors to; local setup, PR flow, coding conventions
+- [`docs/admin/contributor-cluster-access.md`](contributor-cluster-access.md) — the cluster access policy and the GitHub IdP reference
+- [`CLAUDE.md`](../../CLAUDE.md) — agent-facing conventions that overlap with the human-facing `CONTRIBUTING.md`
+- [`.github/CODEOWNERS`](../../.github/CODEOWNERS) — who reviews what
+- [`.github/pull_request_template.md`](../../.github/pull_request_template.md) — what new contributors see when they open a PR
