@@ -34,12 +34,19 @@ fi
 
 # Derive cluster-specific URLs (used by apply_manifest via sed)
 echo "→ Resolving cluster URLs..."
-OAUTH_HOST=$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' 2>/dev/null)
-if [ -z "$OAUTH_HOST" ]; then
-    echo "Error: Cannot resolve OpenShift OAuth route. Is this an OpenShift 4 cluster?"
-    exit 1
+OAUTH_HOST=$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' 2>/dev/null || true)
+if [ -n "$OAUTH_HOST" ]; then
+    OAUTH_AUTHORIZE_URL="https://${OAUTH_HOST}/oauth/authorize"
+else
+    echo "  No oauth-openshift route (ROSA cluster?) — querying API metadata..."
+    OAUTH_AUTHORIZE_URL=$(oc get --raw '/.well-known/oauth-authorization-server' \
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('authorization_endpoint',''))" \
+        || true)
+    if [ -z "$OAUTH_AUTHORIZE_URL" ]; then
+        echo "Error: Cannot resolve OpenShift OAuth endpoint via route or API metadata."
+        exit 1
+    fi
 fi
-OAUTH_AUTHORIZE_URL="https://${OAUTH_HOST}/oauth/authorize"
 echo "  OAuth authorize: $OAUTH_AUTHORIZE_URL"
 # AUTH_ISSUER_URL — try to resolve now (Route may already exist from a
 # previous deploy).  If not, it's resolved after the first apply creates
