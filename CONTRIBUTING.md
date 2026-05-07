@@ -119,6 +119,8 @@ Imperative mood: write "Add foo" not "Adds foo" or "Added foo." Body explains wh
 
 If your commit was assisted by an AI tool, add an `Assisted-by:` trailer (e.g., `Assisted-by: Claude Code (Opus 4.6)`). Do not add `Co-authored-by:` or `Signed-off-by:` trailers — the human author is the sole author of record. The signoff is for the human to add manually before pushing if their workflow requires it.
 
+**Commit author identity.** Your commits' `Author` field must be your real Git identity (your name and an email tied to your GitHub account), not an automation or agent tool's identity. If your tooling commits under a bot account by default (for example `bot@ambient-code.local`), set `git config user.name` and `git config user.email` for this repo before pushing. We use the author field for contributor recognition and `git log --author` queries; bot identities break both. If you only notice after pushing, `git commit --amend --reset-author` followed by a force-push fixes it.
+
 ## Coding conventions
 
 These conventions are enforced by review, not by linters (mostly).
