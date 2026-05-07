@@ -46,7 +46,7 @@ When you find yourself wanting MemoryHub to do one of these jobs, that is usuall
 
 Files that contributors most often need:
 
-- [`agent-memory-protocol-rfc.md`](agent-memory-protocol-rfc.md) (when present): the protocol shape MemoryHub exposes, including MCP tools and SDK semantics.
+- [`agent-memory-protocol-rfc.md`](agent-memory-protocol-rfc.md): the protocol shape MemoryHub exposes, including MCP tools and SDK semantics.
 - [`agent-memory-ergonomics/`](agent-memory-ergonomics/): UX research for agents using MemoryHub: pivot detection, two-vector retrieval, FastMCP 3 push notifications.
 - [`context-compaction-survey.md`](context-compaction-survey.md): survey of approaches to context compaction.
 - [`conversation-persistence-survey.md`](conversation-persistence-survey.md): survey of approaches to durable conversation state.
