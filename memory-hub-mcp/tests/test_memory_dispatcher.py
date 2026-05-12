@@ -71,7 +71,7 @@ class TestActionValidation:
         assert "write" in msg
 
     def test_valid_actions_count(self):
-        assert len(_VALID_ACTIONS) == 19
+        assert len(_VALID_ACTIONS) == 20
 
 
 # ── Required param validation ──────────────────────────────────────────────
@@ -208,6 +208,21 @@ class TestDispatchRouting:
         assert call_kwargs["project_id"] == "proj"
         assert call_kwargs["max_results"] == 5
         assert call_kwargs["focus"] == "deployment"
+
+    @pytest.mark.asyncio
+    @patch("src.tools.list_memory.list_memory", new_callable=AsyncMock)
+    async def test_list_dispatches(self, mock_list):
+        mock_list.return_value = {"results": [], "count": 0, "has_more": False}
+        await memory(
+            action="list", scope="project", project_id="my-proj",
+            options={"max_results": 50, "cursor": "2026-05-01T00:00:00"},
+        )
+        mock_list.assert_called_once()
+        call_kwargs = mock_list.call_args[1]
+        assert call_kwargs["scope"] == "project"
+        assert call_kwargs["project_id"] == "my-proj"
+        assert call_kwargs["max_results"] == 50
+        assert call_kwargs["cursor"] == "2026-05-01T00:00:00"
 
     @pytest.mark.asyncio
     @patch("src.tools.read_memory.read_memory", new_callable=AsyncMock)

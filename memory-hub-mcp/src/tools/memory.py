@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _VALID_ACTIONS = frozenset({
     # Read path
-    "search", "read", "similar", "relationships",
+    "search", "read", "list", "similar", "relationships",
     "status", "focus_history", "list_projects", "describe_project",
     # Write path
     "write", "update", "delete", "set_focus", "relate",
@@ -34,6 +34,9 @@ _SEARCH_OPTS = frozenset({
     "max_response_tokens", "raw_results", "weight_threshold",
     "current_only", "owner_id", "graph_depth",
     "graph_relationship_types", "graph_boost_weight",
+})
+_LIST_OPTS = frozenset({
+    "max_results", "cursor", "include_branches", "current_only",
 })
 _READ_OPTS = frozenset({
     "include_versions", "history_offset", "history_max_versions", "hydrate",
@@ -140,6 +143,8 @@ async def memory(
     Read actions:
       search(query, [scope, project_id, options: max_results, focus, domains, ...])
         Semantic search. Returns cache-optimized stable ordering by default.
+      list([scope, project_id, options: max_results, cursor, include_branches])
+        Enumerate memories without semantic ranking. Ordered by creation time.
       read(memory_id, [project_id, options: include_versions, hydrate])
         Retrieve memory by UUID with optional version history.
       similar(memory_id, [project_id, options: threshold, max_results])
@@ -192,6 +197,8 @@ async def memory(
     # --- Read path ---
     if action == "search":
         return await _dispatch_search(query, scope, project_id, opts, ctx)
+    if action == "list":
+        return await _dispatch_list(scope, project_id, opts, ctx)
     if action == "read":
         return await _dispatch_read(memory_id, project_id, opts, ctx)
     if action == "similar":
@@ -240,6 +247,14 @@ async def _dispatch_search(query, scope, project_id, opts, ctx):
     return await search_memory(
         query=query, scope=scope, project_id=project_id, ctx=ctx,
         **_forward(opts, _SEARCH_OPTS),
+    )
+
+
+async def _dispatch_list(scope, project_id, opts, ctx):
+    from src.tools.list_memory import list_memory
+    return await list_memory(
+        scope=scope, project_id=project_id, ctx=ctx,
+        **_forward(opts, _LIST_OPTS),
     )
 
 

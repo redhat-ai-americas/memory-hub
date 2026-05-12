@@ -873,6 +873,81 @@ async def search_memories(
     return results
 
 
+async def list_memories(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    scope: str | None = None,
+    owner_id: str | None = None,
+    max_results: int = 100,
+    cursor: str | None = None,
+    current_only: bool = True,
+    authorized_scopes: dict[str, str | None] | None = None,
+    campaign_ids: set[str] | None = None,
+    project_ids: set[str] | None = None,
+    role_names: set[str] | None = None,
+) -> tuple[list[MemoryNodeRead | MemoryNodeStub], str | None]:
+    """Enumerate memories without semantic ranking.
+
+    Returns (results, next_cursor). Ordered by created_at DESC for
+    deterministic pagination. No embedding cost. RBAC filters are
+    identical to search_memories.
+    """
+    filters = _build_search_filters(
+        scope, owner_id, current_only, authorized_scopes, tenant_id,
+        campaign_ids=campaign_ids,
+        project_ids=project_ids,
+        role_names=role_names,
+    )
+    if filters is None:
+        return [], None
+
+    if cursor is not None:
+        try:
+            from datetime import datetime, timezone
+            cursor_dt = datetime.fromisoformat(cursor).replace(tzinfo=timezone.utc)
+            filters.append(MemoryNode.created_at < cursor_dt)
+        except (ValueError, TypeError):
+            pass
+
+    stmt = (
+        select(MemoryNode)
+        .where(*filters)
+        .order_by(MemoryNode.created_at.desc())
+        .limit(max_results + 1)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+
+    has_more = len(rows) > max_results
+    nodes = rows[:max_results]
+
+    if not nodes:
+        return [], None
+
+    node_ids = [n.id for n in nodes]
+    branch_flags = await _bulk_branch_flags(node_ids, session)
+
+    results: list[MemoryNodeRead | MemoryNodeStub] = []
+    for node in nodes:
+        has_children, has_rationale, branch_count = branch_flags.get(
+            node.id, (False, False, 0)
+        )
+        results.append(
+            node_to_read(
+                node,
+                has_children=has_children,
+                has_rationale=has_rationale,
+                branch_count=branch_count,
+            )
+        )
+
+    next_cursor = None
+    if has_more:
+        next_cursor = nodes[-1].created_at.isoformat()
+
+    return results, next_cursor
+
+
 # ---- Two-vector retrieval (#58, NEW-1 RRF blend) -----------------------
 
 

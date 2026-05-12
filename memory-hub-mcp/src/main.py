@@ -31,6 +31,7 @@ from src.tools.read_memory import read_memory
 from src.tools.update_memory import update_memory
 from src.tools.delete_memory import delete_memory
 from src.tools.search_memory import search_memory
+from src.tools.list_memory import list_memory
 from src.tools.register_session import register_session
 from src.tools.manage_session import manage_session
 from src.tools.manage_graph import manage_graph
@@ -92,7 +93,7 @@ _TOOLS_COMPACT = [register_session, memory]
 
 _TOOLS_FULL = [
     register_session, write_memory, read_memory, update_memory,
-    delete_memory, search_memory,
+    delete_memory, search_memory, list_memory,
     manage_session, manage_graph, manage_curation, manage_project,
 ]
 

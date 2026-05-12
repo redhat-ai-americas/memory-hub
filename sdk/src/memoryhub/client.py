@@ -618,6 +618,44 @@ class MemoryHubClient:
         )
         return Memory.model_validate(data)
 
+    async def list(
+        self,
+        *,
+        scope: str | None = None,
+        project_id: str | None = None,
+        max_results: int = 100,
+        cursor: str | None = None,
+        include_branches: bool = False,
+        current_only: bool = True,
+    ) -> dict[str, Any]:
+        """Enumerate memories without semantic ranking.
+
+        Returns memories ordered by creation time (newest first). Use for
+        enumeration, cleanup, and admin tooling. For discovery by meaning,
+        use search instead.
+
+        Args:
+            scope: Filter to a specific scope (user, project, etc.).
+            project_id: Limit results to this project.
+            max_results: Maximum results per page (1-200).
+            cursor: Pagination cursor from a previous list response.
+            include_branches: If True, include branch memories.
+            current_only: If True, only current versions.
+        """
+        opts: dict[str, Any] = {
+            "max_results": max_results,
+            "include_branches": include_branches,
+            "current_only": current_only,
+        }
+        if cursor is not None:
+            opts["cursor"] = cursor
+        return await self._call_action(
+            "list",
+            scope=scope,
+            project_id=project_id,
+            options=opts,
+        )
+
     async def write(
         self,
         content: str,
