@@ -107,6 +107,7 @@ The IBM Python Agent Development Kit (ADK) ships a MemoryStore extension that wr
 - **SDK surface used**: `MemoryHubClient` constructor, `search`/`write`/`read`/`update`/`delete`, `WriteResult.curation.reason`, `NotFoundError`.
 - **Authentication**: API key (default) or OAuth 2.1 `client_credentials`.
 - **E2E tests**: gated behind `MEMORYHUB_E2E_URL` and `MEMORYHUB_E2E_API_KEY` repo secrets on `kagenti/adk`; skipped without them.
+- **URL discovery**: The current MCP URL is published at `https://redhat-ai-americas.github.io/memory-hub/discovery.json` via GitHub Pages. When the sandbox cluster rotates, run `scripts/update-discovery.sh --push <new-url>` to update the discovery file. E2E tests can read this endpoint to self-heal after rotation. See `planning/kagenti-adk-e2e-cluster-url-stability.md` for the decision record.
 - **Stability promise**: SDK breaking changes (renamed fields, signature changes, new exceptions on the happy path) need to be coordinated with the kagenti-adk maintainers before release.
 
 ## What's not yet shipped

@@ -1,7 +1,7 @@
 # Cluster URL stability for kagenti-adk E2E
 
-Status: Skeleton — 2026-04-29
-Tracks: (no GitHub issue yet — file when picking up)
+Status: Decided: Option D — 2026-05-12
+Tracks: #209
 Author: @rdwj (drafted with Claude Code Opus 4.7)
 
 ## Why this exists
@@ -16,7 +16,7 @@ That hostname embeds a sandbox cluster ID (`n7pd5`, `sandbox5167`). Sandbox clus
 
 We need to decide how stable this URL needs to be and pick a strategy proportional to that decision. See [`docs/SYSTEMS.md`](../docs/SYSTEMS.md#kagenti-adk) for the full integration profile.
 
-This document is the proposal. **No infrastructure changes in this document.** Implementation is a future session.
+This document is the proposal and decision record.
 
 ## Options
 
@@ -60,12 +60,11 @@ Publish the current URL at a known stable location (e.g., `https://redhat-ai-ame
 
 Option A as the v1 — set expectations clearly. Layer in Option D when the first rotation actually causes pain. Option B/C are over-engineering for one downstream consumer; revisit if a second consumer shows up or if the manual coordination cost gets annoying.
 
-## What needs deciding
+## Decision
 
-- Are we OK with manual coordination on rotation, or is that already too painful?
-- If layering in Option D: where does the discovery file live (GitHub Pages? a static route on the cluster itself? another)?
-- Do we need to coordinate this with @JanPokorny before changing strategies, or can we adopt server-side and have kagenti-adk catch up?
-- Sandbox cluster rotation cadence — how often does it actually happen? Influences how aggressive we need to be.
+Option D was selected. The QuickStart use case (deploying to arbitrary RHPDS or on-premise clusters) means the URL is inherently variable, not just occasionally rotated. A stable discovery endpoint handles this generically. Option A's manual coordination doesn't scale past one downstream consumer.
+
+The discovery file is published via GitHub Pages at `https://redhat-ai-americas.github.io/memory-hub/discovery.json`. The `scripts/update-discovery.sh` script updates the file, commits the change, and optionally pushes to trigger Pages rebuilds.
 
 ## Out of scope
 
