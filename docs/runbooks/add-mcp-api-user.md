@@ -4,6 +4,8 @@ This runbook covers adding a new API key to the `memoryhub-users` ConfigMap so a
 
 If you are looking for OAuth 2.1 `client_credentials` provisioning instead — used by SDK consumers and dashboards — see [`docs/auth/README.md`](../auth/README.md). API keys are the dev-path shim; OAuth is the durable mechanism. Both work today.
 
+> **Prefer adding users to the example template.** If the user is expected to persist across fresh deploys (CI accounts, automation agents), add them to `memory-hub-mcp/deploy/users-configmap.example.yaml` rather than patching the live ConfigMap. The runbook procedure below is for one-off or temporary users.
+
 ## When to use this
 
 - Adding a new API key for an external CI test job (e.g., `kagenti-ci`) that needs to exercise the MCP server end-to-end.

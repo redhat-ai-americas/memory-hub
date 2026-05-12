@@ -27,13 +27,36 @@ data:
           "user_id": "wjackson",
           "name": "Wes Jackson",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
-          "scopes": ["user", "project", "role", "organizational", "enterprise"]
+          "scopes": ["user", "project", "role", "organizational", "enterprise"],
+          "_comment": "primary operator"
         },
         {
           "user_id": "dev-test",
           "name": "Test User",
-          "api_key": "REPLACE-ME-GENERATE-A-SECOND-KEY",
-          "scopes": ["user", "project"]
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "scopes": ["user", "project"],
+          "_comment": "local development and integration testing"
+        },
+        {
+          "user_id": "rdwj-agent-1",
+          "name": "RDWJ Agent 1",
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "scopes": ["user", "project", "role", "organizational", "enterprise"],
+          "_comment": "agent automation slot 1"
+        },
+        {
+          "user_id": "rdwj-agent-2",
+          "name": "RDWJ Agent 2",
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "scopes": ["user", "project", "role", "organizational", "enterprise"],
+          "_comment": "agent automation slot 2"
+        },
+        {
+          "user_id": "kagenti-ci",
+          "name": "Kagenti CI",
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "scopes": ["user", "project"],
+          "_comment": "kagenti-adk E2E test runner (see docs/SYSTEMS.md)"
         }
       ]
     }
