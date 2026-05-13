@@ -124,7 +124,7 @@ ROUTE=$(oc get route memory-hub-mcp --context $CTX -n $NS -o jsonpath='{.spec.ho
 echo "https://${ROUTE}/mcp/"
 ```
 
-Then hit `initialize` with the new bearer token:
+Then hit `register_session` with the new bearer token:
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' \
@@ -132,12 +132,12 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   -H "Authorization: Bearer ${NEW_KEY}" \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"register_session","arguments":{"api_key":"'"${NEW_KEY}"'"}}}'
 ```
 
-Expected: `200`. Anything else means the rollout has not completed, the ConfigMap merge dropped the new entry, or the key was not formatted correctly.
+Expected: `200` with a success response. An invalid key returns an error with `"Invalid API key"` in the response body. A `401` means the rollout has not completed or the ConfigMap merge dropped the new entry.
 
-A wrong/missing key returns `401`; a working key returns `200` and an SSE-style body. The body is not what we are testing here — we just want the HTTP status.
+**Why `register_session` and not `initialize`?** The `initialize` endpoint always returns `200` regardless of the API key — authentication only happens when calling tools like `register_session`. Testing against `initialize` would give operators false confidence that a bad key works.
 
 ### 7. Hand off the key
 
