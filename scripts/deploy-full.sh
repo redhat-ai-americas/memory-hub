@@ -520,13 +520,18 @@ deploy_tile() {
         die "OdhApplication manifest not found: $odh_manifest"
     fi
 
-    info "Applying OdhApplication CR to $RHOAI_NAMESPACE..."
-    if ! oc apply --context "$CONTEXT" -f "$odh_manifest" -n "$RHOAI_NAMESPACE"; then
-        die "Failed to apply OdhApplication manifest."
+    if oc get crd odhapplications.dashboard.opendatahub.io --context "$CONTEXT" &>/dev/null; then
+        info "Applying OdhApplication CR to $RHOAI_NAMESPACE..."
+        if ! oc apply --context "$CONTEXT" -f "$odh_manifest" -n "$RHOAI_NAMESPACE"; then
+            die "Failed to apply OdhApplication manifest."
+        fi
+        echo ""
+        echo -e "  ${GREEN}RHOAI tile applied${RESET}"
+    else
+        warn "OdhApplication CRD not found — skipping dashboard tile (non-blocking)"
+        echo ""
+        echo -e "  ${YELLOW}RHOAI tile skipped (CRD not available)${RESET}"
     fi
-
-    echo ""
-    echo -e "  ${GREEN}RHOAI tile applied${RESET}"
 }
 
 # ---------------------------------------------------------------------------
