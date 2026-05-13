@@ -26,8 +26,8 @@ class TestProfileDefinitions:
     def test_compact_has_2_tools(self):
         assert len(_TOOLS_COMPACT) == 2
 
-    def test_full_has_10_tools(self):
-        assert len(_TOOLS_FULL) == 10
+    def test_full_has_11_tools(self):
+        assert len(_TOOLS_FULL) == 11
 
     def test_minimal_has_4_tools(self):
         assert len(_TOOLS_MINIMAL) == 4
