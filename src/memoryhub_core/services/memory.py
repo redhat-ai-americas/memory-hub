@@ -904,8 +904,7 @@ async def list_memories(
 
     if cursor is not None:
         try:
-            from datetime import datetime, timezone
-            cursor_dt = datetime.fromisoformat(cursor).replace(tzinfo=timezone.utc)
+            cursor_dt = datetime.fromisoformat(cursor).replace(tzinfo=UTC)
             filters.append(MemoryNode.created_at < cursor_dt)
         except (ValueError, TypeError):
             pass
