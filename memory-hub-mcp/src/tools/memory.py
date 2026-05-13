@@ -1,7 +1,7 @@
 """Unified memory tool with action dispatch (#201).
 
-Consolidates all 9 non-auth tools into a single ``memory`` tool with
-19 actions. Each action delegates to the existing tool function, so
+Consolidates all non-auth tools into a single ``memory`` tool with
+20 actions. Each action delegates to the existing tool function, so
 business logic is not duplicated. See planning/mcp-single-tool-schema.md
 for the design rationale.
 """

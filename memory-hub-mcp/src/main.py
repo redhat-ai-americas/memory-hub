@@ -10,7 +10,7 @@ Tool profiles (MEMORYHUB_TOOL_PROFILE env var):
              Action-dispatch with options dict. Best for frontier models
              (Claude, GPT-4) where tool count is the constraint.
 
-  full     — register_session + 9 flat-param tools (10 tools).
+  full     — register_session + 10 flat-param tools (11 tools).
              Each operation is a separate tool with typed parameters.
              Best for mid-range models that need schema discoverability.
 
