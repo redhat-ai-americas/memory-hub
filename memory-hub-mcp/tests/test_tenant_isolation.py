@@ -1102,7 +1102,7 @@ async def test_get_relationships_cross_tenant_returns_not_found():
     )
 
     async def _fake_get_rels(
-        node_id, session, *, tenant_id, relationship_type=None, direction="both"
+        node_id, session, *, tenant_id, relationship_type=None, direction="both", as_of=None
     ):
         return store.get_relationships(node_id, tenant_id)
 
@@ -1201,7 +1201,7 @@ async def test_get_relationships_same_tenant_returns_edges():
     }
 
     async def _fake_get_rels(
-        node_id, session, *, tenant_id, relationship_type=None, direction="both"
+        node_id, session, *, tenant_id, relationship_type=None, direction="both", as_of=None
     ):
         # Same-tenant query: return one edge.
         return [fake_rel]

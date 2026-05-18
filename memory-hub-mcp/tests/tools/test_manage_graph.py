@@ -517,3 +517,116 @@ async def test_get_similar_forwards_tenant_id_to_service():
         f"Expected tenant_id='tenant_a' in get_similar_memories_service kwargs, "
         f"got {similar_kwargs}"
     )
+
+
+# ── PR 1 entity infrastructure tests ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_relationship_rejects_mentions_type():
+    """create_relationship with relationship_type='mentions' raises ToolError
+    because mentions is system-managed."""
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.manage_graph.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch(
+                "src.tools.manage_graph.release_db_session",
+                new_callable=AsyncMock,
+            ),
+            pytest.raises(ToolError, match="system-managed"),
+        ):
+            await manage_graph(
+                action="create_relationship",
+                source_id=str(uuid.uuid4()),
+                target_id=str(uuid.uuid4()),
+                relationship_type="mentions",
+            )
+    finally:
+        auth_mod._current_session = None
+
+
+@pytest.mark.asyncio
+async def test_get_relationships_forwards_as_of():
+    """get_relationships with as_of parameter forwards it as a datetime to the
+    service layer."""
+    from datetime import datetime, timezone
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.manage_graph.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch(
+                "src.tools.manage_graph.release_db_session",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.tools.manage_graph.get_relationships_service",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_service,
+            patch(
+                "src.tools.manage_graph.get_projects_for_user",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "src.tools.manage_graph.get_roles_for_user",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+        ):
+            await manage_graph(
+                action="get_relationships",
+                node_id=str(uuid.uuid4()),
+                as_of="2026-01-15T00:00:00Z",
+            )
+    finally:
+        auth_mod._current_session = None
+
+    _, kwargs = mock_service.call_args
+    as_of_value = kwargs.get("as_of")
+    assert as_of_value is not None
+    assert isinstance(as_of_value, datetime)
+    assert as_of_value.year == 2026
+    assert as_of_value.month == 1
+    assert as_of_value.day == 15
+
+
+@pytest.mark.asyncio
+async def test_get_relationships_rejects_invalid_as_of():
+    """get_relationships with invalid as_of format raises ToolError."""
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with pytest.raises(ToolError, match="Invalid as_of format"):
+            await manage_graph(
+                action="get_relationships",
+                node_id=str(uuid.uuid4()),
+                as_of="not-a-date",
+            )
+    finally:
+        auth_mod._current_session = None

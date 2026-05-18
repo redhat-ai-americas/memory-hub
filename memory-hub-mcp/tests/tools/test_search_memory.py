@@ -1669,3 +1669,61 @@ async def test_graph_boost_weight_forwarded_to_service():
     assert focused_kwargs.get("graph_boost_weight") == 0.7, (
         f"Expected graph_boost_weight=0.7 forwarded, got {focused_kwargs}"
     )
+
+
+# ---------------------------------------------------------------------------
+# PR 1 — entity scope exclusion
+# ---------------------------------------------------------------------------
+
+
+def test_search_excludes_entity_scope_by_default():
+    """When scope is not specified (default), _build_search_filters excludes
+    entity-scoped nodes via a filter condition."""
+    from memoryhub_core.models.memory import MemoryNode
+    from memoryhub_core.services.memory import _build_search_filters
+
+    filters = _build_search_filters(
+        scope=None,
+        owner_id=None,
+        current_only=True,
+        authorized_scopes=None,
+        tenant_id="default",
+    )
+
+    assert filters is not None
+    # The filters list should contain a condition that excludes entity scope.
+    # Check for a filter that compares MemoryNode.scope != "entity"
+    has_entity_exclusion = False
+    for f in filters:
+        # Convert to string and check for the scope != entity pattern
+        clause_str = str(f.compile(compile_kwargs={"literal_binds": True}))
+        if "scope" in clause_str.lower() and "entity" in clause_str.lower() and "!=" in clause_str:
+            has_entity_exclusion = True
+            break
+
+    assert has_entity_exclusion, f"Expected entity scope exclusion in filters, got: {filters}"
+
+
+def test_search_includes_entity_scope_when_explicit():
+    """When scope='entity' is passed explicitly, _build_search_filters matches
+    entity-scoped nodes and does not exclude them."""
+    from memoryhub_core.services.memory import _build_search_filters
+
+    filters = _build_search_filters(
+        scope="entity",
+        owner_id=None,
+        current_only=True,
+        authorized_scopes=None,
+        tenant_id="default",
+    )
+
+    assert filters is not None
+    # When scope="entity" is set, the filter should include a positive match for entity
+    has_entity_match = False
+    for f in filters:
+        clause_str = str(f.compile(compile_kwargs={"literal_binds": True}))
+        if "scope" in clause_str.lower() and "entity" in clause_str.lower() and "=" in clause_str and "!=" not in clause_str:
+            has_entity_match = True
+            break
+
+    assert has_entity_match, f"Expected entity scope match in filters, got: {filters}"
