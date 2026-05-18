@@ -573,6 +573,17 @@ async def search_memory(
             le=1.0,
         ),
     ] = 0.2,
+    entities: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Filter to memories that mention these entity names. "
+                "Entity names are matched case-insensitively against extracted "
+                "entity nodes linked via MENTIONS relationships. "
+                "Composes with all other filters (scope, domain, graph_depth)."
+            ),
+        ),
+    ] = None,
     raw_results: Annotated[
         bool,
         Field(
@@ -759,6 +770,7 @@ async def search_memory(
                 graph_depth=graph_depth,
                 graph_relationship_types=graph_relationship_types,
                 graph_boost_weight=graph_boost_weight,
+                entity_names=entities,
             )
             graph_bundle = bundle
             results = bundle.results
@@ -785,6 +797,7 @@ async def search_memory(
                 campaign_ids=campaign_ids,
                 project_ids=project_ids,
                 role_names=role_names,
+                entity_names=entities,
             )
 
         # Count all matching memories under the same filter set so the agent
@@ -799,6 +812,7 @@ async def search_memory(
             campaign_ids=campaign_ids,
             project_ids=project_ids,
             role_names=role_names,
+            entity_names=entities,
         )
 
         # Apply post-retrieval domain boost only on the non-focus path.
