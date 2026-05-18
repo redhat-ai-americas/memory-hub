@@ -19,6 +19,7 @@ class RelationshipType(StrEnum):
     supersedes = "supersedes"
     conflicts_with = "conflicts_with"
     related_to = "related_to"
+    mentions = "mentions"  # Phase 2: memory -> entity (system-managed)
 
 
 class MemoryScope(StrEnum):
@@ -30,6 +31,7 @@ class MemoryScope(StrEnum):
     ROLE = "role"
     ORGANIZATIONAL = "organizational"
     ENTERPRISE = "enterprise"
+    ENTITY = "entity"  # Phase 2: auto-extracted entity nodes
 
 
 class CampaignStatus(StrEnum):
