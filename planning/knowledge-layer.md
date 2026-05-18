@@ -157,12 +157,16 @@ What this proposal explicitly does NOT do:
 MemoryHub's knowledge layer is the experience-to-assertion pipeline. RetrievalHub is the corpus-to-answer pipeline.
 
 
-## 8. Open Questions
+## 8. Open Questions (Resolved)
 
-1. **Should `content_type` be mutable via `update`, or only via `graduate`?** Recommendation: only via `graduate`. Prevents bypassing the governed graduation path.
+1. **Should `content_type` be mutable via `update`, or only via `graduate`?**
+   **Answer: only via `graduate`.** Direct mutation via `update` bypasses the governed graduation path -- no provenance chain is created, no evidence is recorded, no curator authorization is checked. If an agent can call `update(memory_id, options={content_type: "knowledge"})`, the entire graduation model is advisory. The `update` action should reject changes to `content_type`; the `graduate` action is the sole write path for that field.
 
-2. **Minimum weight floor for knowledge nodes?** Graduated knowledge could auto-set `weight >= 0.85` to ensure it ranks above experiential memories in mixed searches. Or leave weight orthogonal.
+2. **Minimum weight floor for knowledge nodes?**
+   **Answer: leave weight orthogonal.** Weight currently serves as a visibility threshold (full-content vs stub), not a ranking signal in RRF. Adding a floor conflates two signals and creates a hidden coupling between graduation and search visibility. The right mechanism for ranking knowledge higher is question 3 (knowledge boost in RRF), which is explicit, tunable, and composable. Graduation metadata (`metadata_.graduation`) already marks the node distinctly; a curator who wants a graduated fact to rank higher can set weight manually as a separate intentional act.
 
-3. **Knowledge boost in mixed search results?** Add a `knowledge_boost_weight` parameter (similar to `domain_boost_weight` in RRF) that lifts knowledge results when searching all content types.
+3. **Knowledge boost in mixed search results?**
+   **Answer: yes, as a fifth RRF signal.** Add `knowledge_boost_weight` to `search_memories_with_focus`, carved from the remaining budget exactly like `domain_boost_weight` and `graph_boost_weight` already are. Knowledge nodes receive rank 1 (highest); experiential nodes receive a penalty rank. Default `0.0` (disabled) for backward compatibility -- agents opt in by setting it > 0. This composes with all existing signals and requires no changes to `_build_search_filters`.
 
-4. **Naming: `graduate` vs `certify` vs `curate`?** `graduate` is consistent with the language in #235 and the research docs. `certify` implies a stronger guarantee than we intend. `curate` is overloaded (already used for the curation subsystem).
+4. **Naming: `graduate` vs `certify` vs `curate`?**
+   **Answer: `graduate`.** Consistent with the language in #235, the research docs, and this proposal. `certify` implies cryptographic or legal guarantee beyond what we provide. `curate` collides with the existing curation subsystem (`manage_curation` action, `CurationRule` model). `graduate` accurately describes the epistemic transition: a memory has earned a higher trust status through evidence and review, not been rubber-stamped.
