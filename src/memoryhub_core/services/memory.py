@@ -660,6 +660,11 @@ def _build_search_filters(
         filters.append(MemoryNode.is_current.is_(True))
     if scope is not None:
         filters.append(MemoryNode.scope == scope)
+    else:
+        # Entity nodes are infrastructure (extracted entities, not agent-written
+        # memories). Exclude them from normal search unless the caller explicitly
+        # requests scope="entity".
+        filters.append(MemoryNode.scope != "entity")
     if owner_id is not None:
         filters.append(MemoryNode.owner_id == owner_id)
 
