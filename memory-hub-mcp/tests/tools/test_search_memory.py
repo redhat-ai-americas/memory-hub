@@ -1727,3 +1727,70 @@ def test_search_includes_entity_scope_when_explicit():
             break
 
     assert has_entity_match, f"Expected entity scope match in filters, got: {filters}"
+
+
+# ---------------------------------------------------------------------------
+# PR 2 — entity-aware search
+# ---------------------------------------------------------------------------
+
+
+def test_search_memory_has_entities_param():
+    """Structural test: verify search_memory accepts an entities parameter."""
+    sig = inspect.signature(search_memory)
+    params = sig.parameters
+
+    assert "entities" in params
+    assert params["entities"].default is None
+
+
+@pytest.mark.asyncio
+async def test_search_memory_forwards_entities_to_service():
+    """When entities is passed, the tool must forward entity_names to the
+    underlying service layer."""
+    from unittest.mock import MagicMock
+
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:read:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.search_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.search_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.search_memory.get_embedding_service",
+            return_value=fake_embedding_service,
+        ),
+        patch(
+            "src.tools.search_memory.search_memories",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as mock_search,
+        patch(
+            "src.tools.search_memory.count_search_matches",
+            new_callable=AsyncMock,
+            return_value=0,
+        ) as mock_count,
+    ):
+        await search_memory(query="anything", entities=["PostgreSQL"])
+
+    _, search_kwargs = mock_search.call_args
+    assert search_kwargs.get("entity_names") == ["PostgreSQL"], (
+        f"Expected entity_names=['PostgreSQL'] in search_memories kwargs, got {search_kwargs}"
+    )
+    _, count_kwargs = mock_count.call_args
+    assert count_kwargs.get("entity_names") == ["PostgreSQL"], (
+        f"Expected entity_names=['PostgreSQL'] in count_search_matches kwargs, got {count_kwargs}"
+    )

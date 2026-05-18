@@ -33,7 +33,7 @@ _SEARCH_OPTS = frozenset({
     "domain_boost_weight", "include_branches", "mode",
     "max_response_tokens", "raw_results", "weight_threshold",
     "current_only", "owner_id", "graph_depth",
-    "graph_relationship_types", "graph_boost_weight",
+    "graph_relationship_types", "graph_boost_weight", "entities",
 })
 _READ_OPTS = frozenset({
     "include_versions", "history_offset", "history_max_versions", "hydrate",

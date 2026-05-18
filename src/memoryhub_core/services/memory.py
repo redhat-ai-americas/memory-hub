@@ -641,6 +641,7 @@ def _build_search_filters(
     campaign_ids: set[str] | None = None,
     project_ids: set[str] | None = None,
     role_names: set[str] | None = None,
+    entity_names: list[str] | None = None,
 ) -> list | None:
     """Build the SQL filter list shared by search_memories and count_search_matches.
 
@@ -725,6 +726,28 @@ def _build_search_filters(
             # caller with no campaign_ids). No scope matches → no results.
             return None
 
+    if entity_names:
+        from memoryhub_core.models.memory import MemoryRelationship
+        entity_subq = (
+            select(MemoryRelationship.source_id)
+            .join(
+                MemoryNode,
+                and_(
+                    MemoryNode.id == MemoryRelationship.target_id,
+                    MemoryNode.scope == "entity",
+                    func.lower(MemoryNode.content).in_([n.lower() for n in entity_names]),
+                    MemoryNode.tenant_id == tenant_id,
+                    MemoryNode.deleted_at.is_(None),
+                ),
+            )
+            .where(
+                MemoryRelationship.relationship_type == "mentions",
+                MemoryRelationship.valid_until.is_(None),
+                MemoryRelationship.tenant_id == tenant_id,
+            )
+        )
+        filters.append(MemoryNode.id.in_(entity_subq))
+
     return filters
 
 
@@ -739,6 +762,7 @@ async def count_search_matches(
     campaign_ids: set[str] | None = None,
     project_ids: set[str] | None = None,
     role_names: set[str] | None = None,
+    entity_names: list[str] | None = None,
 ) -> int:
     """Count memories matching the same filter set used by search_memories.
 
@@ -756,6 +780,7 @@ async def count_search_matches(
         campaign_ids=campaign_ids,
         project_ids=project_ids,
         role_names=role_names,
+        entity_names=entity_names,
     )
     if filters is None:
         return 0
@@ -778,6 +803,7 @@ async def search_memories(
     campaign_ids: set[str] | None = None,
     project_ids: set[str] | None = None,
     role_names: set[str] | None = None,
+    entity_names: list[str] | None = None,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity.
 
@@ -803,6 +829,7 @@ async def search_memories(
         campaign_ids=campaign_ids,
         project_ids=project_ids,
         role_names=role_names,
+        entity_names=entity_names,
     )
     if filters is None:
         return []
@@ -954,6 +981,7 @@ async def search_memories_with_focus(
     graph_depth: int = 0,
     graph_relationship_types: list[str] | None = None,
     graph_boost_weight: float = 0.2,
+    entity_names: list[str] | None = None,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -1002,6 +1030,7 @@ async def search_memories_with_focus(
             campaign_ids=campaign_ids,
             project_ids=project_ids,
             role_names=role_names,
+            entity_names=entity_names,
         )
         return FocusedSearchResult(results=plain)
 
@@ -1022,6 +1051,7 @@ async def search_memories_with_focus(
         campaign_ids=campaign_ids,
         project_ids=project_ids,
         role_names=role_names,
+        entity_names=entity_names,
     )
     if filters is None:
         return FocusedSearchResult(
