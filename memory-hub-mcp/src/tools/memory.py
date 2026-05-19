@@ -25,7 +25,8 @@ _VALID_ACTIONS = frozenset({
     # Write path
     "write", "update", "delete", "set_focus", "relate",
     "report", "resolve", "set_rule",
-    "create_project", "add_member", "remove_member",
+    "create_project", "add_member", "remove_member", "promote",
+    "checkpoint",
 })
 
 # Per-action option keys accepted for forwarding.
@@ -60,6 +61,8 @@ _SET_RULE_OPTS = frozenset({
     "name", "tier", "action_type", "config", "scope_filter",
     "enabled", "priority",
 })
+_PROMOTE_OPTS = frozenset({"target_scope", "target_scope_id"})
+_CHECKPOINT_OPTS = frozenset({"workflow_name", "state", "scope", "scope_id"})
 
 
 def _require(action: str, name: str, value: Any) -> Any:
@@ -190,6 +193,11 @@ async def memory(
         Add user to project.
       remove_member(project_id, options: {user_id})
         Remove user from project.
+      promote(memory_id, options: {target_scope}, [options: target_scope_id])
+        Promote memory to broader scope. Creates new memory linked via derived_from.
+      checkpoint(options: {workflow_name}, [options: state, scope, scope_id])
+        Durable key-value state for recurring agents. Upsert when state provided,
+        read when only workflow_name given.
 
     Params in () are top-level. {braces} in options = required for that action.
     """
@@ -244,8 +252,12 @@ async def memory(
         return await _dispatch_create_project(project_id, opts, ctx)
     if action == "add_member":
         return await _dispatch_add_member(project_id, opts, ctx)
-    # remove_member (last remaining action)
-    return await _dispatch_remove_member(project_id, opts, ctx)
+    if action == "remove_member":
+        return await _dispatch_remove_member(project_id, opts, ctx)
+    if action == "promote":
+        return await _dispatch_promote(memory_id, project_id, opts, ctx)
+    # checkpoint (last remaining action)
+    return await _dispatch_checkpoint(opts, ctx)
 
 
 # ── Read-path dispatchers ──────────────────────────────────────────────────
@@ -481,3 +493,101 @@ async def _dispatch_remove_member(project_id, opts, ctx):
         action="remove_member", project_name=project_id,
         user_id=opts["user_id"], ctx=ctx,
     )
+
+
+async def _dispatch_checkpoint(opts, ctx):
+    """Dispatch checkpoint action (read or upsert)."""
+    from memoryhub_core.db import get_db_session
+    from memoryhub_core.services.checkpoint import read_checkpoint, upsert_checkpoint
+    from memoryhub_core.services.embeddings import get_embedding_service
+    from src.core.auth import require_session
+
+    _opt_require("checkpoint", "workflow_name", opts)
+    workflow_name = opts["workflow_name"]
+    state = opts.get("state")
+    scope = opts.get("scope", "user")
+    scope_id = opts.get("scope_id")
+
+    session_info = require_session(ctx)
+
+    if state is not None:
+        # Upsert: create or update checkpoint
+        async with get_db_session() as db_session:
+            embedding_service = get_embedding_service()
+            memory, created = await upsert_checkpoint(
+                workflow_name=workflow_name,
+                state=state,
+                session=db_session,
+                embedding_service=embedding_service,
+                tenant_id=session_info.tenant_id,
+                owner_id=session_info.user_id,
+                scope=scope,
+                scope_id=scope_id,
+            )
+        return {
+            "workflow_name": workflow_name,
+            "state": memory.metadata,
+            "created": created,
+            "memory_id": str(memory.id),
+        }
+
+    # Read: retrieve checkpoint state
+    async with get_db_session() as db_session:
+        checkpoint_state = await read_checkpoint(
+            workflow_name=workflow_name,
+            session=db_session,
+            tenant_id=session_info.tenant_id,
+            owner_id=session_info.user_id,
+            scope=scope,
+        )
+    return {
+        "workflow_name": workflow_name,
+        "state": checkpoint_state,
+    }
+
+
+async def _dispatch_promote(memory_id, project_id, opts, ctx):
+    """Dispatch promote action to service layer."""
+    import uuid as uuid_module
+    from src.tools._deps import (
+        get_db_session,
+        get_embedding_service,
+        release_db_session,
+    )
+    from src.core.authz import get_claims_from_context, get_tenant_filter
+    from memoryhub_core.services.promotion import promote_memory
+
+    _require("promote", "memory_id", memory_id)
+    _opt_require("promote", "target_scope", opts)
+
+    claims = get_claims_from_context(ctx)
+    tenant_id = get_tenant_filter(claims)
+    promoted_by = claims["sub"]
+
+    session = await get_db_session()
+    try:
+        embedding_service = get_embedding_service()
+        promoted = await promote_memory(
+            memory_id=uuid_module.UUID(memory_id),
+            target_scope=opts["target_scope"],
+            session=session,
+            embedding_service=embedding_service,
+            tenant_id=tenant_id,
+            promoted_by=promoted_by,
+            target_scope_id=opts.get("target_scope_id"),
+            project_id=project_id,
+        )
+        return {
+            "promoted_memory": {
+                "id": str(promoted.id),
+                "scope": promoted.scope,
+                "scope_id": promoted.scope_id,
+                "content": promoted.content,
+                "weight": promoted.weight,
+                "metadata": promoted.metadata,
+                "created_at": promoted.created_at.isoformat(),
+            },
+            "message": f"Memory promoted from '{promoted.metadata.get('promoted_from', {}).get('source_id', 'unknown')}' to {promoted.scope} scope",
+        }
+    finally:
+        await release_db_session(session)

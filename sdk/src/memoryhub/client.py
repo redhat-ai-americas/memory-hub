@@ -786,6 +786,51 @@ class MemoryHubClient:
         )
         return DeleteResult.model_validate(data)
 
+    async def promote(
+        self,
+        memory_id: str,
+        target_scope: str,
+        *,
+        target_scope_id: str | None = None,
+        project_id: str | None = None,
+    ) -> Memory:
+        """Promote a memory to a broader scope.
+
+        Creates a new memory at the target scope with the same content, weight,
+        and domains as the source. Links back to the source via a derived_from
+        relationship. Promoted memories skip curation since the source already
+        passed curation.
+
+        Args:
+            memory_id: ID of the memory to promote.
+            target_scope: Target scope (project, organizational, enterprise).
+                Must be broader than the source scope.
+            target_scope_id: Scope ID for the target (e.g., project ID for
+                project scope). Required for project/role scopes.
+            project_id: Project context for the promotion.
+
+        Returns:
+            The newly promoted memory.
+
+        Raises:
+            ValueError: Invalid promotion direction (e.g., project -> user).
+            NotFoundError: Source memory does not exist.
+        """
+        opts: dict[str, Any] = {"target_scope": target_scope}
+        if target_scope_id is not None:
+            opts["target_scope_id"] = target_scope_id
+        data = await self._call_action(
+            "promote",
+            memory_id=memory_id,
+            project_id=project_id,
+            options=opts,
+        )
+        # The promote response contains "promoted_memory" wrapper, extract it
+        promoted_data = data.get("promoted_memory")
+        if promoted_data is None:
+            raise MemoryHubError("Promote response missing 'promoted_memory' field")
+        return Memory.model_validate(promoted_data)
+
     # ── Lifecycle ───────────────────────────────────────────────────
 
     async def report_contradiction(
@@ -1125,6 +1170,43 @@ class MemoryHubClient:
         return await self._call_action(
             "focus_history",
             project_id=project,
+            options=opts,
+        )
+
+    async def checkpoint(
+        self,
+        workflow_name: str,
+        *,
+        state: dict[str, Any] | None = None,
+        scope: str = "user",
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Durable key-value checkpoint state for recurring workflow agents.
+
+        When ``state`` is provided, upserts the checkpoint (creates new or
+        updates existing). When ``state`` is None, reads the current checkpoint
+        state.
+
+        Args:
+            workflow_name: Identifier for the workflow (unique per owner+scope).
+            state: State dictionary to persist. If None, reads existing state.
+            scope: Scope for the checkpoint (default: user).
+            project_id: Project identifier when using project scope.
+
+        Returns:
+            Dict with ``workflow_name`` and ``state`` keys. When upserting,
+            also includes ``created`` (bool) and ``memory_id`` (str).
+        """
+        opts: dict[str, Any] = {"workflow_name": workflow_name}
+        if state is not None:
+            opts["state"] = state
+        if scope != "user":
+            opts["scope"] = scope
+        if project_id is not None and scope == "project":
+            opts["scope_id"] = project_id
+
+        return await self._call_action(
+            "checkpoint",
             options=opts,
         )
 
