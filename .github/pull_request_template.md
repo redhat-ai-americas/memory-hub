@@ -82,3 +82,11 @@ Closes #
 - [ ] No committed credentials or cluster-specific URLs
 - [ ] CLAUDE.md / docs updated if behavior or conventions changed
 - [ ] Commit message follows `subsystem: Imperative summary` format
+
+## Release readiness (if this PR touches `sdk/` or `memoryhub-cli/`)
+
+<!-- Skip this section if the PR does not modify files under sdk/ or memoryhub-cli/. -->
+
+- [ ] `pyproject.toml` version matches `__init__.py` `__version__`
+- [ ] `CHANGELOG.md` has an entry for the new version
+- [ ] If breaking: CHANGELOG entry is flagged with `BREAKING` and links the tracking issue

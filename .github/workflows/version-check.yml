@@ -1,0 +1,87 @@
+name: Version Consistency
+
+on:
+  pull_request:
+    paths:
+      - 'sdk/**'
+      - 'memoryhub-cli/**'
+
+jobs:
+  version-check:
+    name: Version Consistency
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version consistency
+        run: |
+          set -e
+
+          # Determine which components changed
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+
+          SDK_CHANGED=false
+          CLI_CHANGED=false
+
+          if echo "$CHANGED_FILES" | grep -q '^sdk/'; then
+            SDK_CHANGED=true
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q '^memoryhub-cli/'; then
+            CLI_CHANGED=true
+          fi
+
+          EXIT_CODE=0
+
+          check_component() {
+            local LABEL="$1" DIR="$2" PKG="$3"
+
+            echo "Checking $LABEL version consistency..."
+
+            if [ ! -f "$DIR/pyproject.toml" ] || [ ! -f "$DIR/src/$PKG/__init__.py" ]; then
+              echo "❌ ERROR: $LABEL version files missing"
+              return 1
+            fi
+
+            PYPROJECT_VERSION=$(grep -E '^version' "$DIR/pyproject.toml" | head -1 | cut -d'"' -f2)
+            INIT_VERSION=$(grep -E '^__version__' "$DIR/src/$PKG/__init__.py" | cut -d'"' -f2)
+
+            if [ -z "$PYPROJECT_VERSION" ] || [ -z "$INIT_VERSION" ]; then
+              echo "❌ ERROR: Could not extract $LABEL version (pyproject=$PYPROJECT_VERSION, __init__=$INIT_VERSION)"
+              return 1
+            fi
+
+            echo "  $DIR/pyproject.toml version: $PYPROJECT_VERSION"
+            echo "  $DIR/src/$PKG/__init__.py __version__: $INIT_VERSION"
+
+            if [ "$PYPROJECT_VERSION" != "$INIT_VERSION" ]; then
+              echo "❌ ERROR: $LABEL versions do not match!"
+              return 1
+            fi
+            echo "✅ $LABEL versions match"
+
+            if [ -f "$DIR/CHANGELOG.md" ] && grep -q "## \[$PYPROJECT_VERSION\]" "$DIR/CHANGELOG.md"; then
+              echo "✅ $LABEL CHANGELOG.md has entry for version $PYPROJECT_VERSION"
+            else
+              echo "⚠️  WARNING: $DIR/CHANGELOG.md missing entry for version $PYPROJECT_VERSION"
+              echo "   Fine for intermediate PRs, but required before release."
+            fi
+            return 0
+          }
+
+          if [ "$SDK_CHANGED" = "true" ]; then
+            check_component "SDK" "sdk" "memoryhub" || EXIT_CODE=1
+          fi
+
+          if [ "$CLI_CHANGED" = "true" ]; then
+            check_component "CLI" "memoryhub-cli" "memoryhub_cli" || EXIT_CODE=1
+          fi
+
+          if [ "$SDK_CHANGED" = "false" ] && [ "$CLI_CHANGED" = "false" ]; then
+            echo "No SDK or CLI files changed, skipping version check."
+          fi
+
+          exit $EXIT_CODE
