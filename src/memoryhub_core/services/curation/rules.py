@@ -189,7 +189,7 @@ async def seed_default_rules(
             trigger="on_write",
             tier="regex",
             config={"pattern_set": "pii"},
-            action="flag",
+            action="block",
             scope_filter=None,
             layer="system",
             owner_id=None,

@@ -170,7 +170,7 @@ System-layer rules that ship with MemoryHub:
 | Name | Tier | Trigger | Action | Override | Notes |
 |---|---|---|---|---|---|
 | `secrets_scan` | regex | on_write | quarantine | yes | AWS keys, GitHub tokens, generic API keys, private key headers, bearer tokens |
-| `pii_scan` | regex | on_write | flag | yes | SSNs, email addresses, phone numbers |
+| `pii_scan` | regex | on_write | block | yes | SSNs, email addresses, phone numbers |
 | `exact_duplicate` | embedding | on_write | reject_with_pointer | no | Cosine similarity > 0.95 within same (owner_id, scope) |
 | `near_duplicate` | embedding | on_write | flag | no | Similarity 0.80 - 0.95, flags in metadata and returns similar_count |
 | `staleness_trigger` | regex | on_contradiction_count | flag | no | When contradiction count reaches threshold (default 5), flag for review |

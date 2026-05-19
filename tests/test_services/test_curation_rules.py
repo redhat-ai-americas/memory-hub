@@ -243,8 +243,10 @@ async def test_pipeline_flags_pii(async_session):
         session=async_session,
     )
 
-    assert result["blocked"] is False
-    assert "pii_scan:email" in result["flags"]
+    assert result["blocked"] is True
+    assert result["reason"] == "pii_scan"
+    assert result["detail"] is not None
+    assert "email" in result["detail"]
 
 
 async def test_pipeline_clean_content(async_session):

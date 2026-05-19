@@ -151,6 +151,10 @@ Because the worker calls the same core authorization and audit code that the MCP
 
 **Emergency override.** A user has adjusted their dedup threshold to 0.99, effectively disabling duplicate detection. The admin discovers this is causing memory sprawl that affects system performance. The admin creates a system-layer embedding rule with `override=true` that enforces a maximum dedup threshold of 0.95. The user's 0.99 threshold is now overridden.
 
+## System Rule: PII Protection
+
+The `pii_scan` system rule enforces strict PII protection at write time with `action=block` and `override=true`. Content containing SSNs, email addresses, and phone numbers is rejected before persisting to the database. This rule cannot be weakened by organizational or user-layer rules, and `force=true` on write operations does not bypass it. PII scanning runs at Tier 1 (regex), which executes before similarity checks and blocks regardless of content value or user intent.
+
 ## Open Questions
 
 - **Rule versioning**: Should rule changes be versioned like memories are (with `isCurrent`, `previous_version_id`, version history)? This would allow rolling back rule changes and auditing the evolution of the rule set over time. The tradeoff is additional schema complexity for a table that changes infrequently.
