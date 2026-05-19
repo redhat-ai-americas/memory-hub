@@ -106,6 +106,14 @@ The preserve-DB variant is the default smoke test after infrastructure changes. 
 - [ ] Golden test (preserve-DB): `scripts/uninstall-full.sh --skip-db --yes && scripts/deploy-full.sh` succeeds
 - [ ] Golden test (full fresh): `scripts/uninstall-full.sh --yes && scripts/deploy-full.sh` succeeds on a new cluster
 
+## Deploy Safety
+
+**Never delegate deploy or uninstall scripts to sub-agents.** `deploy-full.sh` and `uninstall-full.sh` can destroy the database and all stored memories. Run them in the main conversation context where the operator sees each command and can intervene. A terminal-worker sub-agent misinterpreted "run the full deployment" as "clean-slate install" and destroyed the production database (2026-05-19; recovered from backup).
+
+When deploying, always use `deploy-full.sh` directly (it preserves the existing DB by default). The golden test variants (`uninstall --skip-db` or full `uninstall`) are for verification, not routine deploys.
+
+After restoring from backup, verify `alembic_version` matches the actual schema before running `upgrade head`. Backup dumps can have stale version markers that cause migrations to fail on duplicate columns.
+
 ## Testing
 - pytest for all Python testing
 - 80%+ coverage target

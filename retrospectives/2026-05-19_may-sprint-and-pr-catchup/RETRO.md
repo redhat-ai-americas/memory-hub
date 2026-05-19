@@ -51,8 +51,21 @@ Watch list: kagenti/adk PR #231, cluster URL stability (#209).
 - [x] Close corresponding issues (#196, #197, #209, #213, #219, #220, #221)
 - [x] Update #176 memory to reflect milestone met
 - [x] Update NEXT_SESSION.md
-- [ ] Deploy latest to cluster (0.9.0 MCP server with `list` action, entity service, discovery endpoint)
-- [ ] Investigate pre-existing `test_config_regenerate_errors_when_no_yaml` CI failure
+- [x] Deploy latest to cluster (0.9.0 MCP server with `list` action, entity service, discovery endpoint)
+- [x] Investigate pre-existing `test_config_regenerate_errors_when_no_yaml` CI failure (Rich console wrapping; fixed)
+- [x] Restore DB after deploy incident (371 memories, 9 projects recovered)
+- [x] Add kagenti-ci to local users-configmap.yaml (was only ever a manual patch)
+- [x] Stamp alembic version and apply migration 015 after restore
+
+## Deploy Incident
+
+**What happened:** The terminal-worker sub-agent was instructed to "run the full MemoryHub deployment" and interpreted that as a clean-slate install. It ran `uninstall-full.sh` (without `--skip-db`) before `deploy-full.sh`, destroying the `memoryhub-db` namespace, PVC, and all 371 memories. The agent's summary described this as "full namespace cleanup -> fresh deploy" -- it went beyond the instruction.
+
+**Recovery:** Backup from today (864KB, taken automatically by deploy-full.sh before the uninstall) was restored. Alembic version was stamped to 014 (backup had the schema but stale version marker), then migration 015 (entity extraction indexes) applied cleanly. All data recovered: 371 memories, 9 projects, 5 users.
+
+**Root cause:** Sub-agent prompt said "run the full MemoryHub deployment" without explicitly constraining it to in-place redeploy. The agent inferred "full" meant "clean-slate."
+
+**Prevention:** Added to CLAUDE.md: never delegate deploy scripts to sub-agents without explicit `--skip-db` or equivalent guardrails. Deploy scripts that can destroy data should be run in the main conversation context where the operator can see each step.
 
 ## Patterns
 
@@ -60,9 +73,11 @@ Watch list: kagenti/adk PR #231, cluster URL stability (#209).
 - Feedback-driven prioritization. The pivot from planned items to entity/graph work was validated by real user needs. Keep letting #176 users shape the backlog.
 - Parallel review agents for PR batches. Efficient, caught a real bug, kept the session focused.
 - Review sub-agent output before merging. The serviceaccount typo catch is the latest in a long line of catches.
+- Automatic pre-deploy backups. Without the backup, the deploy incident would have been a data loss event.
 
 **Start:**
-- Deploy after merging feature PRs. The `list` action and entity service are merged but not live. Users can't benefit until deployed.
+- Deploy in the main conversation context, not via sub-agents. The blast radius is too high for delegation.
+- After restore, verify alembic_version matches the actual schema before running `upgrade head`. Backup dumps can have stale version markers.
 
 **Stop:**
-- Nothing new. The PR batch pattern was circumstantial (travel), not a habit to break.
+- Delegating destructive-capable scripts (deploy, uninstall) to sub-agents. The "full deploy" misinterpretation destroyed the database. Run these in main context where the operator sees each command.
