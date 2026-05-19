@@ -24,6 +24,7 @@ from rich.table import Table
 
 from memoryhub_cli.admin import admin_app
 from memoryhub_cli.config import get_connection_params, save_config
+from memoryhub_cli.export import export_app
 from memoryhub_cli.output import (
     EXIT_AUTH_ERROR,
     EXIT_CLIENT_ERROR,
@@ -75,6 +76,7 @@ config_app = typer.Typer(
 )
 app.add_typer(config_app, name="config")
 app.add_typer(admin_app, name="admin", help="Manage agents and OAuth clients")
+app.add_typer(export_app, name="export", help="Export memories to external formats")
 
 graph_app = typer.Typer(
     name="graph",
