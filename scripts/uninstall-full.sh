@@ -16,6 +16,7 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 
 DB_NAMESPACE="memoryhub-db"
 MCP_PROJECT="memory-hub-mcp"
@@ -98,11 +99,11 @@ preflight() {
     banner "Preflight"
 
     info "Verifying OpenShift login..."
-    if ! oc whoami &>/dev/null; then
+    if ! oc whoami --context "$CONTEXT" &>/dev/null; then
         die "Not logged in to OpenShift. Run 'oc login' first."
     fi
-    echo "     Logged in as: $(oc whoami)"
-    echo "     Server:       $(oc whoami --show-server)"
+    echo "     Logged in as: $(oc whoami --context "$CONTEXT")"
+    echo "     Server:       $(oc whoami --context "$CONTEXT" --show-server)"
 }
 
 # ---------------------------------------------------------------------------
@@ -168,7 +169,7 @@ backup_before_uninstall() {
     banner "Pre-Uninstall Backup"
 
     # Check if the DB pod is even running — can't back up a dead pod.
-    if ! oc get pod -l "app.kubernetes.io/name=memoryhub-pg" \
+    if ! oc get pod --context "$CONTEXT" -l "app.kubernetes.io/name=memoryhub-pg" \
             -n "$DB_NAMESPACE" &>/dev/null; then
         warn "No PostgreSQL pod found in $DB_NAMESPACE — skipping backup."
         return 0
@@ -206,33 +207,33 @@ remove_tile() {
     fi
 
     info "Removing OdhApplication/memoryhub..."
-    oc delete odhapplication memoryhub \
+    oc delete odhapplication --context "$CONTEXT" memoryhub \
         -n "$RHOAI_NAMESPACE" \
         --ignore-not-found
 
     info "Removing Route/memoryhub-ui..."
-    oc delete route memoryhub-ui \
+    oc delete route --context "$CONTEXT" memoryhub-ui \
         -n "$RHOAI_NAMESPACE" \
         --ignore-not-found
 
     info "Removing Service/memoryhub-ui..."
-    oc delete service memoryhub-ui \
+    oc delete service --context "$CONTEXT" memoryhub-ui \
         -n "$RHOAI_NAMESPACE" \
         --ignore-not-found
 
     info "Removing Endpoints/memoryhub-ui..."
-    oc delete endpoints memoryhub-ui \
+    oc delete endpoints --context "$CONTEXT" memoryhub-ui \
         -n "$RHOAI_NAMESPACE" \
         --ignore-not-found
 
     info "Removing memoryhub entry from odh-enabled-applications-config..."
-    if oc get configmap odh-enabled-applications-config \
+    if oc get configmap --context "$CONTEXT" odh-enabled-applications-config \
             -n "$RHOAI_NAMESPACE" &>/dev/null; then
         # Check if the key exists before attempting removal (oc patch fails if key is absent)
-        if oc get configmap odh-enabled-applications-config \
+        if oc get configmap --context "$CONTEXT" odh-enabled-applications-config \
                 -n "$RHOAI_NAMESPACE" \
                 -o jsonpath='{.data.memoryhub}' 2>/dev/null | grep -q .; then
-            oc patch configmap odh-enabled-applications-config \
+            oc patch configmap --context "$CONTEXT" odh-enabled-applications-config \
                 -n "$RHOAI_NAMESPACE" \
                 --type json \
                 -p '[{"op":"remove","path":"/data/memoryhub"}]'
@@ -254,7 +255,7 @@ remove_ui_namespace() {
     banner "2. UI Namespace ($UI_NAMESPACE)"
 
     info "Deleting namespace $UI_NAMESPACE (--wait=false)..."
-    oc delete namespace "$UI_NAMESPACE" \
+    oc delete namespace --context "$CONTEXT" "$UI_NAMESPACE" \
         --ignore-not-found \
         --wait=false
     warn "Namespace deletion is async; full teardown may take 30-60s."
@@ -272,22 +273,22 @@ remove_legacy_ui() {
     local ns="-n $MCP_PROJECT --ignore-not-found"
 
     info "Removing Deployment/memoryhub-ui..."
-    oc delete deployment memoryhub-ui $ns
+    oc delete deployment --context "$CONTEXT" memoryhub-ui $ns
 
     info "Removing Service/memoryhub-ui..."
-    oc delete service memoryhub-ui $ns
+    oc delete service --context "$CONTEXT" memoryhub-ui $ns
 
     info "Removing Route/memoryhub-ui..."
-    oc delete route memoryhub-ui $ns
+    oc delete route --context "$CONTEXT" memoryhub-ui $ns
 
     info "Removing ImageStream/memoryhub-ui..."
-    oc delete imagestream memoryhub-ui $ns
+    oc delete imagestream --context "$CONTEXT" memoryhub-ui $ns
 
     info "Removing BuildConfig/memoryhub-ui..."
-    oc delete buildconfig memoryhub-ui $ns
+    oc delete buildconfig --context "$CONTEXT" memoryhub-ui $ns
 
     info "Removing ServiceAccount/memoryhub-ui..."
-    oc delete serviceaccount memoryhub-ui $ns
+    oc delete serviceaccount --context "$CONTEXT" memoryhub-ui $ns
 
     echo ""
     echo -e "  ${GREEN}Legacy UI artifacts removed from $MCP_PROJECT${RESET}"
@@ -300,7 +301,7 @@ remove_mcp_namespace() {
     banner "4. MCP Namespace ($MCP_PROJECT)"
 
     info "Deleting namespace $MCP_PROJECT (--wait=false)..."
-    oc delete namespace "$MCP_PROJECT" \
+    oc delete namespace --context "$CONTEXT" "$MCP_PROJECT" \
         --ignore-not-found \
         --wait=false
     warn "Namespace deletion is async; full teardown may take 30-60s."
@@ -316,7 +317,7 @@ remove_auth_namespace() {
     banner "5. Auth Namespace ($AUTH_PROJECT)"
 
     info "Deleting namespace $AUTH_PROJECT (--wait=false)..."
-    oc delete namespace "$AUTH_PROJECT" \
+    oc delete namespace --context "$CONTEXT" "$AUTH_PROJECT" \
         --ignore-not-found \
         --wait=false
     warn "Namespace deletion is async; full teardown may take 30-60s."
@@ -337,7 +338,7 @@ remove_db_namespace() {
     fi
 
     warn "Deleting $DB_NAMESPACE — ALL STORED MEMORIES WILL BE LOST."
-    oc delete namespace "$DB_NAMESPACE" \
+    oc delete namespace --context "$CONTEXT" "$DB_NAMESPACE" \
         --ignore-not-found \
         --wait=false
     warn "Namespace deletion is async; full teardown may take 30-60s."

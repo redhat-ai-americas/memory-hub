@@ -6,6 +6,7 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 
 DB_NAMESPACE="memoryhub-db"
 POD_LABEL="app.kubernetes.io/name=memoryhub-pg"
@@ -99,20 +100,20 @@ preflight() {
     echo "     Dump file: $DUMP_FILE ($(du -h "$DUMP_FILE" | cut -f1))"
 
     info "Verifying OpenShift login..."
-    if ! oc whoami &>/dev/null; then
+    if ! oc whoami --context "$CONTEXT" &>/dev/null; then
         die "Not logged in to OpenShift. Run 'oc login' first."
     fi
-    echo "     Logged in as: $(oc whoami)"
-    echo "     Server:       $(oc whoami --show-server)"
+    echo "     Logged in as: $(oc whoami --context "$CONTEXT")"
+    echo "     Server:       $(oc whoami --context "$CONTEXT" --show-server)"
 
     info "Locating PostgreSQL pod..."
-    PG_POD="$(oc get pod -n "$DB_NAMESPACE" \
+    PG_POD="$(oc get pod --context "$CONTEXT" -n "$DB_NAMESPACE" \
         -l "$POD_LABEL" \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [[ -z "$PG_POD" ]]; then
         die "No pod found in namespace '$DB_NAMESPACE' with label '$POD_LABEL'. Is the DB deployed?"
     fi
-    POD_PHASE="$(oc get pod "$PG_POD" -n "$DB_NAMESPACE" \
+    POD_PHASE="$(oc get pod --context "$CONTEXT" "$PG_POD" -n "$DB_NAMESPACE" \
         -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     if [[ "$POD_PHASE" != "Running" ]]; then
         die "Pod '$PG_POD' is in phase '$POD_PHASE', expected 'Running'."
@@ -120,11 +121,11 @@ preflight() {
     echo "     Pod: $PG_POD (Running)"
 
     info "Reading credentials from secret '$SECRET_NAME'..."
-    PG_USER="$(oc get secret "$SECRET_NAME" -n "$DB_NAMESPACE" \
+    PG_USER="$(oc get secret --context "$CONTEXT" "$SECRET_NAME" -n "$DB_NAMESPACE" \
         -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)"
-    PG_PASSWORD="$(oc get secret "$SECRET_NAME" -n "$DB_NAMESPACE" \
+    PG_PASSWORD="$(oc get secret --context "$CONTEXT" "$SECRET_NAME" -n "$DB_NAMESPACE" \
         -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
-    PG_DB="$(oc get secret "$SECRET_NAME" -n "$DB_NAMESPACE" \
+    PG_DB="$(oc get secret --context "$CONTEXT" "$SECRET_NAME" -n "$DB_NAMESPACE" \
         -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)"
 
     if [[ -z "$PG_USER" || -z "$PG_PASSWORD" || -z "$PG_DB" ]]; then
@@ -168,7 +169,7 @@ restore() {
     banner "Restore"
 
     info "Streaming dump into pod and running pg_restore..."
-    cat "$DUMP_FILE" | oc exec -i "$PG_POD" \
+    cat "$DUMP_FILE" | oc exec --context "$CONTEXT" -i "$PG_POD" \
         -n "$DB_NAMESPACE" \
         -c "$CONTAINER" \
         -- env PGPASSWORD="$PG_PASSWORD" \

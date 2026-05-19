@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 
 DB_NAMESPACE="memoryhub-db"
 MCP_PROJECT="memory-hub-mcp"
@@ -58,31 +59,31 @@ skipped() { echo -e "  ${YELLOW}(skipped)${RESET} $*"; }
 # Idempotent: skips if the target already exists.
 copy_secret() {
     local src_name=$1 src_ns=$2 dst_name=$3 dst_ns=$4
-    if oc get secret "$dst_name" -n "$dst_ns" &>/dev/null; then
+    if oc get secret --context "$CONTEXT" "$dst_name" -n "$dst_ns" &>/dev/null; then
         info "Secret $dst_name already exists in $dst_ns"
         return 0
     fi
     info "Copying Secret $src_name from $src_ns to $dst_ns (as $dst_name)..."
-    oc get secret "$src_name" -n "$src_ns" -o json | \
+    oc get secret --context "$CONTEXT" "$src_name" -n "$src_ns" -o json | \
         python3 -c "
 import json, sys
 s = json.load(sys.stdin)
 s['metadata'] = {'name': '$dst_name', 'namespace': '$dst_ns'}
 s.pop('status', None)
 json.dump(s, sys.stdout)
-" | oc apply -f -
+" | oc apply --context "$CONTEXT" -f -
 }
 
 # Create a Secret with a random hex value if it doesn't already exist.
 # Idempotent: skips if the target already exists.
 ensure_random_secret() {
     local name=$1 ns=$2 key=$3
-    if oc get secret "$name" -n "$ns" &>/dev/null; then
+    if oc get secret --context "$CONTEXT" "$name" -n "$ns" &>/dev/null; then
         info "Secret $name already exists in $ns"
         return 0
     fi
     info "Generating Secret $name in $ns..."
-    oc create secret generic "$name" --from-literal="$key=$(openssl rand -hex 32)" -n "$ns"
+    oc create secret --context "$CONTEXT" generic "$name" --from-literal="$key=$(openssl rand -hex 32)" -n "$ns"
 }
 
 elapsed() {
@@ -165,11 +166,11 @@ preflight() {
     banner "1. Preflight Checks"
 
     info "Verifying OpenShift login..."
-    if ! oc whoami &>/dev/null; then
+    if ! oc whoami --context "$CONTEXT" &>/dev/null; then
         die "Not logged in to OpenShift. Run 'oc login' first."
     fi
-    echo "     Logged in as: $(oc whoami)"
-    echo "     Server:       $(oc whoami --show-server)"
+    echo "     Logged in as: $(oc whoami --context "$CONTEXT")"
+    echo "     Server:       $(oc whoami --context "$CONTEXT" --show-server)"
 
     info "Verifying .venv and alembic..."
     if [ ! -d "$REPO_ROOT/.venv" ]; then
@@ -206,24 +207,24 @@ deploy_postgresql() {
     fi
 
     # Ensure namespace exists before creating the Secret
-    if ! oc get namespace "$DB_NAMESPACE" &>/dev/null; then
+    if ! oc get namespace --context "$CONTEXT" "$DB_NAMESPACE" &>/dev/null; then
         info "Creating namespace $DB_NAMESPACE..."
-        oc create namespace "$DB_NAMESPACE"
+        oc create namespace --context "$CONTEXT" "$DB_NAMESPACE"
     fi
 
     # Ensure DB credentials Secret exists (generate password on first install,
     # preserve on subsequent runs).  The Secret is NOT in the kustomization so
     # re-applying kustomize never overwrites an existing password.
-    if ! oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" &>/dev/null; then
+    if ! oc get secret --context "$CONTEXT" memoryhub-pg-credentials -n "$DB_NAMESPACE" &>/dev/null; then
         local db_pass
         db_pass=$(openssl rand -hex 16)
         info "Generating DB credentials Secret (first install)..."
-        oc create secret generic memoryhub-pg-credentials \
+        oc create secret --context "$CONTEXT" generic memoryhub-pg-credentials \
             --from-literal=POSTGRES_USER=memoryhub \
             --from-literal=POSTGRES_PASSWORD="$db_pass" \
             --from-literal=POSTGRES_DB=memoryhub \
             -n "$DB_NAMESPACE"
-        oc label secret memoryhub-pg-credentials \
+        oc label secret --context "$CONTEXT" memoryhub-pg-credentials \
             app.kubernetes.io/name=memoryhub-pg \
             app.kubernetes.io/part-of=memoryhub \
             app.kubernetes.io/component=database \
@@ -233,25 +234,25 @@ deploy_postgresql() {
     fi
 
     info "Applying kustomize manifests..."
-    oc apply -k "$REPO_ROOT/deploy/postgresql/"
+    oc apply --context "$CONTEXT" -k "$REPO_ROOT/deploy/postgresql/"
 
     info "Granting anyuid SCC to default service account..."
-    # idempotent — oc adm policy exits 0 whether or not the grant was new
-    oc adm policy add-scc-to-user anyuid -z default -n "$DB_NAMESPACE"
+    # idempotent — oc adm policy --context "$CONTEXT" exits 0 whether or not the grant was new
+    oc adm policy --context "$CONTEXT" add-scc-to-user anyuid -z default -n "$DB_NAMESPACE"
 
     # If the pod already existed before the SCC grant, it may be stuck.
     # Check if the pod is in a bad state and delete it so it restarts with the SCC.
     local pod_phase
-    pod_phase=$(oc get pod -n "$DB_NAMESPACE" -l "$DB_POD_LABEL" \
+    pod_phase=$(oc get pod --context "$CONTEXT" -n "$DB_NAMESPACE" -l "$DB_POD_LABEL" \
         -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "")
 
     if [ -n "$pod_phase" ] && [ "$pod_phase" != "Running" ]; then
         warn "PostgreSQL pod is in '$pod_phase' state — deleting so it restarts with updated SCC..."
-        oc delete pod -n "$DB_NAMESPACE" -l "$DB_POD_LABEL" --ignore-not-found
+        oc delete pod --context "$CONTEXT" -n "$DB_NAMESPACE" -l "$DB_POD_LABEL" --ignore-not-found
     fi
 
     info "Waiting for PostgreSQL pod to be ready (timeout: 120s)..."
-    if ! oc wait --for=condition=ready pod -l "$DB_POD_LABEL" \
+    if ! oc wait --context "$CONTEXT" --for=condition=ready pod -l "$DB_POD_LABEL" \
             -n "$DB_NAMESPACE" --timeout=120s; then
         die "PostgreSQL pod did not become ready within 120s. Check: oc describe pod -l $DB_POD_LABEL -n $DB_NAMESPACE"
     fi
@@ -303,7 +304,7 @@ run_migrations() {
     # Auto-read DB password from K8s Secret if not already set
     if [ -z "${MEMORYHUB_DB_PASSWORD:-}" ]; then
         info "Reading DB password from K8s Secret in $DB_NAMESPACE..."
-        MEMORYHUB_DB_PASSWORD=$(oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" \
+        MEMORYHUB_DB_PASSWORD=$(oc get secret --context "$CONTEXT" memoryhub-pg-credentials -n "$DB_NAMESPACE" \
             -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
         export MEMORYHUB_DB_PASSWORD
     fi
@@ -330,26 +331,26 @@ deploy_infra() {
 
     # Ensure MCP namespace exists (MCP deploy script also does this, but we
     # need it now for MinIO/Valkey which must be ready before MCP starts)
-    if ! oc get namespace "$MCP_PROJECT" &>/dev/null; then
+    if ! oc get namespace --context "$CONTEXT" "$MCP_PROJECT" &>/dev/null; then
         info "Creating namespace $MCP_PROJECT..."
-        oc create namespace "$MCP_PROJECT"
+        oc create namespace --context "$CONTEXT" "$MCP_PROJECT"
     fi
 
     info "Deploying MinIO..."
-    oc apply -k "$REPO_ROOT/deploy/minio/" -n "$MCP_PROJECT"
-    oc adm policy add-scc-to-user anyuid -z memoryhub-minio -n "$MCP_PROJECT"
+    oc apply --context "$CONTEXT" -k "$REPO_ROOT/deploy/minio/" -n "$MCP_PROJECT"
+    oc adm policy --context "$CONTEXT" add-scc-to-user anyuid -z memoryhub-minio -n "$MCP_PROJECT"
 
     info "Deploying Valkey..."
-    oc apply -k "$REPO_ROOT/deploy/valkey/" -n "$MCP_PROJECT"
-    oc adm policy add-scc-to-user anyuid -z memoryhub-valkey -n "$MCP_PROJECT"
+    oc apply --context "$CONTEXT" -k "$REPO_ROOT/deploy/valkey/" -n "$MCP_PROJECT"
+    oc adm policy --context "$CONTEXT" add-scc-to-user anyuid -z memoryhub-valkey -n "$MCP_PROJECT"
 
     info "Waiting for MinIO rollout..."
-    if ! oc rollout status deployment/memoryhub-minio -n "$MCP_PROJECT" --timeout=120s; then
+    if ! oc rollout --context "$CONTEXT" status deployment/memoryhub-minio -n "$MCP_PROJECT" --timeout=120s; then
         die "MinIO did not become ready. Check: oc describe deployment/memoryhub-minio -n $MCP_PROJECT"
     fi
 
     info "Waiting for Valkey rollout..."
-    if ! oc rollout status deployment/memoryhub-valkey -n "$MCP_PROJECT" --timeout=120s; then
+    if ! oc rollout --context "$CONTEXT" status deployment/memoryhub-valkey -n "$MCP_PROJECT" --timeout=120s; then
         die "Valkey did not become ready. Check: oc describe deployment/memoryhub-valkey -n $MCP_PROJECT"
     fi
 
@@ -385,9 +386,9 @@ prepare_auth_infra() {
 
     banner "4b. Auth Infrastructure"
 
-    if ! oc get namespace "$AUTH_PROJECT" &>/dev/null; then
+    if ! oc get namespace --context "$CONTEXT" "$AUTH_PROJECT" &>/dev/null; then
         info "Creating namespace $AUTH_PROJECT..."
-        oc create namespace "$AUTH_PROJECT"
+        oc create namespace --context "$CONTEXT" "$AUTH_PROJECT"
     fi
 
     copy_secret memoryhub-pg-credentials "$DB_NAMESPACE" memoryhub-pg-credentials "$AUTH_PROJECT"
@@ -427,34 +428,34 @@ prepare_ui_infra() {
 
     banner "5b. UI Infrastructure"
 
-    if ! oc get namespace "$UI_NAMESPACE" &>/dev/null; then
+    if ! oc get namespace --context "$CONTEXT" "$UI_NAMESPACE" &>/dev/null; then
         info "Creating namespace $UI_NAMESPACE..."
-        oc create namespace "$UI_NAMESPACE"
+        oc create namespace --context "$CONTEXT" "$UI_NAMESPACE"
     fi
 
     # ServiceAccount for oauth-proxy sidecar
     info "Applying UI ServiceAccount..."
-    oc apply -f "$REPO_ROOT/memoryhub-ui/openshift/oauth-proxy-sa.yaml" -n "$UI_NAMESPACE"
+    oc apply --context "$CONTEXT" -f "$REPO_ROOT/memoryhub-ui/openshift/oauth-proxy-sa.yaml" -n "$UI_NAMESPACE"
 
     # DB credentials for the UI BFF — must use MEMORYHUB_DB_* key names
     # (the UI's Pydantic settings uses env_prefix="MEMORYHUB_"). Cannot use
     # copy_secret here because the source Secret has POSTGRES_* keys.
     info "Creating/updating memoryhub-db-credentials in $UI_NAMESPACE..."
     local ui_db_pass
-    ui_db_pass=$(oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" \
+    ui_db_pass=$(oc get secret --context "$CONTEXT" memoryhub-pg-credentials -n "$DB_NAMESPACE" \
         -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
-    oc create secret generic memoryhub-db-credentials \
+    oc create secret --context "$CONTEXT" generic memoryhub-db-credentials \
         --from-literal=MEMORYHUB_DB_HOST=memoryhub-pg.memoryhub-db.svc.cluster.local \
         --from-literal=MEMORYHUB_DB_PORT=5432 \
         --from-literal=MEMORYHUB_DB_NAME=memoryhub \
         --from-literal=MEMORYHUB_DB_USER=memoryhub \
         --from-literal=MEMORYHUB_DB_PASSWORD="$ui_db_pass" \
-        --dry-run=client -o json | oc apply -f - -n "$UI_NAMESPACE"
+        --dry-run=client -o json | oc apply --context "$CONTEXT" -f - -n "$UI_NAMESPACE"
 
     # OAuth proxy session secret (must be exactly 32 bytes, key must be "session-secret")
-    if ! oc get secret memoryhub-ui-proxy -n "$UI_NAMESPACE" &>/dev/null; then
+    if ! oc get secret --context "$CONTEXT" memoryhub-ui-proxy -n "$UI_NAMESPACE" &>/dev/null; then
         info "Generating OAuth proxy session secret..."
-        oc create secret generic memoryhub-ui-proxy \
+        oc create secret --context "$CONTEXT" generic memoryhub-ui-proxy \
             --from-literal="session-secret=$(openssl rand -base64 32 | head -c 32)" \
             -n "$UI_NAMESPACE"
     else
@@ -463,14 +464,14 @@ prepare_ui_infra() {
 
     # Admin key for the UI BFF — copy from auth service's secret, remapping
     # the key name to match the UI's MEMORYHUB_ env prefix.
-    if oc get secret auth-admin-key -n "$AUTH_PROJECT" &>/dev/null; then
+    if oc get secret --context "$CONTEXT" auth-admin-key -n "$AUTH_PROJECT" &>/dev/null; then
         info "Creating/updating memoryhub-ui-admin-key in $UI_NAMESPACE..."
         local admin_key_val
-        admin_key_val=$(oc get secret auth-admin-key -n "$AUTH_PROJECT" \
+        admin_key_val=$(oc get secret --context "$CONTEXT" auth-admin-key -n "$AUTH_PROJECT" \
             -o jsonpath='{.data.AUTH_ADMIN_KEY}' | base64 -d)
-        oc create secret generic memoryhub-ui-admin-key \
+        oc create secret --context "$CONTEXT" generic memoryhub-ui-admin-key \
             --from-literal=MEMORYHUB_ADMIN_KEY="$admin_key_val" \
-            --dry-run=client -o json | oc apply -f - -n "$UI_NAMESPACE"
+            --dry-run=client -o json | oc apply --context "$CONTEXT" -f - -n "$UI_NAMESPACE"
     else
         warn "auth-admin-key not found in $AUTH_PROJECT — skipping memoryhub-ui-admin-key (deploy auth first or re-run without --skip-auth)"
     fi
@@ -519,13 +520,18 @@ deploy_tile() {
         die "OdhApplication manifest not found: $odh_manifest"
     fi
 
-    info "Applying OdhApplication CR to $RHOAI_NAMESPACE..."
-    if ! oc apply -f "$odh_manifest" -n "$RHOAI_NAMESPACE"; then
-        die "Failed to apply OdhApplication manifest."
+    if oc get crd odhapplications.dashboard.opendatahub.io --context "$CONTEXT" &>/dev/null; then
+        info "Applying OdhApplication CR to $RHOAI_NAMESPACE..."
+        if ! oc apply --context "$CONTEXT" -f "$odh_manifest" -n "$RHOAI_NAMESPACE"; then
+            die "Failed to apply OdhApplication manifest."
+        fi
+        echo ""
+        echo -e "  ${GREEN}RHOAI tile applied${RESET}"
+    else
+        warn "OdhApplication CRD not found — skipping dashboard tile (non-blocking)"
+        echo ""
+        echo -e "  ${YELLOW}RHOAI tile skipped (CRD not available)${RESET}"
     fi
-
-    echo ""
-    echo -e "  ${GREEN}RHOAI tile applied${RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -535,17 +541,17 @@ print_summary() {
     banner "Deployment Summary"
 
     local cluster_url current_user
-    cluster_url=$(oc whoami --show-server 2>/dev/null || echo "(unavailable)")
-    current_user=$(oc whoami 2>/dev/null || echo "(unavailable)")
+    cluster_url=$(oc whoami --context "$CONTEXT" --show-server 2>/dev/null || echo "(unavailable)")
+    current_user=$(oc whoami --context "$CONTEXT" 2>/dev/null || echo "(unavailable)")
 
     local ui_route mcp_route auth_route rhoai_route
-    ui_route=$(oc get route memoryhub-ui -n "$UI_NAMESPACE" \
+    ui_route=$(oc get route --context "$CONTEXT" memoryhub-ui -n "$UI_NAMESPACE" \
         -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    mcp_route=$(oc get route memory-hub-mcp -n "$MCP_PROJECT" \
+    mcp_route=$(oc get route --context "$CONTEXT" memory-hub-mcp -n "$MCP_PROJECT" \
         -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    auth_route=$(oc get route auth-server -n "$AUTH_PROJECT" \
+    auth_route=$(oc get route --context "$CONTEXT" auth-server -n "$AUTH_PROJECT" \
         -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    rhoai_route=$(oc get route rhods-dashboard -n "$RHOAI_NAMESPACE" \
+    rhoai_route=$(oc get route --context "$CONTEXT" rhods-dashboard -n "$RHOAI_NAMESPACE" \
         -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 
     echo ""
@@ -556,25 +562,25 @@ print_summary() {
     if [ -n "$ui_route" ]; then
         printf "    %-24s %s\n" "UI:" "https://${ui_route}"
     else
-        printf "    %-24s %s\n" "UI:" "(route not found — check: oc get route memoryhub-ui -n $UI_NAMESPACE)"
+        printf "    %-24s %s\n" "UI:" "(route not found — check: oc get route --context "$CONTEXT" memoryhub-ui -n $UI_NAMESPACE)"
     fi
 
     if [ -n "$mcp_route" ]; then
         printf "    %-24s %s\n" "MCP server:" "https://${mcp_route}/mcp/"
     else
-        printf "    %-24s %s\n" "MCP server:" "(route not found — check: oc get route -n $MCP_PROJECT)"
+        printf "    %-24s %s\n" "MCP server:" "(route not found — check: oc get route --context "$CONTEXT" -n $MCP_PROJECT)"
     fi
 
     if [ -n "$auth_route" ]; then
         printf "    %-24s %s\n" "Auth server:" "https://${auth_route}"
     else
-        printf "    %-24s %s\n" "Auth server:" "(route not found — check: oc get route auth-server -n $AUTH_PROJECT)"
+        printf "    %-24s %s\n" "Auth server:" "(route not found — check: oc get route --context "$CONTEXT" auth-server -n $AUTH_PROJECT)"
     fi
 
     if [ -n "$rhoai_route" ]; then
         printf "    %-24s %s\n" "RHOAI dashboard:" "https://${rhoai_route}"
     else
-        printf "    %-24s %s\n" "RHOAI dashboard:" "(route not found — check: oc get route rhods-dashboard -n $RHOAI_NAMESPACE)"
+        printf "    %-24s %s\n" "RHOAI dashboard:" "(route not found — check: oc get route --context "$CONTEXT" rhods-dashboard -n $RHOAI_NAMESPACE)"
     fi
 
     echo ""
