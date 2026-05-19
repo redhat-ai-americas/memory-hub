@@ -499,7 +499,7 @@ async def _dispatch_checkpoint(opts, ctx):
     """Dispatch checkpoint action (read or upsert)."""
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
     from memoryhub_core.services.checkpoint import read_checkpoint, upsert_checkpoint
-    from src.core.auth import require_session
+    from src.core.authz import get_claims_from_context, get_tenant_filter
 
     _opt_require("checkpoint", "workflow_name", opts)
     workflow_name = opts["workflow_name"]
@@ -507,7 +507,9 @@ async def _dispatch_checkpoint(opts, ctx):
     scope = opts.get("scope", "user")
     scope_id = opts.get("scope_id")
 
-    session_info = require_session(ctx)
+    claims = get_claims_from_context()
+    tenant_id = get_tenant_filter(claims)
+    owner_id = claims["sub"]
 
     session, gen = await get_db_session()
     try:
@@ -518,8 +520,8 @@ async def _dispatch_checkpoint(opts, ctx):
                 state=state,
                 session=session,
                 embedding_service=embedding_service,
-                tenant_id=session_info.tenant_id,
-                owner_id=session_info.user_id,
+                tenant_id=tenant_id,
+                owner_id=owner_id,
                 scope=scope,
                 scope_id=scope_id,
             )
@@ -533,8 +535,8 @@ async def _dispatch_checkpoint(opts, ctx):
         checkpoint_state = await read_checkpoint(
             workflow_name=workflow_name,
             session=session,
-            tenant_id=session_info.tenant_id,
-            owner_id=session_info.user_id,
+            tenant_id=tenant_id,
+            owner_id=owner_id,
             scope=scope,
         )
         return {
