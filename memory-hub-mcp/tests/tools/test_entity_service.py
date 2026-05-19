@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
-from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, RelationshipRead
+from memoryhub_core.models.schemas import MemoryNodeRead, RelationshipRead
 from memoryhub_core.services.entity import (
     create_mentions_relationship,
     find_entities_by_names,

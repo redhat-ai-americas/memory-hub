@@ -1679,7 +1679,6 @@ async def test_graph_boost_weight_forwarded_to_service():
 def test_search_excludes_entity_scope_by_default():
     """When scope is not specified (default), _build_search_filters excludes
     entity-scoped nodes via a filter condition."""
-    from memoryhub_core.models.memory import MemoryNode
     from memoryhub_core.services.memory import _build_search_filters
 
     filters = _build_search_filters(

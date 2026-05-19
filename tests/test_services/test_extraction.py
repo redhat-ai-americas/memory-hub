@@ -8,7 +8,6 @@ import pytest
 
 from memoryhub_core.services.embeddings import MockEmbeddingService
 from memoryhub_core.services.extraction import (
-    _SPACY_LABEL_MAP,
     extract_entities_from_memory,
     run_spacy_ner,
 )
@@ -99,8 +98,9 @@ async def test_extract_entities_creates_nodes_and_edges(async_session):
     owner_id = "test-user"
 
     # Create a source memory node to reference
+    from datetime import UTC, datetime
+
     from memoryhub_core.models.memory import MemoryNode
-    from datetime import datetime, UTC
 
     now = datetime.now(UTC)
     source = MemoryNode(
@@ -174,9 +174,11 @@ async def test_extract_entities_deduplicates_across_memories(async_session):
     tenant_id = "test-tenant"
     owner_id = "test-user"
 
-    from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
-    from datetime import datetime, UTC
+    from datetime import UTC, datetime
+
     from sqlalchemy import select
+
+    from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 
     now = datetime.now(UTC)
     mem_ids = [uuid.uuid4(), uuid.uuid4()]
@@ -230,8 +232,9 @@ async def test_extract_entities_handles_no_entities(async_session):
     embedding_service = MockEmbeddingService()
     memory_id = uuid.uuid4()
 
+    from datetime import UTC, datetime
+
     from memoryhub_core.models.memory import MemoryNode
-    from datetime import datetime, UTC
 
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
@@ -272,8 +275,9 @@ async def test_extract_entities_survives_individual_failure(async_session):
     embedding_service = MockEmbeddingService()
     memory_id = uuid.uuid4()
 
+    from datetime import UTC, datetime
+
     from memoryhub_core.models.memory import MemoryNode
-    from datetime import datetime, UTC
 
     now = datetime.now(UTC)
     async_session.add(MemoryNode(

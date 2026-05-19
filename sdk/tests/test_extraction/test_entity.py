@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from memoryhub.extraction.extractors.entity import EntityExtractor
-from memoryhub.extraction.models import TraceEvent, TraceEventType
+from memoryhub.extraction.models import TraceEvent
 
 
 @pytest.mark.asyncio

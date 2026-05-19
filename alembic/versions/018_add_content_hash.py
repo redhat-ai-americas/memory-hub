@@ -5,8 +5,9 @@ Revises: 017_add_content_type
 Create Date: 2026-05-19
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "018_add_content_hash"
 down_revision = "017_add_content_type"

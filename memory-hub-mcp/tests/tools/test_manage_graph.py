@@ -560,7 +560,7 @@ async def test_create_relationship_rejects_mentions_type():
 async def test_get_relationships_forwards_as_of():
     """get_relationships with as_of parameter forwards it as a datetime to the
     service layer."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     mock_session = AsyncMock()
     mock_gen = AsyncMock()

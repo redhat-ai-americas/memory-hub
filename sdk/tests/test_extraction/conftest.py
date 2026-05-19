@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, UTC
 from unittest.mock import AsyncMock
 
 import pytest

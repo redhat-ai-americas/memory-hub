@@ -5,8 +5,9 @@ Revises: 016_escalate_pii_to_block
 Create Date: 2026-05-19
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "017_add_content_type"
 down_revision = "016_escalate_pii_to_block"

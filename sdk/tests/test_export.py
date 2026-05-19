@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
-from memoryhub.export import _memory_to_markdown, _generate_obsidian_config
+from memoryhub.export import _generate_obsidian_config, _memory_to_markdown
 
 
 def test_memory_to_markdown_basic():

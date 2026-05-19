@@ -230,7 +230,7 @@ class TestGraduateDispatch:
         ):
             mock_graduate.return_value = graduated_memory
 
-            result = await memory(
+            await memory(
                 action="graduate",
                 memory_id=str(source_id),
                 options={

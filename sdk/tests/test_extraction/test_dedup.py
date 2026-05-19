@@ -7,9 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from memoryhub.extraction.dedup import DedupFilter
-from memoryhub.extraction.models import CandidateMemory, TraceEvent
+from memoryhub.extraction.models import CandidateMemory
 from memoryhub.models import Memory, SearchResult
-
 
 # ── Duplicate detection ──────────────────────────────────────────────────────
 

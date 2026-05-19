@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from memoryhub.extraction.extractors.decision import DecisionTraceExtractor
-from memoryhub.extraction.models import TraceEvent, TraceEventType
+from memoryhub.extraction.models import TraceEvent
 
 
 @pytest.mark.asyncio

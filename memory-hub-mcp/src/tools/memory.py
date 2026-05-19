@@ -640,7 +640,7 @@ async def _dispatch_graduate(memory_id, project_id, opts, ctx):
                 "metadata": graduated.metadata,
                 "created_at": graduated.created_at.isoformat(),
             },
-            "message": f"Memory graduated from experiential to knowledge",
+            "message": "Memory graduated from experiential to knowledge",
         }
     finally:
         await release_db_session(gen)

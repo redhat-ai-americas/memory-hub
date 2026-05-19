@@ -9,17 +9,16 @@ from pathlib import Path
 
 # Import SDK components
 from memoryhub import MemoryHubClient
+from memoryhub.export import export_obsidian
 from memoryhub.extraction import (
-    ExtractionPipeline,
-    TraceEvent,
-    TraceEventType,
     DecisionTraceExtractor,
     EntityExtractor,
+    ExtractionPipeline,
     PreferenceExtractor,
     RelationshipExtractor,
+    TraceEvent,
+    TraceEventType,
 )
-from memoryhub.export import export_obsidian
-
 
 # Test configuration
 MCP_URL = "https://memory-hub-mcp-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/"
@@ -94,7 +93,8 @@ async def run_tests():
                 if found:
                     print(f"✅ Test 3: search - found memory in {len(search_result.results)} results")
                 else:
-                    print(f"✅ Test 3: search - returned {len(search_result.results)} results (new memory not indexed yet -- compilation cache)")
+                    count = len(search_result.results)
+                    print(f"✅ Test 3: search - returned {count} results (not indexed yet -- compilation cache)")
                 passed += 1
             except Exception as e:
                 print(f"❌ Test 3: search - {e}")
@@ -107,7 +107,7 @@ async def run_tests():
                     print(f"✅ Test 4: read - content: {memory.content[:50]}...")
                     passed += 1
                 else:
-                    print(f"❌ Test 4: read - wrong memory returned")
+                    print("❌ Test 4: read - wrong memory returned")
                     failed += 1
             except Exception as e:
                 print(f"❌ Test 4: read - {e}")
@@ -144,10 +144,10 @@ async def run_tests():
                     scope="user",
                 )
                 if checkpoint_read.get("state", {}).get("memory_id") == memory_id:
-                    print(f"✅ Test 6b: checkpoint read - state matches")
+                    print("✅ Test 6b: checkpoint read - state matches")
                     passed += 1
                 else:
-                    print(f"❌ Test 6b: checkpoint read - state mismatch")
+                    print("❌ Test 6b: checkpoint read - state mismatch")
                     failed += 1
             except Exception as e:
                 print(f"❌ Test 6: checkpoint - {e}")
@@ -214,7 +214,7 @@ async def run_tests():
                     print(f"✅ Test 9: extraction - extracted {candidate_count} candidates")
                     passed += 1
                 else:
-                    print(f"❌ Test 9: extraction - no candidates extracted")
+                    print("❌ Test 9: extraction - no candidates extracted")
                     failed += 1
             except Exception as e:
                 print(f"❌ Test 9: extraction - {e}")

@@ -11,7 +11,6 @@ from memoryhub.extraction.models import CandidateMemory, ExtractionResult, Trace
 from memoryhub.extraction.pipeline import ExtractionPipeline
 from memoryhub.models import CurationInfo, Memory, SearchResult, WriteResult
 
-
 # ── Mock Extractor ───────────────────────────────────────────────────────────
 
 
@@ -432,7 +431,7 @@ async def test_pipeline_uses_configured_scope(mock_client, sample_events):
     pipeline = ExtractionPipeline(
         mock_client, extractors=[extractor], scope="project", project_id="test-project"
     )
-    result = await pipeline.observe(event)
+    await pipeline.observe(event)
 
     # Check that write was called with project scope
     call_kwargs = mock_client.write.call_args[1]
@@ -454,7 +453,7 @@ async def test_pipeline_uses_configured_domains(mock_client, sample_events):
     pipeline = ExtractionPipeline(
         mock_client, extractors=[extractor], domains=["architecture"]
     )
-    result = await pipeline.observe(event)
+    await pipeline.observe(event)
 
     # Check that write was called with configured domains
     call_kwargs = mock_client.write.call_args[1]
