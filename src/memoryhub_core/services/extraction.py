@@ -21,7 +21,10 @@ from memoryhub_core.services.entity import (
 
 logger = logging.getLogger(__name__)
 
-# spaCy label -> POLE+O type mapping.  Labels not in this map are skipped.
+# spaCy label -> POLE+O type mapping.  Unmapped labels (DATE, TIME, MONEY,
+# PERCENT, QUANTITY, ORDINAL, CARDINAL, NORP, PRODUCT, WORK_OF_ART, LAW,
+# LANGUAGE) are skipped -- they don't map to the POLE+O entity model.
+# Stage 2 (GLiNER2) will handle OBJECT entities not covered by spaCy.
 _SPACY_LABEL_MAP: dict[str, str] = {
     "PERSON": "person",
     "ORG": "organization",
