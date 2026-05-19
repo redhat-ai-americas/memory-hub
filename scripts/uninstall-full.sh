@@ -288,7 +288,7 @@ remove_legacy_ui() {
     oc delete buildconfig --context "$CONTEXT" memoryhub-ui $ns
 
     info "Removing ServiceAccount/memoryhub-ui..."
-    oc delete service --context "$CONTEXT"account memoryhub-ui $ns
+    oc delete serviceaccount --context "$CONTEXT" memoryhub-ui $ns
 
     echo ""
     echo -e "  ${GREEN}Legacy UI artifacts removed from $MCP_PROJECT${RESET}"
