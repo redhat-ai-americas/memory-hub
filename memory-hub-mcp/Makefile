@@ -7,6 +7,7 @@ PYTHON ?= python3
 # The OpenShift namespace is hardcoded in deploy/deploy.sh on purpose.
 # See the comment in that script for the history.
 NAMESPACE := memory-hub-mcp
+MEMORYHUB_CONTEXT ?= mcp-rhoai
 
 # Default target
 help:
@@ -55,8 +56,8 @@ deploy:
 # Clean up OpenShift deployment
 clean:
 	@echo "Cleaning up namespace: $(NAMESPACE)"
-	@oc delete -f deploy/openshift.yaml -n $(NAMESPACE) --ignore-not-found=true || echo "Not deployed or already cleaned"
-	@oc delete -f deploy/users-configmap.yaml -n $(NAMESPACE) --ignore-not-found=true || true
+	@oc delete --context $(MEMORYHUB_CONTEXT) -f deploy/openshift.yaml -n $(NAMESPACE) --ignore-not-found=true || echo "Not deployed or already cleaned"
+	@oc delete --context $(MEMORYHUB_CONTEXT) -f deploy/users-configmap.yaml -n $(NAMESPACE) --ignore-not-found=true || true
 
 # Development shortcuts
 dev: run-local

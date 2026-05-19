@@ -6,6 +6,7 @@
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 QUIET=false
 
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 TARGET_NAMESPACES=(memory-hub-mcp memoryhub-auth memoryhub-db memoryhub-ui)
 
 # ---------------------------------------------------------------------------
@@ -84,9 +85,9 @@ fi
 
 # 3. Logged into a cluster
 info "Checking OpenShift login (oc whoami)..."
-if oc whoami &>/dev/null; then
-    CURRENT_USER="$(oc whoami)"
-    CURRENT_SERVER="$(oc whoami --show-server 2>/dev/null || echo 'unknown')"
+if oc whoami --context "$CONTEXT" &>/dev/null; then
+    CURRENT_USER="$(oc whoami --context "$CONTEXT")"
+    CURRENT_SERVER="$(oc whoami --context "$CONTEXT" --show-server 2>/dev/null || echo 'unknown')"
     pass "Logged in as ${CURRENT_USER} on ${CURRENT_SERVER}"
 else
     fail "Not logged into an OpenShift cluster. Run 'oc login <cluster-url>' first."
@@ -105,7 +106,7 @@ fi
 
 # 4. Can reach the cluster API
 info "Checking cluster API reachability (oc get --raw /version)..."
-if oc get --raw /version &>/dev/null; then
+if oc get --context "$CONTEXT" --raw /version &>/dev/null; then
     pass "Cluster API reachable"
 else
     fail "Could not reach cluster API. Check your network connection and cluster health."
@@ -114,7 +115,7 @@ fi
 
 # 5. Cluster-admin (can create namespaces)
 info "Checking cluster-admin privileges (can-i create namespaces)..."
-CAN_CREATE_NS="$(oc auth can-i create namespaces 2>/dev/null || echo 'no')"
+CAN_CREATE_NS="$(oc auth can-i --context "$CONTEXT" create namespaces 2>/dev/null || echo 'no')"
 if [ "$CAN_CREATE_NS" = "yes" ]; then
     pass "cluster-admin confirmed"
 else
@@ -124,7 +125,7 @@ fi
 
 # 6. RHOAI installed
 info "Checking for Red Hat OpenShift AI (namespace redhat-ods-applications)..."
-if oc get namespace redhat-ods-applications &>/dev/null; then
+if oc get namespace --context "$CONTEXT" redhat-ods-applications &>/dev/null; then
     pass "redhat-ods-applications namespace found — RHOAI is installed"
 else
     fail "Namespace 'redhat-ods-applications' not found. MemoryHub expects Red Hat OpenShift AI to be installed. See https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed for installation."
@@ -133,7 +134,7 @@ fi
 
 # 7. Default storage class exists
 info "Checking for a default StorageClass..."
-DEFAULT_SC="$(oc get storageclass -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}' 2>/dev/null \
+DEFAULT_SC="$(oc get storageclass --context "$CONTEXT" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}' 2>/dev/null \
     | awk -F'\t' '$2 == "true" {print $1}')"
 if [ -n "$DEFAULT_SC" ]; then
     pass "Default StorageClass: ${DEFAULT_SC}"
@@ -146,9 +147,9 @@ fi
 [ "$QUIET" = false ] && echo ""
 info "Checking target namespaces..."
 for NS in "${TARGET_NAMESPACES[@]}"; do
-    if oc get namespace "$NS" &>/dev/null; then
+    if oc get namespace --context "$CONTEXT" "$NS" &>/dev/null; then
         # Namespace exists — check write access
-        CAN_WRITE="$(oc auth can-i create deployments -n "$NS" 2>/dev/null || echo 'no')"
+        CAN_WRITE="$(oc auth can-i --context "$CONTEXT" create deployments -n "$NS" 2>/dev/null || echo 'no')"
         if [ "$CAN_WRITE" = "yes" ]; then
             warn "Namespace '${NS}' already exists (write access confirmed). You may want to uninstall first if doing a fresh install."
         else

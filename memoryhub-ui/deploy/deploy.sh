@@ -21,6 +21,7 @@ set -euo pipefail
 NAMESPACE="${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}"
 DEPLOYMENT="memoryhub-ui"
 IMAGESTREAM="memoryhub-ui"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -29,7 +30,7 @@ echo "Namespace: $NAMESPACE"
 echo ""
 
 # Check OpenShift login
-if ! oc whoami &>/dev/null; then
+if ! oc whoami --context "$CONTEXT" &>/dev/null; then
     echo "Error: Not logged in to OpenShift. Run 'oc login' first."
     exit 1
 fi
@@ -39,22 +40,22 @@ fi
 BUILD_DIR="$PROJECT_ROOT/.build-context"
 
 # Step 2: Ensure namespace exists
-if oc get namespace "$NAMESPACE" &>/dev/null; then
+if oc get namespace "$NAMESPACE" --context "$CONTEXT" &>/dev/null; then
     echo "Using existing namespace: $NAMESPACE"
 else
     echo "Creating namespace: $NAMESPACE"
-    oc create namespace "$NAMESPACE"
+    oc create namespace "$NAMESPACE" --context "$CONTEXT"
 fi
 
 # Step 3: Apply manifests
 echo ""
 echo "Applying manifests..."
-oc apply -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
+oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
 
 # Step 4: Start binary build
 echo ""
 echo "Starting build..."
-oc start-build "$IMAGESTREAM" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
+oc start-build "$IMAGESTREAM" --context "$CONTEXT" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
 
 # Step 5: Re-apply manifest to re-resolve the :latest imagestream tag
 # against the digest the build just pushed. The Deployment carries
@@ -64,7 +65,7 @@ oc start-build "$IMAGESTREAM" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
 # the digest :latest pointed at *before* the build (retro #18 / #83 / #88).
 echo ""
 echo "Re-applying manifest to re-resolve image digest..."
-oc apply -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
+oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
 
 # Step 5b: Populate the public-facing route URLs used by the Client
 # Management welcome-email renderer. The openshift.yaml manifest ships
@@ -74,9 +75,9 @@ oc apply -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
 # env vars to the new Route hostnames automatically.
 echo ""
 echo "Populating public Route URLs for the welcome-email feature..."
-MCP_ROUTE_HOST=$(oc get route memory-hub-mcp -n memory-hub-mcp -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-AUTH_ROUTE_HOST=$(oc get route auth-server -n memoryhub-auth -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-EMBEDDING_SVC_HOST=$(oc get svc all-minilm-l6-v2 -n embedding-model -o jsonpath='{.metadata.name}.{.metadata.namespace}.svc.cluster.local' 2>/dev/null || echo "")
+MCP_ROUTE_HOST=$(oc get route memory-hub-mcp --context "$CONTEXT" -n memory-hub-mcp -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+AUTH_ROUTE_HOST=$(oc get route auth-server --context "$CONTEXT" -n memoryhub-auth -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+EMBEDDING_SVC_HOST=$(oc get svc all-minilm-l6-v2 --context "$CONTEXT" -n embedding-model -o jsonpath='{.metadata.name}.{.metadata.namespace}.svc.cluster.local' 2>/dev/null || echo "")
 if [ -n "$MCP_ROUTE_HOST" ] && [ -n "$AUTH_ROUTE_HOST" ]; then
     MCP_PUBLIC_URL="https://$MCP_ROUTE_HOST/mcp/"
     AUTH_PUBLIC_URL="https://$AUTH_ROUTE_HOST"
@@ -94,7 +95,7 @@ if [ -n "$MCP_ROUTE_HOST" ] && [ -n "$AUTH_ROUTE_HOST" ]; then
         echo "  WARNING: embedding service not found in embedding-model namespace"
         echo "  Search will fall back to text matching until the service is deployed."
     fi
-    oc set env "deployment/$DEPLOYMENT" -n "$NAMESPACE" \
+    oc set env "deployment/$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" \
         "${ENV_ARGS[@]}" \
         --containers="$DEPLOYMENT" >/dev/null
     echo "  Env vars applied to deployment/$DEPLOYMENT."
@@ -110,12 +111,12 @@ fi
 # Step 6: Force rollout restart so the new image digest is picked up.
 echo ""
 echo "Restarting rollout..."
-oc rollout restart "deployment/$DEPLOYMENT" -n "$NAMESPACE"
+oc rollout restart "deployment/$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE"
 
 # Step 7: Wait for rollout
 echo ""
 echo "Waiting for rollout..."
-oc rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
+oc rollout status "deployment/$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" --timeout=300s
 
 # Step 8: Verify the running pod is on the just-pushed digest.
 # The Deployment spec carries the resolved digest after re-apply; the
@@ -125,9 +126,9 @@ oc rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
 # failure family #88 closes.
 echo ""
 echo "Verifying running digest matches imagestream :latest..."
-RUNNING=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
+RUNNING=$(oc get deploy "$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" \
     -o jsonpath='{.spec.template.spec.containers[?(@.name=="memoryhub-ui")].image}' 2>/dev/null || echo "")
-LATEST_DIGEST=$(oc get is "$IMAGESTREAM" -n "$NAMESPACE" \
+LATEST_DIGEST=$(oc get is "$IMAGESTREAM" --context "$CONTEXT" -n "$NAMESPACE" \
     -o jsonpath='{.status.tags[?(@.tag=="latest")].items[0].image}' 2>/dev/null || echo "")
 echo "  Running: $RUNNING"
 echo "  Latest:  $LATEST_DIGEST"
@@ -161,14 +162,14 @@ echo "  OK: running digest matches imagestream :latest"
 RHOAI_NS="redhat-ods-applications"
 echo ""
 echo "Syncing RHOAI dashboard proxy route in $RHOAI_NS..."
-UI_CLUSTER_IP=$(oc get svc memoryhub-ui -n "$NAMESPACE" \
+UI_CLUSTER_IP=$(oc get svc memoryhub-ui --context "$CONTEXT" -n "$NAMESPACE" \
     -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
 if [ -z "$UI_CLUSTER_IP" ]; then
     echo "  WARNING: could not resolve memoryhub-ui Service ClusterIP."
     echo "  Re-run this script after the UI Service exists in $NAMESPACE."
 else
     echo "  UI Service ClusterIP: $UI_CLUSTER_IP"
-    cat <<PROXY_EOF | oc apply -f - 2>/dev/null
+    cat <<PROXY_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
 apiVersion: v1
 kind: Service
 metadata:
@@ -193,8 +194,8 @@ subsets:
     protocol: TCP
 PROXY_EOF
     # Create the Route only if it doesn't exist (idempotent).
-    if ! oc get route memoryhub-ui -n "$RHOAI_NS" &>/dev/null; then
-        cat <<ROUTE_EOF | oc apply -f - 2>/dev/null
+    if ! oc get route memoryhub-ui --context "$CONTEXT" -n "$RHOAI_NS" &>/dev/null; then
+        cat <<ROUTE_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -217,10 +218,10 @@ fi
 # Step 10: Apply the OdhApplication tile (idempotent).
 echo ""
 echo "Applying RHOAI tile..."
-oc apply -f "$PROJECT_ROOT/openshift/odh-application.yaml"
+oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift/odh-application.yaml"
 
 # Step 11: Print route URL
-ROUTE=$(oc get route "$DEPLOYMENT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+ROUTE=$(oc get route "$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 echo ""
 echo "=== Deployment Complete ==="
 if [ -n "$ROUTE" ]; then

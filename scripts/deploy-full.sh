@@ -7,6 +7,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+export MEMORYHUB_CONTEXT="$CONTEXT"
 
 DB_NAMESPACE="memoryhub-db"
 MCP_PROJECT="memory-hub-mcp"

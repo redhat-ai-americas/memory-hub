@@ -7,6 +7,7 @@
 set -euo pipefail
 
 PROJECT="${1:-memoryhub-auth}"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 
 # Manifest is rewritten through sed to embed the project-qualified registry
 # path and cluster-specific URLs.  Secrets are managed out-of-band --
@@ -17,7 +18,7 @@ apply_manifest() {
     sed "s|image: auth-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/auth-server:latest|g; \
          s|__AUTH_ISSUER__|${AUTH_ISSUER_URL}|g; \
          s|__OAUTH_AUTHORIZE_URL__|${OAUTH_AUTHORIZE_URL}|g" openshift.yaml | \
-        oc apply -f - -n "$PROJECT"
+        oc apply --context "$CONTEXT" -f - -n "$PROJECT"
 }
 
 echo "========================================="
@@ -27,19 +28,19 @@ echo "Project: $PROJECT"
 echo ""
 
 # Check if logged in to OpenShift
-if ! oc whoami &>/dev/null; then
+if ! oc whoami --context "$CONTEXT" &>/dev/null; then
     echo "Error: Not logged in to OpenShift. Please run 'oc login' first."
     exit 1
 fi
 
 # Derive cluster-specific URLs (used by apply_manifest via sed)
 echo "→ Resolving cluster URLs..."
-OAUTH_HOST=$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' 2>/dev/null || true)
+OAUTH_HOST=$(oc get route --context "$CONTEXT" oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' 2>/dev/null || true)
 if [ -n "$OAUTH_HOST" ]; then
     OAUTH_AUTHORIZE_URL="https://${OAUTH_HOST}/oauth/authorize"
 else
     echo "  No oauth-openshift route (ROSA cluster?) — querying API metadata..."
-    OAUTH_AUTHORIZE_URL=$(oc get --raw '/.well-known/oauth-authorization-server' \
+    OAUTH_AUTHORIZE_URL=$(oc get --context "$CONTEXT" --raw '/.well-known/oauth-authorization-server' \
         | python3 -c "import sys,json; print(json.load(sys.stdin).get('authorization_endpoint',''))" \
         || true)
     if [ -z "$OAUTH_AUTHORIZE_URL" ]; then
@@ -51,7 +52,7 @@ echo "  OAuth authorize: $OAUTH_AUTHORIZE_URL"
 # AUTH_ISSUER_URL — try to resolve now (Route may already exist from a
 # previous deploy).  If not, it's resolved after the first apply creates
 # the Route, and the re-apply after the build embeds the real value.
-ROUTE_HOST=$(oc get route auth-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+ROUTE_HOST=$(oc get route --context "$CONTEXT" auth-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 if [ -n "$ROUTE_HOST" ]; then
     AUTH_ISSUER_URL="https://${ROUTE_HOST}"
 else
@@ -60,16 +61,16 @@ fi
 
 # Create project if it doesn't exist
 echo "→ Setting up project..."
-if oc get project "$PROJECT" &>/dev/null; then
+if oc get namespace --context "$CONTEXT" "$PROJECT" &>/dev/null; then
     echo "  Using existing project: $PROJECT"
 else
     echo "  Creating new project: $PROJECT"
-    oc new-project "$PROJECT"
+    oc create namespace --context "$CONTEXT" "$PROJECT"
 fi
 
 # Generate RSA keys for JWT signing if the secret doesn't exist or has empty values
 echo "→ Checking RSA key secret..."
-EXISTING_KEY=$(oc get secret auth-rsa-keys -n "$PROJECT" -o jsonpath='{.data.AUTH_RSA_PRIVATE_KEY_PEM}' 2>/dev/null || echo "")
+EXISTING_KEY=$(oc get secret --context "$CONTEXT" auth-rsa-keys -n "$PROJECT" -o jsonpath='{.data.AUTH_RSA_PRIVATE_KEY_PEM}' 2>/dev/null || echo "")
 if [ -z "$EXISTING_KEY" ] || [ "$EXISTING_KEY" = "" ]; then
     echo "  Generating RSA-2048 key pair for JWT signing..."
     TMPKEYS=$(mktemp -d)
@@ -81,7 +82,7 @@ if [ -z "$EXISTING_KEY" ] || [ "$EXISTING_KEY" = "" ]; then
     oc create secret generic auth-rsa-keys \
         --from-file=AUTH_RSA_PRIVATE_KEY_PEM="$TMPKEYS/private.pem" \
         --from-file=AUTH_RSA_PUBLIC_KEY_PEM="$TMPKEYS/public.pem" \
-        --dry-run=client -o yaml | oc apply -f - -n "$PROJECT"
+        --dry-run=client -o yaml | oc apply --context "$CONTEXT" -f - -n "$PROJECT"
     echo "  RSA key secret created."
 else
     echo "  RSA key secret already exists."
@@ -89,13 +90,13 @@ fi
 
 # Generate OpenShift OAuth client secret if it doesn't exist
 echo "→ Checking OpenShift OAuth client secret..."
-EXISTING_OAUTH_SECRET=$(oc get secret openshift-oauth-client-secret -n "$PROJECT" -o jsonpath='{.data.AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET}' 2>/dev/null || echo "")
+EXISTING_OAUTH_SECRET=$(oc get secret --context "$CONTEXT" openshift-oauth-client-secret -n "$PROJECT" -o jsonpath='{.data.AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET}' 2>/dev/null || echo "")
 if [ -z "$EXISTING_OAUTH_SECRET" ]; then
     echo "  Generating OpenShift OAuth client secret..."
     OAUTH_SECRET=$(openssl rand -base64 32 | tr -d '\n')
     oc create secret generic openshift-oauth-client-secret \
         --from-literal=AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET="$OAUTH_SECRET" \
-        --dry-run=client -o yaml | oc apply -f - -n "$PROJECT"
+        --dry-run=client -o yaml | oc apply --context "$CONTEXT" -f - -n "$PROJECT"
     echo "  OpenShift OAuth client secret created."
 else
     echo "  OpenShift OAuth client secret already exists."
@@ -103,13 +104,13 @@ fi
 
 # Apply OAuthClient CR (cluster-scoped, requires cluster-admin)
 echo "→ Checking OAuthClient CR..."
-if oc auth can-i create oauthclients 2>/dev/null; then
+if oc auth can-i --context "$CONTEXT" create oauthclients 2>/dev/null; then
     if [ -f deploy/oauthclient.yaml ]; then
         # Replace the placeholder secret with the actual value from the K8s Secret.
-        OAUTH_SECRET_VALUE=$(oc get secret openshift-oauth-client-secret -n "$PROJECT" \
+        OAUTH_SECRET_VALUE=$(oc get secret --context "$CONTEXT" openshift-oauth-client-secret -n "$PROJECT" \
             -o jsonpath='{.data.AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET}' | base64 -d)
         sed "s|secret: PLACEHOLDER-SEE-COMMENTS-ABOVE|secret: $OAUTH_SECRET_VALUE|" \
-            deploy/oauthclient.yaml | oc apply -f - 2>&1
+            deploy/oauthclient.yaml | oc apply --context "$CONTEXT" -f - 2>&1
         echo "  OAuthClient CR applied."
     else
         echo "  deploy/oauthclient.yaml not found, skipping."
@@ -122,7 +123,7 @@ fi
 # Run Alembic migrations before deploying new code
 echo "→ Running database migrations..."
 DB_NAMESPACE="memoryhub-db"
-oc port-forward -n "$DB_NAMESPACE" svc/memoryhub-pg 15432:5432 &
+oc port-forward --context "$CONTEXT" -n "$DB_NAMESPACE" svc/memoryhub-pg 15432:5432 &
 MIGRATE_PF_PID=$!
 WAITED=0
 until nc -z localhost 15432 2>/dev/null; do
@@ -134,7 +135,7 @@ until nc -z localhost 15432 2>/dev/null; do
     sleep 1
     WAITED=$((WAITED + 1))
 done
-DB_PASS=$(oc get secret memoryhub-pg-credentials -n "$DB_NAMESPACE" \
+DB_PASS=$(oc get secret --context "$CONTEXT" memoryhub-pg-credentials -n "$DB_NAMESPACE" \
     -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
 AUTH_DB_HOST=localhost \
 AUTH_DB_PORT=15432 \
@@ -166,10 +167,10 @@ if [ "$FIXED_COUNT" -gt "0" ]; then
     find "$BUILD_DIR" -name "*.py" -perm 600 -exec chmod 644 {} \;
 fi
 
-oc start-build auth-server --from-dir="$BUILD_DIR" --follow -n "$PROJECT"
+oc start-build --context "$CONTEXT" auth-server --from-dir="$BUILD_DIR" --follow -n "$PROJECT"
 
 # Resolve AUTH_ISSUER_URL now that the Route exists (created by the first apply).
-ROUTE_HOST=$(oc get route auth-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+ROUTE_HOST=$(oc get route --context "$CONTEXT" auth-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 if [ -n "$ROUTE_HOST" ]; then
     AUTH_ISSUER_URL="https://${ROUTE_HOST}"
     echo "  Auth issuer: $AUTH_ISSUER_URL"
@@ -190,8 +191,8 @@ apply_manifest
 
 # Wait for rollout
 echo "→ Deploying application..."
-oc rollout restart deployment/auth-server -n "$PROJECT" 2>/dev/null || true
-oc rollout status deployment/auth-server -n "$PROJECT" --timeout=300s
+oc rollout restart --context "$CONTEXT" deployment/auth-server -n "$PROJECT" 2>/dev/null || true
+oc rollout status --context "$CONTEXT" deployment/auth-server -n "$PROJECT" --timeout=300s
 
 # Verify the running pod is on the just-pushed digest. This must come AFTER
 # both rollouts complete (the initial restart and the env-triggered second
@@ -199,9 +200,9 @@ oc rollout status deployment/auth-server -n "$PROJECT" --timeout=300s
 # digests don't match, the build pushed but the Deployment is on an older
 # digest -- exactly the failure family #88 closes.
 echo "→ Verifying running digest matches imagestream :latest..."
-RUNNING=$(oc get deploy auth-server -n "$PROJECT" \
+RUNNING=$(oc get deploy --context "$CONTEXT" auth-server -n "$PROJECT" \
     -o jsonpath='{.spec.template.spec.containers[?(@.name=="auth-server")].image}' 2>/dev/null || echo "")
-LATEST_DIGEST=$(oc get is auth-server -n "$PROJECT" \
+LATEST_DIGEST=$(oc get is --context "$CONTEXT" auth-server -n "$PROJECT" \
     -o jsonpath='{.status.tags[?(@.tag=="latest")].items[0].image}' 2>/dev/null || echo "")
 echo "  Running: $RUNNING"
 echo "  Latest:  $LATEST_DIGEST"

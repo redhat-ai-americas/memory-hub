@@ -4,6 +4,7 @@
 set -euo pipefail
 
 NAMESPACE="${1:-memoryhub-db}"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 POD_LABEL="app.kubernetes.io/name=memoryhub-pg"
 DB_USER="memoryhub"
 DB_NAME="memoryhub"
@@ -12,7 +13,7 @@ passed=0
 failed=0
 
 run_sql() {
-  oc exec -n "$NAMESPACE" statefulset/memoryhub-pg -- \
+  oc exec --context "$CONTEXT" -n "$NAMESPACE" statefulset/memoryhub-pg -- \
     psql -U "$DB_USER" -d "$DB_NAME" -tAc "$1" 2>&1
 }
 
@@ -39,7 +40,7 @@ echo ""
 
 # Check pod is running
 printf "  %-50s " "Pod is running"
-if oc get pod -n "$NAMESPACE" -l "$POD_LABEL" -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
+if oc get pod --context "$CONTEXT" -n "$NAMESPACE" -l "$POD_LABEL" -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
   echo "OK"
   ((passed++))
 else

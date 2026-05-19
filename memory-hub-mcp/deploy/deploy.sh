@@ -23,6 +23,7 @@ set -euo pipefail
 
 NAMESPACE="memory-hub-mcp"
 DEPLOYMENT="memory-hub-mcp"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -32,7 +33,7 @@ echo "Deployment: $DEPLOYMENT"
 echo ""
 
 # Check OpenShift login
-if ! oc whoami &>/dev/null; then
+if ! oc whoami --context "$CONTEXT" &>/dev/null; then
     echo "Error: Not logged in to OpenShift. Run 'oc login' first."
     exit 1
 fi
@@ -114,11 +115,11 @@ PYEOF
 BUILD_DIR="$PROJECT_ROOT/.build-context"
 
 # Step 2: Create namespace
-if oc get namespace "$NAMESPACE" &>/dev/null; then
+if oc get namespace --context "$CONTEXT" "$NAMESPACE" &>/dev/null; then
     echo "Using existing namespace: $NAMESPACE"
 else
     echo "Creating namespace: $NAMESPACE"
-    oc create namespace "$NAMESPACE"
+    oc create namespace --context "$CONTEXT" "$NAMESPACE"
 fi
 
 # Step 3: Apply manifests
@@ -142,7 +143,7 @@ if grep -q "REPLACE-ME-" "$USERS_CM"; then
   exit 1
 fi
 # Apply configmap first — the Deployment mounts it as a volume.
-oc apply -f "$USERS_CM" -n "$NAMESPACE"
+oc apply --context "$CONTEXT" -f "$USERS_CM" -n "$NAMESPACE"
 
 # Create the memoryhub-db-credentials Secret from the DB namespace's source of
 # truth. This replaces the old pattern of baking a placeholder password into
@@ -152,13 +153,13 @@ DB_SRC_SECRET="memoryhub-pg-credentials"
 
 echo ""
 echo "Creating DB credentials Secret from $DB_SRC_NAMESPACE/$DB_SRC_SECRET..."
-if ! oc get secret "$DB_SRC_SECRET" -n "$DB_SRC_NAMESPACE" &>/dev/null; then
+if ! oc get secret --context "$CONTEXT" "$DB_SRC_SECRET" -n "$DB_SRC_NAMESPACE" &>/dev/null; then
     echo "ERROR: Source Secret $DB_SRC_SECRET not found in namespace $DB_SRC_NAMESPACE."
     echo "       Deploy PostgreSQL first (scripts/deploy-full.sh) or create the Secret manually."
     exit 1
 fi
 
-DB_PASSWORD=$(oc get secret "$DB_SRC_SECRET" -n "$DB_SRC_NAMESPACE" \
+DB_PASSWORD=$(oc get secret --context "$CONTEXT" "$DB_SRC_SECRET" -n "$DB_SRC_NAMESPACE" \
     -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
 
 oc create secret generic memoryhub-db-credentials \
@@ -169,14 +170,14 @@ oc create secret generic memoryhub-db-credentials \
     --from-literal=MEMORYHUB_DB_PASSWORD="$DB_PASSWORD" \
     --from-literal=MEMORYHUB_EMBEDDING_URL=https://all-minilm-l6-v2-embedding-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/embed \
     --from-literal=MEMORYHUB_RERANKER_URL=https://ms-marco-minilm-l12-v2-reranker-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com \
-    --dry-run=client -o json | oc apply -f - -n "$NAMESPACE"
+    --dry-run=client -o json | oc apply --context "$CONTEXT" -f - -n "$NAMESPACE"
 echo "OK: memoryhub-db-credentials Secret created/updated in $NAMESPACE"
-oc apply -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
+oc apply --context "$CONTEXT" -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
 
 # Step 4: Start binary build
 echo ""
 echo "Starting build..."
-oc start-build "$DEPLOYMENT" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
+oc start-build --context "$CONTEXT" "$DEPLOYMENT" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
 
 # Step 4.5: Re-resolve the :latest ImageStream tag.
 #
@@ -193,17 +194,17 @@ oc start-build "$DEPLOYMENT" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
 # failure family) — the fix is documented in the wave1-4-mcp-fixes retro.
 echo ""
 echo "Re-applying manifest to re-resolve image digest..."
-oc apply -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
+oc apply --context "$CONTEXT" -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
 
 # Step 5: Force rollout restart so the new image digest is picked up
 echo ""
 echo "Restarting rollout..."
-oc rollout restart "deployment/$DEPLOYMENT" -n "$NAMESPACE"
+oc rollout restart --context "$CONTEXT" "deployment/$DEPLOYMENT" -n "$NAMESPACE"
 
 # Step 6: Wait for rollout
 echo ""
 echo "Waiting for rollout..."
-oc rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
+oc rollout status --context "$CONTEXT" "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
 
 # Step 7: Verify single Deployment + one available replica.
 # Counting Running pods directly is unreliable: terminating pods stay in
@@ -216,24 +217,24 @@ oc rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
 # closes.
 echo ""
 echo "Verifying deployment state..."
-DEPLOY_COUNT=$(oc get deploy -n "$NAMESPACE" \
+DEPLOY_COUNT=$(oc get deploy --context "$CONTEXT" -n "$NAMESPACE" \
     -l "app.kubernetes.io/name=$DEPLOYMENT" \
     -o name 2>/dev/null | wc -l | tr -d ' ')
 if [ "$DEPLOY_COUNT" != "1" ]; then
     echo "ERROR: expected 1 Deployment named $DEPLOYMENT, found $DEPLOY_COUNT"
-    oc get deploy -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
+    oc get deploy --context "$CONTEXT" -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
     exit 1
 fi
 
-AVAILABLE=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
+AVAILABLE=$(oc get deploy --context "$CONTEXT" "$DEPLOYMENT" -n "$NAMESPACE" \
     -o jsonpath='{.status.availableReplicas}' 2>/dev/null)
-DESIRED=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
+DESIRED=$(oc get deploy --context "$CONTEXT" "$DEPLOYMENT" -n "$NAMESPACE" \
     -o jsonpath='{.spec.replicas}' 2>/dev/null)
 if [ "$AVAILABLE" = "$DESIRED" ] && [ "$AVAILABLE" = "1" ]; then
     echo "OK: deployment at desired state (1 available replica)"
 else
     echo "ERROR: deployment not at desired state (available=${AVAILABLE:-0}, desired=${DESIRED:-?})"
-    oc get pods -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
+    oc get pods --context "$CONTEXT" -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT"
     exit 1
 fi
 
@@ -245,9 +246,9 @@ fi
 # failure family this verification closes.
 echo ""
 echo "Verifying running digest matches imagestream :latest..."
-RUNNING=$(oc get deploy "$DEPLOYMENT" -n "$NAMESPACE" \
+RUNNING=$(oc get deploy --context "$CONTEXT" "$DEPLOYMENT" -n "$NAMESPACE" \
     -o jsonpath='{.spec.template.spec.containers[?(@.name=="mcp-server")].image}' 2>/dev/null || echo "")
-LATEST_DIGEST=$(oc get is "$DEPLOYMENT" -n "$NAMESPACE" \
+LATEST_DIGEST=$(oc get is --context "$CONTEXT" "$DEPLOYMENT" -n "$NAMESPACE" \
     -o jsonpath='{.status.tags[?(@.tag=="latest")].items[0].image}' 2>/dev/null || echo "")
 echo "  Running: $RUNNING"
 echo "  Latest:  $LATEST_DIGEST"
@@ -278,7 +279,7 @@ echo "  OK: running digest matches imagestream :latest"
 # before the build runs. Runtime issues that the static check can't see
 # (build context missing files, runtime decoration errors, dependency
 # import failures) are what the post-deploy mcp-test-mcp check catches.
-ROUTE=$(oc get route "$DEPLOYMENT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+ROUTE=$(oc get route --context "$CONTEXT" "$DEPLOYMENT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 echo ""
 echo "=== Deployment Complete ==="
 if [ -n "$ROUTE" ]; then
