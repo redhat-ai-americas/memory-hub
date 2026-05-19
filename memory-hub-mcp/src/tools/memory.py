@@ -564,7 +564,7 @@ async def _dispatch_promote(memory_id, project_id, opts, ctx):
     tenant_id = get_tenant_filter(claims)
     promoted_by = claims["sub"]
 
-    session = await get_db_session()
+    session, gen = await get_db_session()
     try:
         embedding_service = get_embedding_service()
         promoted = await promote_memory(
@@ -590,4 +590,4 @@ async def _dispatch_promote(memory_id, project_id, opts, ctx):
             "message": f"Memory promoted from '{promoted.metadata.get('promoted_from', {}).get('source_id', 'unknown')}' to {promoted.scope} scope",
         }
     finally:
-        await release_db_session(session)
+        await release_db_session(gen)
