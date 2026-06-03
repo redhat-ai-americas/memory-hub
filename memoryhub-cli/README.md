@@ -8,14 +8,39 @@ Command-line client for MemoryHub — centralized, governed memory for AI agents
 pip install memoryhub-cli
 ```
 
+## Authentication
+
+The CLI supports two authentication modes:
+
+**API key (recommended for non-interactive use):**
+
+```bash
+# Via environment variable
+export MEMORYHUB_API_KEY=mh-dev-abc123
+export MEMORYHUB_URL=https://memoryhub.example.com
+
+# Or place your key at ~/.config/memoryhub/api-key (mode 0600)
+echo "mh-dev-abc123" > ~/.config/memoryhub/api-key
+```
+
+API key resolution order: `MEMORYHUB_API_KEY` env var > `~/.config/memoryhub/api-key` file > `api_key` in config.json.
+
+**OAuth (interactive setup):**
+
+```bash
+memoryhub login
+```
+
+When both are available, API key takes precedence.
+
 ## Usage
 
 ```bash
-# Authenticate to a MemoryHub instance
-memoryhub login
-
 # Search for memories
 memoryhub search "deployment patterns"
+
+# List memories by creation time (no semantic search)
+memoryhub list --project-id my-project --max 20
 
 # Read a specific memory
 memoryhub read <memory-id>
@@ -26,6 +51,9 @@ memoryhub write "Use Podman, not Docker" --scope user --weight 0.9
 # Campaign-scoped operations (requires project enrollment)
 memoryhub search "shared patterns" --project-id my-project --domain React
 memoryhub write "Use vLLM for embeddings" --project-id my-project --domain ML
+
+# Compact output for LLM context injection (content only, no metadata)
+memoryhub search "project conventions" --output compact
 
 # Set up project-level memory loading
 memoryhub config init
@@ -39,6 +67,15 @@ memoryhub admin disable-agent my-agent
 ```
 
 The `--project-id` flag enables campaign-scoped memory access. When your project is enrolled in campaigns via `.memoryhub.yaml`, the CLI auto-loads the project identifier from config, so you can omit the flag in most cases. Use `--domain` to tag writes or boost domain-matching results in search.
+
+## Output formats
+
+The `--output` / `-o` flag controls output format on most commands:
+
+- `table` (default) -- Rich-formatted tables for interactive use
+- `json` -- Machine-readable JSON envelope (`{"status": "ok", "data": {...}}`)
+- `quiet` -- No output (exit code only)
+- `compact` -- Content-only text for LLM context injection, no IDs or metadata
 
 ## Project configuration
 
