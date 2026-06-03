@@ -1502,5 +1502,78 @@ def session_focus_history(
     console.print(f"[dim]Total sessions: {total}[/dim]")
 
 
+@app.command()
+def checkpoint(
+    workflow_name: str = typer.Argument(..., help="Workflow identifier"),
+    state: str | None = typer.Option(
+        None, "--state", "-s", help="State as JSON string (upserts if given, reads if omitted)",
+    ),
+    scope: str = typer.Option(
+        "user", "--scope", help="Scope for the checkpoint: user, project",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID (required for project scope)",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Read or write durable checkpoint state for workflow agents.
+
+    When --state is given (as a JSON string), upserts the checkpoint.
+    When --state is omitted, reads the current checkpoint state.
+    """
+    import json as json_mod
+
+    state_dict = None
+    if state is not None:
+        try:
+            state_dict = json_mod.loads(state)
+        except json_mod.JSONDecodeError as exc:
+            handle_error(
+                "invalid_json",
+                f"--state must be valid JSON: {exc}",
+                output,
+                EXIT_CLIENT_ERROR,
+            )
+
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.checkpoint(
+                workflow_name,
+                state=state_dict,
+                scope=scope,
+                project_id=_project_id,
+            )
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    cp_state = result.get("state", {})
+    if result.get("created") is not None:
+        action = "Created" if result["created"] else "Updated"
+        console.print(f"[green]{action} checkpoint:[/green] {workflow_name}")
+        if result.get("memory_id"):
+            console.print(f"  Memory ID: {result['memory_id']}")
+    else:
+        console.print(f"[blue]Checkpoint:[/blue] {workflow_name}")
+
+    if cp_state:
+        state_preview = json_mod.dumps(cp_state, indent=2, default=str)
+        if len(state_preview) > 200:
+            state_preview = state_preview[:200] + "..."
+        console.print(f"  State: {state_preview}")
+    else:
+        console.print("  State: (empty)")
+
+
 if __name__ == "__main__":
     app()
