@@ -1395,6 +1395,47 @@ def project_remove_member(
     console.print(f"[green]Removed[/green] {user_id} from {project_name}")
 
 
+@project_app.command("describe")
+def project_describe(
+    project_id: str = typer.Argument(..., help="Project identifier"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Show detailed project information and member list."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.describe_project(project_id)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[bold]{result.get('name', project_id)}[/bold]")
+    if result.get("description"):
+        console.print(f"  {result['description']}")
+
+    members = result.get("members", [])
+    if members:
+        table = Table(title="Members")
+        table.add_column("User ID")
+        table.add_column("Role")
+        for member in members:
+            table.add_row(
+                str(member.get("user_id", "")),
+                str(member.get("role", "")),
+            )
+        console.print(table)
+    else:
+        console.print("  No members")
+
+
 # ── memoryhub session ─────────────────────────────────────────────────────────
 
 

@@ -1139,6 +1139,24 @@ class MemoryHubClient:
             options={"user_id": user_id},
         )
 
+    async def describe_project(self, project_id: str) -> dict[str, Any]:
+        """Get detailed information about a project including members.
+
+        Args:
+            project_id: Project identifier.
+
+        Returns:
+            Dict with project details: name, description, members list.
+
+        Raises:
+            NotFoundError: Project does not exist.
+            PermissionDeniedError: Not a project member.
+        """
+        return await self._call_action(
+            "describe_project",
+            project_id=project_id,
+        )
+
     # ── Session focus (#61) ─────────────────────────────────────────
 
     async def get_session(self) -> dict[str, Any]:
