@@ -23,7 +23,7 @@ from memoryhub.exceptions import (
 from rich.table import Table
 
 from memoryhub_cli.admin import admin_app
-from memoryhub_cli.config import get_api_key, get_connection_params, get_server_url, save_config
+from memoryhub_cli.config import get_api_key, get_connection_params, get_server_url, load_config, save_config
 from memoryhub_cli.export import export_app
 from memoryhub_cli.output import (
     EXIT_AUTH_ERROR,
@@ -883,6 +883,39 @@ def config_init(
             "  Create this file with your MemoryHub API key before using\n"
             "  the agent. Ask your administrator for a key."
         )
+
+    # ── Server URL check ──
+    existing_config = load_config()
+    existing_url = existing_config.get("url", "")
+    if existing_url:
+        console.print(f"[green]Server URL configured:[/green] {existing_url}")
+    elif non_interactive:
+        env_url = get_server_url()
+        if env_url:
+            console.print(f"[green]Server URL (from env):[/green] {env_url}")
+        else:
+            console.print(
+                "[yellow]Warning:[/yellow] No server URL configured.\n"
+                "  Set MEMORYHUB_URL or add \"url\" to"
+                " ~/.config/memoryhub/config.json."
+            )
+    else:
+        console.print(
+            "\n[yellow]Warning:[/yellow] No server URL configured.\n"
+            "  The SessionStart hook and CLI commands need the MemoryHub\n"
+            "  server URL. Set MEMORYHUB_URL env var or enter it now."
+        )
+        url_input = typer.prompt(
+            "MemoryHub server URL (Enter to skip)",
+            default="",
+            show_default=False,
+        )
+        if url_input.strip():
+            existing_config["url"] = url_input.strip()
+            save_config(existing_config)
+            console.print(
+                f"[green]URL saved to ~/.config/memoryhub/config.json[/green]"
+            )
 
 
 @config_app.command("regenerate")

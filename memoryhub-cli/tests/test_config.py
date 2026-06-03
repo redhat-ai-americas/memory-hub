@@ -1,4 +1,4 @@
-"""Tests for memoryhub_cli.config — API key detection and server URL resolution."""
+"""Tests for memoryhub_cli.config — API key detection, server URL resolution, and config init URL prompt."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from memoryhub_cli.config import get_api_key, get_server_url
+from memoryhub_cli.config import get_api_key, get_server_url, load_config, save_config
 
 
 @pytest.fixture(autouse=True)
@@ -73,3 +73,30 @@ class TestGetServerUrl:
     def test_returns_none_when_nothing_set(self, monkeypatch, tmp_path):
         monkeypatch.setattr("memoryhub_cli.config.CONFIG_FILE", tmp_path / "nope.json")
         assert get_server_url() is None
+
+
+class TestSaveConfigMerge:
+    """Verify save_config writes to config.json and preserves existing keys."""
+
+    def test_save_creates_file(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "memoryhub"
+        config_file = config_dir / "config.json"
+        monkeypatch.setattr("memoryhub_cli.config.CONFIG_DIR", config_dir)
+        monkeypatch.setattr("memoryhub_cli.config.CONFIG_FILE", config_file)
+        save_config({"url": "https://example.com/mcp/"})
+        data = json.loads(config_file.read_text())
+        assert data["url"] == "https://example.com/mcp/"
+
+    def test_save_preserves_existing_keys(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "memoryhub"
+        config_dir.mkdir()
+        config_file = config_dir / "config.json"
+        config_file.write_text(json.dumps({"client_id": "old", "url": "old-url"}))
+        monkeypatch.setattr("memoryhub_cli.config.CONFIG_DIR", config_dir)
+        monkeypatch.setattr("memoryhub_cli.config.CONFIG_FILE", config_file)
+        existing = load_config()
+        existing["url"] = "https://new.example.com/mcp/"
+        save_config(existing)
+        data = json.loads(config_file.read_text())
+        assert data["url"] == "https://new.example.com/mcp/"
+        assert data["client_id"] == "old"

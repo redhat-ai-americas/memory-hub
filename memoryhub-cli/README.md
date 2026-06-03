@@ -17,13 +17,27 @@ The CLI supports two authentication modes:
 ```bash
 # Via environment variable
 export MEMORYHUB_API_KEY=mh-dev-abc123
-export MEMORYHUB_URL=https://memoryhub.example.com
 
 # Or place your key at ~/.config/memoryhub/api-key (mode 0600)
 echo "mh-dev-abc123" > ~/.config/memoryhub/api-key
 ```
 
 API key resolution order: `MEMORYHUB_API_KEY` env var > `~/.config/memoryhub/api-key` file > `api_key` in config.json.
+
+**Server URL:**
+
+The CLI needs to know where the MemoryHub server is. The SessionStart hook for Claude Code also reads from this config.
+
+```bash
+# Via environment variable
+export MEMORYHUB_URL=https://memoryhub.example.com/mcp/
+
+# Or save to ~/.config/memoryhub/config.json (also set by memoryhub config init)
+echo '{"url": "https://memoryhub.example.com/mcp/"}' > ~/.config/memoryhub/config.json
+chmod 600 ~/.config/memoryhub/config.json
+```
+
+URL resolution: `MEMORYHUB_URL` env var > `url` in `~/.config/memoryhub/config.json`.
 
 **OAuth (interactive setup):**
 

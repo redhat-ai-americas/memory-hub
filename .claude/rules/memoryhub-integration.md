@@ -36,3 +36,9 @@ The api key is stored at `~/.config/memoryhub/api-key` (mode 0600). This is inte
 - It MUST NOT be committed to the repository.
 - Each operator maintains their own key corresponding to a user in the deployed `memoryhub-users` ConfigMap on the cluster.
 - If the server moves to a different auth mechanism (e.g., OAuth 2.1 client_credentials only, no `register_session` shim), update this section accordingly.
+
+### Server URL
+
+The server URL is stored at `~/.config/memoryhub/config.json` (mode 0600) as `{"url": "https://..."}`. The SessionStart hook and all CLI commands resolve the URL from `MEMORYHUB_URL` env var first, then this file. Without a configured URL, the hook degrades silently and CLI commands fail with a clear error.
+
+Run `memoryhub config init` to set this interactively, or create the file manually. This file is per-operator and MUST NOT be committed.
