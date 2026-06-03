@@ -619,6 +619,47 @@ def update(
 
 
 @app.command()
+def promote(
+    memory_id: str = typer.Argument(..., help="Memory UUID to promote"),
+    target_scope: str = typer.Argument(
+        ..., help="Target scope: project, organizational, enterprise",
+    ),
+    target_scope_id: str | None = typer.Option(
+        None, "--target-scope-id", help="Scope ID for the target (e.g., project ID)",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for context",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Promote a memory to a broader scope."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.promote(
+                memory_id,
+                target_scope,
+                target_scope_id=target_scope_id,
+                project_id=_project_id,
+            )
+
+    memory = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(memory.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Promoted:[/green] {memory.id}")
+    console.print(f"  Scope: {memory.scope} | Weight: {memory.weight:.2f}")
+
+
+@app.command()
 def history(
     memory_id: str = typer.Argument(..., help="Memory UUID"),
     max_versions: int = typer.Option(20, "--max", "-n", help="Maximum versions to show"),
