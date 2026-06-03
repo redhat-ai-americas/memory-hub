@@ -71,7 +71,7 @@ class TestActionValidation:
         assert "write" in msg
 
     def test_valid_actions_count(self):
-        assert len(_VALID_ACTIONS) == 20
+        assert len(_VALID_ACTIONS) == 24
 
 
 # ── Required param validation ──────────────────────────────────────────────
@@ -208,6 +208,8 @@ class TestDispatchRouting:
         assert call_kwargs["project_id"] == "proj"
         assert call_kwargs["max_results"] == 5
         assert call_kwargs["focus"] == "deployment"
+        # Dispatcher injects verbose=False by default (#255)
+        assert call_kwargs["verbose"] is False
 
     @pytest.mark.asyncio
     @patch("src.tools.list_memory.list_memory", new_callable=AsyncMock)
@@ -223,6 +225,8 @@ class TestDispatchRouting:
         assert call_kwargs["project_id"] == "my-proj"
         assert call_kwargs["max_results"] == 50
         assert call_kwargs["cursor"] == "2026-05-01T00:00:00"
+        # Dispatcher injects verbose=False by default (#255)
+        assert call_kwargs["verbose"] is False
 
     @pytest.mark.asyncio
     @patch("src.tools.read_memory.read_memory", new_callable=AsyncMock)
@@ -396,6 +400,55 @@ class TestDispatchRouting:
         )
         kw = mock_proj.call_args[1]
         assert kw["project_name"] == "explicit"
+
+
+# ── Compact default at dispatcher level (#255) ────────────────────────────
+
+class TestCompactDefault:
+    """The dispatcher injects verbose=False so agents get compact output,
+    while direct callers of search_memory/list_memory keep verbose=True."""
+
+    @pytest.mark.asyncio
+    @patch("src.tools.search_memory.search_memory", new_callable=AsyncMock)
+    async def test_search_defaults_verbose_false(self, mock_search):
+        """Dispatcher injects verbose=False when caller omits it."""
+        mock_search.return_value = {"results": []}
+        await memory(action="search", query="test")
+        kw = mock_search.call_args[1]
+        assert kw["verbose"] is False
+
+    @pytest.mark.asyncio
+    @patch("src.tools.search_memory.search_memory", new_callable=AsyncMock)
+    async def test_search_respects_explicit_verbose_true(self, mock_search):
+        """Caller can override to verbose=True via options."""
+        mock_search.return_value = {"results": []}
+        await memory(
+            action="search", query="test",
+            options={"verbose": True},
+        )
+        kw = mock_search.call_args[1]
+        assert kw["verbose"] is True
+
+    @pytest.mark.asyncio
+    @patch("src.tools.list_memory.list_memory", new_callable=AsyncMock)
+    async def test_list_defaults_verbose_false(self, mock_list):
+        """Dispatcher injects verbose=False when caller omits it."""
+        mock_list.return_value = {"results": [], "count": 0, "has_more": False}
+        await memory(action="list")
+        kw = mock_list.call_args[1]
+        assert kw["verbose"] is False
+
+    @pytest.mark.asyncio
+    @patch("src.tools.list_memory.list_memory", new_callable=AsyncMock)
+    async def test_list_respects_explicit_verbose_true(self, mock_list):
+        """Caller can override to verbose=True via options."""
+        mock_list.return_value = {"results": [], "count": 0, "has_more": False}
+        await memory(
+            action="list",
+            options={"verbose": True},
+        )
+        kw = mock_list.call_args[1]
+        assert kw["verbose"] is True
 
 
 # ── Options isolation ──────────────────────────────────────────────────────

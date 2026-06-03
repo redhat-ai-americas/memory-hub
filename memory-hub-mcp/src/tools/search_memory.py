@@ -119,19 +119,58 @@ def _estimate_tokens(payload: dict[str, Any]) -> int:
     return max(1, len(json.dumps(payload, default=str)) // _CHARS_PER_TOKEN)
 
 
+def _compact_entry(
+    item: MemoryNodeRead | MemoryNodeStub,
+    entry_type: str,
+    relevance_score: float | None = None,
+) -> dict[str, Any]:
+    """Build a compact {id, content, result_type} projection.
+
+    Used when verbose=False to dramatically reduce token overhead.
+    Includes relevance_score when provided (raw_results mode).
+    """
+    entry: dict[str, Any] = {
+        "id": str(item.id),
+        "result_type": entry_type,
+    }
+    if isinstance(item, MemoryNodeRead):
+        entry["content"] = item.content
+    else:
+        entry["content"] = item.stub
+    if relevance_score is not None:
+        entry["relevance_score"] = round(relevance_score, 4)
+    return entry
+
+
 def _format_entry(
     item: MemoryNodeRead | MemoryNodeStub,
     relevance_score: float,
     nested_branches: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+    verbose: bool = True,
 ) -> tuple[dict[str, Any], int]:
     """Build the JSON-ready dict for one result entry and estimate its cost.
 
     nested_branches is the list of branch results (with their scores) that
     should appear under this entry's "branches" field. Pass an empty list
     when not nesting.
+
+    When verbose=False, returns a compact {id, content, result_type} projection
+    with relevance_score included.
     """
+    entry_type = "full" if isinstance(item, MemoryNodeRead) else "stub"
+
+    if not verbose:
+        entry = _compact_entry(item, entry_type, relevance_score=relevance_score)
+        if nested_branches:
+            entry["branches"] = [
+                _compact_entry(b, "full" if isinstance(b, MemoryNodeRead) else "stub",
+                               relevance_score=bs)
+                for b, bs in nested_branches
+            ]
+        return entry, _estimate_tokens(entry)
+
     entry = item.model_dump(mode="json")
-    entry["result_type"] = "full" if isinstance(item, MemoryNodeRead) else "stub"
+    entry["result_type"] = entry_type
     entry["relevance_score"] = round(relevance_score, 4)
     # Guide agents from chunk hits to the parent memory's full content
     if item.branch_type == "chunk" and item.parent_id is not None:
@@ -156,10 +195,25 @@ def _format_entry_cached(
     item: MemoryNodeRead | MemoryNodeStub,
     nested_branches: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
     is_appendix: bool = False,
+    verbose: bool = True,
 ) -> tuple[dict[str, Any], int]:
-    """Build cache-optimized entry -- no relevance_score, adds is_appendix."""
+    """Build cache-optimized entry -- no relevance_score, adds is_appendix.
+
+    When verbose=False, returns a compact {id, content, result_type} projection.
+    """
+    entry_type = "full" if isinstance(item, MemoryNodeRead) else "stub"
+
+    if not verbose:
+        entry = _compact_entry(item, entry_type)
+        if nested_branches:
+            entry["branches"] = [
+                _compact_entry(b, "full" if isinstance(b, MemoryNodeRead) else "stub")
+                for b, _ in nested_branches
+            ]
+        return entry, _estimate_tokens(entry)
+
     entry = item.model_dump(mode="json")
-    entry["result_type"] = "full" if isinstance(item, MemoryNodeRead) else "stub"
+    entry["result_type"] = entry_type
     entry["is_appendix"] = is_appendix
     if item.branch_type == "chunk" and item.parent_id is not None:
         entry["parent_hint"] = (
@@ -593,6 +647,16 @@ async def search_memory(
             ),
         ),
     ] = False,
+    verbose: Annotated[
+        bool,
+        Field(
+            description=(
+                "Return full metadata per result. When False, returns only "
+                "id + content + result_type, dramatically reducing token overhead. "
+                "The unified memory() dispatcher defaults to False for agent callers."
+            ),
+        ),
+    ] = True,
     content_type: Annotated[
         str | None,
         Field(
@@ -960,13 +1024,16 @@ async def search_memory(
                         for b, s in child_branches
                     ]
                     entry, cost = _format_entry_cached(
-                        output_item, output_branches, is_appendix
+                        output_item, output_branches, is_appendix,
+                        verbose=verbose,
                     )
                     formatted.append(entry)
                     budget = max(0, budget - cost)
                     continue
 
-                entry, cost = _format_entry_cached(item, child_branches, is_appendix)
+                entry, cost = _format_entry_cached(
+                    item, child_branches, is_appendix, verbose=verbose,
+                )
                 if isinstance(item, MemoryNodeStub) or cost <= budget:
                     formatted.append(entry)
                     budget = max(0, budget - cost)
@@ -978,7 +1045,8 @@ async def search_memory(
                         for b, s in child_branches
                     ]
                     stub_entry, stub_cost = _format_entry_cached(
-                        stub_item, stub_branches, is_appendix
+                        stub_item, stub_branches, is_appendix,
+                        verbose=verbose,
                     )
                     formatted.append(stub_entry)
                     budget = max(0, budget - stub_cost)
@@ -999,14 +1067,17 @@ async def search_memory(
                         for b, s in child_branches
                     ]
                     entry, cost = _format_entry(
-                        output_item, relevance_score, output_branches
+                        output_item, relevance_score, output_branches,
+                        verbose=verbose,
                     )
                     formatted.append(entry)
                     budget = max(0, budget - cost)
                     continue
 
                 # Try the full form first.
-                entry, cost = _format_entry(item, relevance_score, child_branches)
+                entry, cost = _format_entry(
+                    item, relevance_score, child_branches, verbose=verbose,
+                )
                 if isinstance(item, MemoryNodeStub) or cost <= budget:
                     formatted.append(entry)
                     budget = max(0, budget - cost)
@@ -1021,7 +1092,8 @@ async def search_memory(
                         for b, s in child_branches
                     ]
                     stub_entry, stub_cost = _format_entry(
-                        stub_item, relevance_score, stub_branches
+                        stub_item, relevance_score, stub_branches,
+                        verbose=verbose,
                     )
                     formatted.append(stub_entry)
                     budget = max(0, budget - stub_cost)

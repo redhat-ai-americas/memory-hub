@@ -1672,6 +1672,103 @@ async def test_graph_boost_weight_forwarded_to_service():
 
 
 # ---------------------------------------------------------------------------
+# #255 — compact response mode (verbose=False default)
+# ---------------------------------------------------------------------------
+
+
+def test_search_memory_verbose_parameter_defaults_true():
+    """Verify the verbose parameter exists and defaults to True.
+
+    The tool function defaults to True for backward compatibility with
+    direct callers. The unified memory() dispatcher overrides this to
+    False so agents get compact output by default (#255).
+    """
+    sig = inspect.signature(search_memory)
+    params = sig.parameters
+    assert "verbose" in params
+    assert params["verbose"].default is True
+
+
+@pytest.mark.asyncio
+async def test_search_compact_explicit_returns_id_and_content():
+    """Explicit verbose=False returns compact {id, content, result_type} entries
+    without full metadata fields like weight, scope, owner_id, etc."""
+    full, score = _fake_full_result("Use Podman for containers", weight=0.9)
+    result = await _patched_search_call(
+        page_results=[(full, score)],
+        total_matching=1,
+        verbose=False,
+    ).run()
+
+    entry = result["results"][0]
+    assert "id" in entry
+    assert "content" in entry
+    assert entry["content"] == "Use Podman for containers"
+    assert entry["result_type"] == "full"
+    # Compact mode omits metadata fields
+    assert "weight" not in entry
+    assert "scope" not in entry
+    assert "owner_id" not in entry
+    assert "tenant_id" not in entry
+    assert "created_at" not in entry
+    assert "updated_at" not in entry
+
+
+@pytest.mark.asyncio
+async def test_search_verbose_true_returns_full_metadata():
+    """verbose=True returns the full model_dump with all metadata fields."""
+    full, score = _fake_full_result("Use Podman for containers", weight=0.9)
+    result = await _patched_search_call(
+        page_results=[(full, score)],
+        total_matching=1,
+        verbose=True,
+    ).run()
+
+    entry = result["results"][0]
+    assert "id" in entry
+    assert "content" in entry
+    assert "weight" in entry
+    assert "scope" in entry
+    assert "owner_id" in entry
+    assert "created_at" in entry
+
+
+@pytest.mark.asyncio
+async def test_search_compact_raw_results_includes_relevance_score():
+    """In compact mode with raw_results=True, relevance_score is included."""
+    full, score = _fake_full_result("memory", weight=0.9, score=0.85)
+    result = await _patched_search_call(
+        page_results=[(full, score)],
+        total_matching=1,
+        raw_results=True,
+        verbose=False,
+    ).run()
+
+    entry = result["results"][0]
+    assert "relevance_score" in entry
+    assert entry["relevance_score"] == 0.85
+    # But still compact - no metadata
+    assert "weight" not in entry
+    assert "scope" not in entry
+
+
+@pytest.mark.asyncio
+async def test_search_compact_stub_uses_stub_text():
+    """Compact mode for stubs uses the stub text as content."""
+    stub_result = _fake_search_result("Stub summary text", weight=0.3)
+    result = await _patched_search_call(
+        page_results=[stub_result],
+        total_matching=1,
+        verbose=False,
+    ).run()
+
+    entry = result["results"][0]
+    assert entry["content"] == "Stub summary text"
+    assert entry["result_type"] == "stub"
+    assert "weight" not in entry
+
+
+# ---------------------------------------------------------------------------
 # PR 1 — entity scope exclusion
 # ---------------------------------------------------------------------------
 

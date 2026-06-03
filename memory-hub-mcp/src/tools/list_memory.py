@@ -83,6 +83,16 @@ async def list_memory(
             ),
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        Field(
+            description=(
+                "Return full metadata per result. When False, returns only "
+                "id + content, dramatically reducing token overhead. "
+                "The unified memory() dispatcher defaults to False for agent callers."
+            ),
+        ),
+    ] = True,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """List memories in a scope without semantic search.
@@ -159,10 +169,17 @@ async def list_memory(
 
     formatted: list[dict[str, Any]] = []
     for item in results:
-        entry = item.model_dump(mode="json")
-        entry["result_type"] = "full" if isinstance(item, MemoryNodeRead) else "stub"
         if not include_branches and item.branch_type is not None:
             continue
+        if verbose:
+            entry = item.model_dump(mode="json")
+            entry["result_type"] = "full" if isinstance(item, MemoryNodeRead) else "stub"
+        else:
+            entry = {"id": str(item.id)}
+            if isinstance(item, MemoryNodeRead):
+                entry["content"] = item.content
+            else:
+                entry["content"] = item.stub
         formatted.append(entry)
 
     return {

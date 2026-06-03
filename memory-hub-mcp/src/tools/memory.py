@@ -36,11 +36,11 @@ _SEARCH_OPTS = frozenset({
     "max_response_tokens", "raw_results", "weight_threshold",
     "current_only", "owner_id", "graph_depth",
     "graph_relationship_types", "graph_boost_weight", "entities",
-    "content_type",
+    "content_type", "verbose",
 })
 _LIST_OPTS = frozenset({
     "max_results", "cursor", "include_branches", "current_only",
-    "content_type",
+    "content_type", "verbose",
 })
 _READ_OPTS = frozenset({
     "include_versions", "history_offset", "history_max_versions", "hydrate",
@@ -270,17 +270,24 @@ async def memory(
 async def _dispatch_search(query, scope, project_id, opts, ctx):
     from src.tools.search_memory import search_memory
     _require("search", "query", query)
+    kwargs = _forward(opts, _SEARCH_OPTS)
+    # Compact by default at the dispatcher level -- agents get minimal
+    # token overhead unless they explicitly request verbose=True.
+    kwargs.setdefault("verbose", False)
     return await search_memory(
         query=query, scope=scope, project_id=project_id, ctx=ctx,
-        **_forward(opts, _SEARCH_OPTS),
+        **kwargs,
     )
 
 
 async def _dispatch_list(scope, project_id, opts, ctx):
     from src.tools.list_memory import list_memory
+    kwargs = _forward(opts, _LIST_OPTS)
+    # Compact by default at the dispatcher level.
+    kwargs.setdefault("verbose", False)
     return await list_memory(
         scope=scope, project_id=project_id, ctx=ctx,
-        **_forward(opts, _LIST_OPTS),
+        **kwargs,
     )
 
 
@@ -351,6 +358,8 @@ async def _dispatch_reconstruct(scope, project_id, opts, ctx):
     search_opts = _forward(opts, _RECONSTRUCT_OPTS)
     search_opts["content_type"] = "behavioral"
     search_opts["raw_results"] = True
+    # Compact by default at the dispatcher level.
+    search_opts.setdefault("verbose", False)
     # Default query for reconstruct: broad semantic search for all behavioral
     # memories. Callers can provide a more specific query via the search action
     # if they want to filter behavioral memories by topic.
