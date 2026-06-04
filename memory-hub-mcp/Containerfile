@@ -2,23 +2,28 @@ FROM registry.redhat.io/ubi9/python-311:latest
 
 WORKDIR /opt/app-root/src
 
-# Install dependencies (includes all memoryhub_core requirements from pyproject.toml)
+# Install dependencies
+# build-context.sh stages requirements.txt at the context root.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade wheel setuptools && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy memoryhub_core library from the staged build context and install it.
+# We use --no-build-isolation to avoid setuptools trying to create egg-info
+# in the read-only source directory. This works because all build deps are
+# already installed above.
+COPY memoryhub_core/ ./memoryhub_core/
+RUN pip install --no-cache-dir --no-build-isolation -e ./memoryhub_core/
 
 # Download spaCy model at build time (12MB, air-gap safe)
 RUN python -m spacy download en_core_web_sm
-
-# Copy memoryhub_core library (Python modules only, not pip-installable)
-COPY memoryhub_core/ ./memoryhub_core/
 
 # Copy MCP server application code
 COPY src/ ./src/
 COPY conftest.py ./
 
 # Fix permissions for OpenShift arbitrary UIDs
-RUN find . -type f -name "*.py" -exec chmod 644 {} \; && \
-    find . -type d -exec chmod 755 {} \;
+RUN find ./src -name "*.py" -exec chmod 644 {} \;
 
 # Set environment for HTTP transport
 ENV MCP_TRANSPORT=http \
@@ -28,5 +33,4 @@ ENV MCP_TRANSPORT=http \
 
 USER 1001
 
-# Use FastMCP 3 entry point
 CMD ["python", "-m", "src.main"]
