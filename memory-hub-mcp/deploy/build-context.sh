@@ -28,11 +28,14 @@ cp "$REPO_ROOT/pyproject.toml" "$BUILD_DIR/memoryhub_core/"
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
     "$REPO_ROOT/src/memoryhub_core/" "$BUILD_DIR/memoryhub_core/src/memoryhub_core/"
 
-# Fix permissions — Claude Code Write tool creates 600; OpenShift needs 644
-FIXED_COUNT=$(find "$BUILD_DIR" -name "*.py" -perm 600 2>/dev/null | wc -l | tr -d ' ')
+# Fix permissions — Claude Code Write tool creates 600; OpenShift needs 644+
+# Also fix directory permissions so pip can create .egg-info during build
+FIXED_FILE_COUNT=$(find "$BUILD_DIR" -name "*.py" -perm 600 2>/dev/null | wc -l | tr -d ' ')
 find "$BUILD_DIR" -name "*.py" -exec chmod 644 {} \;
-if [ "$FIXED_COUNT" -gt "0" ]; then
-    echo "  Fixed $FIXED_COUNT file(s) with 600 permissions"
+# Fix directories: ensure they're writable by the build process
+find "$BUILD_DIR" -type d -exec chmod 755 {} \;
+if [ "$FIXED_FILE_COUNT" -gt "0" ]; then
+    echo "  Fixed $FIXED_FILE_COUNT file(s) with 600 permissions"
 fi
 
 echo "Build context ready at $BUILD_DIR"
