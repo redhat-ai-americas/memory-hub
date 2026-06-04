@@ -77,6 +77,8 @@ claude mcp add --transport http \
 
 Then run `memoryhub config init` (from the CLI, see below) to generate a `.claude/rules/memoryhub-loading.md` that tells the agent when and how to call the tools. The generated rule covers session start, working-set loading, pivot detection, memory hygiene, and contradiction handling — all parameterized by your project's session shape (focused / broad / adaptive).
 
+For zero-overhead startup, add a [SessionStart hook](docs/hooks-integration.md) that pre-loads memories into the conversation context before the first prompt — no MCP calls, no token overhead from structural metadata. The MCP server remains available for mid-session searches and writes.
+
 ### 2. From Python via the SDK
 
 ```bash
@@ -200,6 +202,7 @@ Package-specific docs live in each package's own README:
 - **[CLI](memoryhub-cli/README.md)** — commands, project config, credential setup
 - **[MCP server](memory-hub-mcp/README.md)** — tool list, deployment, testing
 - **[Auth service](memoryhub-auth/)** — standalone OAuth 2.1 authorization server
+- **[Hooks integration](docs/hooks-integration.md)** — zero-overhead memory injection at Claude Code session start
 
 For LLM agents crawling this repo: [`llms.txt`](llms.txt) at the repo root follows the [llmstxt.org](https://llmstxt.org/) convention and is the most direct entry point.
 
@@ -273,5 +276,6 @@ Apache 2.0 — see [`LICENSE`](LICENSE).
 - [Architecture](docs/ARCHITECTURE.md)
 - [Subsystems](docs/SYSTEMS.md)
 - [Agent memory ergonomics design](docs/agent-memory-ergonomics/)
+- [Hooks integration guide](docs/hooks-integration.md)
 - [Python SDK on PyPI](https://pypi.org/project/memoryhub/)
 - [GitHub issues](https://github.com/redhat-ai-americas/memory-hub/issues)
