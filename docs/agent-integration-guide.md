@@ -213,6 +213,8 @@ Tools: `register_session`, `search_memory`, `write_memory`, `read_memory`,
 `update_memory`, `delete_memory`, `manage_session`, `manage_graph`,
 `manage_curation`, `manage_project`.
 
+Full-profile search and list tools return verbose output (full metadata) by default for backward compatibility. Pass `verbose=false` to get compact content-only results.
+
 ### Path 3: Compact MCP profile (frontier models)
 
 Two tools: `register_session` and a single `memory` dispatcher that
@@ -225,6 +227,8 @@ MEMORYHUB_TOOL_PROFILE=compact   # default
 ```
 
 Tools: `register_session`, `memory(action=...)`.
+
+Compact-profile `search` and `list` actions now return content-only results by default: each entry contains `{id, content, result_type}` with no structural metadata. This is complementary to the hook-based startup injection (Path 1.5, see [memoryhub-loading rule](../.claude/rules/memoryhub-loading.md)) which is also content-only. Pass `options: {verbose: true}` when full metadata is needed (e.g., for curation decisions that depend on weight or scope).
 
 ### Why not the minimal profile for small models?
 

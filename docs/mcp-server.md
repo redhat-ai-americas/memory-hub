@@ -63,6 +63,14 @@ Three-layer rules (system > organizational > user) with override protection. Sys
 
 Every result entry includes a `result_type` (`"full"` or `"stub"`) and a `relevance_score`. Pagination metadata in the response (`total_matching`, `has_more`) lets callers tell when more matches exist beyond `max_results`.
 
+## Compact response mode (#255)
+
+The `memory(action="search")` and `memory(action="list")` dispatcher actions return compact responses by default: each result contains only `{id, content, result_type}`. Pass `options: {verbose: true}` to get full metadata (owner_id, scope, weight, created_at, updated_at, tenant_id, metadata, domains, branch_type, etc.).
+
+Direct callers of the full-profile tools (`search_memory`, `list_memory`) still receive verbose output by default for backward compatibility.
+
+The compact default reduces token overhead for consuming agents, which typically need content for reasoning and only need metadata for curation decisions.
+
 ## Session focus retrieval (Layer 2, #58)
 
 When the caller passes a `focus` string to `search_memory`, retrieval routes through `search_memories_with_focus` instead of plain pgvector cosine. The pipeline is:
