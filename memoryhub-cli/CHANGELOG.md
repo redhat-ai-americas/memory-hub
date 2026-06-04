@@ -2,6 +2,50 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [0.8.0] — 2026-06-03
+
+- **New commands (#256)**: `memoryhub promote`, `memoryhub graduate`,
+  `memoryhub checkpoint`, and `memoryhub describe` for memory lifecycle
+  management.
+- **Obsidian export (#245)**: `memoryhub export --format obsidian` generates
+  Obsidian-compatible markdown with wikilinks and frontmatter.
+- **Hook-aware rule templates**: `memoryhub config init` and
+  `memoryhub config regenerate` now generate rule files that check for a
+  `<memoryhub-context>` block from SessionStart hooks before falling back
+  to the manual `register_session` + `search_memory` flow.
+
+## [0.7.0] — 2026-05-19
+
+- **Content type support (#237)**: Write and search commands accept
+  `--content-type` for behavioral memory classification.
+
+## [0.6.0] — 2026-05-07
+
+- **API key authentication (#256)**: The CLI now supports API key auth
+  via `MEMORYHUB_API_KEY` env var, `--api-key` flag, or the file at
+  `~/.config/memoryhub/api-key`. This enables non-interactive use cases
+  like SessionStart hooks.
+- **Compact output (#255)**: `--output compact` on search and list commands
+  produces content-only text wrapped in `<memoryhub-context>` tags for
+  zero-overhead LLM injection.
+- **List command**: `memoryhub list` enumerates memories without semantic
+  ranking, with cursor-based pagination.
+- **Server URL prompt**: `memoryhub config init` now prompts for the
+  server URL and saves it to `~/.config/memoryhub/config.json`.
+
+## [0.5.0] — 2026-04-22
+
+- **Structured output (#200)**: Replaced `--json` flag with `--output`
+  accepting `table`, `json`, `quiet`, and `compact` formats. All commands
+  now return structured JSON envelopes with `--output json`.
+- **New sub-apps**: `memoryhub graph` (relate, list, similar),
+  `memoryhub curation` (report, resolve), `memoryhub session` (status,
+  focus), `memoryhub project` (list, describe, join, leave).
+- **Update command**: `memoryhub update` for modifying existing memories
+  with version history preservation.
+- **Config enhancements**: `--project` and `--non-interactive` flags on
+  `memoryhub config init`.
+
 ## [0.4.0] — 2026-04-14
 
 - **Admin subcommands (#186)**: Added `memoryhub admin` command group with

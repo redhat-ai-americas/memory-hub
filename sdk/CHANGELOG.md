@@ -2,6 +2,34 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.11.0] — 2026-06-03
+
+- **`describe_project()` method**: Retrieve project details including
+  members, memory counts, and description.
+
+## [0.10.0] — 2026-05-28
+
+- **`graduate()` method**: Graduate a memory from project scope to
+  organizational scope.
+- **Lint cleanup**: Fixed 14 ruff findings (unused imports, import sorting).
+
+## [0.9.0] — 2026-05-19
+
+- **Obsidian export (#245)**: `export_obsidian()` method generates
+  Obsidian-compatible markdown with wikilinks and frontmatter.
+- **`promote()` and `checkpoint()` methods (#235, #238)**: Memory lifecycle
+  operations for weight promotion and checkpoint snapshotting.
+- **Content type support (#237)**: `content_type` parameter on `write()`
+  and `search()` for behavioral memory classification.
+
+## [0.8.0] — 2026-05-07
+
+- **`list()` method (#230)**: Enumerate memories without semantic ranking.
+  Supports cursor-based pagination, scope filtering, and project filtering.
+- **Extraction pipeline (#240)**: `extract_preferences()`,
+  `extract_decisions()`, and related helpers for agent trace observation.
+  85 tests covering the extraction pipeline.
+
 ## [0.7.0] — 2026-04-29
 
 - **BREAKING (wire format)**: `MemoryHubClient` now dispatches every
