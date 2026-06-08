@@ -271,7 +271,8 @@ def search(
         None, "--content-type", help="Filter by content type: declarative or behavioral",
     ),
     output: OutputFormat = typer.Option(
-        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+        OutputFormat.table, "--output", "-o",
+        help="Output format: table, json, quiet, compact",
     ),
 ):
     """Search memories using semantic similarity."""
@@ -673,6 +674,156 @@ def history(
         console.print(
             f"[dim]Showing {len(result.versions)} of {result.total_versions} versions[/dim]"
         )
+
+
+# ── promote / graduate / checkpoint ───────────────────────────────────────────
+
+
+@app.command()
+def promote(
+    memory_id: str = typer.Argument(..., help="Memory UUID to promote"),
+    target_scope: str = typer.Argument(
+        ..., help="Target scope: project, organizational, or enterprise",
+    ),
+    target_scope_id: str | None = typer.Option(
+        None, "--target-scope-id", help="Scope ID (e.g., project ID for project scope)",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Promote a memory to a broader scope."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.promote(
+                memory_id, target_scope,
+                target_scope_id=target_scope_id,
+                project_id=_project_id,
+            )
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Promoted:[/green] {result.id}")
+    console.print(f"  Scope: {result.scope} | Content type: {result.content_type}")
+    console.print(f"  Source: {memory_id[:12]}...")
+
+
+@app.command()
+def graduate(
+    memory_id: str = typer.Argument(..., help="Memory UUID to graduate"),
+    evidence: str | None = typer.Option(
+        None, "--evidence", "-e", help="Evidence text to attach",
+    ),
+    reviewer_note: str | None = typer.Option(
+        None, "--reviewer-note", help="Note explaining the graduation",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Graduate an experiential memory to knowledge status."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.graduate(
+                memory_id,
+                evidence=evidence,
+                reviewer_note=reviewer_note,
+                project_id=_project_id,
+            )
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Graduated:[/green] {result.id}")
+    console.print(f"  Content type: {result.content_type} | Scope: {result.scope}")
+    console.print(f"  Source: {memory_id[:12]}...")
+    if evidence:
+        console.print("  Evidence branch attached.")
+
+
+@app.command()
+def checkpoint(
+    workflow_name: str = typer.Argument(..., help="Workflow identifier"),
+    state: str | None = typer.Option(
+        None, "--state", help="JSON state to persist (omit to read current state)",
+    ),
+    scope: str = typer.Option("user", "--scope", "-s", help="Scope: user (default) or project"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID (required for project scope)",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Read or write durable checkpoint state for a workflow."""
+    import json as json_mod
+
+    state_dict = None
+    if state is not None:
+        try:
+            state_dict = json_mod.loads(state)
+        except json_mod.JSONDecodeError as exc:
+            handle_error(
+                "invalid_json",
+                f"--state must be valid JSON: {exc}",
+                output, EXIT_CLIENT_ERROR,
+            )
+
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.checkpoint(
+                workflow_name,
+                state=state_dict,
+                scope=scope,
+                project_id=_project_id,
+            )
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    wf = result.get("workflow_name", workflow_name)
+    current_state = result.get("state")
+    if state_dict is not None:
+        verb = "Created" if result.get("created") else "Updated"
+        console.print(f"[green]{verb} checkpoint:[/green] {wf}")
+    else:
+        if current_state is None:
+            console.print(f"[dim]No checkpoint found for workflow '{wf}'.[/dim]")
+            return
+        console.print(f"[bold]Checkpoint:[/bold] {wf}")
+
+    console.print(f"  State: {json_mod.dumps(current_state, indent=2)}")
 
 
 # ── memoryhub config init / regenerate ───────────────────────────────────────
@@ -1393,6 +1544,53 @@ def project_remove_member(
         return
 
     console.print(f"[green]Removed[/green] {user_id} from {project_name}")
+
+
+@project_app.command("describe")
+def project_describe(
+    project_name: str = typer.Argument(..., help="Project name"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Show project details, members, and memory count."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.describe_project(project_name)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    proj = result.get("project", {})
+    console.print(f"[bold]{proj.get('name', project_name)}[/bold]")
+    if proj.get("description"):
+        console.print(f"  {proj['description']}")
+    policy = "invite-only" if proj.get("invite_only") else "open"
+    console.print(f"  Policy: {policy} | Memories: {proj.get('memory_count', 0)}")
+    if proj.get("created_by"):
+        created = str(proj.get("created_at", ""))[:19]
+        console.print(f"  Created by {proj['created_by']} on {created}")
+
+    members = result.get("members", [])
+    if members:
+        console.print()
+        table = Table(title="Members")
+        table.add_column("User", style="bold")
+        table.add_column("Role", style="cyan")
+        table.add_column("Joined", style="dim")
+        for m in members:
+            joined = str(m.get("joined_at", ""))[:19] if m.get("joined_at") else "-"
+            table.add_row(m.get("user_id", ""), m.get("role", ""), joined)
+        console.print(table)
+    else:
+        console.print("\n[dim]No members.[/dim]")
 
 
 # ── memoryhub session ─────────────────────────────────────────────────────────

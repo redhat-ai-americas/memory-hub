@@ -1139,6 +1139,28 @@ class MemoryHubClient:
             options={"user_id": user_id},
         )
 
+    async def describe_project(
+        self,
+        project_name: str,
+    ) -> dict[str, Any]:
+        """Get project details including members and memory count.
+
+        Args:
+            project_name: Project identifier.
+
+        Returns:
+            Dict with ``project`` (name, description, invite_only,
+            created_at, created_by, memory_count), ``members`` list,
+            and ``total_members`` count.
+
+        Raises:
+            NotFoundError: Project does not exist.
+        """
+        return await self._call_action(
+            "describe_project",
+            project_id=project_name,
+        )
+
     # ── Session focus (#61) ─────────────────────────────────────────
 
     async def get_session(self) -> dict[str, Any]:
