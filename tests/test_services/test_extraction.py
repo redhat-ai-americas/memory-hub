@@ -1,6 +1,7 @@
 """Tests for the entity extraction pipeline."""
 
 import json
+import os
 import uuid
 from collections import namedtuple
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -97,6 +98,26 @@ def test_run_spacy_ner_maps_all_supported_labels():
 
     types = [e["type"] for e in result]
     assert types == ["person", "organization", "location", "location", "location", "event"]
+
+
+def test_run_spacy_ner_discounts_acronym_confidence():
+    """Acronym-pattern entities get discounted confidence (#267)."""
+    fake = FakeNlp([
+        SpacyEntity("Alice", "PERSON", 0, 5),
+        SpacyEntity("ORM", "ORG", 10, 13),
+        SpacyEntity("NER", "ORG", 15, 18),
+    ])
+    with patch("memoryhub_core.services.extraction._get_nlp", return_value=fake):
+        result = run_spacy_ner("Alice uses ORM and NER tools.")
+
+    assert len(result) == 3
+    alice = next(e for e in result if e["name"] == "Alice")
+    orm = next(e for e in result if e["name"] == "ORM")
+    ner_ent = next(e for e in result if e["name"] == "NER")
+
+    assert alice["confidence"] == 1.0, "Mixed case should keep full confidence"
+    assert orm["confidence"] == 0.5, "Acronym should get discounted confidence"
+    assert ner_ent["confidence"] == 0.5, "Acronym should get discounted confidence"
 
 
 # ── extract_entities_from_memory tests ───────────────────────────────────────
@@ -540,8 +561,8 @@ async def test_cascade_runs_stage2_when_spacy_coverage_low(async_session):
 
 
 @pytest.mark.asyncio
-async def test_cascade_skips_stage2_when_spacy_coverage_sufficient(async_session):
-    """When spaCy finds >= 2 high-confidence entities, GLiNER is skipped."""
+async def test_cascade_always_runs_gliner_alongside_spacy(async_session):
+    """GLiNER Stage 2 always runs regardless of spaCy coverage (#267)."""
     embedding_service = MockEmbeddingService()
     memory_id = uuid.uuid4()
 
@@ -593,9 +614,68 @@ async def test_cascade_skips_stage2_when_spacy_coverage_sufficient(async_session
         )
 
     assert result["count"] == 3
-    assert not gliner_called, "GLiNER should not have been called when spaCy coverage is sufficient"
+    assert gliner_called, "GLiNER should always run alongside spaCy (#267)"
     extractors = {e["extractor"] for e in result["entities"]}
     assert extractors == {"spacy"}
+
+
+@pytest.mark.asyncio
+async def test_cascade_gliner_runs_despite_spacy_false_positives(async_session):
+    """GLiNER runs even when spaCy produces false-positive ORG entities (#267).
+
+    Reproduces the documented issue where spaCy tags technical terms as
+    ORG/GPE with confidence 1.0 (now discounted to 0.5 for acronyms).
+    """
+    embedding_service = MockEmbeddingService()
+    memory_id = uuid.uuid4()
+
+    from datetime import UTC, datetime
+
+    from memoryhub_core.models.memory import MemoryNode
+
+    now = datetime.now(UTC)
+    async_session.add(MemoryNode(
+        id=memory_id,
+        content="Deployed PostgreSQL with ORM on OpenShift.",
+        stub="Deployed PostgreSQL...",
+        scope="user",
+        weight=0.9,
+        owner_id="test-user",
+        tenant_id="test-tenant",
+        is_current=True,
+        version=1,
+        storage_type="inline",
+        created_at=now,
+        updated_at=now,
+    ))
+    await async_session.commit()
+
+    fake_nlp = FakeNlp([
+        SpacyEntity("PostgreSQL", "GPE", 9, 19),
+        SpacyEntity("ORM", "ORG", 25, 28),
+    ])
+    fake_gliner = FakeGLiNERModel([
+        {"text": "PostgreSQL", "label": "database", "score": 0.92, "start": 9, "end": 19},
+        {"text": "OpenShift", "label": "technology", "score": 0.90, "start": 36, "end": 45},
+    ])
+
+    with (
+        patch("memoryhub_core.services.extraction._get_nlp", return_value=fake_nlp),
+        patch("memoryhub_core.services.extraction._get_gliner", return_value=fake_gliner),
+    ):
+        result = await extract_entities_from_memory(
+            memory_id=memory_id,
+            content="Deployed PostgreSQL with ORM on OpenShift.",
+            session=async_session,
+            embedding_service=embedding_service,
+            tenant_id="test-tenant",
+            owner_id="test-user",
+        )
+
+    extractors = {e["extractor"] for e in result["entities"]}
+    assert "gliner" in extractors, "GLiNER entities should appear in results"
+    names = {e["name"] for e in result["entities"]}
+    assert "OpenShift" in names, "GLiNER-only entity should be in results"
 
 
 @pytest.mark.asyncio
@@ -1680,3 +1760,111 @@ async def test_llm_handles_code_fenced_response():
 
     assert len(entities) == 1
     assert entities[0]["name"] == "Bob"
+
+
+# ── Integration: acronym discount triggers Stage 3 with real LLM ──────────
+
+_LLM_URL = os.environ.get("MEMORYHUB_LLM_EXTRACTION_URL", "")
+_LLM_MODEL = os.environ.get(
+    "MEMORYHUB_LLM_EXTRACTION_MODEL", "RedHatAI/gpt-oss-20b",
+)
+
+_skip_no_llm = pytest.mark.skipif(
+    not _LLM_URL,
+    reason="MEMORYHUB_LLM_EXTRACTION_URL not set; skipping live LLM test",
+)
+
+
+@_skip_no_llm
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_acronym_discount_triggers_stage3_live_llm(async_session):
+    """End-to-end: acronym discount causes Stage 3 to fire against real LLM.
+
+    Scenario: spaCy produces only acronym entities (ORM, NER) which get
+    discounted to 0.5 confidence. GLiNER finds nothing additional. The
+    combined high-confidence count (0) is below the Stage 3 threshold (2),
+    so Stage 3 fires against the real GPT-OSS 20B endpoint and extracts
+    entities that spaCy and GLiNER missed.
+
+    Requires MEMORYHUB_LLM_EXTRACTION_URL to be set (e.g., via port-forward
+    or cluster route).
+    """
+    import memoryhub_core.services.extraction as ext
+    from memoryhub_core.services.extraction import extract_entities_from_memory
+
+    embedding_service = MockEmbeddingService()
+    memory_id = uuid.uuid4()
+
+    from datetime import UTC, datetime
+
+    from memoryhub_core.models.memory import MemoryNode
+
+    content = (
+        "Alice Johnson deployed PostgreSQL and Redis on OpenShift. "
+        "She configured ORM and NER pipelines for the project."
+    )
+
+    now = datetime.now(UTC)
+    async_session.add(MemoryNode(
+        id=memory_id,
+        content=content,
+        stub=content[:40] + "...",
+        scope="user",
+        weight=0.9,
+        owner_id="test-user",
+        tenant_id="test-tenant",
+        is_current=True,
+        version=1,
+        storage_type="inline",
+        created_at=now,
+        updated_at=now,
+    ))
+    await async_session.commit()
+
+    # Stage 1: spaCy finds only acronyms (discounted to 0.5) and maybe
+    # "Alice Johnson" (1.0). We mock spaCy to return ONLY the acronyms
+    # so that spaCy alone doesn't meet the threshold.
+    fake_nlp = FakeNlp([
+        SpacyEntity("ORM", "ORG", 67, 70),
+        SpacyEntity("NER", "ORG", 75, 78),
+    ])
+
+    # Stage 2: GLiNER returns nothing (simulates domain gap)
+    fake_gliner = FakeGLiNERModel([])
+
+    # Reset the singleton so it picks up test env vars
+    old_extractor = ext._llm_extractor
+    ext._llm_extractor = None
+
+    try:
+        with (
+            patch("memoryhub_core.services.extraction._get_nlp", return_value=fake_nlp),
+            patch("memoryhub_core.services.extraction._get_gliner", return_value=fake_gliner),
+            patch.dict("os.environ", {
+                "MEMORYHUB_LLM_EXTRACTION_URL": _LLM_URL,
+                "MEMORYHUB_LLM_EXTRACTION_MODEL": _LLM_MODEL,
+            }),
+        ):
+            result = await extract_entities_from_memory(
+                memory_id=memory_id,
+                content=content,
+                session=async_session,
+                embedding_service=embedding_service,
+                tenant_id="test-tenant",
+                owner_id="test-user",
+            )
+    finally:
+        ext._llm_extractor = old_extractor
+
+    # Stage 3 should have fired and found entities
+    extractors = {e["extractor"] for e in result["entities"]}
+    assert "llm" in extractors, (
+        f"Stage 3 should have fired (acronym discount -> low confidence). "
+        f"Got extractors: {extractors}, entities: {result['entities']}"
+    )
+
+    # The LLM should have found real entities from the text
+    assert len(result["entities"]) >= 3, (
+        f"Expected LLM to find multiple entities. Got: {result['entities']}"
+    )

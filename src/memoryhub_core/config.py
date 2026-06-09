@@ -80,6 +80,9 @@ class AppSettings(BaseSettings):
     # GLiNER Stage 2 (#248)
     gliner_model: str = "urchade/gliner_medium-v2.1"
     gliner_confidence_threshold: float = 0.5
+    # Deprecated since #267: GLiNER now runs unconditionally alongside spaCy.
+    # No longer used by the extraction pipeline; retained to avoid breaking
+    # existing environment configs.
     gliner_stage2_trigger_count: int = 2
     gliner_stage2_trigger_confidence: float = 0.8
 

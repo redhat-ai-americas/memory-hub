@@ -3,9 +3,8 @@
 Three-stage extraction cascade (#170 Phase 2, #248, #249):
 
 - Stage 1 (spaCy) runs always for fast person/org/location/event extraction.
-- Stage 2 (GLiNER2) fires when Stage 1 finds fewer than 2 high-confidence
-  entities, adding zero-shot extraction for objects, technologies, and
-  domain terms.
+- Stage 2 (GLiNER2) runs always alongside Stage 1 for zero-shot extraction
+  of objects, technologies, and domain terms.
 - Stage 3 (LLM) fires when Stages 1+2 combined still have low coverage.
   This is the only stage that extracts inter-entity relationships (not just
   memory-to-entity MENTIONS edges).
@@ -53,6 +52,9 @@ _SPACY_LABEL_MAP: dict[str, str] = {
     "EVENT": "event",
 }
 
+_ACRONYM_PATTERN = re.compile(r"^[A-Z]{2,}$")
+_ACRONYM_CONFIDENCE_DISCOUNT = 0.5
+
 _nlp = None
 
 
@@ -86,18 +88,21 @@ def run_spacy_ner(text: str) -> list[dict[str, Any]]:
         if pole_type is None:
             continue
 
-        key = (ent.text.strip().lower(), pole_type)
+        name = ent.text.strip()
+        key = (name.lower(), pole_type)
         if key in seen:
             continue
         seen.add(key)
 
+        confidence = _ACRONYM_CONFIDENCE_DISCOUNT if _ACRONYM_PATTERN.match(name) else 1.0
+
         entities.append({
-            "name": ent.text.strip(),
+            "name": name,
             "type": pole_type,
             "label": ent.label_,
             "start": ent.start_char,
             "end": ent.end_char,
-            "confidence": 1.0,
+            "confidence": confidence,
         })
 
     return entities
@@ -495,11 +500,16 @@ async def run_llm_ner(text: str) -> tuple[list[dict[str, Any]], list[dict[str, A
 
 
 # ---------------------------------------------------------------------------
-# Cascade: Stage 1 -> Stage 2 (conditional) -> Stage 3 (conditional)
+# Cascade: Stage 1 + Stage 2 (always) -> Stage 3 (conditional)
 # ---------------------------------------------------------------------------
 
 def _should_run_stage2(stage1_entities: list[dict[str, Any]]) -> bool:
-    """Return True if Stage 1 coverage is too low and Stage 2 should run."""
+    """Return True if Stage 1 coverage is too low and Stage 2 should run.
+
+    .. deprecated::
+        GLiNER now runs unconditionally alongside spaCy (#267).
+        Retained for backward compatibility with tests.
+    """
     settings = AppSettings()
     high_confidence = sum(
         1 for e in stage1_entities
@@ -551,33 +561,27 @@ async def extract_entities_from_memory(
 ) -> dict[str, Any]:
     """Extract entities from memory content and create entity nodes + MENTIONS edges.
 
-    Runs the three-stage cascade: Stage 1 (spaCy) always runs; Stage 2
-    (GLiNER2) fires when Stage 1 yields fewer than 2 high-confidence
-    entities; Stage 3 (LLM) fires when Stages 1+2 combined still have
-    low coverage. Stage 3 is the only stage that also extracts inter-entity
-    relationships. Returns a summary dict with extracted entity info for logging.
+    Runs the three-stage cascade: Stages 1 (spaCy) and 2 (GLiNER2) run
+    unconditionally; Stage 3 (LLM) fires when Stages 1+2 combined produce
+    fewer than 2 high-confidence entities. Stage 3 is the only stage that
+    also extracts inter-entity relationships. Returns a summary dict with
+    extracted entity info for logging.
     """
     stage1_entities = _tag_extractor(run_spacy_ner(content), "spacy")
 
-    if _should_run_stage2(stage1_entities):
-        try:
-            stage2_entities = _tag_extractor(run_gliner_ner(content), "gliner")
-            all_entities = _merge_entities(stage1_entities, stage2_entities)
-            logger.debug(
-                "Stage 2 (GLiNER) added %d entities for memory %s",
-                len(all_entities) - len(stage1_entities), memory_id,
-            )
-        except Exception:
-            logger.warning(
-                "GLiNER Stage 2 failed for memory %s; using Stage 1 results only",
-                memory_id,
-                exc_info=True,
-            )
-            all_entities = stage1_entities
-    else:
+    # Stage 2: GLiNER always runs alongside spaCy (#267)
+    try:
+        stage2_entities = _tag_extractor(run_gliner_ner(content), "gliner")
+        all_entities = _merge_entities(stage1_entities, stage2_entities)
         logger.debug(
-            "Stage 2 (GLiNER) skipped for memory %s: %d high-confidence entities from Stage 1",
-            memory_id, len(stage1_entities),
+            "Stage 2 (GLiNER) added %d entities for memory %s",
+            len(all_entities) - len(stage1_entities), memory_id,
+        )
+    except Exception:
+        logger.warning(
+            "GLiNER Stage 2 failed for memory %s; using Stage 1 results only",
+            memory_id,
+            exc_info=True,
         )
         all_entities = stage1_entities
 

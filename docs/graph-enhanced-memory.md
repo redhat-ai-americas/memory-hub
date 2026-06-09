@@ -246,7 +246,7 @@ write_memory commits
 background: extract_entities_from_memory(memory_id)
     ├─ Stage 1: spaCy (~5ms)
     │   └─ Standard NER for person, location, organization
-    ├─ Stage 2: GLiNER2 (~50ms) [if Stage 1 confidence < threshold]
+    ├─ Stage 2: GLiNER2 (~50ms) [always alongside Stage 1]
     │   └─ Zero-shot for object, event types + domain-specific terms
     └─ Stage 3: LLM fallback (~500ms) [if total confidence < threshold]
         └─ Structured extraction prompt for complex cases
@@ -258,7 +258,7 @@ create or update entity nodes
 create MENTIONS relationships
 ```
 
-Stage selection logic: run Stage 1 always. If Stage 1 identifies fewer than 2 entities with confidence > 0.8, continue to Stage 2. If Stage 2 coverage is still low, run Stage 3. For most agent memory content (short factual statements), Stage 1 alone will handle the majority of cases.
+Stage selection logic: Stages 1 (spaCy) and 2 (GLiNER2) run always in parallel. If combined results produce fewer than 2 entities with confidence > 0.7, continue to Stage 3 (LLM fallback). For most agent memory content (short factual statements), Stages 1 and 2 combined will handle the majority of cases.
 
 The LLM fallback uses a structured prompt targeting `gpt-4o-mini` (or the configured local SLM) with a JSON schema response. It extracts both entities and relationships between them — the only stage that extracts inter-entity relationships rather than entity-to-memory relationships.
 
@@ -428,10 +428,7 @@ Tested 2026-06-09 on the mcp-rhoai cluster with three memories of varying entity
 
 **Key finding**: spaCy's `en_core_web_sm` aggressively tags technical terms and acronyms as ORG or GPE. This inflates the "high-confidence entity count" and prevents the cascade from reaching Stage 2 (GLiNER) or Stage 3 (LLM), even when spaCy's entity types are wrong. The cascade trigger counts entities but not type accuracy.
 
-**Possible improvements** (not in scope for this PR):
-- Count only entities with POLE+O-valid types from spaCy (filter out false-positive ORG tags on acronyms)
-- Always run GLiNER alongside spaCy rather than conditionally, since GLiNER's zero-shot labels are more accurate for technical domains
-- Add a confidence discount for spaCy entities that match common acronym patterns
+**Resolution (#267, 2026-06-09):** GLiNER now runs unconditionally alongside spaCy, eliminating the flawed conditional gate. Acronym-pattern entities from spaCy (matching `^[A-Z]{2,}$`) receive a confidence discount from 1.0 to 0.5, improving Stage 3 triggering accuracy.
 
 ## Open Questions
 
