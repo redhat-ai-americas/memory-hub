@@ -27,6 +27,8 @@ _VALID_ACTIONS = frozenset({
     "report", "resolve", "set_rule",
     "create_project", "add_member", "remove_member", "promote",
     "graduate", "checkpoint",
+    # Admin actions
+    "backfill_entities",
 })
 
 # Per-action option keys accepted for forwarding.
@@ -64,6 +66,7 @@ _SET_RULE_OPTS = frozenset({
 _PROMOTE_OPTS = frozenset({"target_scope", "target_scope_id"})
 _GRADUATE_OPTS = frozenset({"evidence", "reviewer_note"})
 _CHECKPOINT_OPTS = frozenset({"workflow_name", "state", "scope", "scope_id"})
+_BACKFILL_OPTS = frozenset({"limit", "include_failed"})
 
 
 def _require(action: str, name: str, value: Any) -> Any:
@@ -202,6 +205,13 @@ async def memory(
         Durable key-value state for recurring agents. Upsert when state provided,
         read when only workflow_name given.
 
+    Admin actions:
+      backfill_entities([options: limit, include_failed])
+        Run entity extraction on memories without extraction_status. Processes up to
+        `limit` memories (default: 50). Set `include_failed=true` to retry previously
+        failed extractions. Returns summary of processed, succeeded, failed, and
+        total entities created.
+
     Params in () are top-level. {braces} in options = required for that action.
     """
     if action not in _VALID_ACTIONS:
@@ -261,6 +271,8 @@ async def memory(
         return await _dispatch_promote(memory_id, project_id, opts, ctx)
     if action == "graduate":
         return await _dispatch_graduate(memory_id, project_id, opts, ctx)
+    if action == "backfill_entities":
+        return await _dispatch_backfill_entities(opts, ctx)
     # checkpoint (last remaining action)
     return await _dispatch_checkpoint(opts, ctx)
 
@@ -653,3 +665,14 @@ async def _dispatch_graduate(memory_id, project_id, opts, ctx):
         }
     finally:
         await release_db_session(gen)
+
+
+async def _dispatch_backfill_entities(opts, ctx):
+    """Dispatch backfill_entities admin action."""
+    from src.tools.backfill_entities import backfill_entities
+    kwargs = _forward(opts, _BACKFILL_OPTS)
+    if "limit" in kwargs:
+        kwargs["limit"] = int(kwargs["limit"])
+    if "include_failed" in kwargs:
+        kwargs["include_failed"] = bool(kwargs["include_failed"])
+    return await backfill_entities(**kwargs)
