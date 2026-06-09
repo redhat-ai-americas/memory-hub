@@ -64,7 +64,7 @@ with open(main_py) as f:
 
 # Files in src/tools/ that are tool implementations (exclude __init__,
 # private/dunder modules, and the known auth helper utility module).
-NON_TOOL_FILES = {"auth.py"}
+NON_TOOL_FILES = {"auth.py", "backfill_entities.py"}
 files = {
     f[:-3]
     for f in os.listdir(tools_dir)
