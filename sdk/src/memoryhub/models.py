@@ -206,3 +206,50 @@ class SessionInfo(BaseModel):
     name: str
     scopes: list[str]
     message: str = ""
+
+
+class EntityInfo(BaseModel):
+    """A single entity node with relationship count."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    content: str
+    entity_type: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    mentions_count: int = 0
+    created_at: datetime | None = None
+
+
+class ListEntitiesResult(BaseModel):
+    """Paginated list of entity nodes."""
+
+    model_config = ConfigDict(extra="allow")
+
+    entities: list[EntityInfo]
+    total: int = 0
+    limit: int = 50
+    offset: int = 0
+    has_more: bool = False
+
+
+class MergeEntitiesResult(BaseModel):
+    """Result of merging two entities."""
+
+    model_config = ConfigDict(extra="allow")
+
+    surviving_entity: dict[str, Any] = Field(default_factory=dict)
+    reassigned_mentions: int = 0
+    skipped_duplicates: int = 0
+    source_deleted: str = ""
+    message: str = ""
+
+
+class RenameEntityResult(BaseModel):
+    """Result of renaming an entity."""
+
+    model_config = ConfigDict(extra="allow")
+
+    entity: dict[str, Any] = Field(default_factory=dict)
+    old_name: str = ""
+    message: str = ""

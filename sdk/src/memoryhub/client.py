@@ -30,9 +30,12 @@ from memoryhub.models import (
     ContradictionResult,
     CurationRuleResult,
     DeleteResult,
+    ListEntitiesResult,
     Memory,
+    MergeEntitiesResult,
     RelationshipInfo,
     RelationshipsResult,
+    RenameEntityResult,
     SearchResult,
     WriteResult,
 )
@@ -785,6 +788,116 @@ class MemoryHubClient:
             project_id=project_id,
         )
         return DeleteResult.model_validate(data)
+
+    # ── Entity management ──────────────────────────────────────────────
+
+    async def list_entities(
+        self,
+        *,
+        entity_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        owner_id: str | None = None,
+        project_id: str | None = None,
+    ) -> ListEntitiesResult:
+        """List extracted entity nodes with MENTIONS relationship counts.
+
+        Args:
+            entity_type: Filter by type (person, object, location, event,
+                organization). None returns all types.
+            limit: Maximum entities to return (default 50).
+            offset: Pagination offset.
+            owner_id: Override the caller's owner_id for listing.
+            project_id: Project identifier for campaign enrollment.
+
+        Returns:
+            Paginated list of entity nodes ordered by mentions count.
+        """
+        opts: dict[str, Any] = {}
+        if entity_type is not None:
+            opts["entity_type"] = entity_type
+        if limit != 50:
+            opts["limit"] = limit
+        if offset != 0:
+            opts["offset"] = offset
+        if owner_id is not None:
+            opts["owner_id"] = owner_id
+        data = await self._call_action(
+            "list_entities",
+            project_id=project_id,
+            options=opts,
+        )
+        return ListEntitiesResult.model_validate(data)
+
+    async def merge_entities(
+        self,
+        source_id: str,
+        target_id: str,
+        *,
+        project_id: str | None = None,
+    ) -> MergeEntitiesResult:
+        """Merge source entity into target entity.
+
+        All MENTIONS relationships are reassigned from source to target.
+        Source's canonical name is added to target's aliases, then source
+        is soft-deleted.
+
+        Args:
+            source_id: ID of the entity to merge away (will be deleted).
+            target_id: ID of the surviving entity.
+            project_id: Project identifier for campaign enrollment.
+
+        Returns:
+            Merge summary with reassignment counts.
+
+        Raises:
+            ValidationError: source_id equals target_id, or nodes are not entities.
+            NotFoundError: Source or target entity not found.
+        """
+        opts: dict[str, Any] = {
+            "source_id": source_id,
+            "target_id": target_id,
+        }
+        data = await self._call_action(
+            "merge_entities",
+            project_id=project_id,
+            options=opts,
+        )
+        return MergeEntitiesResult.model_validate(data)
+
+    async def rename_entity(
+        self,
+        entity_id: str,
+        new_name: str,
+        *,
+        project_id: str | None = None,
+    ) -> RenameEntityResult:
+        """Rename an entity's canonical name.
+
+        The old name is preserved as an alias. Content hash and embedding
+        are recalculated.
+
+        Args:
+            entity_id: ID of the entity to rename.
+            new_name: New canonical name for the entity.
+            project_id: Project identifier for campaign enrollment.
+
+        Returns:
+            Rename summary with old and new name.
+
+        Raises:
+            NotFoundError: Entity not found.
+            ConflictError: New name collides with an existing entity.
+            ValidationError: New name is empty or same as current name.
+        """
+        opts: dict[str, Any] = {"new_name": new_name}
+        data = await self._call_action(
+            "rename_entity",
+            memory_id=entity_id,
+            project_id=project_id,
+            options=opts,
+        )
+        return RenameEntityResult.model_validate(data)
 
     async def promote(
         self,

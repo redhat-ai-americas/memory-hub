@@ -112,6 +112,13 @@ session_app = typer.Typer(
 )
 app.add_typer(session_app, name="session")
 
+entity_app = typer.Typer(
+    name="entity",
+    help="List, merge, and rename extracted entities.",
+    no_args_is_help=True,
+)
+app.add_typer(entity_app, name="entity")
+
 
 def _get_client(output: OutputFormat = OutputFormat.table):
     """Create a MemoryHubClient from config/env.
@@ -1698,6 +1705,154 @@ def session_focus_history(
         console.print(table)
 
     console.print(f"[dim]Total sessions: {total}[/dim]")
+
+
+# ── Entity management commands ─────────────────────────────────────────────────
+
+
+@entity_app.command("list")
+def entity_list(
+    entity_type: str | None = typer.Option(
+        None, "--type", "-t", help="Filter by entity type (person, object, location, event, organization)",
+    ),
+    limit: int = typer.Option(50, "--limit", "-n", help="Maximum entities to return"),
+    offset: int = typer.Option(0, "--offset", help="Pagination offset"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """List extracted entities ordered by mention count."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.list_entities(
+                entity_type=entity_type,
+                limit=limit,
+                offset=offset,
+                project_id=_project_id,
+            )
+
+    result = _run_command(_do(), output)
+    if result is None:
+        return
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    if not result.entities:
+        console.print("[dim]No entities found.[/dim]")
+        return
+
+    table = Table(title=f"Entities ({result.total} total)")
+    table.add_column("Name", style="cyan")
+    table.add_column("Type")
+    table.add_column("Mentions", justify="right")
+    table.add_column("Aliases", style="dim")
+    table.add_column("ID", style="dim")
+
+    for ent in result.entities:
+        aliases = ", ".join(ent.aliases) if ent.aliases else "-"
+        table.add_row(
+            ent.content,
+            ent.entity_type or "-",
+            str(ent.mentions_count),
+            aliases,
+            ent.id,
+        )
+
+    console.print(table)
+    if result.has_more:
+        console.print(f"[dim]Showing {result.offset + 1}-{result.offset + len(result.entities)} of {result.total}. Use --offset to paginate.[/dim]")
+
+
+@entity_app.command("merge")
+def entity_merge(
+    source_id: str = typer.Argument(..., help="ID of the entity to merge away (will be deleted)"),
+    target_id: str = typer.Argument(..., help="ID of the surviving entity"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Merge one entity into another, reassigning all mention relationships."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.merge_entities(
+                source_id, target_id, project_id=_project_id,
+            )
+
+    result = _run_command(_do(), output)
+    if result is None:
+        return
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Merged:[/green] {result.message}")
+    surviving = result.surviving_entity
+    console.print(f"  Surviving entity: {surviving.get('content', '?')} ({surviving.get('id', '?')})")
+    console.print(f"  Reassigned mentions: {result.reassigned_mentions}")
+    if result.skipped_duplicates > 0:
+        console.print(f"  Skipped duplicates: {result.skipped_duplicates}")
+    aliases = surviving.get("aliases", [])
+    if aliases:
+        console.print(f"  Aliases: {', '.join(aliases)}")
+
+
+@entity_app.command("rename")
+def entity_rename(
+    entity_id: str = typer.Argument(..., help="ID of the entity to rename"),
+    new_name: str = typer.Argument(..., help="New canonical name for the entity"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Rename an entity's canonical name (old name preserved as alias)."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.rename_entity(
+                entity_id, new_name, project_id=_project_id,
+            )
+
+    result = _run_command(_do(), output)
+    if result is None:
+        return
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    entity = result.entity
+    console.print(f"[green]Renamed:[/green] '{result.old_name}' -> '{entity.get('content', new_name)}'")
+    console.print(f"  Entity ID: {entity.get('id', entity_id)}")
+    console.print(f"  Type: {entity.get('entity_type', '?')}")
+    aliases = entity.get("aliases", [])
+    if aliases:
+        console.print(f"  Aliases: {', '.join(aliases)}")
 
 
 if __name__ == "__main__":

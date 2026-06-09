@@ -20,7 +20,15 @@ from memoryhub.exceptions import (
     ToolError,
     ValidationError,
 )
-from memoryhub.models import ContradictionResult, Memory, SearchResult, WriteResult
+from memoryhub.models import (
+    ContradictionResult,
+    ListEntitiesResult,
+    Memory,
+    MergeEntitiesResult,
+    RenameEntityResult,
+    SearchResult,
+    WriteResult,
+)
 
 # ── Fake MCP response types ──────────────────────────────────────────────────
 
@@ -1692,3 +1700,126 @@ def test_get_injection_block_skips_empty_content():
     block = MemoryHubClient.get_injection_block(result)
 
     assert block == "Real content."
+
+
+# ── Entity management ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_entities_default(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "entities": [
+                {
+                    "id": "ent-001",
+                    "content": "OpenShift",
+                    "entity_type": "object",
+                    "aliases": ["OCP"],
+                    "mentions_count": 12,
+                    "created_at": "2026-06-01T00:00:00",
+                },
+            ],
+            "total": 1,
+            "limit": 50,
+            "offset": 0,
+            "has_more": False,
+        },
+        is_error=False,
+    )
+
+    result = await c.list_entities()
+
+    assert isinstance(result, ListEntitiesResult)
+    assert len(result.entities) == 1
+    assert result.entities[0].content == "OpenShift"
+    assert result.entities[0].mentions_count == 12
+    assert result.total == 1
+
+    tool, action = _tool_and_action(mock_mcp)
+    assert tool == "memory"
+    assert action == "list_entities"
+
+
+@pytest.mark.asyncio
+async def test_list_entities_with_type_filter(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "entities": [],
+            "total": 0,
+            "limit": 50,
+            "offset": 0,
+            "has_more": False,
+        },
+        is_error=False,
+    )
+
+    result = await c.list_entities(entity_type="person", limit=10, offset=5)
+
+    payload = _payload(mock_mcp)
+    assert payload["entity_type"] == "person"
+    assert payload["limit"] == 10
+    assert payload["offset"] == 5
+    assert result.total == 0
+
+
+@pytest.mark.asyncio
+async def test_merge_entities(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "surviving_entity": {
+                "id": "ent-002",
+                "content": "Kubernetes",
+                "aliases": ["K8s", "k8s"],
+            },
+            "reassigned_mentions": 5,
+            "skipped_duplicates": 1,
+            "source_deleted": "ent-001",
+            "message": "Merged 'K8s' into 'Kubernetes'",
+        },
+        is_error=False,
+    )
+
+    result = await c.merge_entities("ent-001", "ent-002")
+
+    assert isinstance(result, MergeEntitiesResult)
+    assert result.reassigned_mentions == 5
+    assert result.skipped_duplicates == 1
+    assert result.source_deleted == "ent-001"
+    assert result.surviving_entity["content"] == "Kubernetes"
+
+    payload = _payload(mock_mcp)
+    assert payload["source_id"] == "ent-001"
+    assert payload["target_id"] == "ent-002"
+
+
+@pytest.mark.asyncio
+async def test_rename_entity(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "entity": {
+                "id": "ent-001",
+                "content": "Red Hat OpenShift",
+                "entity_type": "object",
+                "aliases": ["OpenShift"],
+                "content_hash": "abc123",
+            },
+            "old_name": "OpenShift",
+            "message": "Renamed entity from 'OpenShift' to 'Red Hat OpenShift'",
+        },
+        is_error=False,
+    )
+
+    result = await c.rename_entity("ent-001", "Red Hat OpenShift")
+
+    assert isinstance(result, RenameEntityResult)
+    assert result.old_name == "OpenShift"
+    assert result.entity["content"] == "Red Hat OpenShift"
+    assert "OpenShift" in result.entity["aliases"]
+
+    payload = _payload(mock_mcp)
+    assert payload["memory_id"] == "ent-001"
+    assert payload["new_name"] == "Red Hat OpenShift"
