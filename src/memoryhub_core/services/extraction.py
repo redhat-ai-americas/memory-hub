@@ -315,6 +315,9 @@ class _LLMExtractor:
         for attempt in range(_LLM_MAX_FORMAT_RETRIES):
             raw_content = await self._call_llm(messages)
 
+            if raw_content is None:
+                raw_content = ""
+
             parsed = _parse_json_best_effort(raw_content)
             if parsed is None:
                 reason = "Response was not valid JSON"
