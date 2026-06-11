@@ -32,7 +32,7 @@ from memoryhub_core.services.valkey_client import (
 from src.core.app import mcp
 from src.core.authz import AuthenticationError, get_claims_from_context, get_tenant_filter
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session
-from src.tools.auth import get_current_user, get_session_expiry
+from src.tools.auth import get_current_user, get_session_expiry, get_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +220,7 @@ async def _handle_status() -> dict[str, Any]:
             await release_db_session(gen)
 
     result: dict[str, Any] = {
+        "session_id": get_session_id(),
         "user_id": claims["sub"],
         "name": display_name,
         "scopes": claims.get("scopes", []),
@@ -247,7 +248,7 @@ async def _handle_set_focus(
         ) from None
 
     user_id = claims["sub"]
-    session_id = user_id  # interim: one session per user; see set_session_focus module docstring
+    session_id = get_session_id() or user_id
 
     embedding_service = get_embedding_service()
     try:

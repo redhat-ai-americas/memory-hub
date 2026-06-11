@@ -202,6 +202,7 @@ class SessionInfo(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    session_id: str | None = None
     user_id: str
     name: str
     scopes: list[str]

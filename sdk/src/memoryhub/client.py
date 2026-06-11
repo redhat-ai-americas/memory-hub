@@ -210,6 +210,7 @@ class MemoryHubClient:
             )
 
         self._mcp: Client | None = None
+        self._session_id: str | None = None
         self._project_config = project_config or ProjectConfig()
         # #62 push pipeline state. The handler is constructed lazily in
         # __aenter__ when live_subscription is enabled, so the SDK adds zero
@@ -315,15 +316,23 @@ class MemoryHubClient:
 
         # API key mode: authenticate via register_session after connecting
         if self._api_key is not None:
-            await self._call("register_session", {"api_key": self._api_key})
+            result = await self._call("register_session", {"api_key": self._api_key})
+            if isinstance(result, dict):
+                self._session_id = result.get("session_id")
 
         return self
+
+    @property
+    def session_id(self) -> str | None:
+        """The per-conversation session identifier assigned by the server."""
+        return self._session_id
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._mcp is not None:
             await self._mcp.__aexit__(exc_type, exc_val, exc_tb)
             self._mcp = None
         self._message_handler = None
+        self._session_id = None
 
     async def _call_action(
         self,

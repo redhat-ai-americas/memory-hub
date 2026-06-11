@@ -15,6 +15,7 @@ succeeds and the agent falls back to pull-only memory loading.
 """
 
 import logging
+import uuid
 from typing import Annotated, Any
 
 from fastmcp import Context
@@ -34,7 +35,7 @@ from memoryhub_core.config import AppSettings
 from src.core.app import mcp
 from src.core.authz import get_tenant_filter
 from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import authenticate, set_session
+from src.tools.auth import authenticate, set_session, set_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -200,20 +201,23 @@ async def register_session(
 
     if token is not None:
         jwt_claims = token.claims
-        session_id = jwt_claims.get("sub", token.client_id)
+        user_id = jwt_claims.get("sub", token.client_id)
+        session_id = str(uuid.uuid4())
+        set_session_id(session_id)
         tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
-        projects = await _fetch_user_projects(session_id, tenant)
+        projects = await _fetch_user_projects(user_id, tenant)
         return {
-            "user_id": session_id,
-            "name": jwt_claims.get("name", session_id),
+            "session_id": session_id,
+            "user_id": user_id,
+            "name": jwt_claims.get("name", user_id),
             "scopes": list(token.scopes),
             "auth_method": "jwt",
             "projects": projects,
             "quick_start": _QUICK_START,
             "message": (
-                f"JWT authentication active for {session_id}. "
-                "Session registration is not needed when using JWT auth."
+                f"JWT authentication active for {user_id}. "
+                f"Session {session_id} registered."
             ),
         }
 
@@ -228,10 +232,12 @@ async def register_session(
     app_settings = AppSettings()
     ttl = app_settings.session_ttl_seconds
     expires_at = set_session(user, ttl_seconds=ttl)
-    await _start_push_for_session(user["user_id"], ctx)
+    session_id = str(uuid.uuid4())
+    set_session_id(session_id)
+    await _start_push_for_session(session_id, ctx)
 
     if ctx:
-        await ctx.info(f"Session registered for user: {user['user_id']}")
+        await ctx.info(f"Session {session_id} registered for user: {user['user_id']}")
 
     tenant = get_tenant_filter(
         {"sub": user["user_id"], "tenant_id": user.get("tenant_id", "default")}
@@ -239,6 +245,7 @@ async def register_session(
     projects = await _fetch_user_projects(user["user_id"], tenant)
 
     return {
+        "session_id": session_id,
         "user_id": user["user_id"],
         "name": user["name"],
         "scopes": user["scopes"],
@@ -247,7 +254,7 @@ async def register_session(
         "projects": projects,
         "quick_start": _QUICK_START,
         "message": (
-            f"Session registered for {user['name']} ({user['user_id']}). "
+            f"Session {session_id} registered for {user['name']} ({user['user_id']}). "
             f"Accessible scopes: {', '.join(user['scopes'])}. "
             f"Session expires in {ttl}s (auto-extends on activity)."
         ),

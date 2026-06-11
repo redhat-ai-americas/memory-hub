@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 _current_session: dict[str, Any] | None = None
 _session_expires_at: datetime | None = None
 _session_ttl_seconds: int = 3600
+_session_id: str | None = None
 
 # Loaded user records keyed by api_key for O(1) lookup.
 _users_by_key: dict[str, dict[str, Any]] = {}
@@ -85,6 +86,17 @@ def authenticate(api_key: str) -> dict[str, Any] | None:
     """Validate an API key and return the user record, or None if invalid."""
     _load_users()
     return _users_by_key.get(api_key)
+
+
+def set_session_id(sid: str) -> None:
+    """Store the per-conversation session identifier (server-minted UUID)."""
+    global _session_id
+    _session_id = sid
+
+
+def get_session_id() -> str | None:
+    """Return the per-conversation session identifier, or None if not registered."""
+    return _session_id
 
 
 def set_session(user: dict[str, Any], ttl_seconds: int = 3600) -> datetime:

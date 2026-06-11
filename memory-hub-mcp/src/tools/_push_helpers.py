@@ -33,6 +33,7 @@ from memoryhub_core.services.valkey_client import (
     ValkeyUnavailableError,
     get_valkey_client,
 )
+from src.tools.auth import get_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ async def broadcast_after_write(
             )
             return
 
-        writer_id = claims.get("sub")
+        writer_id = get_session_id() or claims.get("sub")
         relevant = [sid for sid in active_sessions if sid != writer_id]
         if not relevant:
             # Fast path: no other subscribers, nothing to do. Crucially,

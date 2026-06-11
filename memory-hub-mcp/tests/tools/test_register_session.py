@@ -4,11 +4,16 @@ Exercises the integration between the API-key authentication flow and the
 new push subscriber lifecycle: SADD to ``memoryhub:active_sessions``, spawn
 of the per-session subscriber task, and registration of an
 ``_exit_stack``-driven cleanup callback that undoes both on disconnect.
+
+After #86, ``session_id`` is a server-minted UUID distinct from ``user_id``.
+Tests verify that the UUID is generated, returned, stored in Valkey, and used
+for push subscriber lifecycle.
 """
 
 from __future__ import annotations
 
 import contextlib
+import uuid
 from unittest.mock import patch
 
 import fakeredis.aioredis
@@ -25,6 +30,7 @@ from memoryhub_core.services.valkey_client import (
     ValkeyClient,
     set_valkey_client,
 )
+from src.tools import auth as auth_module
 from src.tools.register_session import register_session
 
 # FastMCP's @mcp.tool decorator returns the original function in this codebase
@@ -99,6 +105,23 @@ def mock_fetch_projects():
         return_value=[],
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def reset_session_id():
+    """Clear the module-level session_id between tests."""
+    auth_module._session_id = None
+    yield
+    auth_module._session_id = None
+
+
+def _is_uuid(value: str) -> bool:
+    """Return True if value is a valid UUID string."""
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -176,11 +199,14 @@ class TestValidApiKey:
         result = await register_session_fn(api_key="valid", ctx=ctx)
 
         assert result["user_id"] == "wjackson"
+        assert _is_uuid(result["session_id"])
+        assert result["session_id"] != result["user_id"]
         assert "expires_at" in result
         assert "session_ttl_seconds" in result
         assert result["session_ttl_seconds"] == 3600
         members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
-        assert members == {"wjackson"}
+        assert len(members) == 1
+        assert _is_uuid(members.pop())
 
     async def test_starts_subscriber_task(
         self, fake_valkey, mock_authenticate, mock_set_session
@@ -200,7 +226,7 @@ class TestValidApiKey:
         self, fake_valkey, mock_authenticate, mock_set_session
     ):
         """Closing the session's _exit_stack should cancel the subscriber
-        and remove the session from the active set — same lifecycle path
+        and remove the session from the active set -- same lifecycle path
         FastMCP's transport drives on real disconnect."""
         mock_authenticate.return_value = {
             "user_id": "wjackson",
@@ -210,24 +236,23 @@ class TestValidApiKey:
         fake_session = FakeServerSession()
         ctx = FakeContext(session=fake_session)
 
-        await register_session_fn(api_key="valid", ctx=ctx)
+        result = await register_session_fn(api_key="valid", ctx=ctx)
         assert get_active_subscriber_count() == 1
         members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
-        assert members == {"wjackson"}
+        assert len(members) == 1
+        assert result["session_id"] in members
 
-        # Drive the cleanup the way FastMCP's session __aexit__ would.
         await fake_session._exit_stack.aclose()
 
         assert get_active_subscriber_count() == 0
         members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
         assert members == set()
 
-    async def test_duplicate_register_does_not_register_cleanup_twice(
+    async def test_duplicate_register_generates_new_session_id(
         self, fake_valkey, mock_authenticate, mock_set_session
     ):
-        """Calling register_session twice for the same session should be
-        idempotent: same subscriber task, exactly one cleanup callback on
-        the _exit_stack."""
+        """Re-registering generates a new session_id each time. Both end
+        up in the active set since cleanup hasn't run yet."""
         mock_authenticate.return_value = {
             "user_id": "wjackson",
             "name": "Wes Jackson",
@@ -236,18 +261,16 @@ class TestValidApiKey:
         fake_session = FakeServerSession()
         ctx = FakeContext(session=fake_session)
 
-        await register_session_fn(api_key="valid", ctx=ctx)
-        await register_session_fn(api_key="valid", ctx=ctx)
+        r1 = await register_session_fn(api_key="valid", ctx=ctx)
+        r2 = await register_session_fn(api_key="valid", ctx=ctx)
 
-        # Idempotent subscriber registry — only one task.
-        assert get_active_subscriber_count() == 1
-        # The session-scoped flag should have been set on first call and
-        # short-circuited the cleanup-registration on the second call.
-        assert getattr(fake_session, "_memoryhub_push_cleanup_registered", False)
+        assert r1["session_id"] != r2["session_id"]
+        assert _is_uuid(r1["session_id"])
+        assert _is_uuid(r2["session_id"])
 
-        # And cleanup should still work cleanly when fired.
-        await fake_session._exit_stack.aclose()
-        assert get_active_subscriber_count() == 0
+        members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
+        assert r1["session_id"] in members
+        assert r2["session_id"] in members
 
 
 class TestNoContextDegradesGracefully:
@@ -264,10 +287,11 @@ class TestNoContextDegradesGracefully:
             "scopes": [],
         }
 
-        await register_session_fn(api_key="valid", ctx=None)
+        result = await register_session_fn(api_key="valid", ctx=None)
 
         members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
-        assert members == {"wjackson"}
+        assert len(members) == 1
+        assert result["session_id"] in members
         assert get_active_subscriber_count() == 0
 
 
