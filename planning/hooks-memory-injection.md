@@ -407,7 +407,27 @@ With the hook pre-loading memories, the rule should be updated to:
 10. Add `promote`, `graduate`, `checkpoint`, `describe_project` commands
 11. Establish same-commit consumer audit rule for future MCP actions
 
-### Phase 5: Performance (future)
-12. Benchmark CLI startup + search latency
-13. Evaluate Rust/Go CLI for sub-second startup
-14. Use CLI/SDK benchmarks to identify MCP server optimization targets
+### Phase 5: Performance baseline (measured 2026-06-12)
+
+Benchmarks on macOS (Apple Silicon), CLI v0.10.0, Python 3.11:
+
+| Measurement | Time |
+|---|---|
+| CLI startup (`--version`) | ~0.5s |
+| CLI search (20 results, compact) | ~1.7s |
+| Hook script end-to-end | ~0.3s |
+| Hook timeout budget | 5.0s |
+| Headroom | ~4.7s |
+
+The hook script is well within the 5-second timeout. The hook is
+faster than a standalone CLI search because it reuses a simpler
+code path and the bash overhead is minimal.
+
+The Python CLI startup cost (~0.5s) is acceptable. A compiled
+Rust/Go CLI would eliminate this but is not justified given the
+current headroom. Revisit if the hook grows to include multiple
+queries or if the MCP server latency increases.
+
+12. ~~Benchmark CLI startup + search latency~~ (done)
+13. ~~Evaluate Rust/Go CLI for sub-second startup~~ (not needed, Python is fast enough)
+14. Use CLI/SDK benchmarks to identify MCP server optimization targets (future)
