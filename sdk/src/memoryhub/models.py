@@ -256,3 +256,75 @@ class RenameEntityResult(BaseModel):
     entity: dict[str, Any] = Field(default_factory=dict)
     old_name: str = ""
     message: str = ""
+
+
+class ConversationThread(BaseModel):
+    """A conversation thread returned by thread operations."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    title: str | None = None
+    scope: str = ""
+    scope_id: str | None = None
+    owner_id: str = ""
+    actor_id: str | None = None
+    tenant_id: str = ""
+    status: str = "active"
+    participant_ids: list[str] = Field(default_factory=list)
+    participant_access: dict[str, str] | None = None
+    extraction_cursor: int = 0
+    last_extracted_at: datetime | None = None
+    expires_at: datetime | None = None
+    legal_hold: bool = False
+    retention_policy: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ConversationMessage(BaseModel):
+    """A single message in a conversation thread."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    thread_id: str
+    sequence_number: int = 0
+    role: str = ""
+    content: str | None = None
+    actor_id: str | None = None
+    storage_type: str = "inline"
+    tool_call_id: str | None = None
+    tenant_id: str = ""
+    metadata: dict[str, Any] | None = None
+    created_at: datetime | None = None
+
+
+class ThreadResult(BaseModel):
+    """Result of a get_thread operation with optional messages."""
+
+    model_config = ConfigDict(extra="allow")
+
+    thread: ConversationThread
+    messages: list[ConversationMessage] | None = None
+    has_more: bool = False
+
+
+class ThreadListResult(BaseModel):
+    """Result of a list_threads operation."""
+
+    model_config = ConfigDict(extra="allow")
+
+    threads: list[ConversationThread] = Field(default_factory=list)
+    total: int = 0
+
+
+class ExtractionResult(BaseModel):
+    """Result of a thread extraction operation."""
+
+    model_config = ConfigDict(extra="allow")
+
+    extracted_count: int = 0
+    cursor: int = 0
+    failures: int = 0

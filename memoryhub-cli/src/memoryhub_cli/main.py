@@ -119,6 +119,13 @@ entity_app = typer.Typer(
 )
 app.add_typer(entity_app, name="entity")
 
+thread_app = typer.Typer(
+    name="thread",
+    help="Conversation thread operations.",
+    no_args_is_help=True,
+)
+app.add_typer(thread_app, name="thread")
+
 
 def _get_client(output: OutputFormat = OutputFormat.table):
     """Create a MemoryHubClient from config/env.
@@ -1713,7 +1720,10 @@ def session_focus_history(
 @entity_app.command("list")
 def entity_list(
     entity_type: str | None = typer.Option(
-        None, "--type", "-t", help="Filter by entity type (person, object, location, event, organization)",
+        None,
+        "--type",
+        "-t",
+        help="Filter by entity type (person, object, location, event, organization)",
     ),
     limit: int = typer.Option(50, "--limit", "-n", help="Maximum entities to return"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
@@ -1770,7 +1780,10 @@ def entity_list(
 
     console.print(table)
     if result.has_more:
-        console.print(f"[dim]Showing {result.offset + 1}-{result.offset + len(result.entities)} of {result.total}. Use --offset to paginate.[/dim]")
+        shown_range = f"{result.offset + 1}-{result.offset + len(result.entities)}"
+        console.print(
+            f"[dim]Showing {shown_range} of {result.total}. Use --offset to paginate.[/dim]"
+        )
 
 
 @entity_app.command("merge")
@@ -1806,7 +1819,9 @@ def entity_merge(
 
     console.print(f"[green]Merged:[/green] {result.message}")
     surviving = result.surviving_entity
-    console.print(f"  Surviving entity: {surviving.get('content', '?')} ({surviving.get('id', '?')})")
+    ent_content = surviving.get("content", "?")
+    ent_id = surviving.get("id", "?")
+    console.print(f"  Surviving entity: {ent_content} ({ent_id})")
     console.print(f"  Reassigned mentions: {result.reassigned_mentions}")
     if result.skipped_duplicates > 0:
         console.print(f"  Skipped duplicates: {result.skipped_duplicates}")
@@ -1847,12 +1862,333 @@ def entity_rename(
         return
 
     entity = result.entity
-    console.print(f"[green]Renamed:[/green] '{result.old_name}' -> '{entity.get('content', new_name)}'")
+    new_content = entity.get("content", new_name)
+    console.print(f"[green]Renamed:[/green] '{result.old_name}' -> '{new_content}'")
     console.print(f"  Entity ID: {entity.get('id', entity_id)}")
     console.print(f"  Type: {entity.get('entity_type', '?')}")
     aliases = entity.get("aliases", [])
     if aliases:
         console.print(f"  Aliases: {', '.join(aliases)}")
+
+
+# ── memoryhub thread ──────────────────────────────────────────────────────────
+
+
+@thread_app.command("create")
+def thread_create(
+    scope: str = typer.Argument(..., help="Thread scope: user, project, etc."),
+    title: str | None = typer.Option(None, "--title", "-t", help="Thread title"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Create a new conversation thread."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.create_thread(scope, title=title)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Thread created:[/green] {result.id}")
+    console.print(f"  Scope: {result.scope}")
+    if result.title:
+        console.print(f"  Title: {result.title}")
+    console.print(f"  Status: {result.status}")
+
+
+@thread_app.command("append")
+def thread_append(
+    thread_id: str = typer.Argument(..., help="Thread UUID"),
+    role: str = typer.Option(..., "--role", "-r", help="Message role: user, assistant, system"),
+    content: str = typer.Option(..., "--content", "-c", help="Message content"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Append a message to a conversation thread."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.append_message(thread_id, role, content)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Message appended:[/green] {result.id}")
+    console.print(f"  Thread: {result.thread_id}")
+    console.print(f"  Role: {result.role}")
+    console.print(f"  Sequence: {result.sequence_number}")
+
+
+@thread_app.command("get")
+def thread_get(
+    thread_id: str = typer.Argument(..., help="Thread UUID"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max messages"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Retrieve a thread with its messages."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.get_thread(thread_id, limit=limit)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[bold]Thread:[/bold] {result.thread.id}")
+    console.print(f"  Scope: {result.thread.scope} | Status: {result.thread.status}")
+    if result.thread.title:
+        console.print(f"  Title: {result.thread.title}")
+    console.print(f"  Messages: {result.total_messages}")
+
+    if not result.messages:
+        console.print("\n[dim]No messages.[/dim]")
+        return
+
+    console.print()
+    table = Table(title="Messages")
+    table.add_column("Seq", justify="right")
+    table.add_column("Role", style="cyan")
+    table.add_column("Content", max_width=80)
+    table.add_column("Created", style="dim")
+
+    for msg in result.messages:
+        content = (msg.content or msg.summary or "")[:80]
+        created = str(msg.created_at)[:19] if msg.created_at else "-"
+        table.add_row(
+            str(msg.sequence_number),
+            msg.role,
+            content,
+            created,
+        )
+
+    console.print(table)
+
+
+@thread_app.command("list")
+def thread_list(
+    scope: str | None = typer.Option(None, "--scope", "-s", help="Filter by scope"),
+    status: str = typer.Option("active", "--status", help="Filter by status"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max threads"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """List conversation threads."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.list_threads(scope=scope, status=status, limit=limit)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    if not result.threads:
+        console.print("[dim]No threads found.[/dim]")
+        return
+
+    table = Table(title="Threads")
+    table.add_column("ID", style="cyan", max_width=36)
+    table.add_column("Title")
+    table.add_column("Scope")
+    table.add_column("Status")
+    table.add_column("Messages", justify="right")
+    table.add_column("Created")
+
+    for thread in result.threads:
+        title = thread.title or ""
+        created = str(thread.created_at)[:19] if thread.created_at else "-"
+        table.add_row(
+            thread.id,
+            title,
+            thread.scope,
+            thread.status,
+            str(thread.message_count or 0),
+            created,
+        )
+
+    console.print(table)
+    if result.total > len(result.threads):
+        console.print(f"[dim]Showing {len(result.threads)} of {result.total}[/dim]")
+
+
+@thread_app.command("archive")
+def thread_archive(
+    thread_id: str = typer.Argument(..., help="Thread UUID"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Archive a conversation thread."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.archive_thread(thread_id)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Thread archived:[/green] {result.id}")
+    console.print(f"  Status: {result.status}")
+
+
+@thread_app.command("extract")
+def thread_extract(
+    thread_id: str = typer.Argument(..., help="Thread UUID"),
+    model: str | None = typer.Option(None, "--model", help="Override extraction model"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Extract memories from a conversation thread."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.extract_thread(thread_id, model=model)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Extraction complete:[/green] {result.thread_id}")
+    console.print(f"  Memories created: {result.memories_created}")
+    if result.memories:
+        console.print("\n[bold]Extracted memories:[/bold]")
+        for mem in result.memories:
+            console.print(f"  - {mem.id[:12]}... | {(mem.stub or mem.content)[:60]}")
+
+
+@thread_app.command("fork")
+def thread_fork(
+    thread_id: str = typer.Argument(..., help="Source thread UUID"),
+    from_sequence: int = typer.Option(
+        ..., "--from-sequence", "-f", help="Fork point sequence number"
+    ),
+    title: str | None = typer.Option(None, "--title", "-t", help="New thread title"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Fork a thread from a specific message."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.fork_thread(thread_id, from_sequence, title=title)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Thread forked:[/green] {result.id}")
+    console.print(f"  Parent: {result.parent_thread_id}")
+    console.print(f"  Fork point: sequence {result.fork_point_sequence}")
+    if result.title:
+        console.print(f"  Title: {result.title}")
+
+
+@thread_app.command("share")
+def thread_share(
+    thread_id: str = typer.Argument(..., help="Thread UUID"),
+    grantee: str = typer.Option(..., "--grantee", "-g", help="Agent/user to share with"),
+    access: str = typer.Option(..., "--access", "-a", help="Access level: read, write, admin"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Share a thread with another agent or user."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.share_thread(thread_id, grantee, access)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Thread shared:[/green] {result.thread_id}")
+    console.print(f"  Grantee: {result.grantee_id}")
+    console.print(f"  Access: {result.access_level}")
+
+
+@thread_app.command("delete")
+def thread_delete(
+    thread_id: str = typer.Argument(..., help="Thread UUID"),
+    cascade: str | None = typer.Option(
+        None, "--cascade", help="Cascade mode: delete, orphan, preserve"
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Delete a conversation thread."""
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.delete_thread(thread_id, cascade=cascade)
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(f"[green]Thread deleted:[/green] {result.id}")
+    if result.messages_deleted:
+        console.print(f"  Messages deleted: {result.messages_deleted}")
+    if result.cascade_mode:
+        console.print(f"  Cascade mode: {result.cascade_mode}")
 
 
 if __name__ == "__main__":

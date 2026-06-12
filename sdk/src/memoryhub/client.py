@@ -28,8 +28,11 @@ from memoryhub.exceptions import (
 )
 from memoryhub.models import (
     ContradictionResult,
+    ConversationMessage,
+    ConversationThread,
     CurationRuleResult,
     DeleteResult,
+    ExtractionResult,
     ListEntitiesResult,
     Memory,
     MergeEntitiesResult,
@@ -37,6 +40,8 @@ from memoryhub.models import (
     RelationshipsResult,
     RenameEntityResult,
     SearchResult,
+    ThreadListResult,
+    ThreadResult,
     WriteResult,
 )
 
@@ -369,6 +374,30 @@ class MemoryHubClient:
         if options:
             payload["options"] = options
         return await self._call("memory", payload)
+
+    async def _call_thread_action(
+        self,
+        action: str,
+        *,
+        thread_id: str | None = None,
+        content: str | None = None,
+        scope: str | None = None,
+        role: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch an action through the ``thread`` tool."""
+        payload: dict[str, Any] = {"action": action}
+        if thread_id is not None:
+            payload["thread_id"] = thread_id
+        if content is not None:
+            payload["content"] = content
+        if scope is not None:
+            payload["scope"] = scope
+        if role is not None:
+            payload["role"] = role
+        if options:
+            payload["options"] = options
+        return await self._call("thread", payload)
 
     async def _call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call an MCP tool and return the parsed response dict.
@@ -1398,6 +1427,160 @@ class MemoryHubClient:
             options=opts,
         )
 
+    # ── Thread operations ──────────────────────────────────────────
+
+    async def create_thread(
+        self,
+        scope: str,
+        *,
+        title: str | None = None,
+        participant_ids: list[str] | None = None,
+        participant_access: dict[str, str] | None = None,
+        a2a_context_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ConversationThread:
+        """Create a new conversation thread."""
+        opts: dict[str, Any] = {}
+        if title is not None:
+            opts["title"] = title
+        if participant_ids is not None:
+            opts["participant_ids"] = participant_ids
+        if participant_access is not None:
+            opts["participant_access"] = participant_access
+        if a2a_context_id is not None:
+            opts["a2a_context_id"] = a2a_context_id
+        if metadata is not None:
+            opts["metadata"] = metadata
+        data = await self._call_thread_action("create", scope=scope, options=opts or None)
+        return ConversationThread.model_validate(data)
+
+    async def append_message(
+        self,
+        thread_id: str,
+        role: str,
+        content: str,
+        *,
+        actor_id: str | None = None,
+        tool_call_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ConversationMessage:
+        """Append a message to a conversation thread."""
+        opts: dict[str, Any] = {}
+        if actor_id is not None:
+            opts["actor_id"] = actor_id
+        if tool_call_id is not None:
+            opts["tool_call_id"] = tool_call_id
+        if metadata is not None:
+            opts["metadata"] = metadata
+        data = await self._call_thread_action(
+            "append", thread_id=thread_id, role=role, content=content,
+            options=opts or None,
+        )
+        return ConversationMessage.model_validate(data)
+
+    async def get_thread(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 50,
+        before_sequence: int | None = None,
+        include_messages: bool = True,
+    ) -> ThreadResult:
+        """Retrieve a thread with optional message history."""
+        opts: dict[str, Any] = {"limit": limit, "include_messages": include_messages}
+        if before_sequence is not None:
+            opts["before_sequence"] = before_sequence
+        data = await self._call_thread_action("get", thread_id=thread_id, options=opts)
+        return ThreadResult.model_validate(data)
+
+    async def list_threads(
+        self,
+        *,
+        scope: str | None = None,
+        scope_id: str | None = None,
+        status: str = "active",
+        participant_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> ThreadListResult:
+        """List threads visible to the caller."""
+        opts: dict[str, Any] = {"status": status, "limit": limit, "offset": offset}
+        if scope_id is not None:
+            opts["scope_id"] = scope_id
+        if participant_id is not None:
+            opts["participant_id"] = participant_id
+        data = await self._call_thread_action("list", scope=scope, options=opts)
+        return ThreadListResult.model_validate(data)
+
+    async def archive_thread(self, thread_id: str) -> ConversationThread:
+        """Archive a thread. Immutable thereafter."""
+        data = await self._call_thread_action("archive", thread_id=thread_id)
+        return ConversationThread.model_validate(data)
+
+    async def extract_thread(
+        self,
+        thread_id: str,
+        *,
+        turn_range: tuple[int, int] | None = None,
+        model: str | None = None,
+        model_url: str | None = None,
+    ) -> ExtractionResult:
+        """Trigger extraction pipeline on a thread."""
+        opts: dict[str, Any] = {}
+        if turn_range is not None:
+            opts["turn_range"] = list(turn_range)
+        if model is not None:
+            opts["model"] = model
+        if model_url is not None:
+            opts["model_url"] = model_url
+        data = await self._call_thread_action("extract", thread_id=thread_id, options=opts or None)
+        return ExtractionResult.model_validate(data)
+
+    async def fork_thread(
+        self,
+        thread_id: str,
+        from_sequence: int,
+        *,
+        title: str | None = None,
+    ) -> ConversationThread:
+        """Create a divergent copy of a thread up to from_sequence."""
+        opts: dict[str, Any] = {"from_sequence": from_sequence}
+        if title is not None:
+            opts["title"] = title
+        data = await self._call_thread_action("fork", thread_id=thread_id, options=opts)
+        return ConversationThread.model_validate(data)
+
+    async def share_thread(
+        self,
+        thread_id: str,
+        grantee_id: str,
+        access_level: str,
+        *,
+        authorized_by: str | None = None,
+    ) -> ConversationThread:
+        """Grant access to a thread participant."""
+        opts: dict[str, Any] = {
+            "grantee_id": grantee_id,
+            "access_level": access_level,
+        }
+        if authorized_by is not None:
+            opts["authorized_by"] = authorized_by
+        data = await self._call_thread_action("share", thread_id=thread_id, options=opts)
+        return ConversationThread.model_validate(data)
+
+    async def delete_thread(
+        self,
+        thread_id: str,
+        *,
+        cascade: str | None = None,
+    ) -> ConversationThread:
+        """Soft-delete a thread with optional cascade mode override."""
+        opts: dict[str, Any] = {}
+        if cascade is not None:
+            opts["cascade"] = cascade
+        data = await self._call_thread_action("delete", thread_id=thread_id, options=opts or None)
+        return ConversationThread.model_validate(data)
+
     # ── Push notifications (#62, Pattern E) ─────────────────────────
 
     def on_memory_updated(self, callback: MemoryUpdatedCallback) -> None:
@@ -1517,5 +1700,32 @@ class MemoryHubClient:
         async def _do():
             async with self:
                 return await self.delete(memory_id)
+
+        return self._run_sync(_do())
+
+    def create_thread_sync(self, scope: str, **kwargs) -> ConversationThread:
+        """Synchronous wrapper for create_thread()."""
+
+        async def _do():
+            async with self:
+                return await self.create_thread(scope, **kwargs)
+
+        return self._run_sync(_do())
+
+    def get_thread_sync(self, thread_id: str, **kwargs) -> ThreadResult:
+        """Synchronous wrapper for get_thread()."""
+
+        async def _do():
+            async with self:
+                return await self.get_thread(thread_id, **kwargs)
+
+        return self._run_sync(_do())
+
+    def list_threads_sync(self, **kwargs) -> ThreadListResult:
+        """Synchronous wrapper for list_threads()."""
+
+        async def _do():
+            async with self:
+                return await self.list_threads(**kwargs)
 
         return self._run_sync(_do())
