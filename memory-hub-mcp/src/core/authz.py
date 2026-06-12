@@ -39,8 +39,10 @@ def _normalize_session_scopes(access_tiers: list[str]) -> list[str]:
     for tier in access_tiers:
         scopes.append(f"memory:read:{tier}")
         scopes.append(f"memory:write:{tier}")
+        scopes.append(f"threads:read:{tier}")
+        scopes.append(f"threads:write:{tier}")
     if all(t in access_tiers for t in ALL_TIERS):
-        scopes.extend(["memory:read", "memory:write"])
+        scopes.extend(["memory:read", "memory:write", "threads:read", "threads:write"])
     return scopes
 
 
@@ -53,12 +55,14 @@ def _extract_jwt_from_headers() -> dict | None:
     """
     try:
         from fastmcp.server.dependencies import get_http_request
+
         request = get_http_request()
         auth_header = request.headers.get("authorization", "")
         if not auth_header.lower().startswith("bearer "):
             return None
         token = auth_header.split(" ", 1)[1].strip()
         import jwt as pyjwt
+
         return pyjwt.decode(token, options={"verify_signature": False})
     except Exception:
         return None
@@ -73,6 +77,7 @@ def get_claims_from_context() -> dict:
     # 1. Try FastMCP JWT path (get_access_token populated by auth middleware)
     try:
         from fastmcp.server.dependencies import get_access_token
+
         token = get_access_token()
     except Exception:
         token = None
@@ -120,9 +125,7 @@ def get_claims_from_context() -> dict:
 
     # 4. No identity
     log.warning("No JWT or session identity available")
-    raise AuthenticationError(
-        "Authentication required. Provide a JWT or call register_session."
-    )
+    raise AuthenticationError("Authentication required. Provide a JWT or call register_session.")
 
 
 def authorize_read(
@@ -272,3 +275,137 @@ def get_tenant_filter(claims: dict) -> str:
     service paths.
     """
     return claims.get("tenant_id", "default")
+
+
+def authorize_thread_read(
+    claims: dict,
+    thread,
+    project_ids: set[str] | None = None,
+) -> bool:
+    """Can this identity read this conversation thread?
+
+    Thread owner and listed participants always have read access.
+    Scope-level threads:read permissions provide broader access.
+    """
+    # Tenant isolation first
+    if thread.tenant_id != claims.get("tenant_id", "default"):
+        return False
+
+    caller_id = claims["sub"]
+
+    # Owner always has access
+    if thread.owner_id == caller_id:
+        return True
+
+    # Participants have access
+    participant_ids = thread.participant_ids or []
+    if caller_id in participant_ids:
+        return True
+
+    # Scope-level permission check
+    scopes = claims.get("scopes", [])
+    tier = thread.scope
+    if hasattr(tier, "value"):
+        tier = tier.value
+
+    if f"threads:read:{tier}" not in scopes and "threads:read" not in scopes:
+        return False
+
+    # For user-scoped threads, only owner (already checked above)
+    if tier == "user":
+        return False
+    # For project-scoped, check project membership
+    if tier == "project":
+        if not PROJECT_ISOLATION_ENABLED:
+            return True
+        if project_ids is None:
+            return False
+        return thread.scope_id in project_ids
+    # enterprise/organizational are open read
+    return tier in ("enterprise", "organizational")
+
+
+def authorize_thread_write(
+    claims: dict,
+    thread,
+    project_ids: set[str] | None = None,
+) -> bool:
+    """Can this identity write (append) to this conversation thread?
+
+    Thread owner always has write access. Listed participants have write
+    access by default (can be narrowed by participant_access). Scope-level
+    threads:write permissions provide broader access.
+    """
+    # Tenant isolation first
+    if thread.tenant_id != claims.get("tenant_id", "default"):
+        return False
+
+    caller_id = claims["sub"]
+
+    # Owner always has access
+    if thread.owner_id == caller_id:
+        return True
+
+    # Check participant_access for explicit access level
+    participant_access = thread.participant_access or {}
+    if caller_id in participant_access:
+        level = participant_access[caller_id]
+        return level in ("write", "admin")
+
+    # Participants without explicit access level default to write
+    participant_ids = thread.participant_ids or []
+    if caller_id in participant_ids:
+        return True
+
+    # Scope-level permission check
+    scopes = claims.get("scopes", [])
+    tier = thread.scope
+    if hasattr(tier, "value"):
+        tier = tier.value
+
+    if f"threads:write:{tier}" not in scopes and "threads:write" not in scopes:
+        return False
+
+    if tier == "user":
+        return False
+    if tier == "project":
+        if not PROJECT_ISOLATION_ENABLED:
+            return True
+        if project_ids is None:
+            return False
+        return thread.scope_id in project_ids
+    if tier in ("enterprise", "organizational"):
+        return claims.get("identity_type") == "service"
+
+    return False
+
+
+def authorize_thread_admin(
+    claims: dict,
+    thread,
+) -> bool:
+    """Can this identity perform admin operations (archive, modify participants)?
+
+    Only thread owner or holders of threads:admin scope permission.
+    """
+    if thread.tenant_id != claims.get("tenant_id", "default"):
+        return False
+
+    caller_id = claims["sub"]
+
+    # Owner always has admin
+    if thread.owner_id == caller_id:
+        return True
+
+    # Check participant_access for admin grant
+    participant_access = thread.participant_access or {}
+    if caller_id in participant_access:
+        return participant_access[caller_id] == "admin"
+
+    # Scope-level admin check
+    scopes = claims.get("scopes", [])
+    tier = thread.scope
+    if hasattr(tier, "value"):
+        tier = tier.value
+
+    return f"threads:admin:{tier}" in scopes or "threads:admin" in scopes
