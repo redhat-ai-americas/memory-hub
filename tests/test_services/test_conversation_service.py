@@ -14,15 +14,14 @@ from memoryhub_core.models.schemas import (
     ConversationMessageCreate,
     ConversationThreadCreate,
 )
-from memoryhub_core.services.exceptions import ThreadNotActiveError, ThreadNotFoundError
 from memoryhub_core.services.conversation import (
-    soft_delete_thread,
-    hard_delete_thread,
     admin_purge_thread,
-    spill_response_thread,
+    hard_delete_thread,
     run_retention_sweep,
+    soft_delete_thread,
+    spill_response_thread,
 )
-from memoryhub_core.models.conversation import PurgeLog
+from memoryhub_core.services.exceptions import ThreadNotActiveError, ThreadNotFoundError
 
 
 def _mock_session():
@@ -713,10 +712,7 @@ class TestGetThreadRedaction:
 class TestSoftDeleteThread:
     @pytest.mark.asyncio
     async def test_soft_delete_sets_status_and_deleted_at(self):
-        from datetime import datetime, UTC
-        from unittest.mock import patch
-        from memoryhub_core.services.conversation import soft_delete_thread
-        from memoryhub_core.models.conversation import PurgeLog
+        from datetime import datetime
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -751,7 +747,6 @@ class TestSoftDeleteThread:
 
     @pytest.mark.asyncio
     async def test_soft_delete_with_legal_hold(self):
-        from memoryhub_core.services.conversation import soft_delete_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -782,8 +777,7 @@ class TestSoftDeleteThread:
 
     @pytest.mark.asyncio
     async def test_soft_delete_cascade_delete(self):
-        from unittest.mock import patch, AsyncMock
-        from memoryhub_core.services.conversation import soft_delete_thread
+        from unittest.mock import AsyncMock, patch
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -824,7 +818,6 @@ class TestSoftDeleteThread:
 
     @pytest.mark.asyncio
     async def test_soft_delete_cascade_orphan(self):
-        from memoryhub_core.services.conversation import soft_delete_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -839,7 +832,9 @@ class TestSoftDeleteThread:
 
         execute_results = [
             _mock_execute_result(mock_thread),
-            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[mock_extraction1, mock_extraction2])))),
+            MagicMock(scalars=MagicMock(
+                return_value=MagicMock(all=MagicMock(return_value=[mock_extraction1, mock_extraction2])),
+            )),
         ]
         session.execute.side_effect = execute_results
 
@@ -859,7 +854,6 @@ class TestSoftDeleteThread:
 
     @pytest.mark.asyncio
     async def test_soft_delete_cascade_preserve(self):
-        from memoryhub_core.services.conversation import soft_delete_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -889,7 +883,6 @@ class TestSoftDeleteThread:
 
     @pytest.mark.asyncio
     async def test_soft_delete_missing_thread(self):
-        from memoryhub_core.services.conversation import soft_delete_thread
 
         session = _mock_session()
         session.execute.return_value = _mock_execute_result(None)
@@ -907,7 +900,6 @@ class TestSoftDeleteThread:
 class TestHardDeleteThread:
     @pytest.mark.asyncio
     async def test_hard_delete_removes_thread(self):
-        from memoryhub_core.services.conversation import hard_delete_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -930,7 +922,6 @@ class TestHardDeleteThread:
 
     @pytest.mark.asyncio
     async def test_hard_delete_with_legal_hold_raises(self):
-        from memoryhub_core.services.conversation import hard_delete_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -949,7 +940,6 @@ class TestHardDeleteThread:
 
     @pytest.mark.asyncio
     async def test_hard_delete_s3_cleanup(self):
-        from memoryhub_core.services.conversation import hard_delete_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -990,7 +980,6 @@ class TestHardDeleteThread:
 
     @pytest.mark.asyncio
     async def test_hard_delete_missing_thread(self):
-        from memoryhub_core.services.conversation import hard_delete_thread
 
         session = _mock_session()
         session.execute.return_value = _mock_execute_result(None)
@@ -1006,9 +995,7 @@ class TestHardDeleteThread:
 class TestAdminPurgeThread:
     @pytest.mark.asyncio
     async def test_admin_purge_creates_audit_log(self):
-        from unittest.mock import patch, AsyncMock
-        from memoryhub_core.services.conversation import admin_purge_thread
-        from memoryhub_core.models.conversation import PurgeLog
+        from unittest.mock import AsyncMock, patch
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -1048,8 +1035,7 @@ class TestAdminPurgeThread:
 
     @pytest.mark.asyncio
     async def test_admin_purge_overrides_legal_hold(self):
-        from unittest.mock import patch, AsyncMock
-        from memoryhub_core.services.conversation import admin_purge_thread
+        from unittest.mock import AsyncMock, patch
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -1082,7 +1068,6 @@ class TestAdminPurgeThread:
 class TestSpillResponseThread:
     @pytest.mark.asyncio
     async def test_spill_response_creates_tombstone(self):
-        from memoryhub_core.services.conversation import spill_response_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -1120,7 +1105,6 @@ class TestSpillResponseThread:
 
     @pytest.mark.asyncio
     async def test_spill_response_silent_no_log(self):
-        from memoryhub_core.services.conversation import spill_response_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -1151,7 +1135,6 @@ class TestSpillResponseThread:
 
     @pytest.mark.asyncio
     async def test_spill_response_bypasses_legal_hold(self):
-        from memoryhub_core.services.conversation import spill_response_thread
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -1184,9 +1167,8 @@ class TestSpillResponseThread:
 class TestRunRetentionSweep:
     @pytest.mark.asyncio
     async def test_sweep_soft_deletes_expired(self):
-        from datetime import datetime, timedelta, UTC
-        from unittest.mock import patch, AsyncMock
-        from memoryhub_core.services.conversation import run_retention_sweep
+        from datetime import UTC, datetime, timedelta
+        from unittest.mock import AsyncMock, patch
 
         session = _mock_session()
 
@@ -1216,9 +1198,8 @@ class TestRunRetentionSweep:
 
     @pytest.mark.asyncio
     async def test_sweep_hard_deletes_past_retention(self):
-        from datetime import datetime, timedelta, UTC
-        from unittest.mock import patch, AsyncMock
-        from memoryhub_core.services.conversation import run_retention_sweep
+        from datetime import UTC, datetime, timedelta
+        from unittest.mock import AsyncMock, patch
 
         session = _mock_session()
 
@@ -1245,9 +1226,6 @@ class TestRunRetentionSweep:
 
     @pytest.mark.asyncio
     async def test_sweep_skips_legal_hold(self):
-        from datetime import datetime, UTC
-        from unittest.mock import patch, AsyncMock
-        from memoryhub_core.services.conversation import run_retention_sweep
 
         session = _mock_session()
 
