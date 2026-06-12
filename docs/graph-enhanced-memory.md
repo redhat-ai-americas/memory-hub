@@ -9,7 +9,7 @@
 This design originally covered three phases as a single effort. During implementation, the work was split into two epics:
 
 - **Entity Extraction epic** (closed, June 2026): Phase 2 -- extraction pipeline, entity model, entity management actions, backfill. All shipped.
-- **Graph-Enhanced Retrieval epic** (`NEXT_SESSION-graph-retrieval.md`): Phase 1 -- temporal relationships, graph-enhanced search, entity-aware search filtering, `graph_depth`/`entities` search parameters. Not started.
+- **Graph-Enhanced Retrieval epic** (future epic, not yet bootstrapped): Phase 1 -- temporal relationships, graph-enhanced search, entity-aware search filtering, `graph_depth`/`entities` search parameters. Not started.
 - **Phase 3** (graph computation backend decision): Deferred until Phase 1 production data exists. Owned by the Graph-Enhanced Retrieval epic.
 
 Sections below are annotated with **[Shipped]**, **[Deferred -- Graph-Enhanced Retrieval epic]**, or **[Deferred -- Phase 3]** to indicate status.
