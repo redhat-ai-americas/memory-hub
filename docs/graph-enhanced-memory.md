@@ -286,7 +286,7 @@ The LLM fallback uses a structured prompt targeting `gpt-4o-mini` (or the config
 
 The extraction is triggered in the service layer after the transaction commits, using `asyncio.create_task`. The memory node exists in the database before extraction runs. If extraction fails, the memory write succeeds and the failure is logged — extraction is best-effort.
 
-Add a `extraction_status` field to `metadata_` on the memory node: `"pending"` immediately after write, `"complete"` after extraction succeeds, `"failed"` with reason if extraction fails.
+Add a `extraction_status` field to `metadata_` on the memory node: `"pending"` immediately after write, `"complete"` after extraction succeeds, `"partial"` if some stages succeeded before a failure, `"failed"` if no entities were extracted.
 
 Expose `MEMORYHUB_ENTITY_EXTRACTION_ENABLED` as an environment variable (default `false` until Phase 2 is fully deployed). This allows the feature to be toggled without a code change.
 
