@@ -3,16 +3,28 @@
 from memoryhub_core.models.base import Base, TimestampMixin
 from memoryhub_core.models.campaign import Campaign, CampaignMembership
 from memoryhub_core.models.contradiction import ContradictionReport
+from memoryhub_core.models.conversation import (
+    ConversationExtraction,
+    ConversationMessage,
+    ConversationThread,
+    PurgeLog,
+)
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.role import RoleAssignment
 from memoryhub_core.models.schemas import (
+    AccessLevel,
     CampaignCreate,
     CampaignMembershipCreate,
     CampaignMembershipRead,
     CampaignRead,
     CampaignStatus,
+    ConversationExtractionRead,
+    ConversationMessageCreate,
+    ConversationMessageRead,
+    ConversationThreadCreate,
+    ConversationThreadRead,
     CurationResult,
     CuratorRuleCreate,
     CuratorRuleRead,
@@ -22,10 +34,13 @@ from memoryhub_core.models.schemas import (
     MemoryNodeUpdate,
     MemoryScope,
     MemoryVersionInfo,
+    MessageRole,
     ProjectCreate,
     ProjectMembershipCreate,
     ProjectMembershipRead,
     ProjectRead,
+    PurgeLogRead,
+    PurgeReason,
     RelationshipCreate,
     RelationshipRead,
     RelationshipType,
@@ -36,10 +51,12 @@ from memoryhub_core.models.schemas import (
     RuleTier,
     RuleTrigger,
     StorageType,
+    ThreadStatus,
 )
 from memoryhub_core.models.utils import generate_stub
 
 __all__ = [
+    "AccessLevel",
     "Base",
     "Campaign",
     "CampaignCreate",
@@ -49,6 +66,14 @@ __all__ = [
     "CampaignRead",
     "CampaignStatus",
     "ContradictionReport",
+    "ConversationExtraction",
+    "ConversationExtractionRead",
+    "ConversationMessage",
+    "ConversationMessageCreate",
+    "ConversationMessageRead",
+    "ConversationThread",
+    "ConversationThreadCreate",
+    "ConversationThreadRead",
     "CurationResult",
     "CuratorRule",
     "CuratorRuleCreate",
@@ -61,12 +86,16 @@ __all__ = [
     "MemoryScope",
     "MemoryVersionInfo",
     "MemoryRelationship",
+    "MessageRole",
     "Project",
     "ProjectCreate",
     "ProjectMembership",
     "ProjectMembershipCreate",
     "ProjectMembershipRead",
     "ProjectRead",
+    "PurgeLog",
+    "PurgeLogRead",
+    "PurgeReason",
     "RelationshipCreate",
     "RelationshipRead",
     "RelationshipType",
@@ -78,6 +107,7 @@ __all__ = [
     "RuleTier",
     "RuleTrigger",
     "StorageType",
+    "ThreadStatus",
     "TimestampMixin",
     "generate_stub",
 ]

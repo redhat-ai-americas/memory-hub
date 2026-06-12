@@ -443,3 +443,158 @@ class RoleAssignmentRead(BaseModel):
     tenant_id: str
     assigned_at: datetime
     assigned_by: str
+
+
+# -- Conversation schemas --
+
+
+class ThreadStatus(StrEnum):
+    """Lifecycle states for a conversation thread."""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    DELETED = "deleted"
+
+
+class MessageRole(StrEnum):
+    """Message role in a conversation thread."""
+
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    SYSTEM = "system"
+
+
+class AccessLevel(StrEnum):
+    """Participant access level for conversation threads."""
+
+    READ = "read"
+    WRITE = "write"
+    ADMIN = "admin"
+
+
+class PurgeReason(StrEnum):
+    """Reason for purging a resource."""
+
+    RETENTION = "retention"
+    ADMIN = "admin"
+    GDPR = "gdpr"
+    SPILL = "spill"
+
+
+class ConversationThreadCreate(BaseModel):
+    """Input schema for creating a conversation thread."""
+
+    scope: MemoryScope
+    title: str | None = Field(default=None, description="Optional human-readable thread name")
+    a2a_context_id: str | None = Field(default=None, description="A2A contextId for cross-agent threads")
+    participant_ids: list[str] = Field(default_factory=list, description="Agent/user identities in this thread")
+    participant_access: dict[str, AccessLevel] | None = Field(
+        default=None,
+        description="Access level per participant: {'agent-id': 'read'|'write'|'admin'}",
+    )
+    metadata: dict[str, Any] | None = Field(default=None, description="Extensible metadata")
+
+    @field_validator("participant_access")
+    @classmethod
+    def validate_access_levels(cls, v: dict[str, AccessLevel] | None) -> dict[str, AccessLevel] | None:
+        if v is None:
+            return v
+        for identity, level in v.items():
+            if not isinstance(level, str) or level not in ("read", "write", "admin"):
+                raise ValueError(f"Invalid access level '{level}' for '{identity}'; must be read, write, or admin")
+        return v
+
+
+class ConversationThreadRead(BaseModel):
+    """Output schema for reading a conversation thread."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    title: str | None = None
+    a2a_context_id: str | None = None
+    scope: MemoryScope
+    scope_id: str | None = None
+    owner_id: str
+    actor_id: str | None = None
+    driver_id: str | None = None
+    tenant_id: str
+    participant_ids: list[str] = Field(default_factory=list)
+    participant_access: dict[str, str] | None = None
+    status: ThreadStatus = ThreadStatus.ACTIVE
+    archived_at: datetime | None = None
+    deleted_at: datetime | None = None
+    expires_at: datetime | None = None
+    retention_policy: dict[str, Any] | None = None
+    legal_hold: bool = False
+    last_extracted_at: datetime | None = None
+    extraction_cursor: int = 0
+    metadata: dict[str, Any] | None = Field(default=None, validation_alias="metadata_")
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationMessageCreate(BaseModel):
+    """Input schema for appending a message to a conversation thread."""
+
+    thread_id: uuid.UUID
+    role: MessageRole
+    content: str | None = Field(default=None, description="Message content (nullable for S3-stored messages)")
+    actor_id: str | None = Field(default=None, description="Identity of the user/agent producing this message")
+    tool_call_id: str | None = Field(default=None, description="Correlation ID for tool_call/tool_result pairs")
+    metadata: dict[str, Any] | None = Field(default=None, description="Extensible metadata")
+
+
+class ConversationMessageRead(BaseModel):
+    """Output schema for reading a conversation message."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    thread_id: uuid.UUID
+    sequence_number: int
+    role: MessageRole
+    actor_id: str | None = None
+    storage_type: StorageType = StorageType.INLINE
+    content: str | None = None
+    content_ref: str | None = None
+    content_size: int | None = None
+    tool_call_id: str | None = None
+    handoff_from_agent_id: str | None = None
+    handoff_authorized_by: str | None = None
+    handoff_redacted: bool = False
+    tenant_id: str
+    metadata: dict[str, Any] | None = Field(default=None, validation_alias="metadata_")
+    created_at: datetime
+
+
+class ConversationExtractionRead(BaseModel):
+    """Output schema for reading a conversation extraction provenance record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    memory_node_id: uuid.UUID
+    thread_id: uuid.UUID
+    source_messages: list[int] = Field(default_factory=list)
+    extracted_by: str
+    extraction_model: str | None = None
+    extraction_prompt_hash: str | None = None
+    tenant_id: str
+    created_at: datetime
+
+
+class PurgeLogRead(BaseModel):
+    """Output schema for reading a purge log entry."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    resource_type: str
+    resource_id: uuid.UUID
+    purged_by: str
+    purged_at: datetime
+    reason: PurgeReason
+    incident_ref: str | None = None
