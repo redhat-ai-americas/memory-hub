@@ -483,7 +483,7 @@ API_KEY=$(tr -d '\\n' < "$API_KEY_FILE")
 [ -n "$API_KEY" ] || exit 0
 export MEMORYHUB_API_KEY="$API_KEY"
 
-if [ -z "${{MEMORYHUB_URL:-}}" ]; then
+if [ -z "${MEMORYHUB_URL:-}" ]; then
   CONFIG_FILE="$HOME/.config/memoryhub/config.json"
   if [ -f "$CONFIG_FILE" ]; then
     if command -v jq >/dev/null 2>&1; then
@@ -499,10 +499,10 @@ if [ -z "${{MEMORYHUB_URL:-}}" ]; then
     fi
   fi
 fi
-[ -n "${{MEMORYHUB_URL:-}}" ] || exit 0
+[ -n "${MEMORYHUB_URL:-}" ] || exit 0
 export MEMORYHUB_URL
 
-PROJECT_ROOT="${{CLAUDE_PROJECT_DIR:-$PWD}}"
+PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
 MEMORYHUB_BIN=$(command -v memoryhub 2>/dev/null) || true
 if [ -z "$MEMORYHUB_BIN" ]; then
   for candidate in \\

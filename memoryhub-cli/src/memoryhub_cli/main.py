@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import warnings
 from importlib.metadata import version as pkg_version
 from pathlib import Path
+
+_MAX_TESTED_PYTHON = (3, 13)
 
 import typer
 from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
@@ -73,6 +76,14 @@ def main(
     ),
 ) -> None:
     """CLI client for MemoryHub — centralized, governed memory for AI agents."""
+    if sys.version_info[:2] > _MAX_TESTED_PYTHON:
+        warnings.warn(
+            f"memoryhub-cli is tested on Python 3.10-{_MAX_TESTED_PYTHON[1]}. "
+            f"You are running {sys.version_info[0]}.{sys.version_info[1]}, "
+            f"which may cause import errors (e.g., fastmcp namespace packages). "
+            f"Consider using Python {_MAX_TESTED_PYTHON[1]} or earlier.",
+            stacklevel=2,
+        )
 
 
 config_app = typer.Typer(
