@@ -22,7 +22,7 @@ from memoryhub.exceptions import (
     ValidationError,
 )
 
-__version__ = "0.11.0"
+__version__ = "0.14.0"
 
 __all__ = [
     "MemoryHubClient",
