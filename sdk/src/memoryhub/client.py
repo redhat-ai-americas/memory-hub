@@ -708,6 +708,36 @@ class MemoryHubClient:
             options=opts,
         )
 
+    async def reconstruct(
+        self,
+        *,
+        scope: str | None = None,
+        project_id: str | None = None,
+        owner_id: str | None = None,
+    ) -> SearchResult:
+        """Retrieve behavioral memories sorted by weight.
+
+        Convenience wrapper around ``search(content_type="behavioral")``
+        with weight-based ordering. Use this to replay an agent's
+        demonstrated patterns and successful approaches.
+
+        Args:
+            scope: Optional scope filter.
+            project_id: Project identifier for campaign access.
+            owner_id: Override the owner filter (defaults to the
+                authenticated user).
+        """
+        opts: dict[str, Any] = {}
+        if owner_id is not None:
+            opts["owner_id"] = owner_id
+        data = await self._call_action(
+            "reconstruct",
+            scope=scope,
+            project_id=project_id,
+            options=opts or None,
+        )
+        return SearchResult.model_validate(data)
+
     async def write(
         self,
         content: str,

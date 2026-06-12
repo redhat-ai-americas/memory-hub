@@ -1,4 +1,5 @@
-"""Tests for CLI parity commands: promote, graduate, checkpoint, project describe."""
+"""Tests for CLI parity commands: promote, graduate, checkpoint, project describe,
+reconstruct, backfill-entities."""
 
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 from memoryhub.exceptions import NotFoundError
-from memoryhub.models import Memory
+from memoryhub.models import Memory, SearchResult
 from typer.testing import CliRunner
 
 from memoryhub_cli.main import app
@@ -420,3 +421,56 @@ class TestThreadCommands:
         with patch("memoryhub_cli.main._get_client", return_value=mock_client):
             result = runner.invoke(app, ["thread", "delete", "t-001"])
         assert result.exit_code == 0
+
+
+# ── reconstruct ─────────────────────────────────────────────────────────────
+
+
+class TestReconstruct:
+    def _search_result(self, memories=None):
+        if memories is None:
+            memories = [SAMPLE_BEHAVIORAL]
+        return SearchResult(
+            results=memories,
+            total_matching=len(memories),
+            has_more=False,
+        )
+
+    def test_happy_path(self):
+        mock_client = _mock_client(
+            reconstruct=AsyncMock(return_value=self._search_result())
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["reconstruct"])
+        assert result.exit_code == 0
+        assert "Behavioral" in result.output
+
+    def test_json_output(self):
+        mock_client = _mock_client(
+            reconstruct=AsyncMock(return_value=self._search_result())
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["reconstruct", "--output", "json"])
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["status"] == "ok"
+        assert len(parsed["data"]["results"]) == 1
+
+    def test_compact_output(self):
+        mock_client = _mock_client(
+            reconstruct=AsyncMock(return_value=self._search_result())
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["reconstruct", "--output", "compact"])
+        assert result.exit_code == 0
+        assert "<memoryhub-context" in result.output
+        assert "</memoryhub-context>" in result.output
+
+    def test_empty_results(self):
+        mock_client = _mock_client(
+            reconstruct=AsyncMock(return_value=self._search_result(memories=[]))
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["reconstruct"])
+        assert result.exit_code == 0
+        assert "No behavioral memories found" in result.output

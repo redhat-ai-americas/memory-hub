@@ -406,6 +406,63 @@ def list_memories(
 
 
 @app.command()
+def reconstruct(
+    scope: str | None = typer.Option(None, "--scope", "-s", help="Filter by scope"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    owner_id: str | None = typer.Option(
+        None, "--owner-id", help="Override owner filter",
+    ),
+    max_results: int = typer.Option(20, "--max", "-n", help="Maximum results"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o",
+        help="Output format: table, json, quiet, compact",
+    ),
+):
+    """Retrieve behavioral memories (demonstrated patterns and approaches)."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.reconstruct(
+                scope=scope, project_id=_project_id, owner_id=owner_id,
+            )
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+    if output == OutputFormat.compact:
+        _print_compact(result.results, _project_id)
+        return
+
+    if not result.results:
+        console.print("[dim]No behavioral memories found.[/dim]")
+        return
+
+    table = Table(title="Behavioral Memories")
+    table.add_column("ID", style="dim", max_width=12)
+    table.add_column("Scope", style="cyan")
+    table.add_column("Weight", justify="right")
+    table.add_column("Stub", max_width=60)
+
+    for mem in result.results[:max_results]:
+        table.add_row(
+            str(mem.id)[:12],
+            mem.scope,
+            f"{mem.weight:.2f}",
+            (mem.stub or mem.content)[:60],
+        )
+
+    console.print(table)
+
+
+@app.command()
 def read(
     memory_id: str = typer.Argument(..., help="Memory UUID"),
     project_id: str | None = typer.Option(
