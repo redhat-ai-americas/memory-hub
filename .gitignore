@@ -32,8 +32,7 @@ seed-clients.json
 .cache_ggshield
 .mcp.json
 
-NEXT_SESSION_old.md
-NEXT_SESSION.md
+NEXT_SESSION*.md
 planning/rfe_draft.md
 
 

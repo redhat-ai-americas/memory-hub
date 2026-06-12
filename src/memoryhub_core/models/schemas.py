@@ -586,6 +586,23 @@ class ConversationExtractionRead(BaseModel):
     created_at: datetime
 
 
+class ConversationExtractionFailureRead(BaseModel):
+    """Output schema for reading an extraction failure record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    thread_id: uuid.UUID
+    window_start: int
+    window_end: int
+    attempt_count: int
+    last_error: str
+    last_attempt_at: datetime
+    resolved: bool
+    tenant_id: str
+    created_at: datetime
+
+
 class PurgeLogRead(BaseModel):
     """Output schema for reading a purge log entry."""
 

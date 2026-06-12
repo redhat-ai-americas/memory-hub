@@ -97,6 +97,10 @@ class ConversationThread(TimestampMixin, Base):
         "ConversationExtraction",
         back_populates="thread",
     )
+    failures: Mapped[list[ConversationExtractionFailure]] = relationship(
+        "ConversationExtractionFailure",
+        back_populates="thread",
+    )
 
     # -- Table-level indexes and constraints --
     __table_args__ = (
@@ -269,6 +273,78 @@ class ConversationExtraction(Base):
         return (
             f"<ConversationExtraction id={self.id!s:.8}"
             f" thread={self.thread_id!s:.8} memory={self.memory_node_id!s:.8}>"
+        )
+
+
+class ConversationExtractionFailure(Base):
+    """Records extraction failures for conversation windows.
+
+    When extraction fails for a window of messages, the failure is recorded
+    here for retry and monitoring. After successful retry, the failure is
+    marked as resolved.
+    """
+
+    __tablename__ = "conversation_extraction_failures"
+
+    # Primary key
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("uuid_generate_v4()"),
+    )
+
+    # Thread reference
+    thread_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Failed window (sequence_numbers)
+    window_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_end: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Retry metadata
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    last_error: Mapped[str] = mapped_column(Text, nullable=False)
+    last_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Tenant
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        server_default=text("'default'"),
+    )
+
+    # Timestamp
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    # -- Relationships --
+    thread: Mapped[ConversationThread] = relationship(
+        "ConversationThread",
+        back_populates="failures",
+    )
+
+    # -- Table-level indexes --
+    __table_args__ = (
+        Index("ix_conv_extraction_failures_thread_id", "thread_id"),
+        Index("ix_conv_extraction_failures_tenant", "tenant_id"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ConversationExtractionFailure id={self.id!s:.8}"
+            f" thread={self.thread_id!s:.8} window={self.window_start}-{self.window_end}"
+            f" attempts={self.attempt_count} resolved={self.resolved}>"
         )
 
 
