@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, patch
 
-from typer.testing import CliRunner
-
 from memoryhub.exceptions import NotFoundError
 from memoryhub.models import Memory
+from typer.testing import CliRunner
+
 from memoryhub_cli.main import app
 
 runner = CliRunner()
@@ -343,3 +343,80 @@ class TestProjectDescribe:
 
         assert result.exit_code == 1
         assert "not_found" in result.output or "not found" in result.output.lower()
+
+
+# ── thread commands (#199) ───────────────────────────────────────────────────
+
+
+class TestThreadCommands:
+    def test_thread_create(self):
+        from memoryhub.models import ConversationThread
+
+        mock_thread = ConversationThread(
+            id="t-001", scope="user", owner_id="u1", status="active"
+        )
+        mock_client = _mock_client(create_thread=AsyncMock(return_value=mock_thread))
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["thread", "create", "user", "--title", "Test"])
+        assert result.exit_code == 0
+
+    def test_thread_list(self):
+        from memoryhub.models import ConversationThread, ThreadListResult
+
+        threads = [
+            ConversationThread(
+                id="t-001",
+                scope="user",
+                owner_id="u1",
+                status="active",
+                message_count=5,
+            )
+        ]
+        mock_result = ThreadListResult(threads=threads, total=1)
+        mock_client = _mock_client(list_threads=AsyncMock(return_value=mock_result))
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["thread", "list"])
+        assert result.exit_code == 0
+
+    def test_thread_get(self):
+        from memoryhub.models import ConversationThread, ThreadResult
+
+        thread = ConversationThread(
+            id="t-001", scope="user", owner_id="u1", status="active"
+        )
+        mock_result = ThreadResult(
+            thread=thread, messages=[], has_more=False, total_messages=0
+        )
+        mock_client = _mock_client(get_thread=AsyncMock(return_value=mock_result))
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["thread", "get", "t-001"])
+        assert result.exit_code == 0
+
+    def test_thread_archive(self):
+        from memoryhub.models import ConversationThread
+
+        mock_thread = ConversationThread(
+            id="t-001", scope="user", owner_id="u1", status="archived"
+        )
+        mock_client = _mock_client(
+            archive_thread=AsyncMock(return_value=mock_thread)
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["thread", "archive", "t-001"])
+        assert result.exit_code == 0
+
+    def test_thread_delete(self):
+        from memoryhub.models import ConversationThread
+
+        mock_thread = ConversationThread(
+            id="t-001",
+            scope="user",
+            owner_id="u1",
+            status="deleted",
+            messages_deleted=3,
+            cascade_mode="orphan",
+        )
+        mock_client = _mock_client(delete_thread=AsyncMock(return_value=mock_thread))
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["thread", "delete", "t-001"])
+        assert result.exit_code == 0

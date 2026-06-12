@@ -1823,3 +1823,176 @@ async def test_rename_entity(client):
     payload = _payload(mock_mcp)
     assert payload["memory_id"] == "ent-001"
     assert payload["new_name"] == "Red Hat OpenShift"
+
+
+# ── Thread operations (#199) ──────────────────────────────────────────────────
+
+
+class TestThreadOperations:
+    @pytest.mark.asyncio
+    async def test_create_thread(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "id": "thread-001",
+                "scope": "user",
+                "owner_id": "user-1",
+                "status": "active",
+            }
+        )
+        result = await c.create_thread("user", title="Test Thread")
+        tool, action = _tool_and_action(mock_mcp)
+        assert tool == "thread"
+        assert action == "create"
+        payload = _payload(mock_mcp)
+        assert payload["scope"] == "user"
+        assert payload.get("title") == "Test Thread"
+        assert result.id == "thread-001"
+        assert result.scope == "user"
+
+    @pytest.mark.asyncio
+    async def test_append_message(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "id": "msg-001",
+                "thread_id": "thread-001",
+                "sequence_number": 1,
+                "role": "user",
+                "content": "hello",
+            }
+        )
+        result = await c.append_message("thread-001", "user", "hello")
+        tool, action = _tool_and_action(mock_mcp)
+        assert tool == "thread"
+        assert action == "append"
+        assert result.sequence_number == 1
+
+    @pytest.mark.asyncio
+    async def test_get_thread(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "thread": {
+                    "id": "thread-001",
+                    "scope": "user",
+                    "owner_id": "u1",
+                    "status": "active",
+                },
+                "messages": [
+                    {
+                        "id": "m1",
+                        "thread_id": "thread-001",
+                        "sequence_number": 1,
+                        "role": "user",
+                    }
+                ],
+                "has_more": False,
+            }
+        )
+        result = await c.get_thread("thread-001")
+        tool, action = _tool_and_action(mock_mcp)
+        assert tool == "thread"
+        assert action == "get"
+        assert result.thread.id == "thread-001"
+        assert len(result.messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_list_threads(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "threads": [
+                    {
+                        "id": "t1",
+                        "scope": "user",
+                        "owner_id": "u1",
+                        "status": "active",
+                    }
+                ],
+                "total": 1,
+            }
+        )
+        result = await c.list_threads(scope="user")
+        tool, action = _tool_and_action(mock_mcp)
+        assert tool == "thread"
+        assert action == "list"
+        assert result.total == 1
+
+    @pytest.mark.asyncio
+    async def test_archive_thread(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "id": "thread-001",
+                "scope": "user",
+                "owner_id": "u1",
+                "status": "archived",
+            }
+        )
+        result = await c.archive_thread("thread-001")
+        assert result.status == "archived"
+
+    @pytest.mark.asyncio
+    async def test_extract_thread(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "extracted_count": 3,
+                "cursor": 10,
+                "failures": 0,
+            }
+        )
+        result = await c.extract_thread("thread-001")
+        assert result.extracted_count == 3
+        assert result.cursor == 10
+
+    @pytest.mark.asyncio
+    async def test_fork_thread(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "id": "thread-002",
+                "scope": "user",
+                "owner_id": "u1",
+                "status": "active",
+            }
+        )
+        result = await c.fork_thread("thread-001", 5)
+        tool, action = _tool_and_action(mock_mcp)
+        assert action == "fork"
+        payload = _payload(mock_mcp)
+        assert payload.get("from_sequence") == 5
+        assert result.id == "thread-002"
+
+    @pytest.mark.asyncio
+    async def test_share_thread(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "id": "thread-001",
+                "scope": "user",
+                "owner_id": "u1",
+                "participant_ids": ["u1", "agent-b"],
+            }
+        )
+        await c.share_thread("thread-001", "agent-b", "read")
+        payload = _payload(mock_mcp)
+        assert payload.get("grantee_id") == "agent-b"
+        assert payload.get("access_level") == "read"
+
+    @pytest.mark.asyncio
+    async def test_delete_thread(self, client):
+        c, mock_mcp = client
+        mock_mcp.call_tool.return_value = FakeCallToolResult(
+            structured_content={
+                "id": "thread-001",
+                "scope": "user",
+                "owner_id": "u1",
+                "status": "deleted",
+            }
+        )
+        result = await c.delete_thread("thread-001", cascade="orphan")
+        payload = _payload(mock_mcp)
+        assert payload.get("cascade") == "orphan"
+        assert result.status == "deleted"
