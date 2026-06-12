@@ -8,6 +8,7 @@ from functools import partial
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from memoryhub_core.config import AppSettings
 from memoryhub_core.models.conversation import ConversationMessage, ConversationThread
@@ -173,6 +174,12 @@ async def get_thread(
     if include_messages:
         # Build message query
         msg_stmt = select(ConversationMessage).where(ConversationMessage.thread_id == thread_id)
+
+        # Filter redacted messages for non-owner callers (in SQL for correct pagination)
+        is_owner = caller_id is not None and caller_id == thread.owner_id
+        if caller_id is not None and not is_owner:
+            msg_stmt = msg_stmt.where(ConversationMessage.handoff_redacted.is_(False))
+
         if before_sequence is not None:
             msg_stmt = msg_stmt.where(ConversationMessage.sequence_number < before_sequence)
         msg_stmt = msg_stmt.order_by(ConversationMessage.sequence_number.asc())
@@ -185,11 +192,6 @@ async def get_thread(
         has_more = len(messages) > limit
         if has_more:
             messages.pop()  # Remove the extra row
-
-        # Filter redacted messages for non-owner callers
-        is_owner = caller_id is not None and caller_id == thread.owner_id
-        if caller_id is not None and not is_owner:
-            messages = [m for m in messages if not m.handoff_redacted]
 
         # Fetch S3 content if needed
         message_reads = []
@@ -435,6 +437,10 @@ async def fork_thread(
 
     # Create forked thread
     new_id = uuid.uuid4()
+    created_at = datetime.now(UTC)
+    retention = source.retention_policy or {}
+    ttl_days = retention.get("ttl_days", 90)
+
     forked = ConversationThread(
         id=new_id,
         tenant_id=tenant_id,
@@ -447,7 +453,8 @@ async def fork_thread(
         retention_policy=source.retention_policy,
         status="active",
         extraction_cursor=0,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
+        expires_at=created_at + timedelta(days=ttl_days),
         metadata_={"forked_from": str(thread_id), "fork_sequence": from_sequence},
     )
     session.add(forked)
@@ -523,6 +530,7 @@ async def share_thread(
     access = dict(thread.participant_access or {})
     access[grantee_id] = access_level
     thread.participant_access = access
+    flag_modified(thread, "participant_access")
 
     # Record who authorized this share
     meta = dict(thread.metadata_ or {})
@@ -535,6 +543,7 @@ async def share_thread(
     })
     meta["share_grants"] = shares
     thread.metadata_ = meta
+    flag_modified(thread, "metadata_")
 
     await session.commit()
     await session.refresh(thread)

@@ -644,12 +644,13 @@ class TestGetThreadRedaction:
         mock_thread = _mock_thread_obj(owner_id=owner_id)
         mock_thread.id = thread_id
 
+        # SQL-based filtering: the mock query returns only non-redacted messages
+        # because get_thread adds a WHERE clause filtering handoff_redacted=FALSE
         msg1 = _mock_message_obj(sequence_number=1, handoff_redacted=False, content="Normal message")
-        msg2 = _mock_message_obj(sequence_number=2, handoff_redacted=True, content="Redacted message")
 
         execute_results = [
             _mock_execute_result(mock_thread),
-            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[msg1, msg2])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[msg1])))),
         ]
         session.execute.side_effect = execute_results
 
@@ -661,7 +662,7 @@ class TestGetThreadRedaction:
             caller_id=caller_id,
         )
 
-        # Non-owner sees only non-redacted message
+        # Non-owner sees only non-redacted messages (filtered in SQL)
         assert len(result["messages"]) == 1
         assert result["messages"][0].sequence_number == 1
 

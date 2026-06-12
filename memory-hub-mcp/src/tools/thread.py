@@ -214,30 +214,26 @@ async def _dispatch_append(thread_id_str, role, content, opts, ctx):
     tenant = get_tenant_filter(claims)
     s3_adapter = get_s3_adapter()
 
-    # A2A context lookup: resolve thread_id from a2a_context_id if thread_id not provided
     append_opts = _forward(opts, _APPEND_OPTS)
     a2a_ctx = append_opts.pop("a2a_context_id", None)
-    if not thread_id_str and a2a_ctx:
-        session_lookup, gen_lookup = await get_db_session()
-        try:
+
+    session, gen = await get_db_session()
+    try:
+        # A2A context lookup: resolve thread_id from a2a_context_id
+        if not thread_id_str and a2a_ctx:
             resolved = await lookup_thread_by_a2a_context(
-                session_lookup, tenant_id=tenant, a2a_context_id=a2a_ctx,
+                session, tenant_id=tenant, a2a_context_id=a2a_ctx,
             )
             if resolved is not None:
                 thread_id_str = str(resolved)
-        finally:
-            await release_db_session(gen_lookup)
 
-    _require("append", "thread_id", thread_id_str)
+        _require("append", "thread_id", thread_id_str)
 
-    try:
-        tid = uuid.UUID(thread_id_str)
-    except ValueError as exc:
-        raise ToolError(f"Invalid thread_id: {thread_id_str}") from exc
+        try:
+            tid = uuid.UUID(thread_id_str)
+        except ValueError as exc:
+            raise ToolError(f"Invalid thread_id: {thread_id_str}") from exc
 
-    # Load thread to check auth
-    session, gen = await get_db_session()
-    try:
         thread_data = await get_thread(
             session, tenant_id=tenant, thread_id=tid, include_messages=False,
         )
