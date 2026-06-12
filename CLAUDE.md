@@ -23,13 +23,13 @@ Use the `/issue-tracker` skill for ALL issue operations. Never create issues man
 
 ## Cluster Contexts
 
-This project deploys to the **mcp-rhoai** cluster context. Other clusters (kagenti-rhoai, fips-rhoai) are used for unrelated work. All are configured as named contexts in `~/.kube/config`:
+This project deploys to the **mcp-rhoai** cluster context. Other clusters are used for unrelated work. All are configured as named contexts in `~/.kube/config`:
 
 - `mcp-rhoai` — MemoryHub's cluster (n7pd5, sandbox5167)
 - `kagenti-rhoai` — Kagenti deployment cluster (gs4bz)
-- `fips-rhoai` — FIPS cluster (l78nk)
+- `memory-hub-fips` — FIPS verification cluster (zks6c, sandbox417)
 
-> **Note:** The context was previously named `workshop-cluster`. It was renamed to `mcp-rhoai` circa 2026-04-17. Old session notes and retros may reference the old name.
+> **Note:** The FIPS context was previously `fips-rhoai` (l78nk, sandbox1834) which expired 2026-06-09. The main context was previously `workshop-cluster`, renamed to `mcp-rhoai` circa 2026-04-17. Old session notes and retros may reference old names.
 
 **Always pass `--context mcp-rhoai`** on every `oc` / `kubectl` command for this project. Do not rely on the current context, and do not switch contexts with `oc login` or `oc config use-context` — that would break whichever session isn't expecting the switch.
 
