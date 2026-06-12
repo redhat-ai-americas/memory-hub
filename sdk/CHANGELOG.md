@@ -2,6 +2,27 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.14.0] — 2026-06-12
+
+- **`reconstruct()` method**: Convenience wrapper for behavioral memory
+  retrieval, returning memories sorted by weight. Maps to the MCP
+  `reconstruct` action.
+- **`backfill_entities()` method**: Admin operation for bulk entity
+  extraction on memories without extraction_status.
+- **Thread operations** (from unreleased 0.13.0): Full conversation
+  thread support -- `create_thread()`, `append_message()`, `get_thread()`,
+  `list_threads()`, `archive_thread()`, `extract_thread()`, `fork_thread()`,
+  `share_thread()`, `delete_thread()`.
+- **Entity management** (from unreleased 0.12.0): `list_entities()`,
+  `merge_entities()`, `rename_entity()` for entity graph operations.
+  `describe_project()` for project detail retrieval.
+- **Graph, curation, session, project operations**: `get_similar()`,
+  `get_relationships()`, `create_relationship()`,
+  `report_contradiction()`, `resolve_contradiction()`,
+  `set_curation_rule()`, `list_projects()`, `create_project()`,
+  `add_project_member()`, `remove_project_member()`, `get_session()`,
+  `set_session_focus()`, `get_focus_history()`.
+
 ## [0.12.0] — 2026-06-08
 
 - **`describe_project()` method (#257)**: Retrieve project details

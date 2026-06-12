@@ -2,6 +2,35 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [0.11.0] — 2026-06-12
+
+- **Hook scaffolding**: `memoryhub config init` now generates the full
+  hook integration -- `.claude/hooks/load-memories.sh` (portable,
+  executable) and `.claude/settings.json` SessionStart entries.
+- **Hook script portability**: CLI discovery checks PATH first (pipx/global)
+  before project venv paths. JSON parsing uses jq/python3/grep fallback chain.
+- **Loading rule refinement**: Rule templates frame hooks as the expected
+  path, with manual MCP calls as a degraded fallback.
+- **`memoryhub reconstruct`**: Retrieve behavioral memories sorted by
+  weight. Supports table, json, quiet, and compact output.
+- **`memoryhub admin backfill-entities`**: Run entity extraction on
+  memories without extraction_status. Accepts `--limit` and
+  `--include-failed`.
+- **Thread commands** (from unreleased 0.10.0): `memoryhub thread`
+  subgroup with create, append, get, list, archive, extract, fork,
+  share, and delete commands.
+- **Entity commands** (from unreleased 0.10.0): `memoryhub entity`
+  subgroup with list, merge, and rename commands.
+- **Session commands** (from unreleased 0.10.0): `memoryhub session`
+  subgroup with status, focus, and focus-history commands.
+- **Graph commands** (from unreleased 0.10.0): `memoryhub graph`
+  subgroup with relate, list, and similar commands.
+- **Curation commands** (from unreleased 0.10.0): `memoryhub curation`
+  subgroup with report, resolve, and rule commands.
+- **Project commands** (from unreleased 0.10.0): `memoryhub project`
+  subgroup with list, create, add-member, remove-member, and describe.
+- **SDK dependency**: Requires `memoryhub>=0.14.0` (was `>=0.3.0`).
+
 ## [0.9.0] — 2026-06-08
 
 - **CLI/SDK parity (#257)**: `memoryhub promote`, `memoryhub graduate`,
