@@ -371,7 +371,7 @@ deploy_retention_cronjob() {
     fi
 
     info "Deploying retention sweep CronJob..."
-    oc apply --context "$CONTEXT" -f "$REPO_ROOT/deploy/retention/cronjob.yaml"
+    oc apply --context "$CONTEXT" -f "$REPO_ROOT/deploy/retention/cronjob.yaml" -n "$MCP_PROJECT"
     echo ""
     echo -e "  ${GREEN}Retention CronJob deployed${RESET}"
 }
