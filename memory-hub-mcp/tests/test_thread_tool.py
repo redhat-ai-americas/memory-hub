@@ -276,3 +276,63 @@ class TestThreadOptionsForwarding:
             opts = mock.call_args[0][1]
             assert "title" in opts
             assert "extra" in opts  # Passed through; _forward filters inside dispatcher
+
+
+class TestExtractAction:
+    @pytest.mark.asyncio
+    async def test_extract_in_valid_actions(self):
+        from src.tools.thread import _VALID_ACTIONS
+
+        assert "extract" in _VALID_ACTIONS
+
+    @pytest.mark.asyncio
+    async def test_extract_requires_thread_id(self):
+        from src.tools.thread import thread
+
+        with pytest.raises(ToolError, match="requires 'thread_id'"):
+            await thread(action="extract")
+
+    @pytest.mark.asyncio
+    async def test_extract_invalid_thread_id(self):
+        from src.tools.thread import thread
+
+        with pytest.raises(ToolError, match="Invalid thread_id"):
+            await thread(action="extract", thread_id="not-a-uuid")
+
+    @pytest.mark.asyncio
+    async def test_extract_opts_forwarded(self):
+        from src.tools.thread import _EXTRACT_OPTS, _forward
+
+        test_opts = {
+            "turn_range": [1, 5],
+            "model": "test-model",
+            "model_url": "http://test",
+            "garbage": "ignored",
+        }
+        result = _forward(test_opts, _EXTRACT_OPTS)
+
+        assert "turn_range" in result
+        assert "model" in result
+        assert "model_url" in result
+        assert "garbage" not in result
+        assert result["turn_range"] == [1, 5]
+        assert result["model"] == "test-model"
+        assert result["model_url"] == "http://test"
+
+    @pytest.mark.asyncio
+    async def test_extract_action_dispatched(self):
+        from src.tools.thread import thread
+
+        tid = str(uuid.uuid4())
+        with patch("src.tools.thread._dispatch_extract", new_callable=AsyncMock) as mock:
+            mock.return_value = {
+                "extracted_count": 3,
+                "cursor": 10,
+                "failures": 0,
+            }
+            result = await thread(action="extract", thread_id=tid)
+            mock.assert_awaited_once()
+            # _dispatch_extract(thread_id, opts, ctx)
+            assert mock.call_args[0][0] == tid  # thread_id
+            assert isinstance(mock.call_args[0][1], dict)  # opts
+            assert result["extracted_count"] == 3
