@@ -451,3 +451,54 @@ class TestShareAction:
             assert mock.call_args[0][0] == tid  # thread_id
             assert isinstance(mock.call_args[0][1], dict)  # opts
             assert result["id"] == "test"
+
+
+class TestDeleteAction:
+    @pytest.mark.asyncio
+    async def test_delete_in_valid_actions(self):
+        from src.tools.thread import _VALID_ACTIONS
+
+        assert "delete" in _VALID_ACTIONS
+
+    @pytest.mark.asyncio
+    async def test_delete_requires_thread_id(self):
+        from src.tools.thread import thread
+
+        with pytest.raises(ToolError, match="requires 'thread_id'"):
+            await thread(action="delete")
+
+    @pytest.mark.asyncio
+    async def test_delete_invalid_thread_id(self):
+        from src.tools.thread import thread
+
+        with pytest.raises(ToolError, match="Invalid thread_id"):
+            await thread(action="delete", thread_id="not-a-uuid")
+
+    @pytest.mark.asyncio
+    async def test_delete_opts_forwarded(self):
+        from src.tools.thread import _DELETE_OPTS, _forward
+
+        test_opts = {
+            "cascade": "orphan",
+            "garbage": "x",
+        }
+        result = _forward(test_opts, _DELETE_OPTS)
+
+        assert "cascade" in result
+        assert "garbage" not in result
+        assert result["cascade"] == "orphan"
+
+    @pytest.mark.asyncio
+    async def test_delete_action_dispatched(self):
+        from src.tools.thread import thread
+
+        tid = str(uuid.uuid4())
+        with patch("src.tools.thread._dispatch_delete", new_callable=AsyncMock) as mock:
+            mock.return_value = {"id": "test", "status": "deleted"}
+            result = await thread(action="delete", thread_id=tid)
+            mock.assert_awaited_once()
+            # _dispatch_delete(thread_id, opts, ctx)
+            assert mock.call_args[0][0] == tid  # thread_id
+            assert isinstance(mock.call_args[0][1], dict)  # opts
+            assert result["id"] == "test"
+            assert result["status"] == "deleted"
