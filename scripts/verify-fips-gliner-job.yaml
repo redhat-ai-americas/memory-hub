@@ -30,6 +30,8 @@ spec:
       labels:
         app: memoryhub
         component: fips-verification
+      annotations:
+        alpha.image.policy.openshift.io/resolve-names: '*'
     spec:
       restartPolicy: Never
       containers:
@@ -103,8 +105,8 @@ spec:
               print("RESULT: FIPS-VERIFIED -- all checks passed")
           resources:
             requests:
-              memory: "512Mi"
+              memory: "2Gi"
               cpu: "500m"
             limits:
-              memory: "1Gi"
-              cpu: "1"
+              memory: "4Gi"
+              cpu: "2"
