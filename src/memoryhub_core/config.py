@@ -76,6 +76,12 @@ class AppSettings(BaseSettings):
     # Conversation thread persistence (#168)
     conv_inline_max_bytes: int = 8192  # Messages above this go to S3
 
+    # Conversation extraction pipeline (#168 Phase 3)
+    conv_extraction_model: str = ""
+    conv_extraction_model_url: str = ""
+    conv_extraction_window_size: int = 4
+    conv_extraction_timeout: int = 60
+
     # Phase 2 entity extraction (#170)
     entity_extraction_enabled: bool = False
     entity_extraction_concurrency: int = 10
