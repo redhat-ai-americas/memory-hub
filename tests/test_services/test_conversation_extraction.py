@@ -4,15 +4,12 @@ Uses mock AsyncSession to avoid SQLite ARRAY column compatibility issues.
 Integration tests against PostgreSQL are in tests/integration/.
 """
 
-import contextlib
 import hashlib
 import uuid
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import yaml
 
 from memoryhub_core.services.conversation_extraction import (
     _call_extraction_llm,
@@ -541,7 +538,6 @@ class TestExtractFromThread:
 
     @pytest.mark.asyncio
     async def test_extract_from_thread_missing_config_raises(self):
-        from memoryhub_core.services.exceptions import ThreadNotFoundError
 
         session = _mock_session()
         thread_id = uuid.uuid4()
@@ -632,15 +628,14 @@ class TestCallExtractionLLM:
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(side_effect=httpx.ConnectError("Connection error"))
 
-        with patch("asyncio.sleep"):
-            with pytest.raises(httpx.ConnectError):
-                await _call_extraction_llm(
-                    formatted,
-                    system_prompt,
-                    client=mock_client,
-                    model="test-model",
-                    url="http://test",
-                )
+        with patch("asyncio.sleep"), pytest.raises(httpx.ConnectError):
+            await _call_extraction_llm(
+                formatted,
+                system_prompt,
+                client=mock_client,
+                model="test-model",
+                url="http://test",
+            )
 
         # 4 attempts: 1 initial + 1 immediate retry + 2 backoff
         assert mock_client.post.call_count == 4
