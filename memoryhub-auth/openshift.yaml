@@ -157,6 +157,8 @@ spec:
             name: auth-rsa-keys
         - secretRef:
             name: auth-admin-key
+        - secretRef:
+            name: auth-internal-service-key
         env:
         - name: AUTH_HOST
           value: "0.0.0.0"

@@ -411,6 +411,11 @@ prepare_auth_infra() {
 
     copy_secret memoryhub-pg-credentials "$DB_NAMESPACE" memoryhub-pg-credentials "$AUTH_PROJECT"
     ensure_random_secret auth-admin-key "$AUTH_PROJECT" AUTH_ADMIN_KEY
+    ensure_random_secret auth-internal-service-key "$AUTH_PROJECT" AUTH_INTERNAL_SERVICE_KEY
+
+    # Copy the internal service key to MCP namespace so the MCP server can
+    # call the auth service's /internal/validate-api-key endpoint.
+    copy_secret auth-internal-service-key "$AUTH_PROJECT" auth-internal-service-key "$MCP_PROJECT"
 
     echo -e "  ${GREEN}Auth infrastructure ready${RESET}"
 }

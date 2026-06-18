@@ -85,6 +85,15 @@ spec:
           value: "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com"
         - name: AUTH_AUDIENCE
           value: "memoryhub"
+        # API key validation fallback — the MCP server calls the auth
+        # service to validate keys not found in the local ConfigMap.
+        - name: AUTH_API_KEY_VALIDATE_URL
+          value: "http://auth-server.memoryhub-auth.svc:8080/internal/validate-api-key"
+        - name: AUTH_INTERNAL_SERVICE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: auth-internal-service-key
+              key: AUTH_INTERNAL_SERVICE_KEY
         # Valkey backs session focus history (#61) and, when it lands, the
         # #62 Pattern E push-side broadcast filter. The Valkey pod runs in
         # the same namespace (memory-hub-mcp) per deploy/valkey/.

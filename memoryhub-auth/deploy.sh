@@ -101,6 +101,18 @@ else
     echo "  OpenShift OAuth client secret already exists."
 fi
 
+# Generate internal service key for MCP→auth API key validation
+echo "→ Checking internal service key..."
+if oc get secret --context "$CONTEXT" auth-internal-service-key -n "$PROJECT" &>/dev/null; then
+    echo "  Internal service key already exists."
+else
+    echo "  Generating internal service key..."
+    oc create secret generic auth-internal-service-key \
+        --from-literal=AUTH_INTERNAL_SERVICE_KEY="$(openssl rand -hex 32)" \
+        --context "$CONTEXT" -n "$PROJECT"
+    echo "  Internal service key created."
+fi
+
 # Apply OAuthClient CR (cluster-scoped, requires cluster-admin)
 echo "→ Checking OAuthClient CR..."
 if oc auth can-i --context "$CONTEXT" create oauthclients 2>/dev/null; then
