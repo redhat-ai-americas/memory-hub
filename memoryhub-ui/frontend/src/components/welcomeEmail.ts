@@ -24,6 +24,7 @@ export interface WelcomeEmailParams {
   clientId: string;
   clientName: string;
   clientSecret: string | null;
+  apiKey: string | null;
   tenantId: string;
   scopes: string[];
   mcpUrl: string;
@@ -43,6 +44,7 @@ export function renderWelcomeEmail(params: WelcomeEmailParams): string {
     clientId,
     clientName,
     clientSecret,
+    apiKey,
     tenantId,
     scopes,
     mcpUrl,
@@ -70,12 +72,26 @@ Your credentials
   Client name:    ${clientName}
   Tenant:         ${tenantId}
   Scopes:         ${scopes.join(', ') || '(none)'}
+  API key:        ${apiKey ?? '(not yet generated -- rotate via dashboard)'}
   Client secret:  ${secret}
 
 ${secretNote}
 
-How to use it
--------------
+Quick start (API key -- recommended for most users)
+----------------------------------------------------
+The API key works with register_session(api_key=...) and skips the
+OAuth token dance. Use this for Claude Code, the CLI, and lightweight
+scripts.
+
+  # Claude Code / CLI setup:
+  memoryhub login --url ${mcpUrl} --api-key '${apiKey ?? '<your api key>'}'
+  memoryhub config init
+
+  # Or set the environment variable directly:
+  export MEMORYHUB_API_KEY='${apiKey ?? '<your api key>'}'
+
+Advanced: OAuth 2.1 client_credentials
+---------------------------------------
 The MemoryHub auth server issues short-lived JWTs via the OAuth 2.1
 client_credentials grant. Request a token with:
 

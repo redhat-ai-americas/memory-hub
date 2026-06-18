@@ -18,6 +18,7 @@ interface SecretRevealModalProps {
   clientId: string;
   clientName: string;
   clientSecret: string;
+  apiKey: string | null;
   tenantId: string;
   scopes: string[];
   mcpUrl: string;
@@ -45,6 +46,7 @@ const SecretRevealModal: React.FC<SecretRevealModalProps> = ({
   clientId,
   clientName,
   clientSecret,
+  apiKey,
   tenantId,
   scopes,
   mcpUrl,
@@ -55,6 +57,7 @@ const SecretRevealModal: React.FC<SecretRevealModalProps> = ({
     clientId,
     clientName,
     clientSecret,
+    apiKey,
     tenantId,
     scopes,
     mcpUrl,
@@ -74,16 +77,35 @@ const SecretRevealModal: React.FC<SecretRevealModalProps> = ({
           variant="warning"
           isInline
           isPlain
-          title="Copy the secret now — it will not be shown again."
+          title="Copy these credentials now — they will not be shown again."
           style={{ marginBottom: '1rem' }}
         />
 
-        <Title headingLevel="h3" size="md" style={{ marginBottom: '0.5rem' }}>
-          Client secret
-        </Title>
-        <ClipboardCopy isReadOnly hoverTip="Copy secret" clickTip="Copied" variant={ClipboardCopyVariant.expansion}>
-          {clientSecret}
-        </ClipboardCopy>
+        {apiKey && (
+          <>
+            <Title headingLevel="h3" size="md" style={{ marginBottom: '0.5rem' }}>
+              API key (for Claude Code / CLI)
+            </Title>
+            <Content component="small" style={{ color: 'var(--pf-v6-global--Color--200)', display: 'block', marginBottom: '0.5rem' }}>
+              Most integrations use this. Works with register_session(api_key=...) and memoryhub login --api-key.
+            </Content>
+            <ClipboardCopy isReadOnly hoverTip="Copy API key" clickTip="Copied" variant={ClipboardCopyVariant.expansion}>
+              {apiKey}
+            </ClipboardCopy>
+            <div style={{ marginBottom: '1.5rem' }} />
+          </>
+        )}
+
+        {clientSecret && (
+          <>
+            <Title headingLevel="h3" size="md" style={{ marginBottom: '0.5rem' }}>
+              Client secret
+            </Title>
+            <ClipboardCopy isReadOnly hoverTip="Copy secret" clickTip="Copied" variant={ClipboardCopyVariant.expansion}>
+              {clientSecret}
+            </ClipboardCopy>
+          </>
+        )}
 
         <Title
           headingLevel="h3"

@@ -113,11 +113,17 @@ class ClientResponse(BaseModel):
 
 class ClientCreatedResponse(ClientResponse):
     client_secret: str
+    api_key: str
 
 
 class SecretRotatedResponse(BaseModel):
     client_id: str
     client_secret: str
+
+
+class ApiKeyRotatedResponse(BaseModel):
+    client_id: str
+    api_key: str
 
 
 class PublicConfigResponse(BaseModel):

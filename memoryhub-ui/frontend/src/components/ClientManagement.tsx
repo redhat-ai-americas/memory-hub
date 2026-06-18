@@ -28,6 +28,7 @@ import {
   createClient,
   fetchClients,
   fetchPublicConfig,
+  rotateApiKey,
   rotateClientSecret,
   updateClient,
 } from '@/api/client';
@@ -57,6 +58,7 @@ const ClientManagement: React.FC = () => {
     clientId: string;
     clientName: string;
     secret: string;
+    apiKey: string | null;
     tenantId: string;
     scopes: string[];
   } | null>(null);
@@ -122,6 +124,7 @@ const ClientManagement: React.FC = () => {
         clientId: result.client_id,
         clientName: result.client_name,
         secret: result.client_secret,
+        apiKey: result.api_key,
         tenantId: result.tenant_id,
         scopes: result.default_scopes,
       });
@@ -153,11 +156,29 @@ const ClientManagement: React.FC = () => {
         clientId: result.client_id,
         clientName: client.client_name,
         secret: result.client_secret,
+        apiKey: null,
         tenantId: client.tenant_id,
         scopes: client.default_scopes,
       });
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : 'Failed to rotate secret');
+    }
+  };
+
+  const handleRotateApiKey = async (client: ClientResponse) => {
+    setActionError(null);
+    try {
+      const result = await rotateApiKey(client.client_id);
+      setSecretModal({
+        clientId: result.client_id,
+        clientName: client.client_name,
+        secret: '',
+        apiKey: result.api_key,
+        tenantId: client.tenant_id,
+        scopes: client.default_scopes,
+      });
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Failed to rotate API key');
     }
   };
 
@@ -263,6 +284,11 @@ const ClientManagement: React.FC = () => {
                           Rotate Secret
                         </Button>
                       </FlexItem>
+                      <FlexItem>
+                        <Button variant="warning" size="sm" onClick={() => handleRotateApiKey(c)}>
+                          Rotate API Key
+                        </Button>
+                      </FlexItem>
                     </Flex>
                   </Td>
                 </Tr>
@@ -336,6 +362,7 @@ const ClientManagement: React.FC = () => {
           clientId={secretModal.clientId}
           clientName={secretModal.clientName}
           clientSecret={secretModal.secret}
+          apiKey={secretModal.apiKey}
           tenantId={secretModal.tenantId}
           scopes={secretModal.scopes}
           mcpUrl={publicConfig?.mcp_url ?? 'https://mcp-server.example.com/mcp/'}

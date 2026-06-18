@@ -92,11 +92,17 @@ export interface ClientResponse {
 
 export interface ClientCreatedResponse extends ClientResponse {
   client_secret: string;
+  api_key: string;
 }
 
 export interface SecretRotatedResponse {
   client_id: string;
   client_secret: string;
+}
+
+export interface ApiKeyRotatedResponse {
+  client_id: string;
+  api_key: string;
 }
 
 /** Public-facing URLs used to compose contributor welcome emails.

@@ -1,4 +1,5 @@
 import type {
+  ApiKeyRotatedResponse,
   ClientCreatedResponse,
   ClientResponse,
   ContradictionReport,
@@ -106,6 +107,10 @@ export async function updateClient(clientId: string, payload: UpdateClientPayloa
 
 export async function rotateClientSecret(clientId: string): Promise<SecretRotatedResponse> {
   return apiPost<SecretRotatedResponse>(`/clients/${encodeURIComponent(clientId)}/rotate-secret`, {});
+}
+
+export async function rotateApiKey(clientId: string): Promise<ApiKeyRotatedResponse> {
+  return apiPost<ApiKeyRotatedResponse>(`/clients/${encodeURIComponent(clientId)}/rotate-api-key`, {});
 }
 
 export async function fetchUsers(): Promise<UserEntry[]> {

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import Settings, get_settings
 from src.database import get_db
 from src.schemas import (
+    ApiKeyRotatedResponse,
     ClientCreatedResponse,
     ClientResponse,
     ContradictionResponse,
@@ -607,6 +608,12 @@ async def update_client(client_id: str, body: UpdateClientRequest, settings: Set
 @router.post("/api/clients/{client_id}/rotate-secret", response_model=SecretRotatedResponse)
 async def rotate_client_secret(client_id: str, settings: SettingsDep):
     resp = await _admin_request(settings, "POST", f"/admin/clients/{client_id}/rotate-secret")
+    return resp.json()
+
+
+@router.post("/api/clients/{client_id}/rotate-api-key", response_model=ApiKeyRotatedResponse)
+async def rotate_api_key(client_id: str, settings: SettingsDep):
+    resp = await _admin_request(settings, "POST", f"/admin/clients/{client_id}/rotate-api-key")
     return resp.json()
 
 
