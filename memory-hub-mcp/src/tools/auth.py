@@ -95,8 +95,16 @@ def authenticate(api_key: str) -> dict[str, Any] | None:
     return _users_by_key.get(api_key)
 
 
+class AuthServiceUnavailableError(Exception):
+    """Raised when the auth service cannot be reached for API key validation."""
+
+
 async def authenticate_remote(api_key: str) -> dict[str, Any] | None:
-    """Validate an API key via the auth service (fallback for keys not in ConfigMap)."""
+    """Validate an API key via the auth service (fallback for keys not in ConfigMap).
+
+    Returns the user dict on success, None if the key is definitively invalid,
+    or raises AuthServiceUnavailableError on transient network failures.
+    """
     key_hash = hashlib.sha256(api_key.encode()).hexdigest()
     cached = _remote_key_cache.get(key_hash)
     if cached is not None:
@@ -127,8 +135,12 @@ async def authenticate_remote(api_key: str) -> dict[str, Any] | None:
                 json={"api_key": api_key},
                 headers={"X-Service-Key": service_key},
             )
-        if resp.status_code != 200:
+        if resp.status_code == 401:
             return None
+        if resp.status_code != 200:
+            raise AuthServiceUnavailableError(
+                f"Auth service returned {resp.status_code}"
+            )
         data = resp.json()
         user_dict = {
             "user_id": data["user_id"],
@@ -139,9 +151,10 @@ async def authenticate_remote(api_key: str) -> dict[str, Any] | None:
         }
         _remote_key_cache[key_hash] = (user_dict, time.time() + _CACHE_TTL)
         return user_dict
+    except AuthServiceUnavailableError:
+        raise
     except Exception as exc:
-        logger.warning("Auth service API key validation failed: %s", exc)
-        return None
+        raise AuthServiceUnavailableError(str(exc)) from exc
 
 
 def set_session_id(sid: str) -> None:

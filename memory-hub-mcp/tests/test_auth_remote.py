@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.tools import auth as auth_module
-from src.tools.auth import authenticate, authenticate_remote
+from src.tools.auth import AuthServiceUnavailableError, authenticate, authenticate_remote
 
 
 @pytest.fixture(autouse=True)
@@ -157,8 +157,8 @@ async def test_remote_cache_expiry(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_remote_handles_failure(monkeypatch):
-    """Connection errors return None, not an exception."""
+async def test_remote_connection_error_raises(monkeypatch):
+    """Connection errors raise AuthServiceUnavailableError."""
     monkeypatch.setenv("AUTH_API_KEY_VALIDATE_URL", "http://auth:8080/internal/validate-api-key")
     monkeypatch.setenv("AUTH_INTERNAL_SERVICE_KEY", "svc-secret")
 
@@ -167,15 +167,14 @@ async def test_remote_handles_failure(monkeypatch):
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.post = AsyncMock(side_effect=ConnectionError("refused"))
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
-        result = await authenticate_remote("mh-dev-fail")
-
-    assert result is None
+    with patch("httpx.AsyncClient", return_value=mock_client), \
+         pytest.raises(AuthServiceUnavailableError):
+        await authenticate_remote("mh-dev-fail")
 
 
 @pytest.mark.asyncio
-async def test_remote_handles_non_200(monkeypatch):
-    """Non-200 status code returns None."""
+async def test_remote_401_returns_none(monkeypatch):
+    """401 (invalid key) returns None -- not an error, just rejected."""
     monkeypatch.setenv("AUTH_API_KEY_VALIDATE_URL", "http://auth:8080/internal/validate-api-key")
     monkeypatch.setenv("AUTH_INTERNAL_SERVICE_KEY", "svc-secret")
 
@@ -188,6 +187,22 @@ async def test_remote_handles_non_200(monkeypatch):
         result = await authenticate_remote("mh-dev-bad")
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_remote_500_raises(monkeypatch):
+    """Non-401 error responses raise AuthServiceUnavailableError."""
+    monkeypatch.setenv("AUTH_API_KEY_VALIDATE_URL", "http://auth:8080/internal/validate-api-key")
+    monkeypatch.setenv("AUTH_INTERNAL_SERVICE_KEY", "svc-secret")
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=_mock_response(status_code=500))
+
+    with patch("httpx.AsyncClient", return_value=mock_client), \
+         pytest.raises(AuthServiceUnavailableError):
+        await authenticate_remote("mh-dev-server-err")
 
 
 @pytest.mark.asyncio
