@@ -281,6 +281,7 @@ class TestRotateSecret:
         assert data["client_id"] == "test-agent"
         assert "client_secret" in data
         assert len(data["client_secret"]) > 0
+        assert data["api_key"].startswith("mh-dev-")
 
     async def test_rotated_secret_works_for_token_grant(self, client, sample_client):
         # Rotate the secret

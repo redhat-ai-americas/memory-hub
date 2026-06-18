@@ -187,13 +187,16 @@ async def rotate_secret(
     client.client_secret_hash = bcrypt.hashpw(
         plaintext_secret.encode(), bcrypt.gensalt()
     ).decode()
+    api_key = "mh-dev-" + secrets.token_hex(8)
+    client.api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
     client.updated_at = datetime.now(UTC)
     await session.commit()
 
-    log.info("Rotated secret for client %s", client_id)
+    log.info("Rotated secret and API key for client %s", client_id)
     return SecretRotatedResponse(
         client_id=client.client_id,
         client_secret=plaintext_secret,
+        api_key=api_key,
     )
 
 

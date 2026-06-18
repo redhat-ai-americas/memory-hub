@@ -42,6 +42,7 @@ class ClientCreatedResponse(ClientResponse):
 class SecretRotatedResponse(BaseModel):
     client_id: str
     client_secret: str  # plaintext, shown once
+    api_key: str  # also regenerated, shown once
 
 
 class ApiKeyRotatedResponse(BaseModel):

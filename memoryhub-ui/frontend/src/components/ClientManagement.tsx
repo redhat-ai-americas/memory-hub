@@ -150,13 +150,11 @@ const ClientManagement: React.FC = () => {
     setActionError(null);
     try {
       const result = await rotateClientSecret(client.client_id);
-      // Rotate only returns client_id + new secret, so fill in the rest
-      // from the row the user clicked on for the welcome email.
       setSecretModal({
         clientId: result.client_id,
         clientName: client.client_name,
         secret: result.client_secret,
-        apiKey: null,
+        apiKey: result.api_key,
         tenantId: client.tenant_id,
         scopes: client.default_scopes,
       });
