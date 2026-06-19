@@ -155,3 +155,53 @@ memoryhub config init
 Commit `.memoryhub.yaml`, the rule file, and the hook script to your repository. Do not commit credentials -- those stay in `~/.config/memoryhub/`.
 
 After setup, the next Claude Code session in that project will automatically load relevant memories at startup and have the MCP tools available for mid-session operations.
+
+## Where memory fits: agents have a lot of places to store things
+
+A common question when people first see MemoryHub is: "If something is important enough to remember, why leave it up to the agent? Shouldn't we make memory storage deterministic?" The short answer is that deterministic storage already exists -- it's called a database. What the agent needs is something different.
+
+### The landscape of places to put information
+
+An agent operating in an enterprise environment has access to many stores, each with a different purpose:
+
+**Business systems of record.** Salesforce, ServiceNow, ERP, EHR, POS. These are authoritative sources for business data. A customer's account status lives in Salesforce. A patient's medication history lives in the EHR. An agent should *read* from these systems (often via RAG or MCP tools) but should never treat its own memory as a replacement for them. If the agent learns a customer's contract renewal date during a conversation, the right action is to update the CRM, not to write a memory about it.
+
+**Knowledge bases and RAG.** Enterprise RAG, vector search over documentation, web search. These provide factual, curated information: product documentation, policy manuals, API references, regulatory text. The content is authored and maintained by humans or by dedicated curation pipelines. It's reference material, not experience.
+
+**Project and harness configuration.** CLAUDE.md, AGENTS.md, SOUL.md (OpenClaw), `.cursorrules`. These are static, version-controlled instructions committed to a repository. They define how the agent should behave in this project: coding conventions, tool preferences, architectural constraints. They change when a human edits them and commits the change. They're not memories -- they're standing orders.
+
+**Built-in agent memory.** Claude Code's MEMORY.md, ChatGPT's memory feature. These are per-user, per-tool memory stores built into a specific agent harness. They work well for personal preferences within that one tool but don't share across agents, don't have governance, and don't support organizational scoping.
+
+**Agent episodic memory.** This is where MemoryHub sits. It stores what the agent *learned from experience*: preferences discovered during conversations, decisions made and why, workflow patterns that worked, lessons learned the hard way. It's not authoritative business data (that belongs in the system of record). It's not curated reference material (that belongs in the knowledge base). It's not static configuration (that belongs in CLAUDE.md). It's the experiential layer -- the things an agent picks up over time that make it better at its job.
+
+### Why memory can't be deterministic
+
+The question "shouldn't we make this deterministic?" assumes we can define in advance what's worth remembering. But the value of a piece of information as a memory depends on context that only the agent has at the moment of the conversation.
+
+When a user says "use Podman, not Docker," is that a memory or a CLAUDE.md entry? It depends. If it's a project-wide standard, it belongs in CLAUDE.md (and someone should put it there). If it's a personal preference the user just expressed for the first time, it's a memory. If the project's CLAUDE.md already says to use Podman, there's nothing to remember at all. The agent has to evaluate the current context -- what's already documented, what scope this applies to, whether it's new information or a restatement -- and make a judgment call.
+
+A deterministic rule like "always store user preferences" would flood the memory with noise. A rule like "store preferences that aren't already documented" requires the agent to check what's documented, which is itself a judgment. The agent is the only entity with enough context to make the call, so the system gives it guidelines and trusts it to apply them.
+
+### At inference time, provenance disappears
+
+Here's the thing that clarifies most of the confusion: at inference time, none of these distinctions matter to the model. The LLM receives a JSON payload containing a system prompt and a conversation history. Every piece of context -- whether it came from MemoryHub, a RAG retrieval, a Salesforce query, CLAUDE.md, or a user message -- is just tokens in that payload. The model doesn't know or care where a token came from.
+
+Provenance only matters if the developer chooses to signal it. When MemoryHub injects a `<memoryhub-context>` block, the agent can see that those tokens came from MemoryHub (because they're wrapped in a tag). When a Salesforce integration returns data in a `<salesforce_data>` block, the agent knows the source. But this is a developer choice, not a model capability. If you pasted the same text without the tags, the model would process it identically.
+
+This means the real question isn't "where should I store this?" but "how should this information reach the context window?" Different stores have different retrieval characteristics:
+
+- CLAUDE.md is loaded every session, unconditionally. Good for things every session needs.
+- MemoryHub memories are loaded selectively, based on semantic relevance to the current task. Good for the long tail of context that matters sometimes.
+- RAG results are loaded on-demand in response to a query. Good for factual lookups.
+- Business system data is fetched when the agent needs it for a specific operation.
+
+Each store has its own retrieval path into the context window. MemoryHub's path is: hook at session start (broad, semantic search) plus tool calls mid-session (targeted, on pivot). That path is optimized for experiential context -- things the agent learned that it doesn't know it'll need until a conversation makes them relevant.
+
+### The practical test
+
+When deciding whether something belongs in MemoryHub versus somewhere else, the test is straightforward:
+
+- Is it authoritative business data? Put it in the system of record.
+- Is it curated reference material? Put it in the knowledge base.
+- Is it a project-wide standard that every session needs? Put it in CLAUDE.md.
+- Is it something the agent learned from experience that will help future sessions? That's a memory.
