@@ -174,14 +174,6 @@ An agent operating in an enterprise environment has access to many stores, each 
 
 **Agent episodic memory.** This is where MemoryHub sits. It stores what the agent *learned from experience*: preferences discovered during conversations, decisions made and why, workflow patterns that worked, lessons learned the hard way. It's not authoritative business data (that belongs in the system of record). It's not curated reference material (that belongs in the knowledge base). It's not static configuration (that belongs in CLAUDE.md). It's the experiential layer -- the things an agent picks up over time that make it better at its job.
 
-### Why memory can't be deterministic
-
-The question "shouldn't we make this deterministic?" assumes we can define in advance what's worth remembering. But the value of a piece of information as a memory depends on context that only the agent has at the moment of the conversation.
-
-When a user says "use Podman, not Docker," is that a memory or a CLAUDE.md entry? It depends. If it's a project-wide standard, it belongs in CLAUDE.md (and someone should put it there). If it's a personal preference the user just expressed for the first time, it's a memory. If the project's CLAUDE.md already says to use Podman, there's nothing to remember at all. The agent has to evaluate the current context -- what's already documented, what scope this applies to, whether it's new information or a restatement -- and make a judgment call.
-
-A deterministic rule like "always store user preferences" would flood the memory with noise. A rule like "store preferences that aren't already documented" requires the agent to check what's documented, which is itself a judgment. The agent is the only entity with enough context to make the call, so the system gives it guidelines and trusts it to apply them.
-
 ### Who writes the memory: the agent, a watcher, or both
 
 Everything above describes the inline path: the working agent notices something worth remembering and writes it during the conversation. This works, but it has a cost. Every `memory(action="write")` call is a tool round-trip that the agent spends instead of doing work. For a coding agent mid-implementation, stopping to write a memory is a context switch.
