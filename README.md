@@ -2,7 +2,9 @@
 
 Centralized, governed memory for AI agents on OpenShift AI. MemoryHub gives every agent in your organization a shared, persistent memory layer with multi-tier scoping (`user` / `project` / `role` / `organizational` / `enterprise`), version history, semantic search via pgvector, an immutable audit trail, and an OAuth 2.1 authorization story.
 
-It works with any agent framework that speaks MCP — Claude Code, kagenti-deployed agents (LangGraph, CrewAI, AG2, …), LlamaStack workflows, custom Python agents — and ships a typed Python SDK and a CLI for direct use.
+It works with any agent framework that speaks MCP — Claude Code, kagenti-deployed agents (LangGraph, CrewAI, AG2, ...), LlamaStack workflows, custom Python agents — and ships a typed Python SDK and a CLI for direct use.
+
+**Requires Python 3.11+.** See [Local Development](docs/local-development.md) to get the MCP server running on your machine, or [How Agents Use MemoryHub](docs/how-agents-use-memoryhub.md) for the conceptual overview of rules, hooks, and agent-driven memory.
 
 ## Why MemoryHub
 
@@ -115,6 +117,10 @@ memoryhub read <memory-id>               # read by ID
 memoryhub write "Use Podman, not Docker" --scope user --weight 0.9
 memoryhub config init                    # set up .memoryhub.yaml + agent rule file
 ```
+
+## Authentication: API key vs OAuth
+
+MemoryHub supports two authentication paths. **API keys** are the simplest option: obtain a key from your administrator, store it at `~/.config/memoryhub/api-key`, and call `register_session(api_key=...)` at the start of each conversation. This is the right choice for Claude Code, the CLI, scripts, and most integrations. **OAuth 2.1** (`client_credentials` grant) is available for production agents that need automatic token refresh, multi-tenant isolation, and fine-grained scopes via the auth service's client management API. Most users should start with API keys and move to OAuth only when their deployment requires it.
 
 ## Project configuration
 
@@ -233,10 +239,13 @@ A note on the package layout: the server-side library at `src/memoryhub_core/` i
 
 ## Development
 
+Use Python 3.11+ and a virtual environment for all local work. Each subproject maintains its own venv to avoid dependency conflicts.
+
 Set up the server-side library:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3.11 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 pytest tests/ -v
 ```
@@ -273,6 +282,8 @@ Apache 2.0 — see [`LICENSE`](LICENSE).
 
 ## Links
 
+- [Local development](docs/local-development.md)
+- [How agents use MemoryHub](docs/how-agents-use-memoryhub.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Subsystems](docs/SYSTEMS.md)
 - [Agent memory ergonomics design](docs/agent-memory-ergonomics/)
