@@ -4,7 +4,7 @@ Centralized, governed memory for AI agents on OpenShift AI. MemoryHub gives ever
 
 It works with any agent framework that speaks MCP — Claude Code, kagenti-deployed agents (LangGraph, CrewAI, AG2, ...), LlamaStack workflows, custom Python agents — and ships a typed Python SDK and a CLI for direct use.
 
-**Requires Python 3.11+.** See [Local Development](docs/local-development.md) to get the MCP server running on your machine, or [How Agents Use MemoryHub](docs/how-agents-use-memoryhub.md) for the conceptual overview of rules, hooks, and agent-driven memory.
+**Requires Python 3.11+** (use [uv](https://docs.astral.sh/uv/) to install it automatically). See [Local Development](docs/local-development.md) to get the MCP server running on your machine, or [How Agents Use MemoryHub](docs/how-agents-use-memoryhub.md) for the conceptual overview of rules, hooks, and agent-driven memory.
 
 ## Why MemoryHub
 
@@ -239,11 +239,20 @@ A note on the package layout: the server-side library at `src/memoryhub_core/` i
 
 ## Development
 
-Use Python 3.11+ and a virtual environment for all local work. Each subproject maintains its own venv to avoid dependency conflicts.
+Requires Python 3.11+. We recommend [uv](https://docs.astral.sh/uv/) for environment management -- it handles Python installation, venv creation, and dependency resolution in one tool. If you don't have Python 3.11, uv fetches it automatically.
+
+Each subproject maintains its own venv to avoid dependency conflicts.
 
 Set up the server-side library:
 
 ```bash
+# With uv (recommended — installs Python 3.11 if needed)
+uv venv --python 3.11
+uv pip install -e ".[dev]"
+source .venv/bin/activate
+pytest tests/ -v
+
+# Or with plain venv (requires Python 3.11+ already installed)
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"

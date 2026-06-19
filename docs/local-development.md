@@ -4,13 +4,28 @@ Get MemoryHub's MCP server running on your machine for development and testing. 
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.11+ (if you don't have it, `uv` will fetch it automatically)
 - Git
 - Podman (optional, for production-like PostgreSQL testing)
 
-## Quick start: MCP server with dev API keys
+## Quick start with uv (recommended)
 
-The MCP server runs locally in STDIO mode with `dev-users.json` providing pre-populated API keys so you can skip OAuth entirely.
+[uv](https://docs.astral.sh/uv/) handles Python version management, venv creation, and dependency installation in one tool. If you don't have Python 3.11, uv downloads it for you.
+
+```bash
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+cd memory-hub-mcp
+uv venv --python 3.11
+uv pip install -r requirements.txt
+source .venv/bin/activate
+make run-local
+```
+
+## Quick start with venv
+
+If you already have Python 3.11+ and prefer not to use uv:
 
 ```bash
 cd memory-hub-mcp
