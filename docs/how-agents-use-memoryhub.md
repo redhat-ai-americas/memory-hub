@@ -182,6 +182,18 @@ When a user says "use Podman, not Docker," is that a memory or a CLAUDE.md entry
 
 A deterministic rule like "always store user preferences" would flood the memory with noise. A rule like "store preferences that aren't already documented" requires the agent to check what's documented, which is itself a judgment. The agent is the only entity with enough context to make the call, so the system gives it guidelines and trusts it to apply them.
 
+### Who writes the memory: the agent, a watcher, or both
+
+Everything above describes the inline path: the working agent notices something worth remembering and writes it during the conversation. This works, but it has a cost. Every `memory(action="write")` call is a tool round-trip that the agent spends instead of doing work. For a coding agent mid-implementation, stopping to write a memory is a context switch.
+
+The alternative is a watcher -- a second, lighter agent that observes the conversation asynchronously and proposes memories after the fact. Systems like Mem0, OpenClaw, and LibreChat's memory layer use variants of this pattern. MemoryHub supports it too, and the extraction pipeline design (issue #240) formalizes it as an SDK component that observes agent traces, identifies candidate memories, and writes them through the normal governed path.
+
+The two approaches aren't mutually exclusive. In practice, the inline path handles the obvious cases -- the user says "remember this" or makes a decision the agent recognizes immediately. The watcher handles the subtler cases -- patterns that only become visible across multiple turns, or information the working agent was too focused to notice. Both write to the same store. Both go through the same governance (scope isolation, curation rules, version history). And both show up in the next session's retrieval, whether that retrieval happens via the hook or a tool call.
+
+From MemoryHub's perspective, a memory written by a watcher agent is indistinguishable from one written by the working agent. The `owner_id` and `actor_id` fields track who wrote it, but the retrieval path doesn't care. When the hook runs at the next session start and searches for relevant memories, it returns whatever matches -- regardless of whether the original agent or a background watcher created the entry. The write path and the read path are decoupled by design.
+
+This decoupling is important because it means you can start with the inline path (the agent writes its own memories, which is what MemoryHub does today) and layer on a watcher later without changing how retrieval works. The agent's rule file, the hook, the search tool -- none of them need to know that a watcher exists. They just see memories in the store.
+
 ### At inference time, provenance disappears
 
 Here's the thing that clarifies most of the confusion: at inference time, none of these distinctions matter to the model. The LLM receives a JSON payload containing a system prompt and a conversation history. Every piece of context -- whether it came from MemoryHub, a RAG retrieval, a Salesforce query, CLAUDE.md, or a user message -- is just tokens in that payload. The model doesn't know or care where a token came from.
