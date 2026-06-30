@@ -28,13 +28,14 @@ from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
+from src.core.audit import record_event
 from src.core.authz import (
     AuthenticationError,
     authorize_write,
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._deps import get_db_session, get_s3_adapter, release_db_session
+from src.tools._deps import get_db_session, get_s3_adapter, release_db_session, resolve_driver_id
 from src.tools._push_helpers import broadcast_after_write
 
 
@@ -64,6 +65,16 @@ async def delete_memory(
             description=(
                 "Your project identifier. Required when deleting a campaign-scoped "
                 "memory — used to verify your project is enrolled in the campaign."
+            ),
+        ),
+    ] = None,
+    driver_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Identity of the upstream human or system driving this delete. "
+                "Omit to use the session default or the authenticated actor_id. "
+                "Recorded in the audit log."
             ),
         ),
     ] = None,
@@ -156,10 +167,33 @@ async def delete_memory(
         )
         is_admin = "memory:admin" in claims.get("scopes", [])
         if not (is_owner or is_admin):
+            record_event(
+                event_type="memory.delete",
+                actor_id=claims["sub"],
+                driver_id=resolve_driver_id(driver_id, claims),
+                scope=existing.scope,
+                owner_id=existing.owner_id,
+                memory_id=memory_id,
+                decision="denied",
+            )
             raise ToolError(
                 f"Not authorized to delete this {existing.scope}-scope memory. "
                 "You need either ownership of the memory or the memory:admin scope."
             )
+
+        # Resolve actor/driver identity for audit trail.
+        actor_id = claims["sub"]
+        resolved_driver = resolve_driver_id(driver_id, claims)
+
+        record_event(
+            event_type="memory.delete",
+            actor_id=actor_id,
+            driver_id=resolved_driver,
+            scope=existing.scope,
+            owner_id=existing.owner_id,
+            memory_id=memory_id,
+            decision="allowed",
+        )
 
         if ctx:
             await ctx.info(f"Deleting memory {memory_id}")

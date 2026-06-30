@@ -59,8 +59,9 @@ _RECONSTRUCT_OPTS = frozenset({"owner_id"})
 _WRITE_OPTS = frozenset({
     "weight", "parent_id", "branch_type", "metadata", "domains",
     "project_description", "force", "owner_id", "content_type",
+    "driver_id",
 })
-_UPDATE_OPTS = frozenset({"weight", "metadata", "domains"})
+_UPDATE_OPTS = frozenset({"weight", "metadata", "domains", "driver_id"})
 _SET_RULE_OPTS = frozenset({
     "name", "tier", "action_type", "config", "scope_filter",
     "enabled", "priority",
@@ -267,7 +268,7 @@ async def memory(
     if action == "update":
         return await _dispatch_update(memory_id, content, project_id, opts, ctx)
     if action == "delete":
-        return await _dispatch_delete(memory_id, project_id, ctx)
+        return await _dispatch_delete(memory_id, project_id, opts, ctx)
     if action == "set_focus":
         return await _dispatch_set_focus(project_id, opts, ctx)
     if action == "relate":
@@ -434,11 +435,12 @@ async def _dispatch_update(memory_id, content, project_id, opts, ctx):
     )
 
 
-async def _dispatch_delete(memory_id, project_id, ctx):
+async def _dispatch_delete(memory_id, project_id, opts, ctx):
     from src.tools.delete_memory import delete_memory
     _require("delete", "memory_id", memory_id)
     return await delete_memory(
-        memory_id=memory_id, project_id=project_id, ctx=ctx,
+        memory_id=memory_id, project_id=project_id,
+        driver_id=opts.get("driver_id"), ctx=ctx,
     )
 
 

@@ -33,12 +33,14 @@ from memoryhub_core.services.valkey_client import (
     get_valkey_client,
 )
 from src.core.app import mcp
+from src.core.audit import record_event
 from src.core.authz import get_tenant_filter
 from src.tools._deps import get_db_session, release_db_session
 from src.tools.auth import (
     AuthServiceUnavailableError,
     authenticate,
     authenticate_remote,
+    set_default_driver_id,
     set_session,
     set_session_id,
 )
@@ -183,6 +185,18 @@ async def register_session(
             ),
         ),
     ],
+    default_driver_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Identity of the upstream human or system on whose behalf the "
+                "agent is acting. When set, every write in this session records "
+                "this as the driver_id unless overridden per-call. Omit when "
+                "the agent is acting autonomously (driver_id defaults to the "
+                "authenticated actor_id)."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Register this session with your API key.
@@ -210,15 +224,27 @@ async def register_session(
         user_id = jwt_claims.get("sub", token.client_id)
         session_id = str(uuid.uuid4())
         set_session_id(session_id)
+        set_default_driver_id(default_driver_id)
         tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
         projects = await _fetch_user_projects(user_id, tenant)
+        record_event(
+            event_type="session.registered",
+            actor_id=user_id,
+            driver_id=default_driver_id or user_id,
+            scope="session",
+            owner_id=user_id,
+            memory_id=None,
+            decision="allowed",
+            metadata={"auth_method": "jwt", "session_id": session_id},
+        )
         return {
             "session_id": session_id,
             "user_id": user_id,
             "name": jwt_claims.get("name", user_id),
             "scopes": list(token.scopes),
             "auth_method": "jwt",
+            "default_driver_id": default_driver_id,
             "projects": projects,
             "quick_start": _QUICK_START,
             "message": (
@@ -239,6 +265,16 @@ async def register_session(
             ) from exc
 
     if user is None:
+        record_event(
+            event_type="session.denied",
+            actor_id="unknown",
+            driver_id="unknown",
+            scope="session",
+            owner_id="unknown",
+            memory_id=None,
+            decision="denied",
+            metadata={"auth_method": "api_key"},
+        )
         raise ToolError(
             "Invalid API key. Contact your system administrator for a valid key. "
             "Keys follow the format: mh-dev-<hex>."
@@ -249,6 +285,7 @@ async def register_session(
     expires_at = set_session(user, ttl_seconds=ttl)
     session_id = str(uuid.uuid4())
     set_session_id(session_id)
+    set_default_driver_id(default_driver_id)
     await _start_push_for_session(session_id, ctx)
 
     if ctx:
@@ -259,6 +296,17 @@ async def register_session(
     )
     projects = await _fetch_user_projects(user["user_id"], tenant)
 
+    record_event(
+        event_type="session.registered",
+        actor_id=user["user_id"],
+        driver_id=default_driver_id or user["user_id"],
+        scope="session",
+        owner_id=user["user_id"],
+        memory_id=None,
+        decision="allowed",
+        metadata={"auth_method": "api_key", "session_id": session_id},
+    )
+
     return {
         "session_id": session_id,
         "user_id": user["user_id"],
@@ -266,6 +314,7 @@ async def register_session(
         "scopes": user["scopes"],
         "expires_at": expires_at.isoformat(),
         "session_ttl_seconds": ttl,
+        "default_driver_id": default_driver_id,
         "projects": projects,
         "quick_start": _QUICK_START,
         "message": (

@@ -31,13 +31,14 @@ from memoryhub_core.services.memory import read_memory as read_memory_service
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
+from src.core.audit import record_event
 from src.core.authz import (
     AuthenticationError,
     authorize_read,
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._deps import get_db_session, release_db_session
+from src.tools._deps import get_db_session, release_db_session, resolve_driver_id
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +333,10 @@ async def _handle_create_relationship(
             "source_id and target_id must be different — self-referential edges are not allowed."
         )
 
+    # Resolve actor/driver identity for audit trail.
+    actor_id = claims["sub"]
+    resolved_driver = resolve_driver_id(None, claims)
+
     if ctx:
         await ctx.info(
             f"Creating {relationship_type!r} relationship {source_id} -> {target_id}"
@@ -362,6 +367,17 @@ async def _handle_create_relationship(
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
         if not authorize_read(claims, node, campaign_ids=campaign_ids):
             raise ToolError(f"Not authorized to access {label} ({node_id_parsed}).")
+
+    record_event(
+        event_type="memory.relationship_created",
+        actor_id=actor_id,
+        driver_id=resolved_driver,
+        scope="graph",
+        owner_id=claims["sub"],
+        memory_id=source_id,
+        decision="allowed",
+        metadata={"target_id": target_id, "relationship_type": relationship_type},
+    )
 
     try:
         rel_create = RelationshipCreate(

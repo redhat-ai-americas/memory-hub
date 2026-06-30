@@ -28,6 +28,7 @@ _current_session: dict[str, Any] | None = None
 _session_expires_at: datetime | None = None
 _session_ttl_seconds: int = 3600
 _session_id: str | None = None
+_default_driver_id: str | None = None
 
 # Loaded user records keyed by api_key for O(1) lookup.
 _users_by_key: dict[str, dict[str, Any]] = {}
@@ -245,3 +246,35 @@ def require_auth() -> dict[str, Any]:
 def has_scope(user: dict[str, Any], scope: str) -> bool:
     """Return True if the user has access to the given scope."""
     return scope in user.get("scopes", [])
+
+
+def set_default_driver_id(driver_id: str | None) -> None:
+    """Store a session-level default driver_id for actor/driver plumbing.
+
+    When an agent registers a session on behalf of a human user, the human's
+    identity is set here so every subsequent write correctly attributes the
+    upstream driver without requiring per-call driver_id parameters.
+    """
+    global _default_driver_id
+    _default_driver_id = driver_id
+
+
+def get_default_driver_id() -> str | None:
+    """Return the session-level default driver_id, or None if expired/unset."""
+    if _session_expires_at is not None and datetime.now(UTC) > _session_expires_at:
+        return None
+    return _default_driver_id
+
+
+def clear_session() -> None:
+    """Reset all module-level session state.
+
+    Useful in tests and when explicitly ending a session. After calling
+    this, all session-gated helpers (require_auth, get_default_driver_id,
+    etc.) will return None or raise until a new session is registered.
+    """
+    global _current_session, _session_expires_at, _session_id, _default_driver_id
+    _current_session = None
+    _session_expires_at = None
+    _session_id = None
+    _default_driver_id = None

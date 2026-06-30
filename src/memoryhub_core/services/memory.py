@@ -179,6 +179,8 @@ async def create_memory(
         scope_id=data.scope_id,
         weight=data.weight,
         owner_id=data.owner_id,
+        actor_id=data.actor_id,
+        driver_id=data.driver_id,
         tenant_id=tenant_id,
         parent_id=data.parent_id,
         branch_type=data.branch_type,
@@ -370,6 +372,8 @@ async def update_memory(
     session: AsyncSession,
     embedding_service: EmbeddingService,
     s3_adapter: S3StorageAdapter | None = None,
+    actor_id: str | None = None,
+    driver_id: str | None = None,
 ) -> MemoryNodeRead:
     """Create a new version of a memory node.
 
@@ -478,6 +482,8 @@ async def update_memory(
         scope_id=old_node.scope_id,
         weight=new_weight,
         owner_id=old_node.owner_id,
+        actor_id=actor_id,
+        driver_id=driver_id,
         tenant_id=old_node.tenant_id,
         parent_id=old_node.parent_id,
         branch_type=old_node.branch_type,

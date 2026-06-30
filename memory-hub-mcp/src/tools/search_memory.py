@@ -46,6 +46,7 @@ from memoryhub_core.services.valkey_client import (
     get_valkey_client,
 )
 from src.core.app import mcp
+from src.core.audit import record_event
 from src.core.authz import (
     PROJECT_ISOLATION_ENABLED,
     ROLE_ISOLATION_ENABLED,
@@ -805,6 +806,17 @@ async def search_memory(
             f"Invalid scope filter: '{scope}'. "
             f"Valid scopes: {', '.join(sorted(VALID_SCOPES))}."
         )
+
+    record_event(
+        event_type="memory.search",
+        actor_id=claims["sub"],
+        driver_id=claims["sub"],
+        scope=scope or "all",
+        owner_id=owner_id or claims["sub"],
+        memory_id=None,
+        decision="allowed",
+        metadata={"query": query[:200], "max_results": max_results},
+    )
 
     # mode='full_only' overrides weight_threshold so the service never stubs.
     effective_weight_threshold = 0.0 if mode == "full_only" else weight_threshold

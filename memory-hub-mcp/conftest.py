@@ -38,3 +38,4 @@ def _default_test_session():
     })
     yield
     auth_mod._current_session = None
+    auth_mod._default_driver_id = None

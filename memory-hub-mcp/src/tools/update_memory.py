@@ -28,13 +28,14 @@ from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
+from src.core.audit import record_event
 from src.core.authz import (
     AuthenticationError,
     authorize_write,
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session
+from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session, resolve_driver_id
 from src.tools._push_helpers import broadcast_after_write
 
 
@@ -87,6 +88,15 @@ async def update_memory(
             description=(
                 "Your project identifier. Required when updating a campaign-scoped "
                 "memory — used to verify enrollment."
+            ),
+        ),
+    ] = None,
+    driver_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Identity of the upstream human or system driving this update. "
+                "Omit to use the session default or the authenticated actor_id."
             ),
         ),
     ] = None,
@@ -162,9 +172,32 @@ async def update_memory(
             role_names=role_names,
             scope_id=existing.scope_id,
         ):
+            record_event(
+                event_type="memory.update",
+                actor_id=claims["sub"],
+                driver_id=resolve_driver_id(driver_id, claims),
+                scope=existing.scope,
+                owner_id=existing.owner_id,
+                memory_id=memory_id,
+                decision="denied",
+            )
             raise ToolError(
                 f"Not authorized to update this {existing.scope}-scope memory."
             )
+
+        # Resolve actor/driver identity for audit trail.
+        actor_id = claims["sub"]
+        resolved_driver = resolve_driver_id(driver_id, claims)
+
+        record_event(
+            event_type="memory.update",
+            actor_id=actor_id,
+            driver_id=resolved_driver,
+            scope=existing.scope,
+            owner_id=existing.owner_id,
+            memory_id=memory_id,
+            decision="allowed",
+        )
 
         if ctx:
             await ctx.info(f"Updating memory {memory_id}")
@@ -176,6 +209,8 @@ async def update_memory(
             session=session,
             embedding_service=embedding_service,
             s3_adapter=get_s3_adapter(),
+            actor_id=actor_id,
+            driver_id=resolved_driver,
         )
 
         # Pattern E (#62): broadcast to other connected agents post-commit.

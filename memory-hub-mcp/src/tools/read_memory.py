@@ -15,6 +15,7 @@ from memoryhub_core.services.memory import read_memory as _read_memory
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
+from src.core.audit import record_event
 from src.core.authz import (
     AuthenticationError,
     authorize_read,
@@ -167,7 +168,26 @@ async def read_memory(
             project_ids=project_ids,
             role_names=role_names,
         ):
+            record_event(
+                event_type="memory.read",
+                actor_id=claims["sub"],
+                driver_id=claims["sub"],
+                scope=node.scope,
+                owner_id=node.owner_id,
+                memory_id=memory_id,
+                decision="denied",
+            )
             raise ToolError(f"Not authorized to read memory {memory_id}.")
+
+        record_event(
+            event_type="memory.read",
+            actor_id=claims["sub"],
+            driver_id=claims["sub"],
+            scope=node.scope,
+            owner_id=node.owner_id,
+            memory_id=memory_id,
+            decision="allowed",
+        )
 
         result = node.model_dump(mode="json")
 
