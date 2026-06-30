@@ -5,7 +5,7 @@ import secrets
 from datetime import UTC, datetime
 
 import bcrypt
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,9 +51,13 @@ def _client_to_response(client: OAuthClient) -> ClientResponse:
 
 @router.get("/clients", dependencies=[Depends(require_admin_key)])
 async def list_clients(
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
 ) -> list[ClientResponse]:
-    result = await session.execute(select(OAuthClient))
+    stmt = select(OAuthClient)
+    if tenant_id is not None:
+        stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     clients = result.scalars().all()
     return [_client_to_response(c) for c in clients]
 
@@ -125,11 +129,13 @@ async def create_client(
 @router.get("/clients/{client_id}", dependencies=[Depends(require_admin_key)])
 async def get_client(
     client_id: str,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
 ) -> ClientResponse:
-    result = await session.execute(
-        select(OAuthClient).where(OAuthClient.client_id == client_id)
-    )
+    stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
+    if tenant_id is not None:
+        stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     client = result.scalar_one_or_none()
     if client is None:
         raise HTTPException(status_code=404, detail=f"Client '{client_id}' not found")
@@ -140,11 +146,13 @@ async def get_client(
 async def update_client(
     client_id: str,
     body: UpdateClientRequest,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
 ) -> ClientResponse:
-    result = await session.execute(
-        select(OAuthClient).where(OAuthClient.client_id == client_id)
-    )
+    stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
+    if tenant_id is not None:
+        stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     client = result.scalar_one_or_none()
     if client is None:
         raise HTTPException(status_code=404, detail=f"Client '{client_id}' not found")
@@ -174,11 +182,13 @@ async def update_client(
 )
 async def rotate_secret(
     client_id: str,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
 ) -> SecretRotatedResponse:
-    result = await session.execute(
-        select(OAuthClient).where(OAuthClient.client_id == client_id)
-    )
+    stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
+    if tenant_id is not None:
+        stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     client = result.scalar_one_or_none()
     if client is None:
         raise HTTPException(status_code=404, detail=f"Client '{client_id}' not found")
@@ -206,11 +216,13 @@ async def rotate_secret(
 )
 async def rotate_api_key(
     client_id: str,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
 ) -> ApiKeyRotatedResponse:
-    result = await session.execute(
-        select(OAuthClient).where(OAuthClient.client_id == client_id)
-    )
+    stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
+    if tenant_id is not None:
+        stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     client = result.scalar_one_or_none()
     if client is None:
         raise HTTPException(status_code=404, detail=f"Client '{client_id}' not found")
