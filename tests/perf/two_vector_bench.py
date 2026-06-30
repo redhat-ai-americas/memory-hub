@@ -383,44 +383,16 @@ def pipeline_new2_augmented_query(
 
 
 # ── Metrics ─────────────────────────────────────────────────────────
+# recall_at_k, precision_at_k, and mrr are re-exported from the shared
+# metrics module so existing callers (tests, scripts) that import them
+# from this module continue to work.
+
+from tests.perf.metrics import mrr, precision_at_k, recall_at_k  # noqa: F811,E402
 
 
 def relevant_ids_for_query(query: Query, dataset: Dataset) -> set[str]:
     """Memories whose ground-truth topic matches the query's target topic."""
     return {m.id for m in dataset.memories if m.topic == query.topic}
-
-
-def recall_at_k(retrieved_ids: list[str], relevant_ids: set[str], k: int) -> float:
-    """Fraction of relevant items recovered in the top-k.
-
-    Note: with 50 relevant memories per topic and k=10, the maximum
-    achievable Recall@10 is 10/50=0.2. Compare relative values across
-    pipelines, not absolute.
-    """
-    if not relevant_ids:
-        return 0.0
-    top = retrieved_ids[:k]
-    hit = sum(1 for mid in top if mid in relevant_ids)
-    return hit / len(relevant_ids)
-
-
-def precision_at_k(
-    retrieved_ids: list[str], relevant_ids: set[str], k: int
-) -> float:
-    """Fraction of top-k items that are relevant."""
-    top = retrieved_ids[:k]
-    if not top:
-        return 0.0
-    hit = sum(1 for mid in top if mid in relevant_ids)
-    return hit / len(top)
-
-
-def mrr(retrieved_ids: list[str], relevant_ids: set[str]) -> float:
-    """Mean reciprocal rank: 1 / position of first relevant result."""
-    for rank, mid in enumerate(retrieved_ids, start=1):
-        if mid in relevant_ids:
-            return 1.0 / rank
-    return 0.0
 
 
 # ── Sweep runner ────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ import math
 
 from tests.perf.fixtures.queries import QUERIES
 from tests.perf.fixtures.topics import TOPICS, all_memories
+from tests.perf.metrics import mrr, precision_at_k, recall_at_k
 from tests.perf.two_vector_bench import (
     EmbeddingClient,
     Memory,
@@ -31,14 +32,11 @@ from tests.perf.two_vector_bench import (
     cosine_sim,
     evaluate_query,
     load_dataset,
-    mrr,
     pipeline_baseline,
     pipeline_new1_rrf_blend,
     pipeline_new2_augmented_query,
     pipeline_new3_rerank_only,
-    precision_at_k,
     rank_dict,
-    recall_at_k,
     reciprocal_rank_fusion,
     relevant_ids_for_query,
 )
