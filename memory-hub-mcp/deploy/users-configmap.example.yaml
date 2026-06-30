@@ -62,6 +62,42 @@ data:
           "scopes": ["user", "project"],
           "project_memberships": [],
           "_comment": "kagenti-adk E2E test runner (see docs/SYSTEMS.md)"
+        },
+        {
+          "user_id": "trace-reviewer",
+          "name": "Trace Reviewer Agent",
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "identity_type": "service",
+          "scopes": ["user", "project"],
+          "project_memberships": [],
+          "_comment": "reviews completed session traces to extract missed memories (#284)"
+        },
+        {
+          "user_id": "curator-agent",
+          "name": "Curator Agent",
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "identity_type": "service",
+          "scopes": ["organizational", "role", "campaign"],
+          "project_memberships": [],
+          "_comment": "periodic deep curation: dedup, merge, promotion (#284)"
+        },
+        {
+          "user_id": "fact-checker",
+          "name": "Fact Checker Agent",
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "identity_type": "service",
+          "scopes": ["user", "project", "campaign"],
+          "project_memberships": [],
+          "_comment": "periodic verification of factual claims in memories (#284)"
+        },
+        {
+          "user_id": "statistician",
+          "name": "Statistician Agent",
+          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "identity_type": "service",
+          "scopes": ["organizational", "campaign"],
+          "project_memberships": [],
+          "_comment": "population-level pattern aggregation and convergence signals (#284)"
         }
       ]
     }
