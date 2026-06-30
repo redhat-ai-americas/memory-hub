@@ -34,6 +34,7 @@ from memoryhub_core.services.exceptions import (
     MemoryNotCurrentError,
     MemoryNotFoundError,
 )
+from memoryhub_core.services.pattern import PatternSignal, detect_patterns
 from memoryhub_core.services.rerank import RERANK_MAX_BATCH, RerankerService
 from memoryhub_core.storage.chunker import semantic_chunk
 from memoryhub_core.storage.s3 import S3StorageAdapter
@@ -1097,6 +1098,7 @@ class FocusedSearchResult:
     fallback_reason: str | None = None
     graph_neighbors_added: int = 0
     graph_fallback_reason: str | None = None
+    pattern_signals: list[PatternSignal] = field(default_factory=list)
 
 
 def _cosine_distance(a: list[float], b: list[float]) -> float:
@@ -1510,6 +1512,21 @@ async def search_memories_with_focus(
                 )
             )
 
+    # Pattern detection: check for within-user topic clusters.
+    # Only runs when owner_id is available (can't cluster without
+    # knowing whose memories to check).
+    pattern_signals: list[PatternSignal] = []
+    if owner_id and use_pgvector:
+        try:
+            pattern_signals = await detect_patterns(
+                query_embedding,
+                session,
+                owner_id=owner_id,
+                tenant_id=tenant_id,
+            )
+        except Exception:
+            pass  # pattern detection is best-effort
+
     return FocusedSearchResult(
         results=formatted,
         pivot_suggested=pivot_suggested,
@@ -1520,6 +1537,7 @@ async def search_memories_with_focus(
         fallback_reason=fallback_reason,
         graph_neighbors_added=graph_neighbors_added,
         graph_fallback_reason=graph_fallback_reason,
+        pattern_signals=pattern_signals,
     )
 
 
