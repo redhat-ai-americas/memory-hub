@@ -39,6 +39,7 @@ from memoryhub_core.services.memory import (
     search_memories,
     search_memories_with_focus,
 )
+from memoryhub_core.services.pattern import PatternSignal, detect_patterns
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
 from memoryhub_core.services.valkey_client import (
@@ -724,6 +725,10 @@ async def search_memory(
         unique nodes surfaced by graph traversal beyond the vector results.
       - graph_fallback_reason (str, only when graph_depth > 0 and traversal
         was skipped): human-readable reason graph traversal was not performed.
+      - pattern_signals (list, only when a within-user topic cluster is
+        detected): each entry has pattern, matching_memories, time_window_days,
+        representative_id, and summary_hint. Indicates 3+ recent memories
+        cluster around the search topic.
 
     Sizing controls:
       - mode controls full-vs-stub detail per result.
@@ -843,6 +848,7 @@ async def search_memory(
         # the original cosine-only path stays on the hot code path.
         focus_meta: dict[str, Any] | None = None
         graph_bundle = None
+        pattern_signals: list[PatternSignal] = []
         if focus and focus.strip():
             reranker = get_reranker_service()
             bundle = await search_memories_with_focus(
@@ -881,6 +887,7 @@ async def search_memory(
                 "used_reranker": bundle.used_reranker,
                 "fallback_reason": bundle.fallback_reason,
             }
+            pattern_signals = bundle.pattern_signals
         else:
             results = await search_memories(
                 query=query,
@@ -900,6 +907,21 @@ async def search_memory(
                 content_type=content_type,
                 temporal_status=temporal_status,
             )
+
+            # Pattern detection on the non-focus path: embed the query
+            # and check for within-user clusters.  Best-effort; failures
+            # are silently ignored.
+            if owner_id:
+                try:
+                    query_emb = await embedding_service.embed(query)
+                    pattern_signals = await detect_patterns(
+                        query_emb,
+                        session,
+                        owner_id=owner_id,
+                        tenant_id=tenant,
+                    )
+                except Exception:
+                    pass  # best-effort
 
         # Count all matching memories under the same filter set so the agent
         # can tell whether more matches exist beyond this page.
@@ -1147,6 +1169,17 @@ async def search_memory(
             response["graph_neighbors_added"] = graph_bundle.graph_neighbors_added
             if graph_bundle.graph_fallback_reason:
                 response["graph_fallback_reason"] = graph_bundle.graph_fallback_reason
+        if pattern_signals:
+            response["pattern_signals"] = [
+                {
+                    "pattern": sig.pattern,
+                    "matching_memories": sig.matching_memories,
+                    "time_window_days": sig.time_window_days,
+                    "representative_id": sig.representative_id,
+                    "summary_hint": sig.summary_hint,
+                }
+                for sig in pattern_signals
+            ]
         return response
 
     except EmbeddingContentTooLargeError as exc:
