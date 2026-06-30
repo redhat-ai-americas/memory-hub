@@ -21,6 +21,7 @@ This directory holds shipped architecture and user-facing reference material. In
 
 ## Agent memory ergonomics
 
+- [`two-vector-retrieval.md`](two-vector-retrieval.md) — How the two-vector retrieval pipeline works: query + session focus blended via RRF with cross-encoder reranking and pivot detection.
 - [`agent-memory-ergonomics/overview.md`](agent-memory-ergonomics/overview.md) — Concept overview: what problem the ergonomics work solves and how the pieces fit.
 - [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) — Full design cluster: search shape, session focus vector, cross-encoder reranking, loading patterns, real-time push.
 
