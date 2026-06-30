@@ -57,16 +57,16 @@ If the Trace Reviewer extracts a memory from Wes's session and writes it with `o
 Memories written by curation agents carry both fields:
 
 - **`owner_id`**: The user or scope the memory belongs to. This is who can read/search it. For the Trace Reviewer extracting from Wes's session, `owner_id: "wjackson"`. For the Statistician writing an organizational summary, `owner_id` follows the existing scope conventions.
-- **`metadata_.actor_id`**: The service agent that created the memory. Always set to the agent's `user_id` (e.g., `"trace-reviewer"`, `"curator-agent"`, `"statistician"`).
+- **`actor_id` column** (added in #66): Automatically captures the service agent's identity on every write. Set from `claims["sub"]` (e.g., `"trace-reviewer"`, `"curator-agent"`, `"statistician"`).
 
 This means:
 - User-scoped memories extracted by the Trace Reviewer appear in the user's normal search results (owned by them)
-- Audit queries can filter by `metadata_.actor_id` to see everything a specific agent wrote
+- Audit queries filter by the `actor_id` column to see everything a specific agent wrote
 - The user's agents can distinguish agent-written memories from their own if needed (e.g., to treat them with different confidence)
 
 ### Per-agent ownership rules
 
-| Agent | `owner_id` | `metadata_.actor_id` | Rationale |
+| Agent | `owner_id` | `actor_id` column | Rationale |
 |---|---|---|---|
 | Trace Reviewer | Original thread owner | `"trace-reviewer"` | Memories belong to the user whose session was reviewed |
 | Curator | Follows target scope conventions | `"curator-agent"` | Promoted memories are organizational assets, not personal |
@@ -84,7 +84,7 @@ if caller.identity_type == "service" and "memory:write:{scope}" in caller.scopes
 
 This is already how the Curator identity works in [governance.md](../docs/governance.md) for organizational scope. The Trace Reviewer extends this pattern to user and project scope.
 
-The `metadata_.actor_id` field provides the audit trail: "this user-scoped memory was written by the trace-reviewer service agent after reviewing thread X." Combined with the `conversation_extractions` provenance table from #168, the full chain is: thread -> extraction -> memory (owned by user, written by agent).
+The `actor_id` column (added in #66) provides the audit trail: "this user-scoped memory was written by the trace-reviewer service agent after reviewing thread X." Combined with the `conversation_extractions` provenance table from #168, the full chain is: thread -> extraction -> memory (owned by user, written by agent).
 
 ---
 

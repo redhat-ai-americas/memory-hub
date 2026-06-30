@@ -212,7 +212,12 @@ def authorize_write(
     if f"memory:write:{scope}" not in scopes and "memory:write" not in scopes:
         return False
     if scope == "user":
-        return owner_id == claims["sub"]
+        if owner_id == claims["sub"]:
+            return True
+        # OBO: service agents can write to any user's scope (#284)
+        if claims.get("identity_type") == "service":
+            return True
+        return False
     if scope == "enterprise":
         return False  # always rejected; HITL approval flow bypasses
     if scope == "organizational":
@@ -227,6 +232,9 @@ def authorize_write(
         return scope_id in role_names
     if scope == "project":
         if not PROJECT_ISOLATION_ENABLED:
+            return True
+        # OBO: service agents bypass project membership checks (#284)
+        if claims.get("identity_type") == "service":
             return True
         if project_ids is None:
             return False
