@@ -192,6 +192,11 @@ class _PatchedSearchCall:
                     "src.tools.search_memory.PROJECT_ISOLATION_ENABLED",
                     False,
                 ),
+                patch(
+                    "src.tools.search_memory.detect_patterns",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ),
             ):
                 return await search_memory(query="memory", **self.call_kwargs)
         finally:
