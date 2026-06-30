@@ -28,6 +28,7 @@ data:
           "name": "Wes Jackson",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
+          "project_memberships": [],
           "_comment": "primary operator"
         },
         {
@@ -35,6 +36,7 @@ data:
           "name": "Test User",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "scopes": ["user", "project"],
+          "project_memberships": [],
           "_comment": "local development and integration testing"
         },
         {
@@ -42,6 +44,7 @@ data:
           "name": "RDWJ Agent 1",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
+          "project_memberships": [],
           "_comment": "agent automation slot 1"
         },
         {
@@ -49,6 +52,7 @@ data:
           "name": "RDWJ Agent 2",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
+          "project_memberships": [],
           "_comment": "agent automation slot 2"
         },
         {
@@ -56,6 +60,7 @@ data:
           "name": "Kagenti CI",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "scopes": ["user", "project"],
+          "project_memberships": [],
           "_comment": "kagenti-adk E2E test runner (see docs/SYSTEMS.md)"
         }
       ]
