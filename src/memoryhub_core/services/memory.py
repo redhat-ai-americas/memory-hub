@@ -187,6 +187,7 @@ async def create_memory(
         metadata_=node_metadata,
         domains=data.domains,
         content_type=data.content_type,
+        relevant_until=data.relevant_until,
         embedding=embedding,
         is_current=True,
         version=1,
