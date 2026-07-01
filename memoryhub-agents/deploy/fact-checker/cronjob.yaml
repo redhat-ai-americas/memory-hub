@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fact-checker
+  namespace: memory-hub-mcp
+  labels:
+    app.kubernetes.io/name: fact-checker
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: agent
+spec:
+  schedule: "0 1 * * *"  # Daily at 01:00 UTC
+  concurrencyPolicy: Allow  # Multiple replicas OK
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: fact-checker
+              image: memoryhub-agent:latest
+              env:
+                - name: AGENT_TYPE
+                  value: fact-checker
+                - name: MH_MCP_URL
+                  valueFrom:
+                    configMapKeyRef:
+                      name: memoryhub-agent-config
+                      key: mcp_url
+                - name: MH_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fact-checker-credentials
+                      key: api_key
+                - name: VALKEY_URL
+                  value: redis://memoryhub-valkey:6379
+                - name: TENANT_ID
+                  value: default
+              resources:
+                requests:
+                  memory: 256Mi
+                  cpu: 250m
+                limits:
+                  memory: 512Mi
+                  cpu: 500m
