@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trace-reviewer
+  namespace: memoryhub-agents
+  labels:
+    app.kubernetes.io/name: trace-reviewer
+    app.kubernetes.io/part-of: memoryhub
+    app.kubernetes.io/component: agent
+spec:
+  replicas: 1  # HPA on trace_review_queue depth; set to 0 to disable
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trace-reviewer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trace-reviewer
+        app.kubernetes.io/part-of: memoryhub
+        app.kubernetes.io/component: agent
+    spec:
+      serviceAccountName: trace-reviewer
+      containers:
+        - name: agent
+          image: memoryhub-agent:latest
+          command: ["trace-reviewer"]
+          env:
+            - name: AGENT_TYPE
+              value: "trace-reviewer"
+            - name: MH_MCP_URL
+              value: "http://memory-hub-mcp.memory-hub-mcp.svc:8000"
+            - name: MH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: trace-reviewer-credentials
+                  key: api-key
+            - name: VALKEY_URL
+              value: "redis://valkey.memoryhub-agents.svc:6379"
+            - name: TENANT_ID
+              value: "default"
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 512Mi
+              cpu: 500m
