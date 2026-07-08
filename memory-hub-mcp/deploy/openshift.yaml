@@ -32,6 +32,8 @@ metadata:
     app.kubernetes.io/name: memory-hub-mcp
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: memory-hub-mcp
