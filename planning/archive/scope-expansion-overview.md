@@ -59,8 +59,8 @@ All four features have research surveys in `research/`:
 |---------|------------------|
 | #168 Threads | `research/conversation-persistence-survey.md` |
 | #169 Compaction | `research/context-compaction-survey.md` |
-| #170 Graph | `research/graph-memory-survey.md` |
-| #171 Compilation | `research/llm-wiki-landscape.md` |
+| #170 Graph | `research/surveys/knowledge-and-graph-memory.md` |
+| #171 Compilation | `research/surveys/knowledge-and-graph-memory.md` |
 
 Design docs should incorporate findings from these surveys, particularly: the EU AI Act Article 12 audit trail requirement (August 2026 deadline), the ACE Generator/Reflector/Curator pattern (+10.6% on agent benchmarks), the Anthropic vs OpenAI transparency fork on compaction, and the Meta 50-agent tribal knowledge extraction case study.
 

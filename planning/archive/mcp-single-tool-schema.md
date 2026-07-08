@@ -5,7 +5,7 @@
 
 ## Context
 
-> **This design is now shipped.** The compact profile (2 tools) is the default as of v0.9.0. The old 10 tools are retained as deprecated aliases. See `docs/agent-integration-guide.md` for the user-facing documentation and `docs/mcp-server.md` for the current tool reference.
+> **This design is now shipped.** The compact profile (2 tools) is the default as of v0.9.0. The old 10 tools are retained as deprecated aliases. See `docs/agent-integration-guide.md` for the user-facing documentation and `docs/design/mcp-server.md` for the current tool reference.
 
 MemoryHub's MCP server previously exposed 10 tools consuming ~13K tokens in agent
 context. With models handling ~40-50 tools effectively, MemoryHub alone

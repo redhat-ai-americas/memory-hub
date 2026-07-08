@@ -3,7 +3,7 @@
 **Status:** Design exploration
 **Date:** June 2026
 **Author:** @rdwj (designed with Claude Code Opus 4.6)
-**Builds on:** [curator-agent.md](../docs/curator-agent.md) (Phase 3), [knowledge-compilation.md](../docs/knowledge-compilation.md) (#171), [campaign-domain-framework.md](campaign-domain-framework.md), [conversation-persistence.md](../docs/conversation-persistence.md) (#168), [governance.md](../docs/governance.md)
+**Builds on:** [curator-agent.md](../docs/design/curator-agent.md) (Phase 3), [knowledge-compilation.md](../docs/design/knowledge-compilation.md) (#171), [campaign-domain-framework.md](archive/campaign-domain-framework.md), [conversation-persistence.md](../docs/design/conversation-persistence.md) (#168), [governance.md](../docs/design/governance.md)
 
 ---
 
@@ -11,7 +11,7 @@
 
 MemoryHub's curation today is deterministic and inline -- regex scanning and embedding dedup at write time (Phase 2a, shipped). This catches secrets, PII, and exact duplicates but cannot perform deeper analysis: reviewing session traces for missed memories, detecting population-level patterns across hundreds of users, verifying factual claims against current state, or merging convergent discoveries across agents.
 
-The Phase 3 "Background Curator" sketched in [curator-agent.md](../docs/curator-agent.md) describes these needs but envisions a single monolithic curator process. Real-world requirements diverge: trace review needs conversation thread access and fires after sessions complete; fact checking needs tool access and calendar awareness; pattern aggregation needs cross-tenant statistical reads that no other agent should have. These are different workloads with different trust boundaries, different model requirements, different scaling characteristics, and different cost profiles.
+The Phase 3 "Background Curator" sketched in [curator-agent.md](../docs/design/curator-agent.md) describes these needs but envisions a single monolithic curator process. Real-world requirements diverge: trace review needs conversation thread access and fires after sessions complete; fact checking needs tool access and calendar awareness; pattern aggregation needs cross-tenant statistical reads that no other agent should have. These are different workloads with different trust boundaries, different model requirements, different scaling characteristics, and different cost profiles.
 
 This document designs a **fleet of specialized autonomous agents** running on-cluster as Kubernetes Deployments, each with precisely scoped RBAC, independently selectable models (including fine-tuned variants), and independent enable/disable for resource management.
 
@@ -21,13 +21,13 @@ This document designs a **fleet of specialized autonomous agents** running on-cl
 
 | Topic | Document | Status |
 |---|---|---|
-| Inline curation pipeline (regex, embedding dedup) | [curator-agent.md](../docs/curator-agent.md) Phase 2a | Implemented |
-| Five-stage knowledge promotion pipeline | [campaign-domain-framework.md](campaign-domain-framework.md) | Design |
-| Knowledge compilation pods, ACE pattern, Valkey queues | [knowledge-compilation.md](../docs/knowledge-compilation.md) #171 | Design |
-| Conversation threads, messages, extraction provenance | [conversation-persistence.md](../docs/conversation-persistence.md) #168 | Design |
-| Service agent identity model (`identity_type: "service"`) | [governance.md](../docs/governance.md) | Implemented |
+| Inline curation pipeline (regex, embedding dedup) | [curator-agent.md](../docs/design/curator-agent.md) Phase 2a | Implemented |
+| Five-stage knowledge promotion pipeline | [campaign-domain-framework.md](archive/campaign-domain-framework.md) | Design |
+| Knowledge compilation pods, ACE pattern, Valkey queues | [knowledge-compilation.md](../docs/design/knowledge-compilation.md) #171 | Design |
+| Conversation threads, messages, extraction provenance | [conversation-persistence.md](../docs/design/conversation-persistence.md) #168 | Design |
+| Service agent identity model (`identity_type: "service"`) | [governance.md](../docs/design/governance.md) | Implemented |
 | Content type system (experiential/knowledge/behavioral) | [knowledge-layer.md](knowledge-layer.md), `MemoryNode.content_type` | Implemented |
-| Emergent domain ontology and normalization | [campaign-domain-framework.md](campaign-domain-framework.md) Phase 5 | Design |
+| Emergent domain ontology and normalization | [campaign-domain-framework.md](archive/campaign-domain-framework.md) Phase 5 | Design |
 
 ### New in this document
 
@@ -82,7 +82,7 @@ if caller.identity_type == "service" and "memory:write:{scope}" in caller.scopes
     allow write with any owner_id in that scope
 ```
 
-This is already how the Curator identity works in [governance.md](../docs/governance.md) for organizational scope. The Trace Reviewer extends this pattern to user and project scope.
+This is already how the Curator identity works in [governance.md](../docs/design/governance.md) for organizational scope. The Trace Reviewer extends this pattern to user and project scope.
 
 The `actor_id` column (added in #66) provides the audit trail: "this user-scoped memory was written by the trace-reviewer service agent after reviewing thread X." Combined with the `conversation_extractions` provenance table from #168, the full chain is: thread -> extraction -> memory (owned by user, written by agent).
 
@@ -139,7 +139,7 @@ The `actor_id` column (added in #66) provides the audit trail: "this user-scoped
 
 2. **CronJobs for periodic agents, Deployment for event-driven agents.** The Curator, Fact Checker, and Statistician run as Kubernetes CronJobs -- they start, process their queue, and exit. This avoids idle resource waste between runs and simplifies reasoning about lifecycle. The Trace Reviewer runs as a Deployment because it processes events promptly as sessions complete. All four have independent resource limits, independent model configuration, and independent enable/disable (suspend the CronJob or scale the Deployment to 0).
 
-3. **Valkey for queue coordination.** Consistent with the pattern established in [knowledge-compilation.md](../docs/knowledge-compilation.md). Each agent has its own queue. A scheduler (lightweight sidecar or CronJob) enqueues work; agent pods dequeue and process.
+3. **Valkey for queue coordination.** Consistent with the pattern established in [knowledge-compilation.md](../docs/design/knowledge-compilation.md). Each agent has its own queue. A scheduler (lightweight sidecar or CronJob) enqueues work; agent pods dequeue and process.
 
 4. **Leader election for singleton agents.** The Curator and Statistician must be singletons within a tenant to avoid conflicting writes. Leader election via Valkey `SET ... NX EX` (same pattern as the compilation scheduler). The Trace Reviewer and Fact Checker can run multiple replicas processing different queue items.
 
@@ -151,7 +151,7 @@ The `actor_id` column (added in #66) provides the audit trail: "this user-scoped
 
 **Purpose:** Review completed session traces (conversation threads) to extract memories that working agents missed during their sessions. An agent in the heat of problem-solving may not pause to write "I learned that the billing module requires TLS 1.3" -- the Trace Reviewer catches these.
 
-**Trigger model:** Event-driven. When a conversation thread transitions to `status = 'archived'` (see [conversation-persistence.md](../docs/conversation-persistence.md)), an event is published to `trace_review_queue:{tenant}`. The Trace Reviewer picks up the job.
+**Trigger model:** Event-driven. When a conversation thread transitions to `status = 'archived'` (see [conversation-persistence.md](../docs/design/conversation-persistence.md)), an event is published to `trace_review_queue:{tenant}`. The Trace Reviewer picks up the job.
 
 **Alternative trigger (pre-#168):** Until conversation persistence ships, the Trace Reviewer can operate on the SDK extraction pipeline output (#240). Agents using the SDK's `Extractor` ABC produce candidate memories at session end. The Trace Reviewer's pre-#168 mode reads these candidates and evaluates whether additional memories should be extracted from the session context stored in the extraction provenance.
 
@@ -193,7 +193,7 @@ The Trace Reviewer needs `threads:read` to access completed conversation threads
 
 ### 5.2 Curator Agent
 
-**Purpose:** Periodic deep curation across the memory store. Cross-agent dedup, merge, promotion, staleness processing, and domain ontology refinement. This is the Phase 3 background curator from [curator-agent.md](../docs/curator-agent.md), now specified in detail.
+**Purpose:** Periodic deep curation across the memory store. Cross-agent dedup, merge, promotion, staleness processing, and domain ontology refinement. This is the Phase 3 background curator from [curator-agent.md](../docs/design/curator-agent.md), now specified in detail.
 
 **Trigger model:** Periodic (cron-scheduled). Default schedules:
 
@@ -219,7 +219,7 @@ The Trace Reviewer needs `threads:read` to access completed conversation threads
 3. For genuine contradictions, call `memory(action="report", memory_id=..., options={observed_behavior: ...})` to file contradiction reports.
 
 **Promotion analysis:**
-Uses the five-stage pipeline from [campaign-domain-framework.md](campaign-domain-framework.md): Classification, Decontextualization, Novelty Check, Draft, Human Review. The Curator executes stages 1-4; stage 5 routes to the approval queue.
+Uses the five-stage pipeline from [campaign-domain-framework.md](archive/campaign-domain-framework.md): Classification, Decontextualization, Novelty Check, Draft, Human Review. The Curator executes stages 1-4; stage 5 routes to the approval queue.
 
 **Staleness processing:**
 1. Query memories with accumulated contradiction reports (count >= `staleness_trigger` threshold, default 5).
@@ -233,7 +233,7 @@ Uses the five-stage pipeline from [campaign-domain-framework.md](campaign-domain
 3. Write normalization mappings as organizational-scoped knowledge memories with `content_type: "knowledge"` and `branch_type: "domain_ontology"`.
 4. Future: apply normalization retroactively to existing memories (requires batch update capability).
 
-**Scaling:** Singleton per tenant. Leader election via Valkey. The single-agent consistency argument from [curator-agent.md](../docs/curator-agent.md) applies: two concurrent curators could independently create conflicting organizational memories.
+**Scaling:** Singleton per tenant. Leader election via Valkey. The single-agent consistency argument from [curator-agent.md](../docs/design/curator-agent.md) applies: two concurrent curators could independently create conflicting organizational memories.
 
 **RBAC identity:**
 
@@ -252,7 +252,7 @@ Uses the five-stage pipeline from [campaign-domain-framework.md](campaign-domain
 }
 ```
 
-This is the identity already described in [governance.md](../docs/governance.md). The Curator can read all memories (needed for cross-scope analysis) and write to organizational, role, and campaign scopes (for promotion). It has `memory:knowledge_curator` for graduating experiential memories to knowledge. It cannot write to enterprise scope (that requires human approval) or user scope (that would violate user memory ownership).
+This is the identity already described in [governance.md](../docs/design/governance.md). The Curator can read all memories (needed for cross-scope analysis) and write to organizational, role, and campaign scopes (for promotion). It has `memory:knowledge_curator` for graduating experiential memories to knowledge. It cannot write to enterprise scope (that requires human approval) or user scope (that would violate user memory ownership).
 
 **Model selection:** Top-tier model (e.g., Llama 4 Maverick or equivalent). Promotion analysis, conflict detection, and merge decisions require nuanced judgment. The Curator makes the most consequential decisions of any agent in the fleet -- a bad promotion has enterprise-wide blast radius. Fine-tuning opportunity: train on (promotion_candidate, human_decision) pairs from the approval queue.
 
@@ -471,7 +471,7 @@ When a memory is written, a background classifier (async, not inline) tags tempo
 | **Evergreen** | "prefers dark mode", "uses pytest" | NULL | No temporal processing |
 | **Implicit temporal** | "currently", "right now", "at the moment" | Set to `now() + 90 days` (configurable default) | Flag for review at expiry |
 
-The temporal classifier runs as a background task after the write succeeds, similar to entity extraction (#170). It is NOT in the inline deterministic pipeline (that would add latency and violate the no-LLM-on-write-path constraint from [curator-agent.md](../docs/curator-agent.md)).
+The temporal classifier runs as a background task after the write succeeds, similar to entity extraction (#170). It is NOT in the inline deterministic pipeline (that would add latency and violate the no-LLM-on-write-path constraint from [curator-agent.md](../docs/design/curator-agent.md)).
 
 ### MCP tool changes
 
@@ -939,7 +939,7 @@ The Statistician is the most novel agent and depends on sufficient multi-user da
 
 ### Phase 5: Promotion Pipeline Integration (months 5-7)
 
-Connects the Curator to the five-stage promotion pipeline from [campaign-domain-framework.md](campaign-domain-framework.md). This is the highest-governance phase.
+Connects the Curator to the five-stage promotion pipeline from [campaign-domain-framework.md](archive/campaign-domain-framework.md). This is the highest-governance phase.
 
 - [ ] Classification stage (observation / preference / directive detection)
 - [ ] Decontextualization stage (strip project-specific details)
@@ -987,13 +987,13 @@ Connects the Curator to the five-stage promotion pipeline from [campaign-domain-
 ## 14. Dependencies
 
 **What this depends on:**
-- [curator-agent.md](../docs/curator-agent.md) Phase 2a (inline pipeline) -- **implemented**
-- [governance.md](../docs/governance.md) service agent identity model -- **implemented**
-- [conversation-persistence.md](../docs/conversation-persistence.md) #168 -- **designed, not implemented** (required for Trace Reviewer full mode)
+- [curator-agent.md](../docs/design/curator-agent.md) Phase 2a (inline pipeline) -- **implemented**
+- [governance.md](../docs/design/governance.md) service agent identity model -- **implemented**
+- [conversation-persistence.md](../docs/design/conversation-persistence.md) #168 -- **designed, not implemented** (required for Trace Reviewer full mode)
 - Valkey infrastructure -- **required for all agents** (can share with #171 compilation or deploy separately)
 - LLM inference endpoints on RHOAI -- **existing infrastructure** (embedding model deployed; LLM for agent reasoning is new)
 
 **What depends on this:**
-- [knowledge-compilation.md](../docs/knowledge-compilation.md) #171 -- compilation consumes promoted/curated memories as source material
-- [campaign-domain-framework.md](campaign-domain-framework.md) Phase 3-5 -- the Curator agent is the executor of the promotion pipeline
+- [knowledge-compilation.md](../docs/design/knowledge-compilation.md) #171 -- compilation consumes promoted/curated memories as source material
+- [campaign-domain-framework.md](archive/campaign-domain-framework.md) Phase 3-5 -- the Curator agent is the executor of the promotion pipeline
 - [operator.md](operator.md) -- the operator CRD needs `spec.agents` for lifecycle management of the agent fleet

@@ -1270,7 +1270,7 @@ GitHub issue (if any) tracking the implementation.
     future readers understand the basis of a memory without
     re-deriving it. The "from IR-2024-117" linkage in the
     cross-incident memories is a provenance reference.
-    *Defined in*: `../../../docs/memory-tree.md` (the underlying tree
+    *Defined in*: `../../../docs/design/memory-tree.md` (the underlying tree
     branch model).
     *Tracked in*: existing functionality, no new issue. The
     branch model is already implemented.
@@ -1391,7 +1391,7 @@ GitHub issue (if any) tracking the implementation.
     (the central narrative is cross-incident learning rather
     than within-incident revision), but referenced in the
     contradiction-resolution flow.
-    *Defined in*: `../../../docs/memory-tree.md` (versioning model with
+    *Defined in*: `../../../docs/design/memory-tree.md` (versioning model with
     `isCurrent` flag, already implemented).
     *Tracked in*: existing functionality.
     *Visible in the demo*: implicit in the contradiction

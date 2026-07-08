@@ -1126,7 +1126,7 @@ GitHub issue (if any) tracking the implementation.
     conversation, a specific source document, a specific
     observation). Lets future readers understand the basis of a
     memory without re-deriving it.
-    *Defined in*: `../../../docs/memory-tree.md` (the underlying tree
+    *Defined in*: `../../../docs/design/memory-tree.md` (the underlying tree
     branch model).
     *Tracked in*: existing functionality, no new issue. The
     branch model is already implemented.
@@ -1240,7 +1240,7 @@ GitHub issue (if any) tracking the implementation.
     memory. Future readers see the current state and can
     inspect the history of how the team's understanding
     evolved.
-    *Defined in*: `../../../docs/memory-tree.md` (versioning model with
+    *Defined in*: `../../../docs/design/memory-tree.md` (versioning model with
     `isCurrent` flag, already implemented).
     *Tracked in*: existing functionality. Reinforced as best
     practice in `stroke-rehab-marcus-reeves.md`

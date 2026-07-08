@@ -36,7 +36,7 @@ MemoryHub is a monorepo. The primary agent surface is an MCP server exposing 15 
 
 - [Package layout](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/package-layout.md): How `memoryhub-core` (server-side library), `memoryhub` (SDK on PyPI), and `memoryhub-cli` fit together.
 - [Build and deploy hardening](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/build-deploy-hardening.md): Build and deploy invariants shared across all MemoryHub components.
-- [Planning directory](https://github.com/redhat-ai-americas/memory-hub/tree/main/planning): In-flight designs for unimplemented features (Kubernetes operator, observability, session persistence, kagenti and LlamaStack integration).
+- [Planning directory](https://github.com/redhat-ai-americas/memory-hub/tree/main/planning): In-flight designs for unimplemented features (Kubernetes operator, observability, LlamaStack integration).
 - [Research directory](https://github.com/redhat-ai-americas/memory-hub/tree/main/research): Investigations and benchmarks — FIPS storage evaluation, two-vector retrieval ranking, pivot detection, FastMCP push notifications, Claude Code JWT limitations.
 - [Demos directory](https://github.com/redhat-ai-americas/memory-hub/tree/main/demos): Conference demo scripts (HIMSS, RSA, IACP, IAEM, World AgriTech) and the RHOAI dashboard tile demo material.
 - [Retrospectives](https://github.com/redhat-ai-americas/memory-hub/tree/main/retrospectives): Per-session retros documenting decisions, gaps, and patterns — read for the "why" behind major design choices.

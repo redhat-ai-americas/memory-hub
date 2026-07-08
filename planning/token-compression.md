@@ -18,7 +18,7 @@ Beyond raw token count, there is a cognitive load dimension. Structural metadata
 in the context window can activate model reasoning about that metadata (e.g., the
 model starts reasoning about weights, scopes, and timestamps instead of the task
 at hand). This was the motivating insight behind the compact CLI output design
-and is documented in planning/hooks-memory-injection.md.
+and is documented in planning/archive/hooks-memory-injection.md.
 
 ## What's already shipped
 
@@ -81,7 +81,7 @@ overhead reductions above by operating on the content payload itself.
 
 - **Semantic summarization** -- LLM-based compression at retrieval time is too
   expensive and too slow. Pre-compute summaries at write time if needed. The
-  context compaction design (docs/context-compaction.md) covers governed
+  context compaction design (docs/design/context-compaction.md) covers governed
   summarization at the storage layer; this design covers retrieval-time
   formatting.
 
@@ -108,7 +108,7 @@ consumer-specific formatting (URL shortening, dedup preferences) where the
 consumer's use case determines whether the transformation is appropriate.
 
 This matches the tiered integration model described in
-planning/hooks-memory-injection.md: Tier 1 (SDK) consumers control their own
+planning/archive/hooks-memory-injection.md: Tier 1 (SDK) consumers control their own
 formatting; Tier 2/3 (MCP) consumers get safe defaults from the server.
 
 ### Implementation location
@@ -268,7 +268,7 @@ def dedup_across_results(entries: list[dict]) -> list[dict]:
   compression applies to mid-conversation MCP searches, not to hook-injected
   startup context.
 
-- **Context compaction services (docs/context-compaction.md):** That design
+- **Context compaction services (docs/design/context-compaction.md):** That design
   covers governed compaction (dedup + merge + archival) at the storage layer
   with full provenance tracking and compliance guarantees. This design covers
   retrieval-time formatting -- lightweight, reversible, no storage mutation.
@@ -280,7 +280,7 @@ def dedup_across_results(entries: list[dict]) -> list[dict]:
 - tinyhumansai/openhuman "TokenJuice" -- inspiration for pre-processing layer
   (up to 80% reduction reported on unstructured memory content)
 - OpenAI token counting: tiktoken cl100k_base
-- MemoryHub context compaction design: docs/context-compaction.md
-- MemoryHub hooks memory injection design: planning/hooks-memory-injection.md
+- MemoryHub context compaction design: docs/design/context-compaction.md
+- MemoryHub hooks memory injection design: planning/archive/hooks-memory-injection.md
 - Factory.ai structured summarization benchmark (referenced in
-  docs/context-compaction.md)
+  docs/design/context-compaction.md)

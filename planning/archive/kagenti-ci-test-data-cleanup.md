@@ -12,8 +12,8 @@ unbounded — gigabytes of "user mentioned: ..." style fixture writes
 accumulating on the cluster, polluting future searches and consuming
 storage.
 
-This document records the decision. See [`docs/SYSTEMS.md`](../docs/SYSTEMS.md#kagenti-adk)
-for the full integration profile and [`docs/runbooks/add-mcp-api-user.md`](../docs/runbooks/add-mcp-api-user.md)
+This document records the decision. See [`docs/SYSTEMS.md`](../../docs/SYSTEMS.md#kagenti-adk)
+for the full integration profile and [`docs/runbooks/add-mcp-api-user.md`](../../docs/runbooks/add-mcp-api-user.md)
 for the API-key provisioning workflow.
 
 ## Decision

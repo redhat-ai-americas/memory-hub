@@ -56,7 +56,7 @@ OWNER=redhat-ai-americas
 
 Every issue MUST satisfy these requirements:
 
-1. **Reference a design document and section.** For example: `docs/memory-tree.md#versioning`. If no design doc exists for the work, create or update one first.
+1. **Reference a design document and section.** For example: `docs/design/memory-tree.md#versioning`. If no design doc exists for the work, create or update one first.
 2. **Be added to the Backlog column** of the MemoryHub project board on creation.
 3. **Use a concise conventional title.** Format: `subsystem: Description in imperative mood`. Example: `memory-tree: Implement versioning with isCurrent flag`.
 4. **Include required body sections** (see template below).

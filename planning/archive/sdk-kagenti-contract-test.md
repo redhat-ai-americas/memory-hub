@@ -6,7 +6,7 @@ Author: @rdwj (drafted with Claude Code Opus 4.7)
 
 ## Why this exists
 
-The `memoryhub` Python SDK now has its first known external consumer: the kagenti-adk project (https://github.com/kagenti/adk) ships a MemoryStore extension that wraps `MemoryHubClient`. The integration baseline is `kagenti/adk` PR #231. See [`docs/SYSTEMS.md`](../docs/SYSTEMS.md#kagenti-adk) for the full integration profile.
+The `memoryhub` Python SDK now has its first known external consumer: the kagenti-adk project (https://github.com/kagenti/adk) ships a MemoryStore extension that wraps `MemoryHubClient`. The integration baseline is `kagenti/adk` PR #231. See [`docs/SYSTEMS.md`](../../docs/SYSTEMS.md#kagenti-adk) for the full integration profile.
 
 The SDK currently has no test that mirrors how kagenti-adk consumes it. If we ship a breaking SDK change — rename a field, change a method signature, replace an exception class on the happy path — we will not catch it in our own test suite. We will hear about it when kagenti-adk's CI breaks, or worse, when a downstream user of kagenti-adk reports the failure.
 

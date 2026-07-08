@@ -167,7 +167,7 @@ Rationale for going first: smallest conversion, establishes the pattern, proves 
 
 - [ ] Update `memory-hub-mcp/TOOLS_PLAN.md` — each tool's "Error cases" section should describe the ToolError message shape and its SDK classification
 - [ ] Update `memory-hub-mcp/README.md` — add a short "Error handling" section documenting the `raise ToolError` contract for future tool authors
-- [ ] Update `docs/mcp-server.md` — reference the design note at `planning/tool-error-standardization.md`
+- [ ] Update `docs/design/mcp-server.md` — reference the design note at `planning/tool-error-standardization.md`
 - [ ] Link this design note from the #97 umbrella issue body
 
 ### Sub-issue 12 — Umbrella close-out
@@ -210,7 +210,7 @@ Close #97 when all of the following are true:
 - [ ] The SDK's `_call()` helper classifies errors into the 6 typed exception subclasses plus the generic `ToolError` fallback
 - [ ] Every sub-issue 1-11 is closed
 - [ ] `memory-hub-mcp/TOOLS_PLAN.md` reflects the new error contract for every tool
-- [ ] `docs/mcp-server.md` references this design note
+- [ ] `docs/design/mcp-server.md` references this design note
 
 ## What this proposal deliberately does not do
 

@@ -14,7 +14,7 @@ https://memory-hub-mcp-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opent
 
 That hostname embeds a sandbox cluster ID (`n7pd5`, `sandbox5167`). Sandbox clusters rotate — when this one is replaced, the URL changes, and the kagenti-adk E2E test breaks until someone updates the repo secret. Today there is no automated handoff for that update; it depends on @rdwj noticing and pinging @JanPokorny out-of-band.
 
-We need to decide how stable this URL needs to be and pick a strategy proportional to that decision. See [`docs/SYSTEMS.md`](../docs/SYSTEMS.md#kagenti-adk) for the full integration profile.
+We need to decide how stable this URL needs to be and pick a strategy proportional to that decision. See [`docs/SYSTEMS.md`](../../docs/SYSTEMS.md#kagenti-adk) for the full integration profile.
 
 This document is the proposal and decision record.
 

@@ -295,7 +295,7 @@ if scope == "role":
     return scope_id in role_names
 ```
 
-The service-only restriction is intentional (see `docs/governance.md`): role-scoped memories are created by the curator agent promoting patterns it detects across individual user memories, not by direct user writes. This matches the organizational-scope model. The `role_names` check is new — it ensures the service agent can only write to roles it is authorized for, closing the current open-access gap.
+The service-only restriction is intentional (see `docs/design/governance.md`): role-scoped memories are created by the curator agent promoting patterns it detects across individual user memories, not by direct user writes. This matches the organizational-scope model. The `role_names` check is new — it ensures the service agent can only write to roles it is authorized for, closing the current open-access gap.
 
 Both functions gain `role_names: set[str] | None = None`.
 
@@ -424,7 +424,7 @@ Dependencies flow top-to-bottom; items at the same indent level can be paralleli
 
 1. **DECIDED: Project writes restricted to project members only.** The caller provides an explicit `project_id` parameter and the tool sets `scope_id` on the memory; `owner_id` stays as the caller for attribution. The authz layer verifies the caller is a member of the target project before allowing the write (as shown in the write_memory validation code above).
 
-2. **DECIDED: Keep service-identity-only restriction for role writes.** This is an intentional governance decision from `docs/governance.md`: role-scoped memories are created by the curator agent promoting patterns it detects across individual user memories, not by direct user writes. The new `role_names` check adds membership verification on top of the existing `identity_type == "service"` gate, closing the open-access gap without changing the write policy.
+2. **DECIDED: Keep service-identity-only restriction for role writes.** This is an intentional governance decision from `docs/design/governance.md`: role-scoped memories are created by the curator agent promoting patterns it detects across individual user memories, not by direct user writes. The new `role_names` check adds membership verification on top of the existing `identity_type == "service"` gate, closing the open-access gap without changing the write policy.
 
 3. **DECIDED: ~~No `projects` table yet.~~ SUPERSEDED by #188.** A `projects` table was added in migration 012 with `enrollment_policy` (open/invite_only). Auto-enrollment uses this table to determine whether non-members can join on first write.
 
