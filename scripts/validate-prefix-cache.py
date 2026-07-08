@@ -17,7 +17,7 @@ Usage::
 
     python scripts/validate-prefix-cache.py
 
-Results are written to research/vllm-prefix-cache-validation/results-<timestamp>.json.
+Results are written to research/infra/vllm-kv-cache-results/results-<timestamp>.json.
 """
 
 from __future__ import annotations
@@ -822,7 +822,7 @@ async def run_cross_query_sharing(client, vllm, metrics) -> dict:
 
 def write_results(results: dict) -> None:
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    out_dir = PROJECT_ROOT / "research" / "vllm-prefix-cache-validation"
+    out_dir = PROJECT_ROOT / "research" / "infra" / "vllm-kv-cache-results"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"results-{ts}.json"
     path.write_text(json.dumps(results, indent=2, default=str))

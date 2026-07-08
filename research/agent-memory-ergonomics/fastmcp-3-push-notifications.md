@@ -172,7 +172,7 @@ Concretely: when `write_memory` computes the new memory's embedding, it also com
 This means:
 
 1. The session focus vector must be **stored in a place the broadcast code can read** (not just in the retrieval code path). Valkey is the natural choice — same lifecycle as the session registry.
-2. The embedding model used for session vectors must match the embedding model used for memory vectors. Document the contract in `../../docs/mcp-server.md`.
+2. The embedding model used for session vectors must match the embedding model used for memory vectors. Document the contract in `../../docs/design/mcp-server.md`.
 3. The push-side filter knob (`push_filter_weight`) and the pull-side bias knob (`session_focus_weight`) are conceptually the same dial but should be **separately configurable**, since users may want strong push filtering with looser pull biasing or vice versa.
 
 **This is a hard prerequisite coupling: #62 cannot ship without #58 having established the session vector mechanism.** Design and review the two issues together.
