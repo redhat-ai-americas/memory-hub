@@ -46,8 +46,8 @@ agent:
 #                      endpoints; set to any non-empty string (e.g. "not-required")
 model:
   provider: ${MODEL_PROVIDER:-openai}
-  endpoint: ${MODEL_ENDPOINT:-http://gpt-oss-20b.gpt-oss-model.svc.cluster.local:8000/v1}
-  name: ${MODEL_NAME:-RedHatAI/gpt-oss-20b}
+  endpoint: ${MODEL_ENDPOINT:-http://ogx-vllm-service.ogx.svc.cluster.local:8321/v1}
+  name: ${MODEL_NAME:-gemma4/google/gemma-4-E4B-it}
   temperature: 0.7
   max_tokens: 4096
 
@@ -82,8 +82,11 @@ model:
 #   PLATFORM_MODE  -- "true" to opt in
 #   OGX_ENDPOINT   -- OGX base URL (typically ending in /v1)
 platform:
-  enabled: ${PLATFORM_MODE:-false}
-  endpoint: ${OGX_ENDPOINT:-}
+  enabled: ${PLATFORM_MODE:-true}
+  endpoint: ${OGX_ENDPOINT:-http://ogx-vllm-service.ogx.svc.cluster.local:8321/v1}
+  mcp:
+    - name: memoryhub
+      connector_id: memoryhub
 
 # -- MCP servers --------------------------------------------------------------
 #
@@ -122,8 +125,7 @@ platform:
 #
 # mcp_servers:
 #   - url: ${MCP_SEARCH_URL:-http://search-mcp:8080/mcp}
-mcp_servers:
-  - url: ${MEMORYHUB_MCP_URL:-http://memory-hub-mcp.memory-hub-mcp.svc.cluster.local:8080/mcp}
+mcp_servers: []
 
 # -- Local tools ---------------------------------------------------------------
 #
