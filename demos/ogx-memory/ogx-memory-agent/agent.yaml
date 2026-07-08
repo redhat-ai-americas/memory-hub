@@ -83,7 +83,7 @@ model:
 #   OGX_ENDPOINT   -- OGX base URL (typically ending in /v1)
 platform:
   enabled: ${PLATFORM_MODE:-true}
-  endpoint: ${OGX_ENDPOINT:-http://ogx-ogx.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com}
+  endpoint: ${OGX_ENDPOINT:-http://ogx-ogx.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/v1}
   mcp:
     - name: memoryhub
       connector_id: memoryhub
