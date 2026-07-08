@@ -1,0 +1,12 @@
+bin/
+.git/
+.gitignore
+.containerignore
+chart/
+planning/
+CLAUDE.md
+README.md
+Makefile
+.DS_Store
+.env
+.venv/

@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gateway-template.fullname" . }}
+  labels:
+    {{- include "gateway-template.labels" . | nindent 4 }}
+data:
+  {{- range $key, $val := .Values.config }}
+  {{ $key }}: {{ $val | quote }}
+  {{- end }}
+  GATEWAY_AUTH_MODE: {{ .Values.auth.mode | quote }}
+  GATEWAY_AUTH_PROXY_USER_HEADER: {{ .Values.auth.proxy.userHeader | quote }}
+  GATEWAY_AUTH_PROXY_EMAIL_HEADER: {{ .Values.auth.proxy.emailHeader | quote }}
+  {{- with .Values.platform }}
+  {{- if .url }}
+  GATEWAY_PLATFORM_URL: {{ .url | quote }}
+  GATEWAY_PLATFORM_ROUTE_FEEDBACK: {{ .feedback | default false | quote }}
+  GATEWAY_PLATFORM_ROUTE_SESSIONS: {{ .sessions | default false | quote }}
+  GATEWAY_PLATFORM_ROUTE_TRACES: {{ .traces | default false | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with .Values.files }}
+  {{- if .maxBytes }}
+  GATEWAY_FILES_MAX_BYTES: {{ .maxBytes | quote }}
+  {{- end }}
+  {{- if .allowedMime }}
+  GATEWAY_FILES_ALLOWED_MIME: {{ .allowedMime | quote }}
+  {{- end }}
+  {{- if .uploadTimeout }}
+  GATEWAY_FILES_UPLOAD_TIMEOUT: {{ .uploadTimeout | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if eq .Values.auth.mode "jwt" }}
+  GATEWAY_AUTH_JWT_JWKS_URL: {{ required "auth.jwt.jwksUrl is required when auth.mode=jwt" .Values.auth.jwt.jwksUrl | quote }}
+  GATEWAY_AUTH_JWT_ISSUER: {{ required "auth.jwt.issuer is required when auth.mode=jwt" .Values.auth.jwt.issuer | quote }}
+  GATEWAY_AUTH_JWT_AUDIENCE: {{ required "auth.jwt.audience is required when auth.mode=jwt" .Values.auth.jwt.audience | quote }}
+  GATEWAY_AUTH_JWT_SUBJECT_CLAIM: {{ .Values.auth.jwt.subjectClaim | default "sub" | quote }}
+  GATEWAY_AUTH_JWT_USER_CLAIM: {{ .Values.auth.jwt.userClaim | default "preferred_username" | quote }}
+  GATEWAY_AUTH_JWT_EMAIL_CLAIM: {{ .Values.auth.jwt.emailClaim | default "email" | quote }}
+  {{- with .Values.auth.jwt.jwksRefreshRateLimit }}
+  GATEWAY_AUTH_JWT_JWKS_REFRESH_RATE_LIMIT: {{ . | quote }}
+  {{- end }}
+  {{- if .Values.auth.jwt.exchange.enabled }}
+  GATEWAY_AUTH_JWT_TOKEN_EXCHANGE_URL: {{ required "auth.jwt.exchange.tokenUrl is required when auth.jwt.exchange.enabled=true" .Values.auth.jwt.exchange.tokenUrl | quote }}
+  GATEWAY_AUTH_JWT_TOKEN_EXCHANGE_CLIENT_ID: {{ required "auth.jwt.exchange.clientId is required when auth.jwt.exchange.enabled=true" .Values.auth.jwt.exchange.clientId | quote }}
+  GATEWAY_AUTH_JWT_TOKEN_EXCHANGE_AUDIENCE: {{ required "auth.jwt.exchange.audience is required when auth.jwt.exchange.enabled=true" .Values.auth.jwt.exchange.audience | quote }}
+  {{- with .Values.auth.jwt.exchange.scope }}
+  GATEWAY_AUTH_JWT_TOKEN_EXCHANGE_SCOPE: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+  {{- end }}

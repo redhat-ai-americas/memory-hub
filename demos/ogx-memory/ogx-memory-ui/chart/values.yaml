@@ -1,0 +1,40 @@
+replicaCount: 1
+
+image:
+  repository: ui-template
+  tag: latest
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi
+
+config:
+  API_URL: http://my-agent:8080
+
+# -- File upload (ui-template#16) -------------------------------------------
+# Client-side file-upload knobs. The UI uses these only to fail fast on
+# obviously oversized or wrong-typed files; the gateway (and ultimately
+# the agent) is the authoritative gate. Match the values to your
+# gateway-template chart's `files` block to avoid surprising the user
+# with a 413 they could have caught client-side.
+files:
+  # Pre-flight client-side size cap. Plain bytes or k/m/g (binary). Empty
+  # falls back to the UI server's default (25 MiB).
+  maxBytes: ""
+  # Comma-separated client-side MIME allowlist. Empty defers entirely to
+  # the gateway's allowlist, which is usually what you want.
+  allowedMime: ""
+
+service:
+  port: 3000
+
+route:
+  enabled: true
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

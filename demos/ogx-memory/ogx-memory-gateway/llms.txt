@@ -1,0 +1,38 @@
+# gateway-template
+
+> OpenAI-compatible HTTP reverse proxy for AI agent backends. Built primarily on the Go standard library; the only third-party deps are stdlib-crypto-only JWT/JWKS libraries used by the optional `jwt` auth mode. Accepts `/v1/chat/completions` requests (sync and SSE streaming), proxies them to a configurable backend, and handles SSE lifecycle management.
+
+This is a template repository. The sentinel string `gateway-template` is replaced with the actual project name during scaffolding via `fips-agents create gateway <name>`.
+
+## Core
+
+- [README](https://raw.githubusercontent.com/fips-agents/gateway-template/main/README.md): Project overview, configuration variables, endpoints, and deployment instructions
+- [Server entrypoint](https://raw.githubusercontent.com/fips-agents/gateway-template/main/cmd/server/main.go): HTTP mux wiring, graceful shutdown, route registration
+- [Config](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/config/config.go): Environment variable parsing (BACKEND_URL, PORT, AGENT_NAME, AGENT_VERSION, LOG_REQUESTS, GATEWAY_AUTH_MODE, GATEWAY_AUTH_PROXY_*, GATEWAY_AUTH_JWT_*)
+
+## Handlers
+
+- [Chat completions](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/handler/chat.go): POST /v1/chat/completions — sync and SSE streaming proxy
+- [Feedback](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/handler/feedback.go): POST/GET /v1/feedback, PATCH /v1/feedback/{id}, GET /v1/feedback/stats — pass-through; forwards canonical X-Auth-* headers
+- [Auth strategies](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/auth/auth.go): Inbound auth modes (anonymous, proxy, jwt) and middleware that projects identity onto canonical X-Auth-Subject / X-Auth-User / X-Auth-Email / X-Auth-Mode headers
+- [JWT mode](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/auth/jwt.go): In-process JWKS validation of `Authorization: Bearer <token>`. Enforces signature, iss, aud, exp, nbf. Maps invalid tokens → 401, JWKS-cold-cache failures → 503. Stdlib crypto only (FIPS-compatible).
+- [Health](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/handler/health.go): GET /healthz and /readyz endpoints
+- [Agent card](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/handler/wellknown.go): GET /.well-known/agent.json
+
+## Internals
+
+- [SSE relay](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/proxy/sse.go): Server-Sent Events relay logic with flush and heartbeat handling
+- [Request logging](https://raw.githubusercontent.com/fips-agents/gateway-template/main/internal/middleware/logging.go): Structured request logging middleware, skips health probes
+
+## Deployment
+
+- [Makefile](https://raw.githubusercontent.com/fips-agents/gateway-template/main/Makefile): Build, test, lint, image-build, and deploy targets
+- [Helm chart values](https://raw.githubusercontent.com/fips-agents/gateway-template/main/chart/values.yaml): Default configuration for OpenShift deployment
+- [Helm deployment template](https://raw.githubusercontent.com/fips-agents/gateway-template/main/chart/templates/deployment.yaml): Kubernetes Deployment spec
+
+## Optional
+
+- [Helm Chart.yaml](https://raw.githubusercontent.com/fips-agents/gateway-template/main/chart/Chart.yaml): Chart metadata
+- [Helm ConfigMap](https://raw.githubusercontent.com/fips-agents/gateway-template/main/chart/templates/configmap.yaml): Environment variable ConfigMap template
+- [Helm Service](https://raw.githubusercontent.com/fips-agents/gateway-template/main/chart/templates/service.yaml): Kubernetes Service template
+- [Helm Route](https://raw.githubusercontent.com/fips-agents/gateway-template/main/chart/templates/route.yaml): OpenShift Route template

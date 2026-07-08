@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ui-template.fullname" . }}
+  labels:
+    {{- include "ui-template.labels" . | nindent 4 }}
+data:
+  API_URL: {{ .Values.config.API_URL | quote }}
+  {{- with .Values.files }}
+  {{- if .maxBytes }}
+  UI_MAX_FILE_BYTES: {{ .maxBytes | quote }}
+  {{- end }}
+  {{- if .allowedMime }}
+  UI_ALLOWED_MIME: {{ .allowedMime | quote }}
+  {{- end }}
+  {{- end }}

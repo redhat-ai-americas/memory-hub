@@ -1,0 +1,29 @@
+# ui-template
+
+> A single-binary chat UI that connects to any OpenAI-compatible API endpoint. A Go server embeds vanilla HTML/CSS/JS and reverse-proxies `/v1/*` to the backend, eliminating CORS. Supports streaming, tool call visualization, reasoning panels, and a settings panel populated via an optional `/v1/agent-info` endpoint.
+
+- The frontend never calls the backend directly -- all API traffic flows through the Go server's `/v1/` reverse proxy
+- The backend must serve `POST /v1/chat/completions` (OpenAI-compatible with SSE streaming); optionally `GET /v1/agent-info` for model/tool metadata
+- This is a template repository: the sentinel string `ui-template` is replaced with the actual project name during scaffolding
+- Configuration is two env vars: `API_URL` (backend endpoint, default `http://localhost:8080`) and `PORT` (listen port, default `3000`)
+- The frontend loads KaTeX from a CDN for math rendering; remove the two tags in `index.html` if not needed or if deploying in a network-restricted environment
+
+## Docs
+
+- [README](https://github.com/fips-agents/ui-template/blob/main/README.md): Features, architecture, backend contract, quick start, and deployment
+- [CLAUDE.md](https://github.com/fips-agents/ui-template/blob/main/CLAUDE.md): Detailed build/run/deploy instructions, architecture notes, config table, Helm deployment, and sentinel strings
+
+## Source
+
+- [cmd/server/main.go](https://github.com/fips-agents/ui-template/blob/main/cmd/server/main.go): Go HTTP server -- reverse proxy, config endpoint, health check, static file serving
+- [static/embed.go](https://github.com/fips-agents/ui-template/blob/main/static/embed.go): `go:embed` directive that bundles the static files into the binary
+- [static/app.js](https://github.com/fips-agents/ui-template/blob/main/static/app.js): Frontend logic -- chat, streaming SSE parser, settings panel, tool call UI, reasoning panel, metrics
+- [static/index.html](https://github.com/fips-agents/ui-template/blob/main/static/index.html): Page structure and settings panel markup
+- [static/style.css](https://github.com/fips-agents/ui-template/blob/main/static/style.css): All styles including tool pills, thinking panel, metrics bar, raw response viewer
+- [Makefile](https://github.com/fips-agents/ui-template/blob/main/Makefile): Build, run, test, lint, image-build, deploy targets
+
+## Deployment
+
+- [Containerfile](https://github.com/fips-agents/ui-template/blob/main/Containerfile): Multi-stage build on UBI 9 minimal
+- [chart/values.yaml](https://github.com/fips-agents/ui-template/blob/main/chart/values.yaml): Helm values -- image, resources, API_URL, route/TLS config
+- [chart/Chart.yaml](https://github.com/fips-agents/ui-template/blob/main/chart/Chart.yaml): Helm chart metadata

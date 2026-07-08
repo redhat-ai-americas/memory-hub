@@ -1,0 +1,66 @@
+# fips-agents-cli template manifest.
+#
+# This file declares which paths in the gateway template are managed
+# by the template (and so should be offered as patches by `fips-agents
+# patch`) and which belong to the user. The CLI reads this file from
+# the template root after cloning, before computing drift in
+# `fips-agents patch check`.
+#
+# Without this manifest, `fips-agents patch` does not work for gateway
+# projects — `get_categories_for_type` in the CLI raises ValueError for
+# gateway / ui / sandbox project types. The presence of this file is
+# what opts the gateway template into the patch flow. See:
+#   https://github.com/fips-agents/fips-agents-cli/issues/45
+
+schema_version: 1
+
+patch:
+  categories:
+
+    chart:
+      description: Helm chart templates
+      patterns:
+        - chart/templates/**/*
+        - chart/Chart.yaml
+      ask_before_patch: true
+
+    docs:
+      description: Documentation files
+      patterns:
+        - CLAUDE.md
+        - llms.txt
+        - docs/**/*
+      ask_before_patch: false
+
+    build:
+      description: Build and deployment files
+      patterns:
+        - Makefile
+        - Containerfile
+        - .containerignore
+        - .gitignore
+      ask_before_patch: true
+
+  never_patch:
+    # User's Go entry point and HTTP wiring
+    - cmd/**
+    # User's Go internals (auth, handlers, middleware, proxy, config)
+    - internal/**
+    # User's Go module dependencies
+    - go.mod
+    - go.sum
+    # User's deploy values
+    - chart/values.yaml
+    # User-authored planning notes and helper scripts
+    - planning/**
+    - scripts/**
+    # Build artifacts (should be gitignored anyway, but defense in depth)
+    - bin/**
+    - build/**
+    # Tests are user code
+    - "**/*_test.go"
+    # Environment files
+    - .env*
+    # User's README, license
+    - README.md
+    - LICENSE

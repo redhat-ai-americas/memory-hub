@@ -1,0 +1,141 @@
+replicaCount: 1
+
+image:
+  repository: gateway-template
+  tag: latest
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+config:
+  BACKEND_URL: http://my-agent:8080
+
+# Inbound auth strategy. See internal/auth and gateway-template#21 / #23.
+#   anonymous (default) — no validation, X-Auth-Subject is "anonymous".
+#                         Use for local dev, smoke tests, or any deployment
+#                         that does not need user attribution.
+#   proxy               — trust an upstream OAuth proxy (or service-mesh
+#                         outputClaimToHeaders) to project identity into
+#                         X-Forwarded-User / X-Forwarded-Email. The
+#                         gateway pod MUST be unreachable except via that
+#                         proxy, otherwise headers can be spoofed.
+#   jwt                 — in-process JWT validation against a JWKS endpoint.
+#                         Use when there is no OAuth proxy in front of the
+#                         gateway (self-contained deployments). The gateway
+#                         validates Authorization: Bearer <token> against
+#                         auth.jwt.jwksUrl, projects the claims onto the
+#                         canonical X-Auth-* headers.
+auth:
+  mode: anonymous
+  proxy:
+    userHeader: X-Forwarded-User
+    emailHeader: X-Forwarded-Email
+  jwt:
+    # JWKS endpoint to fetch signing keys from. Required when mode=jwt.
+    # Example: https://keycloak.example/realms/myrealm/protocol/openid-connect/certs
+    jwksUrl: ""
+    # Expected `iss` claim. Required when mode=jwt.
+    # Example: https://keycloak.example/realms/myrealm
+    issuer: ""
+    # Expected `aud` claim. Required when mode=jwt.
+    audience: ""
+    # Claim name to project onto X-Auth-Subject. Default: sub.
+    subjectClaim: sub
+    # Claim name to project onto X-Auth-User. Default: preferred_username.
+    userClaim: preferred_username
+    # Claim name to project onto X-Auth-Email. Default: email.
+    emailClaim: email
+    # Cap how often the JWKS client refreshes the key set in response to
+    # an unknown `kid`. Empty / unset keeps keyfunc's library default of
+    # 1 refresh per 5 minutes — already conservative enough for most
+    # deployments. Set to a Go duration (eg "30s", "2m") only when you've
+    # measured a real post-rotation latency problem (lower) or want to
+    # harden against forged-kid bursts (higher). See gateway-template#28.
+    jwksRefreshRateLimit: ""
+    # RFC 8693 token exchange (auth v2 part 2). When enabled, the gateway
+    # swaps the inbound user JWT for a downstream-audienced token before
+    # forwarding to the backend. The downstream MCP server / agent
+    # validates the swapped token against the same JWKS, getting a
+    # signed assertion of who is calling rather than a header it has to
+    # trust.
+    #
+    # Leave disabled if the gateway and backend share a trust boundary
+    # (e.g. same OpenShift namespace with NetworkPolicies) — the canonical
+    # X-Auth-* headers are sufficient there.
+    exchange:
+      enabled: false
+      # RFC 8693 token endpoint. Same Keycloak token endpoint that
+      # issues the inbound user tokens.
+      # Example: https://keycloak.example/realms/myrealm/protocol/openid-connect/token
+      tokenUrl: ""
+      # Confidential client representing the gateway's service account.
+      # Used as the `client_id` form parameter on the exchange request.
+      clientId: ""
+      # Reference to an existing Kubernetes Secret holding the client
+      # secret. Using a secretKeyRef keeps the secret out of values.yaml.
+      clientSecretRef:
+        name: ""
+        key: client-secret
+      # The downstream-resource client whose ID becomes the swapped
+      # token's `aud`. The downstream service must validate against
+      # this audience.
+      audience: ""
+      # Optional space-separated scope set requested on the swap. Empty
+      # means no scope narrowing.
+      scope: ""
+
+# -- Platform service routing (gateway-template#30) --------------------------
+# When `platform.url` is set, /v1/feedback*, /v1/sessions/*, and /v1/traces/*
+# proxy to the deployed fipsagents-platform service instead of fanning out
+# to per-agent backends. Each prefix has an opt-out toggle so a deployment
+# can mix backends — eg keep sessions on the agent (so the agent's
+# /v1/sessions/{id}/usage endpoint stays in-process) while routing
+# feedback and traces to the platform.
+#
+# When `platform.url` is empty (default), behavior is unchanged from 0.4.x:
+# every prefix proxies to the agent referenced by config.BACKEND_URL.
+#
+# GET /v1/sessions/{id}/usage always proxies to the agent regardless of
+# the sessions toggle — that endpoint computes USD cost from the agent's
+# PricingConfig and is not implemented on the platform.
+platform:
+  url: ""        # eg http://fipsagents-platform.fipsagents-platform.svc.cluster.local:8080
+  feedback: true
+  sessions: true
+  traces: true
+
+# -- File upload proxy (gateway-template#11) ---------------------------------
+# /v1/files multipart uploads stream through the gateway with a size cap and
+# a MIME-type allowlist enforced before any bytes reach the agent. The
+# allowlist may include wildcards (eg "image/*"); leaving it empty allows
+# every type that the agent itself accepts (the agent runs libmagic-based
+# content sniffing on its own and is the authoritative gate).
+files:
+  # Maximum upload size accepted by the gateway. Accepts a plain integer
+  # (bytes) or a value suffixed with k/m/g (binary). Requests advertising
+  # a Content-Length over this value are rejected with 413 before the
+  # body is read; chunked clients are interrupted by an http.MaxBytesReader.
+  maxBytes: "25m"
+  # Comma-separated MIME-type allowlist. Entries may be exact
+  # ("application/pdf") or wildcard ("image/*"). Leave empty to defer to
+  # the agent's own allowlist.
+  allowedMime: ""
+  # Per-request timeout for backend POST /v1/files calls. Larger than the
+  # gateway's default 120s so big uploads on slow links don't trip the
+  # gateway-side deadline before the agent finishes parsing.
+  uploadTimeout: "5m"
+
+service:
+  port: 8080
+
+route:
+  enabled: true
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

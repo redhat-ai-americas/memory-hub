@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ui-template
+version: 0.4.0
+appVersion: "0.4.0"
+description: Chat UI for AI agents
