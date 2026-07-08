@@ -1,18 +1,16 @@
 """OGX Memory Demo Agent -- persistent memory via MemoryHub.
 
-Direct-to-vLLM mode: uses standard chat completions with client-side
-MCP tool routing. Proves the MemoryHub integration concept works
-end-to-end while OGX Responses API tool-call issues are resolved (#316).
+Direct-to-vLLM with framework memory injection for reads. Writes are
+handled in application code: after every turn, a second LLM call
+decides if the user stated something worth remembering, and if so,
+writes it to MemoryHub via the MCP tool.
 
-MemoryHub is connected as a client-side MCP server. The model calls
-register_session and memory tools via vLLM's built-in tool calling.
-OpenAIChatServer handles SSE streaming natively.
-
-A /v1/memories endpoint is added for the UI's memory viewer pane.
+This bypasses the unreliable tool-calling behavior of small models.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -26,9 +24,6 @@ class OGXMemoryAgent(BaseAgent):
 
     async def setup(self) -> None:
         await super().setup()
-        # Patch model name: the framework strips 'gemma4/' prefix
-        # but OGX registers the model with it. Not needed when going
-        # direct to vLLM, but kept for forward compat.
         raw = os.environ.get("OGX_MODEL_NAME", "")
         if raw and hasattr(self, "llm"):
             original = self.llm._base_kwargs
@@ -46,7 +41,58 @@ class OGXMemoryAgent(BaseAgent):
     async def step(self) -> StepResult:
         response = await self.call_model()
         response = await self.run_tool_calls(response)
+
+        # After the model responds, check if the user said something
+        # worth remembering and write it programmatically.
+        await self._maybe_write_memory()
+
         return StepResult.done(result=response.content)
+
+    async def _maybe_write_memory(self) -> None:
+        """Use a cheap LLM call to extract memorable facts from the
+        user's last message, then write them via the memory tool."""
+        user_msgs = [m for m in self.messages if m.get("role") == "user"]
+        if not user_msgs:
+            return
+        last_user = user_msgs[-1].get("content", "")
+        if len(last_user) < 10:
+            return
+
+        extract_prompt = [
+            {"role": "system", "content": (
+                "Extract any personal preference, decision, or fact the user "
+                "stated about themselves. Return ONLY a JSON object: "
+                '{"memory": "<one sentence>"}. '
+                "If nothing worth remembering, return "
+                '{"memory": null}. '
+                "No explanation, just the JSON."
+            )},
+            {"role": "user", "content": last_user},
+        ]
+
+        try:
+            result = await self.call_model(
+                messages=extract_prompt,
+                include_tools=False,
+            )
+            text = (result.content or "").strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            parsed = json.loads(text)
+            memory_text = parsed.get("memory")
+            if not memory_text:
+                return
+
+            log.info("Writing memory: %s", memory_text[:80])
+            tool_result = await self.tools.execute(
+                "memory",
+                action="write",
+                content=memory_text,
+                scope="user",
+            )
+            log.info("Memory write result: %s", str(tool_result)[:200])
+        except Exception as e:
+            log.debug("Memory extraction skipped: %s", e)
 
 
 if __name__ == "__main__":
