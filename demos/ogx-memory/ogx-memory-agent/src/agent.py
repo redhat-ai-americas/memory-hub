@@ -136,18 +136,22 @@ async def list_memories(limit: int = 20):
         return {"memories": [], "error": "MemoryHub not configured"}
     try:
         async with MemoryHubClient(server_url=mh_url, api_key=_api_key) as client:
-            result = await client.list(max_results=limit, current_only=True)
+            result = await client.search(
+                query="",
+                max_results=limit,
+                mode="index",
+            )
         memories = []
-        for m in result.get("memories", []):
+        for m in result.results:
             memories.append({
-                "id": m.get("id", ""),
-                "content": m.get("content", m.get("stub", "")),
-                "scope": m.get("scope", ""),
-                "weight": m.get("weight", 0),
-                "created_at": m.get("created_at", ""),
-                "content_type": m.get("content_type", ""),
+                "id": m.id,
+                "content": m.content or m.stub or "",
+                "scope": m.scope or "",
+                "weight": m.weight or 0,
+                "created_at": str(m.created_at) if m.created_at else "",
+                "content_type": m.content_type or "",
             })
-        return {"memories": memories, "total": result.get("total", len(memories))}
+        return {"memories": memories, "total": result.total_matching}
     except Exception as e:
         log.warning("Failed to list memories: %s", e)
         return {"memories": [], "error": str(e)}
