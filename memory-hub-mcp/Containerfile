@@ -19,6 +19,10 @@ COPY memoryhub_core/ ./memoryhub_core/
 # ephemeral storage for builds.
 RUN pip install --no-cache-dir --no-build-isolation -e './memoryhub_core/'
 
+# Pin FastMCP to 3.4.2. Version 3.4.3 returns 421 on all streamable-HTTP
+# requests. The memoryhub SDK pulls fastmcp>=2.11.3 which allows 3.4.3.
+RUN pip install --no-cache-dir 'fastmcp==3.4.2'
+
 # Copy MCP server application code
 COPY src/ ./src/
 COPY conftest.py ./
