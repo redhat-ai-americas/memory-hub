@@ -13,11 +13,11 @@ RUN pip install --no-cache-dir --upgrade wheel setuptools && \
 # in the read-only source directory. This works because all build deps are
 # already installed above.
 COPY memoryhub_core/ ./memoryhub_core/
-RUN pip install --no-cache-dir --no-build-isolation -e './memoryhub_core/[extraction]'
-
-# Download NLP models at build time (air-gap safe)
-RUN python -m spacy download en_core_web_sm
-RUN python -c "from gliner import GLiNER; GLiNER.from_pretrained('urchade/gliner_medium-v2.1')"
+# Install without [extraction] extra to reduce image size (~4GB savings).
+# Entity extraction is feature-flagged (MEMORYHUB_ENTITY_EXTRACTION_ENABLED)
+# and disabled by default. Re-add [extraction] when the cluster has more
+# ephemeral storage for builds.
+RUN pip install --no-cache-dir --no-build-isolation -e './memoryhub_core/'
 
 # Copy MCP server application code
 COPY src/ ./src/
