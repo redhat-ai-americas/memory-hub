@@ -46,6 +46,12 @@ class OGXMemoryAgent(BaseAgent):
 
             self.llm._base_kwargs = patched_base_kwargs
 
+    def get_tool_schemas(self):
+        """Filter out stock tools that confuse the 20B model."""
+        schemas = super().get_tool_schemas()
+        blocked = {"ask_user", "spawn_agent"}
+        return [s for s in schemas if s["function"]["name"] not in blocked]
+
     async def step(self) -> StepResult:
         response = await self.call_model()
         response = await self.run_tool_calls(response)
