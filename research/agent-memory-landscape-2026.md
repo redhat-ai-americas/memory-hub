@@ -1,6 +1,6 @@
-# Agent Memory Landscape Analysis (May 2026)
+# Agent Memory Landscape Analysis (2026)
 
-This document surveys the emerging agent memory landscape through three external sources and maps their findings to MemoryHub's architecture, identifying validations, gaps, and design guardrails.
+This document surveys the emerging agent memory landscape through external sources and maps their findings to MemoryHub's architecture, identifying validations, gaps, and design guardrails.
 
 ## Sources
 
@@ -18,6 +18,11 @@ This document surveys the emerging agent memory landscape through three external
    Author: Michael Sakhatsky
    Published: April 2026
    Focus: Critique of the assumption chain from "we need institutional knowledge" to "we need Neo4j"; case for rules engines and Datalog over graph databases.
+
+4. **"Self-Improving Memory for Agents" (Perplexity Brain)**
+   Published: June 18, 2026
+   Focus: Production memory system for Perplexity's "Computer" agent; context graph + overnight synthesis + LLM wiki injection.
+   Full analysis: [perplexity-brain-analysis.md](perplexity-brain-analysis.md)
 
 Additionally, **Neo4j Agent Memory** (neo4j-labs/agent-memory, v0.2-0.3) was reviewed as the most direct open-source competitor.
 
@@ -287,3 +292,5 @@ Neo4j Agent Memory is a graph-first system that happens to support agents. Memor
 | #240 | SDK extraction pipeline for agent trace observation | Neo4j Agent Memory comparison, Gartner context graphs |
 
 Additionally, #170 (graph-enhanced memory) was prioritized to near-term, informed by all three sources. Design guardrails from Sakhatsky's critique should be applied when scoping that work.
+
+Perplexity Brain (June 2026) validates ACE (#169) and extraction pipeline (#240) urgency -- Brain's overnight synthesis loop is production proof that automated memory compaction and pattern extraction have measurable impact (+25% correctness, -13% cost on context-dependent tasks). See [perplexity-brain-analysis.md](perplexity-brain-analysis.md) for the full comparison.
