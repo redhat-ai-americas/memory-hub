@@ -13,11 +13,15 @@ RUN pip install --no-cache-dir --upgrade wheel setuptools && \
 # in the read-only source directory. This works because all build deps are
 # already installed above.
 COPY memoryhub_core/ ./memoryhub_core/
-RUN pip install --no-cache-dir --no-build-isolation -e './memoryhub_core/[extraction]'
+# Install without [extraction] extra to reduce image size (~4GB savings).
+# Entity extraction is feature-flagged (MEMORYHUB_ENTITY_EXTRACTION_ENABLED)
+# and disabled by default. Re-add [extraction] when the cluster has more
+# ephemeral storage for builds.
+RUN pip install --no-cache-dir --no-build-isolation -e './memoryhub_core/'
 
-# Download NLP models at build time (air-gap safe)
-RUN python -m spacy download en_core_web_sm
-RUN python -c "from gliner import GLiNER; GLiNER.from_pretrained('urchade/gliner_medium-v2.1')"
+# Pin FastMCP to 3.4.2. Version 3.4.3 returns 421 on all streamable-HTTP
+# requests. The memoryhub SDK pulls fastmcp>=2.11.3 which allows 3.4.3.
+RUN pip install --no-cache-dir 'fastmcp==3.4.2'
 
 # Copy MCP server application code
 COPY src/ ./src/

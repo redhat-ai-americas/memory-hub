@@ -8,6 +8,11 @@ If anything here is unclear, file an issue and tag it `documentation` — that's
 
 MemoryHub is a monorepo with one server-side library (`src/memoryhub_core/`) and four deployable subprojects (`memory-hub-mcp/`, `memoryhub-auth/`, `memoryhub-ui/`, plus the published Python `sdk/`) and one CLI client (`memoryhub-cli/`). The MCP server, BFF, alembic migrations, and the seed-OAuth-clients script all import from the server-side library; the SDK and CLI are independent and never touch the server-side code. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem inventory and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system overview.
 
+## Roles
+
+- **Maintainers** have merge rights, deploy access to the shared demo cluster, and own project board triage. Currently: @rdwj.
+- **Contributors** can file issues, open PRs, and deploy to their own clusters. No approval needed to file issues.
+
 ## Setting up a dev environment
 
 Each subproject has its own venv. Pick the one(s) you need.
@@ -74,7 +79,7 @@ npm run build
 
 ## Cluster access
 
-Most contributions never need to touch the demo OpenShift cluster. Local development against SQLite or a podman-run PostgreSQL is enough for almost everything. If you do need access to the cluster — to read logs, reproduce a deploy-specific bug, or run the SDK's live-auth tests — see [`docs/contributor-cluster-access.md`](docs/contributor-cluster-access.md). The short version: read-only access is granted on request, deploy access is not, and the cluster admin (`@rdwj`) handles deploys on their own cadence.
+Most contributions never need to touch the demo OpenShift cluster. Local development against SQLite or a podman-run PostgreSQL is enough for almost everything. Contributors can deploy to their own OpenShift clusters freely. The shared demo cluster (`mcp-rhoai` context) is maintainer-managed; read-only access is granted on request, but deploy access is not shared. See [`docs/contributor-cluster-access.md`](docs/contributor-cluster-access.md) for details.
 
 ## Filing issues
 
@@ -82,7 +87,7 @@ Use the `/issue-tracker` slash command — it enforces our conventions automatic
 
 - **Every issue references a design document.** If the design doesn't exist yet, file the design issue first or write a skeleton in `docs/`. We don't accept feature issues without a design pointer.
 - **Every issue starts in the Backlog column** of the MemoryHub project board. Issues flow Backlog → In Progress → Done.
-- **Author is `rdwj`.** Do NOT add AI attribution to issue authors. Other developers need to know who to contact about an issue, and the human owner is the point of contact, not the AI assistant that helped draft the body.
+- **File issues under your own GitHub identity.** Do NOT add AI attribution to issue authors. Other developers need to know who to contact about an issue, and the human owner is the point of contact, not the AI assistant that helped draft the body.
 - **No internal-tooling issues on this public repo.** If something internal to your dev environment is broken, mention it in conversation rather than filing a public issue that reveals private infrastructure details.
 
 ## Submitting pull requests
@@ -92,7 +97,8 @@ Use the `/issue-tracker` slash command — it enforces our conventions automatic
 3. **Run the relevant test suite locally** before opening the PR. Each subproject's `pytest tests/ -q` is fast (under a second on a recent laptop).
 4. **Run [gitleaks](https://github.com/gitleaks/gitleaks)** before committing. We don't depend on git pre-commit hooks. If you have the `/pre-commit` slash command available, use that.
 5. **Open the PR with a clear description** that links the issue number and references the design doc. Reviewers check the design first, then the diff.
-6. **Be ready to iterate.** We optimize for the right design, not the fastest merge.
+6. **Expect review from a maintainer.** Maintainers review and merge all PRs.
+7. **Be ready to iterate.** We optimize for the right design, not the fastest merge.
 
 ## Commit messages
 
@@ -193,4 +199,4 @@ By submitting a contribution, you agree that your contribution will be licensed 
 
 ---
 
-Copyright 2026 Wes Jackson · Apache 2.0
+Copyright 2026 MemoryHub Contributors · Apache 2.0

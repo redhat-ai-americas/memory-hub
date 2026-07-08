@@ -1,4 +1,4 @@
-fastmcp>=3.0.0
+fastmcp==3.4.2
 pyyaml>=6.0.2
 python-dotenv>=1.1.1
 watchdog>=6.0.0
@@ -14,5 +14,6 @@ pydantic-settings
 minio
 psycopg2-binary
 httpx
-spacy>=3.7
-gliner>=0.2.7
+# spacy and gliner moved to [extraction] extra in memoryhub_core.
+# Not needed for core MCP functionality. Reinstall when entity
+# extraction is enabled and cluster has build capacity.
