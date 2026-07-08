@@ -134,7 +134,7 @@ async def list_memories(limit: int = 20):
     if not _mh_client:
         return {"memories": [], "error": "MemoryHub client not configured"}
     try:
-        result = _mh_client.list(max_results=limit, current_only=True)
+        result = await _mh_client.list(max_results=limit, current_only=True)
         memories = []
         for m in result.get("memories", []):
             memories.append({
