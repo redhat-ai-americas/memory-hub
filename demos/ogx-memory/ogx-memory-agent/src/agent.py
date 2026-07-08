@@ -97,19 +97,18 @@ async def chat_completions(request: ChatRequest):
     await agent.setup()
 
     instructions = _build_instructions()
-    user_messages = [m.content for m in request.messages if m.role == "user"]
-    input_text = user_messages[-1] if user_messages else ""
+    messages = [{"role": m.role, "content": m.content} for m in request.messages]
     cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
     if request.stream:
         return StreamingResponse(
-            _stream_response(agent, input_text, instructions, cmpl_id),
+            _stream_response(agent, messages, instructions, cmpl_id),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     response = await agent.call_model_responses(
-        input=input_text,
+        input=messages,
         instructions=instructions,
     )
     return {
@@ -133,12 +132,12 @@ async def chat_completions(request: ChatRequest):
     }
 
 
-async def _stream_response(agent, input_text, instructions, cmpl_id):
+async def _stream_response(agent, messages, instructions, cmpl_id):
     created = int(time.time())
     model = _config.model.name
 
     async for event in agent.call_model_responses_stream(
-        input=input_text,
+        input=messages,
         instructions=instructions,
     ):
         if isinstance(event, ContentDelta):
