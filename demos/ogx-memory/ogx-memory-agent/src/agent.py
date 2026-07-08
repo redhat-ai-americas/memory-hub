@@ -141,7 +141,11 @@ if __name__ == "__main__":
     async def remember(req: RememberRequest):
         """Extract and write a memory from user text. Called by the UI
         after each chat message."""
-        asyncio.create_task(extract_and_write(req.text))
-        return {"status": "accepted"}
+        try:
+            await extract_and_write(req.text)
+            return {"status": "done"}
+        except Exception as e:
+            log.warning("Remember failed: %s", e)
+            return {"status": "error", "detail": str(e)}
 
     server.run(host=config.server.host, port=config.server.port)
