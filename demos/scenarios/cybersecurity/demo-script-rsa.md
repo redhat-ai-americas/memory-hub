@@ -383,7 +383,7 @@ landing. Slow down. Make it land.[^cross-incident]
 > decision. *That* is what we mean by the context that makes
 > security decisions go well."[^value-prop]
 
-**The organizational knowledge moment (30 seconds)**:[^tribal-knowledge]
+**The organizational knowledge moment (30 seconds)**:[^organizational-knowledge]
 
 > "While the Tier 1 agent is making the escalation decision,
 > watch what else it surfaces — a piece of team practice that
@@ -405,7 +405,7 @@ landing. Slow down. Make it land.[^cross-incident]
   killer moment)
 - **Project-scope reads**[^project-scope] (Tier 1 reading the
   team's shared memory)
-- **Analyst organizational knowledge**[^tribal-knowledge] (the off-hours
+- **Analyst organizational knowledge**[^organizational-knowledge] (the off-hours
   service account heuristic)
 - **Value prop landing**[^value-prop]: the headline phrase gets
   its first strong demonstration here
@@ -937,7 +937,7 @@ a single table:
 |---|---|---|---|---|
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, detection boundary, no-auto-containment | `[^value-prop]` `[^detection-boundary]` `[^humans-in-loop]` |
 | 1:30-3:00 | Incident & team intro | Identity model (10 agents register) | Project membership, fleet provisioning | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
-| 3:00-5:00 | Detection & "we've seen this before" | Cross-incident pattern recognition (KILLER MOMENT 1) | Organizational knowledge | `[^cross-incident]` `[^tribal-knowledge]` `[^value-prop]` |
+| 3:00-5:00 | Detection & "we've seen this before" | Cross-incident pattern recognition (KILLER MOMENT 1) | Organizational knowledge | `[^cross-incident]` `[^organizational-knowledge]` `[^value-prop]` |
 | 5:00-8:00 | Investigation & on-call rotation | Driver_id distinction + role-vs-person | Contradiction detection, agent-operational memory, sensitive-data quarantine | `[^role-vs-person]` `[^driver-id]` `[^contradiction]` `[^operational-memory]` `[^data-curation]` |
 | 8:00-10:00 | Containment with operational lessons | Cross-incident operational lesson (KILLER MOMENT 2) | Per-customer context, credential curation | `[^cross-incident]` `[^narrative-context]` `[^data-curation]` |
 | 10:00-11:30 | Audit trail | Driver_id audit query | Role-vs-person + chain of evidence | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` |
@@ -1319,7 +1319,7 @@ GitHub issue (if any) tracking the implementation.
     in Segments 4 and 5; audit queries are the centerpiece of
     Segment 6.
 
-[^tribal-knowledge]: **Analyst organizational knowledge memory
+[^organizational-knowledge]: **Analyst organizational knowledge memory
     category**: the practices a SOC team has developed that
     aren't formal SIEM rules or SOAR playbooks but are how the
     team actually works. The "service account alerts after 8pm

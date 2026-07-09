@@ -496,7 +496,7 @@ the central value-prop moment.[^op-period]
 > captured the working memory of the incident. Both
 > matter."[^value-prop]
 
-**Per-IC preference applied (15 seconds)**:[^tribal-knowledge]
+**Per-IC preference applied (15 seconds)**:[^organizational-knowledge]
 
 > "And while Cynthia is absorbing the handoff, watch what
 > the IC agent does. It's preparing her morning briefing in
@@ -516,7 +516,7 @@ the central value-prop moment.[^op-period]
   transfer**[^op-period] (the killer moment for the EM
   audience)
 - **Project-scope reads**[^project-scope]
-- **Per-IC preference memory**[^tribal-knowledge]
+- **Per-IC preference memory**[^organizational-knowledge]
 - **Value prop landing**[^value-prop]: the headline phrase
   gets its first strong demonstration here
 
@@ -623,7 +623,7 @@ operational tempo:
 > structural way to surface the discrepancy without it
 > being a confrontation."
 
-**Multi-agency organizational knowledge (30 seconds)**:[^tribal-knowledge]
+**Multi-agency organizational knowledge (30 seconds)**:[^organizational-knowledge]
 
 > "And one more piece of this segment. The Liaison Officer
 > is preparing for the afternoon multi-agency coordination
@@ -661,7 +661,7 @@ operational tempo:
   recall**[^cross-incident] (the killer moment 2)
 - **Contradiction detection**[^contradiction]: model
   output vs. field observation
-- **Multi-agency organizational knowledge**[^tribal-knowledge]
+- **Multi-agency organizational knowledge**[^organizational-knowledge]
   (the R5 strike team briefing pattern)
 - **Sensitive-data quarantine**[^data-curation] catching
   resident PII
@@ -1018,8 +1018,8 @@ scan as a single table:
 |---|---|---|---|---|
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, boundary, no autonomous decisions | `[^value-prop]` `[^decision-support-boundary]` `[^humans-in-loop]` |
 | 1:30-3:00 | Incident & team intro | Identity model (10 ICS-position agents register) | Project membership | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
-| 3:00-5:00 | Day 2 morning op period start | Operational period handoff state transfer (KILLER MOMENT 1) | Per-IC preference memory | `[^op-period]` `[^tribal-knowledge]` `[^value-prop]` |
-| 5:00-8:00 | Cross-incident recall & pre-positioning | Cross-incident fuel behavior recall (KILLER MOMENT 2) | Model-vs-field contradiction, multi-agency organizational knowledge, resident PII quarantine | `[^cross-incident]` `[^contradiction]` `[^tribal-knowledge]` `[^data-curation]` |
+| 3:00-5:00 | Day 2 morning op period start | Operational period handoff state transfer (KILLER MOMENT 1) | Per-IC preference memory | `[^op-period]` `[^organizational-knowledge]` `[^value-prop]` |
+| 5:00-8:00 | Cross-incident recall & pre-positioning | Cross-incident fuel behavior recall (KILLER MOMENT 2) | Model-vs-field contradiction, multi-agency organizational knowledge, resident PII quarantine | `[^cross-incident]` `[^contradiction]` `[^organizational-knowledge]` `[^data-curation]` |
 | 8:00-10:00 | Wind shift event | Coordinated response with operational period handoff state paying off | Self-correcting Weather agent, humans-in-loop reinforcement | `[^op-period]` `[^cross-incident]` `[^contradiction]` `[^humans-in-loop]` |
 | 10:00-11:30 | Audit trail | Driver_id audit query | Role-vs-person + chain of accountability | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` |
 | 11:30-12:00 | Op period handoff & post-event | Operational period handoff at end of period | Cross-incident learning capture | `[^op-period]` `[^cross-incident]` |
@@ -1045,7 +1045,7 @@ specific cuts in priority order:
 3. **Third cut**: shorten the multi-agency organizational knowledge
    moment (R5 strike team briefing pattern) in Segment 4 to
    a single sentence. Save 20 seconds. **Lost milestones**:
-   half of `[^tribal-knowledge]`'s demonstration.
+   half of `[^organizational-knowledge]`'s demonstration.
 4. **Fourth cut**: drop one of the two audit queries in
    Segment 6 (keep the role-based one, drop the
    human-based one, mention the second briefly in
@@ -1409,7 +1409,7 @@ the GitHub issue (if any) tracking the implementation.
     Segments 3-7 implicitly demonstrates the
     enforcement.
 
-[^tribal-knowledge]: **Practitioner organizational knowledge
+[^organizational-knowledge]: **Practitioner organizational knowledge
     memory category**: practices a team or agency has
     developed that aren't formal SOP but are how the team
     actually works. In the emergency response scenario,

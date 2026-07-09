@@ -400,7 +400,7 @@ walkthrough of the inpatient rehab phase. Key beats:
 - The Charge Nurse role passing across shifts (different drivers,
   same actor)[^role-vs-person][^driver-id]
 - A organizational knowledge memory being read (Dr. Patel's SSRI
-  preference)[^tribal-knowledge]
+  preference)[^organizational-knowledge]
 - A patient-narrative memory being written (the call light
   observation)[^narrative-context]
 - The PT-vs-OT cane contradiction[^contradiction]
@@ -447,7 +447,7 @@ role-vs-person distinction land.[^role-vs-person][^driver-id][^audit]
 > 'he won't use the call light' note — without any handoff loss.
 > The shift changed; the institutional memory didn't."
 
-**The organizational knowledge moment (45 seconds)**:[^tribal-knowledge][^cds-boundary]
+**The organizational knowledge moment (45 seconds)**:[^organizational-knowledge][^cds-boundary]
 
 > "Now in week 2, something happens that's clinically common.
 > Marcus develops post-stroke depression. Not unusual — the
@@ -513,7 +513,7 @@ detection moment.[^contradiction]
   (the human on shift) changes per session.
 - **Project-scope reads**[^project-scope]: agents reading from the
   team's shared memory.
-- **Organizational knowledge memory**[^tribal-knowledge] (the SSRI
+- **Organizational knowledge memory**[^organizational-knowledge] (the SSRI
   preference).
 - **Patient narrative context**[^narrative-context] (call light
   observation, mentioned in passing).
@@ -806,7 +806,7 @@ mattered most.
 >
 > Two. A care team's organizational knowledge — the SSRI preference —
 > persisting across the unit independent of who was on
-> call.[^tribal-knowledge]
+> call.[^organizational-knowledge]
 >
 > Three. A contradiction surfaced and resolved, not by computer
 > logic, but by the team reading both interpretations and
@@ -849,7 +849,7 @@ a single table:
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, CDS boundary, AI-supports-humans | `[^value-prop]` `[^cds-boundary]` `[^humans-in-loop]` |
 | 1:30-3:00 | Patient & team intro | Identity model (10 agents register) | Project membership, fleet provisioning | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
 | 3:00-5:00 | Acute → VA admission | Cross-system memory handoff | PHI quarantine + audit + provenance | `[^cross-system]` `[^narrative-context]` `[^provenance]` `[^phi-curation]` `[^audit]` |
-| 5:00-8:00 | Inpatient + shift change | Driver_id distinction across shifts | Organizational knowledge memory + contradiction detection | `[^role-vs-person]` `[^driver-id]` `[^tribal-knowledge]` `[^contradiction]` |
+| 5:00-8:00 | Inpatient + shift change | Driver_id distinction across shifts | Organizational knowledge memory + contradiction detection | `[^role-vs-person]` `[^driver-id]` `[^organizational-knowledge]` `[^contradiction]` |
 | 8:00-10:00 | Discharge & outpatient | Cross-care-setting narrative continuity (THE KILLER MOMENT) | Agent-operational memory | `[^cross-encounter]` `[^operational-memory]` `[^value-prop]` |
 | 10:00-11:30 | Audit trail | Driver_id audit query | Role-vs-person + compliance use case | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` |
 | 11:30-12:00 | Phase 6 & plateau | Memory versioning | Cross-time continuity | `[^versioning]` `[^contradiction]` `[^cross-encounter]` |
@@ -1165,7 +1165,7 @@ GitHub issue (if any) tracking the implementation.
     audit in Segment 3; audit queries are the centerpiece of
     Segment 6.
 
-[^tribal-knowledge]: **Care team organizational knowledge memory
+[^organizational-knowledge]: **Care team organizational knowledge memory
     category**: the practices a unit has developed that aren't
     formal protocol but are how the team actually works. The
     SSRI-over-SNRI preference memory in this scenario is the
