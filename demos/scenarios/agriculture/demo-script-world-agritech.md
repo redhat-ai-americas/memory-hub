@@ -71,7 +71,7 @@ same prescription-generation play — has room to land.
    of the existing precision-ag stack, doesn't compete with any
    of them.[^decision-support-boundary]
 3. The cross-season organizational knowledge moment as the most
-   distinctive demonstration of value.[^cross-season][^tribal-knowledge]
+   distinctive demonstration of value.[^cross-season][^organizational-knowledge]
 4. The applicator approval gate as the demonstration that
    MemoryHub is professional ag-tech, not a vendor demo with
    autonomous spraying.[^humans-in-loop]
@@ -391,7 +391,7 @@ MemoryHub.[^identity-triple][^project-scope]
 
 Recorded clip showing the routine scouting flight, the initial
 tar spot detection, and the cross-season organizational knowledge moment
-that tells the team where to look.[^cross-season][^tribal-knowledge]
+that tells the team where to look.[^cross-season][^organizational-knowledge]
 
 ### Talking points
 
@@ -405,7 +405,7 @@ that tells the team where to look.[^cross-season][^tribal-knowledge]
 > early-stage tar spot. Small. Maybe ten acres. But clear
 > enough that the agent flags it for follow-up."
 
-**The killer moment 1 — multi-generational organizational knowledge (1:00)**: Slow down. Make it land.[^cross-season][^tribal-knowledge]
+**The killer moment 1 — multi-generational organizational knowledge (1:00)**: Slow down. Make it land.[^cross-season][^organizational-knowledge]
 
 > "Now watch what the Agronomy agent does next. It's reading
 > shared memory for context on this detection. And here's what
@@ -442,7 +442,7 @@ that tells the team where to look.[^cross-season][^tribal-knowledge]
 > is the leading edge. *That* is the context that makes
 > agronomic decisions go well."[^value-prop]
 
-**The morning briefing organizational knowledge (30 seconds)**:[^tribal-knowledge]
+**The morning briefing organizational knowledge (30 seconds)**:[^organizational-knowledge]
 
 > "While that's happening, watch what the Farm Manager agent
 > does. It's preparing Tom's morning briefing, and it's
@@ -463,9 +463,9 @@ that tells the team where to look.[^cross-season][^tribal-knowledge]
 
 - **Cross-season pattern recognition**[^cross-season] (the
   killer moment)
-- **Multi-generational organizational knowledge**[^tribal-knowledge]
+- **Multi-generational organizational knowledge**[^organizational-knowledge]
   (Tom's 2024 takeaway captured by Kelsey)
-- **Per-operator preference memory**[^tribal-knowledge] (Tom's
+- **Per-operator preference memory**[^organizational-knowledge] (Tom's
   morning briefing order)
 - **Project-scope reads**[^project-scope]
 - **Value prop landing**[^value-prop]: the headline phrase gets
@@ -607,7 +607,7 @@ Key beats:
 - **Multi-source convergence on diagnosis**[^cross-season]
 - **Contradiction detection**[^contradiction]: drone NDVI
   interpretation vs. soil sensor moisture data
-- **Multi-generational organizational knowledge**[^tribal-knowledge]
+- **Multi-generational organizational knowledge**[^organizational-knowledge]
   (Tom's operating philosophy from 2022)
 - **Driver_id distinction across humans on the same
   role**[^driver-id][^role-vs-person]: Tom, Kelsey, and Linda
@@ -905,7 +905,7 @@ most.
 > One. A memory from Kelsey's notes about her father's
 > twenty-five years of experience with one specific field
 > microclimate, available to the team at the moment of
-> detection.[^cross-season][^tribal-knowledge]
+> detection.[^cross-season][^organizational-knowledge]
 >
 > Two. Multi-source convergence — drone imagery, thermal,
 > soil sensors, weather — synthesized into a single
@@ -956,8 +956,8 @@ a single table:
 |---|---|---|---|---|
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, boundary, data ownership, agents-support-humans | `[^value-prop]` `[^decision-support-boundary]` `[^data-ownership]` `[^humans-in-loop]` |
 | 1:30-3:00 | Operation & team intro | Identity model (10 agents register) | Project membership, fleet provisioning | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
-| 3:00-5:00 | Detection & cross-season recall | Cross-season organizational knowledge (KILLER MOMENT 1) | Multi-generational knowledge transfer, per-operator preferences | `[^cross-season]` `[^tribal-knowledge]` `[^value-prop]` |
-| 5:00-8:00 | Diagnosis confirmation & convergence | Multi-source convergence + intervention philosophy | Driver_id distinction across humans on same role, contradiction, yield-data quarantine | `[^cross-season]` `[^contradiction]` `[^tribal-knowledge]` `[^role-vs-person]` `[^driver-id]` `[^data-curation]` `[^data-ownership]` |
+| 3:00-5:00 | Detection & cross-season recall | Cross-season organizational knowledge (KILLER MOMENT 1) | Multi-generational knowledge transfer, per-operator preferences | `[^cross-season]` `[^organizational-knowledge]` `[^value-prop]` |
+| 5:00-8:00 | Diagnosis confirmation & convergence | Multi-source convergence + intervention philosophy | Driver_id distinction across humans on same role, contradiction, yield-data quarantine | `[^cross-season]` `[^contradiction]` `[^organizational-knowledge]` `[^role-vs-person]` `[^driver-id]` `[^data-curation]` `[^data-ownership]` |
 | 8:00-10:00 | Applicator approval & application | Applicator approval gate (KILLER MOMENT 2) | Self-correcting weather, compliance recordkeeping | `[^humans-in-loop]` `[^contradiction]` `[^audit]` `[^operational-memory]` |
 | 10:00-11:30 | Audit trail & data ownership | Driver_id audit query + data ownership story | Role-vs-person | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` `[^data-ownership]` |
 | 11:30-12:00 | Post-application learning | Explicit cross-season learning capture | Narrative context | `[^cross-season]` `[^narrative-context]` |
@@ -980,7 +980,7 @@ specific cuts in priority order:
    one of two `[^contradiction]` demonstrations.
 3. **Third cut**: drop the per-operator preference memory in
    Segment 3 (Tom's morning briefing order). Save 30 seconds.
-   **Lost milestones**: one of three `[^tribal-knowledge]`
+   **Lost milestones**: one of three `[^organizational-knowledge]`
    demonstrations.
 4. **Fourth cut**: drop one of the two audit queries in Segment 6
    (keep the role-based one, drop the human-based one, mention
@@ -1323,7 +1323,7 @@ GitHub issue (if any) tracking the implementation.
     Segment 7; narrative reasoning surfaced throughout the
     diagnosis and decision phases.
 
-[^tribal-knowledge]: **Multi-generational organizational knowledge
+[^organizational-knowledge]: **Multi-generational organizational knowledge
     memory category**: unique to agriculture among the
     demos because of the multi-generational dimension.
     Senior farmers' understanding of how specific fields

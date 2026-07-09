@@ -435,7 +435,7 @@ team's geographic analysis.[^cross-incident]
 > mean by the context that makes tactical decisions go
 > well."[^value-prop]
 
-**The organizational knowledge moment (30 seconds)**:[^tribal-knowledge]
+**The organizational knowledge moment (30 seconds)**:[^organizational-knowledge]
 
 > "While the Pattern Analyst is doing its work, watch what
 > happens at the Tip Line Triage agent. Tips are starting to
@@ -460,7 +460,7 @@ team's geographic analysis.[^cross-incident]
   killer moment 1)
 - **Project-scope reads**[^project-scope] (Pattern Analyst
   reading the team's shared memory)
-- **Organizational knowledge memory**[^tribal-knowledge] (the IC
+- **Organizational knowledge memory**[^organizational-knowledge] (the IC
   preference filter)
 - **Value prop landing**[^value-prop]: the headline phrase gets
   its first strong demonstration here
@@ -1010,7 +1010,7 @@ a single table:
 |---|---|---|---|---|
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, decision-support boundary, no third rails | `[^value-prop]` `[^decision-support-boundary]` `[^humans-in-loop]` |
 | 1:30-3:00 | Search & team intro | Identity model (10 agents register) | Project membership, fleet provisioning | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
-| 3:00-5:00 | Initial canvass & "we've seen this before" | Cross-incident pattern recognition (KILLER MOMENT 1) | Organizational knowledge | `[^cross-incident]` `[^tribal-knowledge]` `[^value-prop]` |
+| 3:00-5:00 | Initial canvass & "we've seen this before" | Cross-incident pattern recognition (KILLER MOMENT 1) | Organizational knowledge | `[^cross-incident]` `[^organizational-knowledge]` `[^value-prop]` |
 | 5:00-8:00 | Lead development & shift handoff | Driver_id distinction + negative findings discipline | Contradiction detection, agent-operational memory, third-party data quarantine | `[^role-vs-person]` `[^driver-id]` `[^contradiction]` `[^operational-memory]` `[^data-curation]` `[^cross-incident]` |
 | 8:00-10:00 | Convergence | Multi-source convergence linking to prior hypothesis (KILLER MOMENT 2) | Negative findings payoff, source identification quarantine | `[^cross-incident]` `[^narrative-context]` `[^data-curation]` `[^value-prop]` `[^humans-in-loop]` |
 | 10:00-11:30 | Audit trail | Driver_id audit query | Role-vs-person + chain of accountability | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` |
@@ -1401,7 +1401,7 @@ GitHub issue (if any) tracking the implementation.
     *Visible in the demo*: the working hypothesis throughout
     Segments 2-5; post-incident lesson capture in Segment 7.
 
-[^tribal-knowledge]: **Practitioner organizational knowledge memory
+[^organizational-knowledge]: **Practitioner organizational knowledge memory
     category**: the practices an agency or team has developed
     that aren't formal SOP but are how the team actually
     works. The "IC Sergeant Hammond's tip queue preference"
