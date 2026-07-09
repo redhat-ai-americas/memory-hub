@@ -131,7 +131,7 @@ if running long).
 | 1. Opening hook and framing | 1:30 | Title slide → patient archetype slide |
 | 2. Meet the patient and team | 1:30 | Marcus Reeves intro → agent fleet startup |
 | 3. Phases 1-2: acute hospital → VA admission | 2:00 | Recorded clip: agents registering, transfer handoff, goals memory |
-| 4. Phase 3: inpatient rehab + shift change resilience | 3:00 | Recorded clip: daily rounds, cane contradiction, tribal knowledge memory |
+| 4. Phase 3: inpatient rehab + shift change resilience | 3:00 | Recorded clip: daily rounds, cane contradiction, organizational knowledge memory |
 | 5. Phases 4-5: discharge and outpatient continuity | 2:00 | Recorded clip: cross-care-setting handoff, the killer demo moment |
 | 6. The audit trail and driver_id moment | 1:30 | Recorded clip: audit query showing actor/driver split |
 | 7. Phase 6 + plateau contradiction | 0:30 | Brief PCP scene, contradiction-resolved moment |
@@ -170,7 +170,7 @@ we're NOT showing.[^cds-boundary]
 > drug interactions, dosing, evidence-based alerts — and it's
 > doing its job. What you're about to see lives *alongside* your
 > CDS. It holds what CDS doesn't: the soft narrative context, the
-> team's tribal knowledge, the cross-handoff continuity, the
+> team's organizational knowledge, the cross-handoff continuity, the
 > things that determine whether the right clinical decision lands
 > well or poorly."
 
@@ -399,7 +399,7 @@ walkthrough of the inpatient rehab phase. Key beats:
 - Daily rounds — multiple agents reading and writing
 - The Charge Nurse role passing across shifts (different drivers,
   same actor)[^role-vs-person][^driver-id]
-- A tribal knowledge memory being read (Dr. Patel's SSRI
+- A organizational knowledge memory being read (Dr. Patel's SSRI
   preference)[^tribal-knowledge]
 - A patient-narrative memory being written (the call light
   observation)[^narrative-context]
@@ -447,7 +447,7 @@ role-vs-person distinction land.[^role-vs-person][^driver-id][^audit]
 > 'he won't use the call light' note — without any handoff loss.
 > The shift changed; the institutional memory didn't."
 
-**The tribal knowledge moment (45 seconds)**:[^tribal-knowledge][^cds-boundary]
+**The organizational knowledge moment (45 seconds)**:[^tribal-knowledge][^cds-boundary]
 
 > "Now in week 2, something happens that's clinically common.
 > Marcus develops post-stroke depression. Not unusual — the
@@ -513,7 +513,7 @@ detection moment.[^contradiction]
   (the human on shift) changes per session.
 - **Project-scope reads**[^project-scope]: agents reading from the
   team's shared memory.
-- **Tribal knowledge memory**[^tribal-knowledge] (the SSRI
+- **Organizational knowledge memory**[^tribal-knowledge] (the SSRI
   preference).
 - **Patient narrative context**[^narrative-context] (call light
   observation, mentioned in passing).
@@ -529,7 +529,7 @@ detection moment.[^contradiction]
   output while the `actor_id` stays constant. If the harness
   doesn't natively highlight this, add a visible callout in
   post-production editing.
-- **Capture**: Dr. Patel's tribal knowledge memory being read by
+- **Capture**: Dr. Patel's organizational knowledge memory being read by
   the Behavioral Health agent, with the full memory text visible
   on screen long enough to read in the back row.
 - **Capture both memories of the cane contradiction**: PT's
@@ -792,7 +792,7 @@ call to action.
 > well. That phrase is the entire pitch. Your CDS makes the
 > recommendations. Your EHR holds the structured data. MemoryHub
 > holds everything around them — the soft narrative context,
-> the team's tribal knowledge, the cross-handoff continuity,
+> the team's organizational knowledge, the cross-handoff continuity,
 > and the agent fleet's own operational learning."
 
 **What you saw (30 seconds)**: Recap the three or four moments that
@@ -804,7 +804,7 @@ mattered most.
 > referenced by every discipline as they planned
 > interventions.[^narrative-context][^provenance]
 >
-> Two. A care team's tribal knowledge — the SSRI preference —
+> Two. A care team's organizational knowledge — the SSRI preference —
 > persisting across the unit independent of who was on
 > call.[^tribal-knowledge]
 >
@@ -849,7 +849,7 @@ a single table:
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, CDS boundary, AI-supports-humans | `[^value-prop]` `[^cds-boundary]` `[^humans-in-loop]` |
 | 1:30-3:00 | Patient & team intro | Identity model (10 agents register) | Project membership, fleet provisioning | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
 | 3:00-5:00 | Acute → VA admission | Cross-system memory handoff | PHI quarantine + audit + provenance | `[^cross-system]` `[^narrative-context]` `[^provenance]` `[^phi-curation]` `[^audit]` |
-| 5:00-8:00 | Inpatient + shift change | Driver_id distinction across shifts | Tribal knowledge memory + contradiction detection | `[^role-vs-person]` `[^driver-id]` `[^tribal-knowledge]` `[^contradiction]` |
+| 5:00-8:00 | Inpatient + shift change | Driver_id distinction across shifts | Organizational knowledge memory + contradiction detection | `[^role-vs-person]` `[^driver-id]` `[^tribal-knowledge]` `[^contradiction]` |
 | 8:00-10:00 | Discharge & outpatient | Cross-care-setting narrative continuity (THE KILLER MOMENT) | Agent-operational memory | `[^cross-encounter]` `[^operational-memory]` `[^value-prop]` |
 | 10:00-11:30 | Audit trail | Driver_id audit query | Role-vs-person + compliance use case | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` |
 | 11:30-12:00 | Phase 6 & plateau | Memory versioning | Cross-time continuity | `[^versioning]` `[^contradiction]` `[^cross-encounter]` |
@@ -1165,7 +1165,7 @@ GitHub issue (if any) tracking the implementation.
     audit in Segment 3; audit queries are the centerpiece of
     Segment 6.
 
-[^tribal-knowledge]: **Care team tribal knowledge memory
+[^tribal-knowledge]: **Care team organizational knowledge memory
     category**: the practices a unit has developed that aren't
     formal protocol but are how the team actually works. The
     SSRI-over-SNRI preference memory in this scenario is the
@@ -1177,7 +1177,7 @@ GitHub issue (if any) tracking the implementation.
     (touchpoint 3).
     *Tracked in*: not a discrete feature — same emergence as
     narrative context. Category positioning, not separate code.
-    *Visible in the demo*: tribal knowledge moment in Segment 4
+    *Visible in the demo*: organizational knowledge moment in Segment 4
     (Behavioral Health agent reads Dr. Patel's SSRI memory).
 
 [^contradiction]: **Contradiction detection** via the

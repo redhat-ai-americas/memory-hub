@@ -14,7 +14,7 @@ Same shape as the clinical scenario, intentionally. The platform's value
 proposition is consistent across domains: the decisions are made by
 humans using their judgment, the existing tooling makes recommendations,
 and MemoryHub holds the surrounding context — the cross-incident
-patterns, the analyst tribal knowledge, the operational lessons, and
+patterns, the analyst organizational knowledge, the operational lessons, and
 the agent fleet's own learning — that determines whether security
 decisions land well.
 
@@ -103,7 +103,7 @@ The experience layer the existing stack can't easily hold:
   alert fires." Threat intel feeds carry IOCs and campaign attribution;
   MemoryHub carries the *story* of how *this team* responded last time
   and what *they* learned.
-- **Analyst tribal knowledge** — "Tier 1 has learned: alerts on
+- **Analyst organizational knowledge** — "Tier 1 has learned: alerts on
   `svc-backup` during business hours are usually maintenance, but
   alerts after 8pm are 80% worth escalating. Not a formal rule, just
   team experience." This kind of soft knowledge gets passed during
@@ -407,7 +407,7 @@ the agents in the next incident.
 ## Memory touchpoints
 
 Specific memory operations the demo will showcase. Every example is
-narrative context, analyst tribal knowledge, agent-operational state,
+narrative context, analyst organizational knowledge, agent-operational state,
 or cross-incident learning — none duplicate SIEM, EDR, or threat intel
 feed functionality.
 
@@ -436,7 +436,7 @@ value. Every SOC has had the experience of "we saw something like
 this before but I couldn't remember the details." MemoryHub is the
 answer to that experience.
 
-### Touchpoint 2: Tier 1 tribal knowledge (Phase 1)
+### Touchpoint 2: Tier 1 organizational knowledge (Phase 1)
 
 The Tier 1 agent surfaces a related memory from team practice:
 

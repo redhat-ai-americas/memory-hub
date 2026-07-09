@@ -56,7 +56,7 @@ The right framing in every scenario:
 
 > **MemoryHub holds the *context that makes [domain] decisions go well*. The
 > existing decision-support systems make the decisions. MemoryHub holds what
-> they can't easily hold: the soft narrative context, the team's tribal
+> they can't easily hold: the soft narrative context, the team's organizational
 > knowledge, the cross-encounter continuity, and the agent fleet's own
 > operational learning.**
 

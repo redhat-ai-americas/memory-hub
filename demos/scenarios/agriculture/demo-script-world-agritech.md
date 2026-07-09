@@ -70,7 +70,7 @@ same prescription-generation play — has room to land.
    alongside Climate FieldView, Operations Center, and the rest
    of the existing precision-ag stack, doesn't compete with any
    of them.[^decision-support-boundary]
-3. The cross-season tribal knowledge moment as the most
+3. The cross-season organizational knowledge moment as the most
    distinctive demonstration of value.[^cross-season][^tribal-knowledge]
 4. The applicator approval gate as the demonstration that
    MemoryHub is professional ag-tech, not a vendor demo with
@@ -214,7 +214,7 @@ walkthrough if running long).
 |---|---|---|
 | 1. Opening hook and framing | 1:30 | Title slide → operation archetype slide |
 | 2. Meet the operation and team | 1:30 | Hollander Farms intro → agent fleet startup |
-| 3. Detection & cross-season pattern recall | 2:00 | Recorded clip: routine scouting, tar spot detection, multi-generational tribal knowledge |
+| 3. Detection & cross-season pattern recall | 2:00 | Recorded clip: routine scouting, tar spot detection, multi-generational organizational knowledge |
 | 4. Diagnosis confirmation & multi-source convergence | 3:00 | Recorded clip: parallel evidence, contradiction resolution, intervention decision |
 | 5. Applicator approval gate & application | 2:00 | Recorded clip: spray prep, approval interface, execution |
 | 6. Audit trail and data ownership story | 1:30 | Recorded clip: audit query + data ownership framing |
@@ -390,7 +390,7 @@ MemoryHub.[^identity-triple][^project-scope]
 ### What's on screen
 
 Recorded clip showing the routine scouting flight, the initial
-tar spot detection, and the cross-season tribal knowledge moment
+tar spot detection, and the cross-season organizational knowledge moment
 that tells the team where to look.[^cross-season][^tribal-knowledge]
 
 ### Talking points
@@ -405,7 +405,7 @@ that tells the team where to look.[^cross-season][^tribal-knowledge]
 > early-stage tar spot. Small. Maybe ten acres. But clear
 > enough that the agent flags it for follow-up."
 
-**The killer moment 1 — multi-generational tribal knowledge (1:00)**: Slow down. Make it land.[^cross-season][^tribal-knowledge]
+**The killer moment 1 — multi-generational organizational knowledge (1:00)**: Slow down. Make it land.[^cross-season][^tribal-knowledge]
 
 > "Now watch what the Agronomy agent does next. It's reading
 > shared memory for context on this detection. And here's what
@@ -433,7 +433,7 @@ that tells the team where to look.[^cross-season][^tribal-knowledge]
 > retires. It will be available if Kelsey hires a manager. It
 > doesn't walk out the door."
 >
-> "*This* is what the multi-generational tribal knowledge
+> "*This* is what the multi-generational organizational knowledge
 > problem looks like in agriculture, and it's the single most
 > distinctive thing about how MemoryHub fits this domain. The
 > existing precision-ag platforms hold field data and
@@ -442,7 +442,7 @@ that tells the team where to look.[^cross-season][^tribal-knowledge]
 > is the leading edge. *That* is the context that makes
 > agronomic decisions go well."[^value-prop]
 
-**The morning briefing tribal knowledge (30 seconds)**:[^tribal-knowledge]
+**The morning briefing organizational knowledge (30 seconds)**:[^tribal-knowledge]
 
 > "While that's happening, watch what the Farm Manager agent
 > does. It's preparing Tom's morning briefing, and it's
@@ -463,7 +463,7 @@ that tells the team where to look.[^cross-season][^tribal-knowledge]
 
 - **Cross-season pattern recognition**[^cross-season] (the
   killer moment)
-- **Multi-generational tribal knowledge**[^tribal-knowledge]
+- **Multi-generational organizational knowledge**[^tribal-knowledge]
   (Tom's 2024 takeaway captured by Kelsey)
 - **Per-operator preference memory**[^tribal-knowledge] (Tom's
   morning briefing order)
@@ -497,7 +497,7 @@ Key beats:
 
 - Multi-source convergence on the diagnosis
 - A contradiction between drone imagery and soil sensor data
-- The intervention decision rooted in tribal knowledge from
+- The intervention decision rooted in organizational knowledge from
   Tom's operating philosophy
 - Per-operator role distinction (Tom and Kelsey both consult
   the Agronomy agent but with different driver_ids)[^role-vs-person][^driver-id]
@@ -607,7 +607,7 @@ Key beats:
 - **Multi-source convergence on diagnosis**[^cross-season]
 - **Contradiction detection**[^contradiction]: drone NDVI
   interpretation vs. soil sensor moisture data
-- **Multi-generational tribal knowledge**[^tribal-knowledge]
+- **Multi-generational organizational knowledge**[^tribal-knowledge]
   (Tom's operating philosophy from 2022)
 - **Driver_id distinction across humans on the same
   role**[^driver-id][^role-vs-person]: Tom, Kelsey, and Linda
@@ -893,7 +893,7 @@ slide with contact info / call to action.
 > Operations Center holds the equipment telemetry. xarvio
 > predicts the disease risk. MemoryHub holds everything
 > around them — the cross-season patterns, the
-> multi-generational tribal knowledge, the operational
+> multi-generational organizational knowledge, the operational
 > lessons from prior seasons, and the agent fleet's own
 > learning."
 
@@ -956,7 +956,7 @@ a single table:
 |---|---|---|---|---|
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, boundary, data ownership, agents-support-humans | `[^value-prop]` `[^decision-support-boundary]` `[^data-ownership]` `[^humans-in-loop]` |
 | 1:30-3:00 | Operation & team intro | Identity model (10 agents register) | Project membership, fleet provisioning | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
-| 3:00-5:00 | Detection & cross-season recall | Cross-season tribal knowledge (KILLER MOMENT 1) | Multi-generational knowledge transfer, per-operator preferences | `[^cross-season]` `[^tribal-knowledge]` `[^value-prop]` |
+| 3:00-5:00 | Detection & cross-season recall | Cross-season organizational knowledge (KILLER MOMENT 1) | Multi-generational knowledge transfer, per-operator preferences | `[^cross-season]` `[^tribal-knowledge]` `[^value-prop]` |
 | 5:00-8:00 | Diagnosis confirmation & convergence | Multi-source convergence + intervention philosophy | Driver_id distinction across humans on same role, contradiction, yield-data quarantine | `[^cross-season]` `[^contradiction]` `[^tribal-knowledge]` `[^role-vs-person]` `[^driver-id]` `[^data-curation]` `[^data-ownership]` |
 | 8:00-10:00 | Applicator approval & application | Applicator approval gate (KILLER MOMENT 2) | Self-correcting weather, compliance recordkeeping | `[^humans-in-loop]` `[^contradiction]` `[^audit]` `[^operational-memory]` |
 | 10:00-11:30 | Audit trail & data ownership | Driver_id audit query + data ownership story | Role-vs-person | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` `[^data-ownership]` |
@@ -996,7 +996,7 @@ down to ~11:10, well inside the 15-minute hard cap.
 If you finish at 11 minutes and want to fill to 13, the easy
 extensions are:
 
-1. Spend more time on Segment 3's tribal knowledge moment. Let
+1. Spend more time on Segment 3's organizational knowledge moment. Let
    the audience really sit with Tom's quoted observation about
    Field 7's microclimate. The multi-generational angle is
    distinctive enough that it benefits from extra time.
@@ -1323,7 +1323,7 @@ GitHub issue (if any) tracking the implementation.
     Segment 7; narrative reasoning surfaced throughout the
     diagnosis and decision phases.
 
-[^tribal-knowledge]: **Multi-generational tribal knowledge
+[^tribal-knowledge]: **Multi-generational organizational knowledge
     memory category**: unique to agriculture among the
     demos because of the multi-generational dimension.
     Senior farmers' understanding of how specific fields
@@ -1334,7 +1334,7 @@ GitHub issue (if any) tracking the implementation.
     mechanism for capturing it across generations.
     *Defined in*: `README.md`
     ("What MemoryHub holds in this scenario" — second
-    bullet, "Multi-generational tribal knowledge");
+    bullet, "Multi-generational organizational knowledge");
     `disease-detection-hollander-farms.md`
     (touchpoints 1, 3, 5).
     *Tracked in*: not a discrete feature — same emergence

@@ -20,7 +20,7 @@ Consolidated 2026-07-08 from: `research/surveys/agent-memory-landscape-2026.md`,
 
 - **Platform instability destroyed accumulated context.** Built on OpenClaw ("powerful and inherently unstable"); harness updates risked "forgetting everything you've told them and trained them to do." Agent knowledge was coupled to a specific harness version. Failures included agents sending "Terminated" messages, denying live app connections, and one agent (Zosia) interjecting in Slack after months of silence because she was "inevitable, apparently."
 - **Maintenance burden on individuals.** "Every time an agent broke, the person it belonged to had to fix it themselves." "For every tinkerer, there are a lot of people who want the benefits of an agent without the obligation of having to manage and mend it." The personal-agent model failed the non-tinkerer majority.
-- **Context isolation.** "A one-on-one employee only builds up context on your work, often missing out on what the rest of the organization is doing." Personal agents could not "absorb information from across the company to accrue tribal knowledge" by construction.
+- **Context isolation.** "A one-on-one employee only builds up context on your work, often missing out on what the rest of the organization is doing." Personal agents could not "absorb information from across the company to accrue organizational knowledge" by construction.
 - **Knowledge fragility.** "A personal agent's value is tied to whomever trained it, and disappears if that employee leaves." No continuity mechanism.
 - **Their pivot:** shared team agents with defined jobs (e.g., a weekly engineering skill spanning Intercom → GitHub → Linear → Slack), exploring Claude Managed Agents, keeping per-user connections inside shared agents. Open questions: permissions for shared agents, per-department vs. company-wide agents, superagent vs. specialist roster.
 
@@ -47,7 +47,7 @@ Consolidated 2026-07-08 from: `research/surveys/agent-memory-landscape-2026.md`,
 
 *"Gartner on Context Graphs: Top Insights, Capabilities & Implementation Recommendations for 2026"* — Emily Winks, Atlan.
 
-**The distinction:** Knowledge graphs are the semantic layer (entities, ontologies — what things ARE). Context graphs are the procedural layer (decision traces, workflow logic, tribal knowledge — how things HAPPEN). Context graphs augment, not replace, knowledge graphs. Gartner predicts 50%+ of AI agent systems will use context graphs by 2028.
+**The distinction:** Knowledge graphs are the semantic layer (entities, ontologies — what things ARE). Context graphs are the procedural layer (decision traces, workflow logic, organizational knowledge — how things HAPPEN). Context graphs augment, not replace, knowledge graphs. Gartner predicts 50%+ of AI agent systems will use context graphs by 2028.
 
 **MemoryHub is a context graph:**
 

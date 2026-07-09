@@ -124,7 +124,7 @@ don't try to hold:
   last year's, the *pattern* of how a particular field behaves
   under specific weather conditions, the *story* of what worked
   and didn't work in prior interventions.
-- **Multi-generational tribal knowledge** — the soft expertise
+- **Multi-generational organizational knowledge** — the soft expertise
   that walks out the door when the senior farmer retires or the
   operation changes hands.
 - **Cross-fleet operational state** — when the spray drone is
@@ -489,7 +489,7 @@ will be read by future scouting flights.
 
 These are the specific memory operations the demo will showcase.
 Every example below is **cross-season field knowledge,
-multi-generational tribal knowledge, operational state,
+multi-generational organizational knowledge, operational state,
 applicator approval gates, or compliance context** — none of it
 duplicates Climate FieldView, Operations Center, or any other
 precision-ag platform.
@@ -517,7 +517,7 @@ specific microclimate is the tar spot leading edge for the
 field — is now informing this year's response.
 
 **Why this is the load-bearing memory**: this is the
-multi-generational tribal knowledge that walks out the door
+multi-generational organizational knowledge that walks out the door
 when farmers retire or operations change hands. In current
 practice, Tom would have remembered this in his head, and if
 he wasn't around, the memory would be lost. MemoryHub holds it
@@ -558,7 +558,7 @@ agronomist would have to pull data from four places and form
 the diagnosis manually, often days later. MemoryHub does the
 synthesis at the moment the question is asked.
 
-### Touchpoint 3: Multi-generational tribal knowledge (Phase 3)
+### Touchpoint 3: Multi-generational organizational knowledge (Phase 3)
 
 When the team is debating whether to spray, the Agronomy agent
 surfaces a memory that Kelsey wrote three years ago after a

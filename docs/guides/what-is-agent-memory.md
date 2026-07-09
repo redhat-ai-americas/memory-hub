@@ -46,7 +46,7 @@ Most real deployments are hybrid: local files for personal, machine-specific con
 
 ## The ladder: matching the tool to the situation
 
-**One developer, one machine, coding.** Use your harness's built-in memory — Claude Code's CLAUDE.md and memory system, or the equivalent in your harness — and be happy. It's local, zero-setup, and the forensic question never comes up because you are the only actor. Adding a memory platform here is pure overhead.
+**One developer, one machine, coding.** Use your harness's built-in memory — Claude Code's CLAUDE.md and memory system, or the equivalent in your harness — and you are well-served. It's local, zero-setup, and the forensic question never comes up because you are the only actor. Adding a memory platform here is pure overhead.
 
 **Still just you, but beyond coding.** You want your harness (Claude Code, OpenClaw, whatever) to accumulate knowledge across domains — research, writing, projects. This is the [llm-wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) / Obsidian territory: agent-maintained markdown, compiled once and kept current, with an index the agent reads first. It works well, it's yours, and it's the right answer. Note what makes it work: one writer, one reader, moderate scale.
 

@@ -13,7 +13,7 @@ changes, and prior incident learning.
 
 That phrase is the entire frame for this scenario. Every sensor
 correlation, every hypothesis update, every negative finding, every
-tribal knowledge memory in this doc is in service of it. The
+organizational knowledge memory in this doc is in service of it. The
 tactical decisions in this scenario are made by the human Incident
 Commander and the supporting analysts. The agents help them hold
 the operational context that determines whether those decisions
@@ -538,7 +538,7 @@ practice, that recall is unreliable and depends on whether
 the right person is in the room. MemoryHub makes it
 structural.
 
-### Touchpoint 4: Tribal knowledge memory (Phase 1)
+### Touchpoint 4: Organizational knowledge memory (Phase 1)
 
 Early in the search, the Tip Line Triage agent reads a memory
 written months ago about the Incident Commander:
@@ -557,7 +557,7 @@ later, the agent will check whether the next IC has different
 preferences.
 
 **Why it's the right kind of memory**: this is exactly the
-soft tribal knowledge that matters operationally but lives
+soft organizational knowledge that matters operationally but lives
 nowhere in current systems. It's not in CAD. It's not in any
 SOP. It walks out the door when Hammond retires.
 

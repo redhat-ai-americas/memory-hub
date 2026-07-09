@@ -139,7 +139,7 @@ or don't try to hold:
   dynamics, evacuation route reliability, structure defense
   outcomes from prior incidents on similar fuel types and
   similar terrain.
-- **Multi-agency tribal knowledge** — the soft dynamics of
+- **Multi-agency organizational knowledge** — the soft dynamics of
   working with specific cooperators that aren't in any formal
   SOP.
 - **Real-time hypothesis state** — the team's current best
@@ -522,7 +522,7 @@ future similar incidents.
 
 These are the specific memory operations the demo will showcase.
 Every example below is **operational period state, cross-incident
-fuel behavior memory, multi-agency tribal knowledge, real-time
+fuel behavior memory, multi-agency organizational knowledge, real-time
 hypothesis tracking, or post-event learning** — none of it
 duplicates CAD, ROSS, GIS, EOC software, or any other existing
 emergency response system.
@@ -602,7 +602,7 @@ audience will recognize the experience of "I remember
 something like this from last summer but I can't find it."
 MemoryHub makes it structural.
 
-### Touchpoint 3: Multi-agency tribal knowledge (Phase 1)
+### Touchpoint 3: Multi-agency organizational knowledge (Phase 1)
 
 When the Liaison Officer is preparing for the morning's
 multi-agency coordination call, the Multi-Agency Liaison

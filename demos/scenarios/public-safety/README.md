@@ -71,7 +71,7 @@ The things existing LEO systems can't easily hold or don't try to hold:
   as data points — "the LPR hit at 03:42 and the doorbell camera
   detection at 03:51 are 1.2 miles apart, consistent with the
   subject continuing on foot in the projected direction."
-- **Tribal knowledge across incident commanders and shifts** —
+- **Organizational knowledge across incident commanders and shifts** —
   "IC Sergeant Hammond prefers tip line items pre-scored for
   credibility before they hit her queue. The Tip Line Triage agent
   learned this last incident."

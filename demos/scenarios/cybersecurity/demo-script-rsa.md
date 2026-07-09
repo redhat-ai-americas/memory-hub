@@ -207,7 +207,7 @@ we're NOT showing.[^detection-boundary]
 > "What you're about to see lives *alongside* all of those. It
 > holds what they don't: the cross-incident patterns your team has
 > seen, the operational lessons you learned from past incidents,
-> the analyst tribal knowledge that walks out the door when staff
+> the analyst organizational knowledge that walks out the door when staff
 > turn over, and the per-customer or per-tenant context that
 > doesn't fit cleanly in a SOAR playbook."
 
@@ -383,7 +383,7 @@ landing. Slow down. Make it land.[^cross-incident]
 > decision. *That* is what we mean by the context that makes
 > security decisions go well."[^value-prop]
 
-**The tribal knowledge moment (30 seconds)**:[^tribal-knowledge]
+**The organizational knowledge moment (30 seconds)**:[^tribal-knowledge]
 
 > "While the Tier 1 agent is making the escalation decision,
 > watch what else it surfaces — a piece of team practice that
@@ -405,7 +405,7 @@ landing. Slow down. Make it land.[^cross-incident]
   killer moment)
 - **Project-scope reads**[^project-scope] (Tier 1 reading the
   team's shared memory)
-- **Analyst tribal knowledge**[^tribal-knowledge] (the off-hours
+- **Analyst organizational knowledge**[^tribal-knowledge] (the off-hours
   service account heuristic)
 - **Value prop landing**[^value-prop]: the headline phrase gets
   its first strong demonstration here
@@ -422,7 +422,7 @@ landing. Slow down. Make it land.[^cross-incident]
   its escalation decision. The audience needs to see "the
   agent surfaced this memory at 02:18; the analyst escalated at
   02:38" with timestamps visible.
-- **Capture**: the tribal knowledge memory being read in the
+- **Capture**: the organizational knowledge memory being read in the
   same flow.
 - The visual styling should make the prior incident reference
   ("IR-2024-117") clickable-looking, even if it's just text —
@@ -878,7 +878,7 @@ contact info / call to action.
 > correlates the logs. Your EDR detects on the endpoints.
 > Your SOAR runs the playbooks. Your threat intel feed
 > delivers the IOCs. MemoryHub holds everything around them
-> — the cross-incident patterns, the team's tribal knowledge,
+> — the cross-incident patterns, the team's organizational knowledge,
 > the operational lessons from prior incidents, and the
 > agent fleet's own learning."
 
@@ -937,7 +937,7 @@ a single table:
 |---|---|---|---|---|
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, detection boundary, no-auto-containment | `[^value-prop]` `[^detection-boundary]` `[^humans-in-loop]` |
 | 1:30-3:00 | Incident & team intro | Identity model (10 agents register) | Project membership, fleet provisioning | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
-| 3:00-5:00 | Detection & "we've seen this before" | Cross-incident pattern recognition (KILLER MOMENT 1) | Tribal knowledge | `[^cross-incident]` `[^tribal-knowledge]` `[^value-prop]` |
+| 3:00-5:00 | Detection & "we've seen this before" | Cross-incident pattern recognition (KILLER MOMENT 1) | Organizational knowledge | `[^cross-incident]` `[^tribal-knowledge]` `[^value-prop]` |
 | 5:00-8:00 | Investigation & on-call rotation | Driver_id distinction + role-vs-person | Contradiction detection, agent-operational memory, sensitive-data quarantine | `[^role-vs-person]` `[^driver-id]` `[^contradiction]` `[^operational-memory]` `[^data-curation]` |
 | 8:00-10:00 | Containment with operational lessons | Cross-incident operational lesson (KILLER MOMENT 2) | Per-customer context, credential curation | `[^cross-incident]` `[^narrative-context]` `[^data-curation]` |
 | 10:00-11:30 | Audit trail | Driver_id audit query | Role-vs-person + chain of evidence | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` |
@@ -1061,7 +1061,7 @@ If a question in Q&A pushes toward any of these, deflect:
 
 5. **The "MemoryHub as attack surface" concern**: this is going
    to come up. The audience will instantly recognize that an
-   agent memory layer holding tribal knowledge, prior incidents,
+   agent memory layer holding organizational knowledge, prior incidents,
    and per-customer context is itself a high-value target. The
    prepared answer should cover: project-scope membership
    enforcement, audit trail integrity, RBAC on read/write,
@@ -1319,7 +1319,7 @@ GitHub issue (if any) tracking the implementation.
     in Segments 4 and 5; audit queries are the centerpiece of
     Segment 6.
 
-[^tribal-knowledge]: **Analyst tribal knowledge memory
+[^tribal-knowledge]: **Analyst organizational knowledge memory
     category**: the practices a SOC team has developed that
     aren't formal SIEM rules or SOAR playbooks but are how the
     team actually works. The "service account alerts after 8pm
@@ -1334,7 +1334,7 @@ GitHub issue (if any) tracking the implementation.
     (touchpoint 2).
     *Tracked in*: not a discrete feature — same emergence as
     narrative context. Category positioning, not separate code.
-    *Visible in the demo*: tribal knowledge moment in Segment 3
+    *Visible in the demo*: organizational knowledge moment in Segment 3
     (Tier 1 agent surfaces the off-hours service account
     heuristic alongside the IR-2024-117 recall).
 

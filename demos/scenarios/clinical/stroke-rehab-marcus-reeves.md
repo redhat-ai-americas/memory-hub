@@ -87,7 +87,7 @@ CDS layer don't try to hold:
 - **Patient narrative context** — what makes this particular patient
   tick, his goals beyond the structured ones, what works and doesn't
   work for him personally
-- **Care team tribal knowledge** — practices the team uses that aren't
+- **Care team organizational knowledge** — practices the team uses that aren't
   in the policy manual
 - **Cross-encounter narrative continuity** — the story that connects
   inpatient rehab to outpatient PT to community reintegration
@@ -392,7 +392,7 @@ reactivation triggers in shared memory for future episodes.
 ## Memory touchpoints
 
 These are the specific memory operations the demo will showcase.
-Every example below is **narrative context, care team tribal
+Every example below is **narrative context, care team organizational
 knowledge, agent-operational state, or cross-encounter narrative
 continuity** — none of it duplicates the EHR or CDS.
 
@@ -440,7 +440,7 @@ walks out the door when nursing staff turn over. The PCT on Tuesday
 night might never encounter this fact unless someone tells her —
 and "someone tells her" is exactly what MemoryHub does.
 
-### Touchpoint 3: Team tribal knowledge (Phase 3)
+### Touchpoint 3: Team organizational knowledge (Phase 3)
 
 PM&R agent holds a memory written by Dr. Patel last month, before
 this patient ever arrived:
@@ -704,11 +704,11 @@ specified in it**:
 - The specific cane-acceptance contradiction (the kind of disagreement
   the structural overlap in Sidebar 5b makes likely, but the specific
   example is invented)
-- Dr. Patel's tribal knowledge about SSRIs over SNRIs (an invented
+- Dr. Patel's organizational knowledge about SSRIs over SNRIs (an invented
   example of the kind of practice memory MemoryHub is designed to
   hold)
 - The dysphagia diet timing rule about "never Friday after 3pm" (an
-  invented example of unit-level tribal knowledge)
+  invented example of unit-level organizational knowledge)
 - The specific therapy session content and protocols (the guideline
   endorses task-specific practice but doesn't prescribe protocols)
 

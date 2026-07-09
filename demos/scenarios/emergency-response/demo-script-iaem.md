@@ -548,7 +548,7 @@ operational tempo:
 - Cross-incident fuel behavior memory recall
 - The contradiction between fire behavior model and field
   observation
-- Multi-agency tribal knowledge applied
+- Multi-agency organizational knowledge applied
 - A sensitive-data quarantine moment
 
 ### Talking points
@@ -623,7 +623,7 @@ operational tempo:
 > structural way to surface the discrepancy without it
 > being a confrontation."
 
-**Multi-agency tribal knowledge (30 seconds)**:[^tribal-knowledge]
+**Multi-agency organizational knowledge (30 seconds)**:[^tribal-knowledge]
 
 > "And one more piece of this segment. The Liaison Officer
 > is preparing for the afternoon multi-agency coordination
@@ -661,7 +661,7 @@ operational tempo:
   recall**[^cross-incident] (the killer moment 2)
 - **Contradiction detection**[^contradiction]: model
   output vs. field observation
-- **Multi-agency tribal knowledge**[^tribal-knowledge]
+- **Multi-agency organizational knowledge**[^tribal-knowledge]
   (the R5 strike team briefing pattern)
 - **Sensitive-data quarantine**[^data-curation] catching
   resident PII
@@ -679,7 +679,7 @@ operational tempo:
   contradiction**: the FBAN's earlier model output and the
   RESL's contradiction memory. When `report_contradiction`
   is called, the relationship should be visually rendered.
-- **Capture**: the R5 strike team tribal knowledge memory
+- **Capture**: the R5 strike team organizational knowledge memory
   being read by the Liaison agent.
 - **Capture both halves of the resident PII quarantine**:
   the rejected attempt with the named residents visible
@@ -957,7 +957,7 @@ info / call to action.
 > software coordinates across agencies. MemoryHub holds
 > everything around them — the operational period handoff
 > state, the cross-incident learning from prior fires, the
-> multi-agency tribal knowledge, and the working memory of
+> multi-agency organizational knowledge, and the working memory of
 > the incident that doesn't fit in any document."
 
 **What you saw (30 seconds)**: Recap the moments that
@@ -1019,7 +1019,7 @@ scan as a single table:
 | 0:00-1:30 | Opening hook & framing | (None — setup) | Phrase, boundary, no autonomous decisions | `[^value-prop]` `[^decision-support-boundary]` `[^humans-in-loop]` |
 | 1:30-3:00 | Incident & team intro | Identity model (10 ICS-position agents register) | Project membership | `[^identity-triple]` `[^project-scope]` `[^cli-provisioning]` |
 | 3:00-5:00 | Day 2 morning op period start | Operational period handoff state transfer (KILLER MOMENT 1) | Per-IC preference memory | `[^op-period]` `[^tribal-knowledge]` `[^value-prop]` |
-| 5:00-8:00 | Cross-incident recall & pre-positioning | Cross-incident fuel behavior recall (KILLER MOMENT 2) | Model-vs-field contradiction, multi-agency tribal knowledge, resident PII quarantine | `[^cross-incident]` `[^contradiction]` `[^tribal-knowledge]` `[^data-curation]` |
+| 5:00-8:00 | Cross-incident recall & pre-positioning | Cross-incident fuel behavior recall (KILLER MOMENT 2) | Model-vs-field contradiction, multi-agency organizational knowledge, resident PII quarantine | `[^cross-incident]` `[^contradiction]` `[^tribal-knowledge]` `[^data-curation]` |
 | 8:00-10:00 | Wind shift event | Coordinated response with operational period handoff state paying off | Self-correcting Weather agent, humans-in-loop reinforcement | `[^op-period]` `[^cross-incident]` `[^contradiction]` `[^humans-in-loop]` |
 | 10:00-11:30 | Audit trail | Driver_id audit query | Role-vs-person + chain of accountability | `[^audit]` `[^driver-id]` `[^role-vs-person]` `[^identity-triple]` |
 | 11:30-12:00 | Op period handoff & post-event | Operational period handoff at end of period | Cross-incident learning capture | `[^op-period]` `[^cross-incident]` |
@@ -1042,7 +1042,7 @@ specific cuts in priority order:
    shared memory — we'll talk about that in Q&A"). Save 25
    seconds. **Lost milestones**: `[^data-curation]` is
    reduced to a mention, not a demonstration.
-3. **Third cut**: shorten the multi-agency tribal knowledge
+3. **Third cut**: shorten the multi-agency organizational knowledge
    moment (R5 strike team briefing pattern) in Segment 4 to
    a single sentence. Save 20 seconds. **Lost milestones**:
    half of `[^tribal-knowledge]`'s demonstration.
@@ -1186,7 +1186,7 @@ fear:
 5. **The "MemoryHub as attack surface" concern**: this will
    come up. EM audiences will recognize that an agent
    memory layer holding incident operational state, prior
-   incident learning, and inter-agency tribal knowledge is
+   incident learning, and inter-agency organizational knowledge is
    a high-value target. The prepared answer should cover:
    project-scope membership enforcement, audit trail
    integrity, RBAC on read/write, curation pipeline
@@ -1409,7 +1409,7 @@ the GitHub issue (if any) tracking the implementation.
     Segments 3-7 implicitly demonstrates the
     enforcement.
 
-[^tribal-knowledge]: **Practitioner tribal knowledge
+[^tribal-knowledge]: **Practitioner organizational knowledge
     memory category**: practices a team or agency has
     developed that aren't formal SOP but are how the team
     actually works. In the emergency response scenario,

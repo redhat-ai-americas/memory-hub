@@ -75,7 +75,7 @@ don't try to hold:
   last August, expected rate of spread was X chains per hour."
   Prior incident postmortems capture this in writing, and the
   writing gets filed and forgotten.
-- **Multi-agency tribal knowledge** — the soft dynamics of working
+- **Multi-agency organizational knowledge** — the soft dynamics of working
   with specific cooperating agencies, mutual aid partners, and NGO
   partners. "When working with USFS Region 5 strike teams, brief
   through the strike team leader rather than directly. The Red

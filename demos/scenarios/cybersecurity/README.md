@@ -14,7 +14,7 @@ are made by analysts and incident responders using their judgment.
 Detection systems make recommendations. EDR and SIEM platforms hold the
 structured data. MemoryHub holds the surrounding context that determines
 whether a security decision goes well or poorly: what the team has
-learned from past incidents, which tribal practices the on-call analyst
+learned from past incidents, which institutional practices the on-call analyst
 needs to know, and what the agent fleet has discovered about its own
 operational patterns.
 
@@ -55,7 +55,7 @@ The things detection tools can't easily hold or don't try to hold:
   for similar SP creation events even before the alert fires." Threat
   intel feeds carry IOCs; MemoryHub carries the *story* of how the
   team responded last time.
-- **Analyst tribal knowledge** — "Tier 1 has learned: alerts on
+- **Analyst organizational knowledge** — "Tier 1 has learned: alerts on
   `svc-backup` during business hours are usually maintenance, but
   alerts after 8pm are 80% worth escalating. Not a formal rule, just
   team experience." This kind of practice gets whispered between

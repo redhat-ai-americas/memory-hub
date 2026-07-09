@@ -15,7 +15,7 @@ proposition is consistent across verticals: the agronomic decisions
 are made by the farmer and the farm team using their judgment, the
 existing precision-ag tools provide the data, and MemoryHub holds the
 surrounding context — the cross-season field knowledge, the
-multi-generational tribal knowledge, the equipment coordination
+multi-generational organizational knowledge, the equipment coordination
 state, and the agent fleet's own operational learning — that
 determines whether agronomic decisions land well.
 
@@ -68,7 +68,7 @@ don't try to hold:
   Variable-rate prescriptions can encode the *current* density,
   but the *reasoning* — and how to revise it as conditions change
   — lives in MemoryHub.
-- **Multi-generational tribal knowledge** — agriculture is
+- **Multi-generational organizational knowledge** — agriculture is
   uniquely multi-generational. The senior farmer's understanding
   of how a field behaves in dry years, what insect pressures
   show up in which weather patterns, which hybrids work in the
@@ -89,7 +89,7 @@ don't try to hold:
   source before every flight." The kind of operational lesson
   that gets learned the hard way and then has to be remembered
   forever.
-- **Per-operator tribal knowledge** — "Tom prefers the morning
+- **Per-operator organizational knowledge** — "Tom prefers the morning
   briefing to start with equipment health, then weather, then
   field issues. Linda prefers it the other way around because she
   handles compliance first thing." Soft preferences that shape

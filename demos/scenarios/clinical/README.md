@@ -20,7 +20,7 @@ It's load-bearing because it does three things at once:
    MemoryHub doesn't try to be either of those things.
 3. **Carves out a specific value MemoryHub provides** — the surrounding
    context that determines whether a clinical decision goes well or
-   poorly. The patient's preferences, the team's tribal knowledge, the
+   poorly. The patient's preferences, the team's organizational knowledge, the
    continuity across handoffs, the cross-encounter narrative thread.
 
 Memorize this phrase. Use it.
@@ -62,7 +62,7 @@ push out of scope:
   structured, and aren't searchable in the EHR — but they determine
   whether the care plan actually works for the human being in the bed.
 
-- **Care team tribal knowledge** — practices that aren't formal protocol
+- **Care team organizational knowledge** — practices that aren't formal protocol
   but the team knows. "Dr. Patel prefers SSRIs over SNRIs for post-stroke
   depression based on her experience." "This unit advances dysphagia diet
   before weekend if patient stable 48h, never Friday after 3pm." These
