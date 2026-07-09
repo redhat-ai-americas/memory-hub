@@ -19,9 +19,13 @@ if [ -z "${MEMORYHUB_URL:-}" ]; then
     if command -v jq >/dev/null 2>&1; then
       MEMORYHUB_URL=$(jq -r '.url // empty' "$CONFIG_FILE" 2>/dev/null) || true
     elif command -v python3 >/dev/null 2>&1; then
-      MEMORYHUB_URL=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('url',''))" "$CONFIG_FILE" 2>/dev/null) || true
+      MEMORYHUB_URL=$(python3 -c \
+        "import json,sys; print(json.load(open(sys.argv[1])).get('url',''))" \
+        "$CONFIG_FILE" 2>/dev/null) || true
     else
-      MEMORYHUB_URL=$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*"url"[[:space:]]*:[[:space:]]*"//;s/"$//' ) || true
+      MEMORYHUB_URL=$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        "$CONFIG_FILE" 2>/dev/null | head -1 \
+        | sed 's/.*"url"[[:space:]]*:[[:space:]]*"//;s/"$//') || true
     fi
   fi
 fi

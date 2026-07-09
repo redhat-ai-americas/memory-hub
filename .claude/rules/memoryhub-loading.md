@@ -1,4 +1,4 @@
-# MemoryHub Loading: Lazy + Rebias on Pivot
+# MemoryHub Loading: Just-in-Time
 
 This project uses MemoryHub for persistent, centralized agent memory across
 conversations. You MUST use it.
@@ -9,33 +9,29 @@ file. Do not hand-edit this file directly — your changes will be overwritten.
 
 ## At session start
 
-Check for a `<memoryhub-context>` block in your conversation context.
-If present, the SessionStart hook has pre-loaded project and user
-memories -- use them as your working set. Do NOT call `register_session`
-or `search_memory` yet.
+A `<memoryhub-context>` block should appear in your conversation context,
+injected by the SessionStart hook before you see the first prompt. Use
+its contents as initial context. Do NOT call `register_session` or
+`search_memory` -- the hook already did this.
 
-If no `<memoryhub-context>` block is present (hook not configured or
-failed silently), fall back to the manual flow: read your API key from
-`~/.config/memoryhub/api-key` (trim whitespace), call
-`register_session(api_key="<key>")`, then after the first user turn
-derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
+If no `<memoryhub-context>` block is present (CLI not installed or hook
+misconfigured), fall back to the manual flow: read your API key from
+`~/.config/memoryhub/api-key` (trim whitespace) and call
+`register_session(api_key="<key>")`. Do NOT call `search_memory` --
+there is no working set in this pattern.
 
-## During the session -- watch for pivots
+## During the session
 
-A pivot is any of:
+- Call `search_memory` only when you encounter a question whose answer
+  might be in memory. Each search is one-shot.
+- Triggers that warrant a search: the user asks "what did we decide
+  about X?", references a project-specific term you don't recognize, or
+  asks for a recommendation that should reflect prior decisions.
+- After acting on a search result, let it drop from context once the
+  immediate question is answered. Do not accumulate a working set.
 
-1. **Subsystem change** -- the user changes topic to a different area of
-   the project (e.g., from "deployment" to "UI", or from "MCP server" to
-   "SDK").
-2. **Unknown concept** -- the user references a project-specific term that
-   isn't in your working set.
-3. **Explicit switch** -- the user says "let's switch to...", "now let's
-   talk about...", or similar phrasing.
-
-When you detect a pivot, call `search_memory` with a query for the new
-topic. **ADD the results to your working set; do not replace it.** The
-prior topic may come back later in the same session, and the agent should
-not have to re-search for memories it already saw.
+This pattern minimizes startup token cost at the price of missing
+implicit context. Use it for narrow one-shot tooling sessions.
 
 ## Memory hygiene
 
@@ -56,22 +52,7 @@ not have to re-search for memories it already saw.
 
 ## Contradiction handling
 
-This project runs with `cross_domain_contradiction_detection: false` in
-`.memoryhub.yaml`, which means you only catch contradictions for memories
-inside your current working set. Memories from other domains will not be
-checked — that's a deliberate tradeoff for token efficiency over coverage.
-
-When you DO notice a contradiction with a loaded memory, call
-`report_contradiction` with the memory_id and a one-sentence description.
-
-## Campaign enrollment
-
-This project is enrolled in the following campaigns:
-- memory-hub-test
-
-When calling `search_memory`, pass `project_id` set to this project's
-identifier so campaign-scoped memories appear in your results. Campaign
-memories contain cross-project knowledge shared by all enrolled projects.
-When writing campaign-scoped memories, use `scope="campaign"` with
-`owner_id` set to the campaign UUID and `project_id` for enrollment
-verification.
+When you notice the user's behavior contradicting a memory you have
+loaded, call `report_contradiction` with the memory_id and a one-sentence
+description of the observed behavior. The server tracks contradiction
+counts and surfaces stale memories for review.

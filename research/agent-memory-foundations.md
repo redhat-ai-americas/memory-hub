@@ -1,8 +1,6 @@
-# Agent Memory Foundations
+# Agent Memory Foundations: Types and Terms
 
-> Consolidated 2026-07-08 from: `research/agent-memory-primer.md`, `research/agent-memory-types.md`. Originals removed; full text in git history.
-
-This document orients contributors to the concepts MemoryHub builds on: the core vocabulary of agent memory, and the classification axes used across the research literature. It assumes you know what an LLM agent is and have used local agent harnesses like Claude Code or Cursor. For the broader research landscape, see the [Memory Systems for LLM-Based Agents survey](https://arxiv.org/abs/2603.10062) and the surveys in this `research/` directory.
+A primer on the vocabulary and classification axes of agent memory, as used across the research literature. It assumes you know what an LLM agent is and have used a local agent harness like Claude Code or Cursor. For the conceptual argument — why memory is a context-assembly problem and when it becomes a platform concern — read [What Agent Memory Really Is](../docs/guides/what-is-agent-memory.md); this document is the reference layer underneath it. For the broader research landscape, see the [Memory Systems for LLM-Based Agents survey](https://arxiv.org/abs/2603.10062) and the surveys in this `research/` directory.
 
 ## Core terms
 
@@ -14,31 +12,11 @@ This document orients contributors to the concepts MemoryHub builds on: the core
 
 **Durable memory.** State that survives across sessions: facts learned, preferences accumulated, decisions made, experiences recallable. Unlike working memory, durable memory can live anywhere — a markdown file, SQLite, a vector store, a managed memory service, a graph database — and the choice has real trade-offs.
 
-**Platform tier vs harness tier.** As agent systems mature, some responsibilities stay close to the inference loop (working memory, prompt assembly, tool routing) because they need to be fast and local. Others move to platform services any harness can call (durable memory, conversation persistence, audit logs) because they need to be governed, multi-tenant, and shared. The line between the two is MemoryHub's central architectural concern; see [When Agent Memory Becomes a Platform Concern](https://medium.com/@wjackson_63436/when-agent-memory-becomes-a-platform-concern-4b6cd23af47f).
-
-## What MemoryHub is
-
-MemoryHub is a governed durable-memory service for AI agents, running as a Kubernetes-native component on OpenShift AI, exposed via MCP (any MCP-compatible harness can use it) plus a Python SDK. It provides:
-
-- **Scope-based access control** — memories are tagged with a scope (user, project, role, organizational, enterprise); authorization rules govern each scope.
-- **Audit and provenance** — writes, updates, and deletes are recorded; a reviewer can reconstruct what an agent learned, when, and from what evidence.
-- **Branch-typed memory nodes** — rationale and provenance branches capture the why and the evidence separately from content.
-- **Contradiction detection and curation** — reported conflicts between stored memories and observed behavior are recorded and surfaced.
-- **Multi-tenant isolation** — enforced at the database level (PostgreSQL row-level security plus explicit grants), not only in application code.
-- **Versioning** — updates create new versions; history is preserved.
-
-MemoryHub does not own working memory — the harness owns it by definition.
-
-## What MemoryHub does not do
-
-- **Conversation persistence and resume** — the unit is a conversation, not a fact; lives in orchestration services (kagenti, LlamaStack). See the [conversation-persistence survey](surveys/retrieval-compaction-persistence.md).
-- **Context compaction** — summarizing long threads to fit context windows; lives near the harness and benefits from inference-engine awareness. See the [context-compaction survey](surveys/retrieval-compaction-persistence.md).
-- **Working-memory forensics and sandbox logging** — governance requirements on harness-owned state, captured to a separate forensics store.
-- **Knowledge / RAG corpora** — RAG retrieves information from outside the agent system; memory tracks information from inside it. They overlap mechanically (vector search) but answer different questions.
-
-Wanting MemoryHub to do one of these jobs usually signals a different platform component is the right home.
+**Platform tier vs harness tier.** As agent systems mature, some responsibilities stay close to the inference loop (working memory, prompt assembly, tool routing) because they need to be fast and local. Others move to platform services any harness can call (durable memory, conversation persistence, audit logs) because they need to be governed, multi-tenant, and shared. The harness/platform line is the orienting concept for everything else in this repo; see [When Agent Memory Becomes a Platform Concern](https://medium.com/@wjackson_63436/when-agent-memory-becomes-a-platform-concern-4b6cd23af47f).
 
 ## Classification axes
+
+Four axes recur across the literature. They are orthogonal: any given memory has a position on each.
 
 ### Axis 1: Temporal scope (how long it lasts)
 
@@ -84,20 +62,15 @@ Declarative memory (the semantic + episodic umbrella) has no single enum value; 
 
 ### Cross-cutting: retrieval resolution
 
-Orthogonal to all axes: *how much* of a memory to surface. Most systems treat retrieval as binary, but a resolution gradient — stub (~10 tokens) → summary (~50-100 tokens) → full hydration — enables much better context budget utilization. See [Tiered Retrieval and Associative Memory](surveys/retrieval-compaction-persistence.md).
+Orthogonal to all four axes: *how much* of a memory to surface. Most systems treat retrieval as binary, but a resolution gradient — stub (~10 tokens) → summary (~50-100 tokens) → full hydration — enables much better context budget utilization. See [Tiered Retrieval and Associative Memory](surveys/retrieval-compaction-persistence.md).
 
 ### Cross-cutting: governance
 
 Who can read, who can write, retention, audit, deletion on request. Absent from cognitive-science taxonomies because it is an enterprise concern — and it is the axis that turns agent memory from a research topic into a procurement decision. See the [Agent Memory Protocol RFC](agent-memory-protocol-rfc.md).
 
-## Where to start as a contributor
+## Where MemoryHub sits on these axes
 
-- Building a MemoryHub feature: [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md), [`docs/SYSTEMS.md`](../docs/SYSTEMS.md), then the [protocol RFC](agent-memory-protocol-rfc.md).
-- Integrating MemoryHub into a harness: the SDK README and [`agent-memory-ergonomics/`](agent-memory-ergonomics/).
-- Evaluating against alternatives: the surveys in [`surveys/`](surveys/) plus the [v2 blog post](https://medium.com/@wjackson_63436/when-agent-memory-becomes-a-platform-concern-4b6cd23af47f).
-- Related platform concerns (persistence, compaction, forensics): the relevant survey plus [`planning/`](../planning/). KV-cache research relevant to memory injection: [`infra/vllm-kv-cache.md`](infra/vllm-kv-cache.md).
-
-The harness/platform line is the orienting concept.
+For orientation only (the design docs are authoritative): MemoryHub is a **platform-tier, durable-memory** service — long-term on Axis 1, spanning all three cognitive types via `content_type` on Axis 2, hybrid vector+graph on PostgreSQL on Axis 3, and centered on experiential/behavioral roles on Axis 4, with governance (six scopes, identity, versioning, curation, audit) as its differentiating cross-cutting axis. Working memory, conversation orchestration, and RAG corpora are deliberately out of scope — those belong to the harness, orchestration services, and the retrieval layer respectively. See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) and [strategy/platform-architecture.md](../strategy/platform-architecture.md).
 
 ## References
 

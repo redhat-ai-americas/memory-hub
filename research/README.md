@@ -6,7 +6,7 @@ Status legend: **current** = still-live reference material; **partially supersed
 
 | File | What it covers | Status |
 |---|---|---|
-| [agent-memory-foundations.md](agent-memory-foundations.md) | Primer on agent memory + the cognitive taxonomy (episodic/procedural/semantic) and its approximate mapping to the shipped `content_type` enum. Start here. | current |
+| [agent-memory-foundations.md](agent-memory-foundations.md) | Primer on agent memory types and terms: core vocabulary (harness, working vs durable memory, platform tier) and the four classification axes (temporal, cognitive, storage, architectural role) with literature citations, incl. the cognitive↔`content_type` mapping. Start here. | current |
 | [agent-memory-protocol-rfc.md](agent-memory-protocol-rfc.md) | RFC-style proposal for a standard agent-memory protocol. | current (proposal) |
 | [surveys/knowledge-and-graph-memory.md](surveys/knowledge-and-graph-memory.md) | Knowledge graphs vs context graphs, graph memory systems and benchmarks, graph DB options, llm-wiki landscape, OKF, ontology contextualization. | partially superseded by [docs/design/graph-enhanced-memory.md](../docs/design/graph-enhanced-memory.md) |
 | [surveys/memory-products-landscape.md](surveys/memory-products-landscape.md) | 2026 product landscape + comparisons: Mem0, MemPalace, OpenViking, Perplexity Brain, Neo4j Agent Memory, and others; gaps worth closing. | snapshot (2026) |

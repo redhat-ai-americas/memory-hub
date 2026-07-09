@@ -7,17 +7,21 @@
 
 memory_loading:
   mode: focused
-  pattern: lazy_with_rebias
-  focus_source: declared
+  pattern: jit
+  focus_source: auto
   session_focus_weight: 0.4
   on_topic_shift: rebias
-  cross_domain_contradiction_detection: false
-  campaigns:
-  - memory-hub-test
+  cross_domain_contradiction_detection: true
+  campaigns: []
   live_subscription: false
   push_payload: uri_only
   push_filter_weight: 0.6
   push_transport: queue
+  injection_position: user_message_prefix
+  sort_order: weight_desc
+  append_only_growth: true
+  include_metadata_in_injection: false
+  auto_recompile_threshold: 0.3
 retrieval_defaults:
   max_results: 10
   max_response_tokens: 4000
