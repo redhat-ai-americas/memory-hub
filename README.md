@@ -1,24 +1,34 @@
 # MemoryHub
 
-Centralized, governed memory for AI agents on OpenShift AI. MemoryHub gives every agent in your organization a shared, persistent memory layer with multi-tier scoping (`user` / `project` / `role` / `organizational` / `enterprise`), version history, semantic search via pgvector, an immutable audit trail, and an OAuth 2.1 authorization story.
+Centralized, governed memory for AI agents on OpenShift AI. MemoryHub gives every agent in your organization a shared, persistent memory layer with multi-tier scoping (`user` / `project` / `campaign` / `role` / `organizational` / `enterprise`), version history, semantic search via pgvector, audit logging (structured events shipped; durable audit store in progress), and an OAuth 2.1 authorization story.
 
 It works with any agent framework that speaks MCP — Claude Code, LlamaStack workflows, LangGraph/CrewAI/AG2 agents, custom Python agents — and ships a typed Python SDK and a CLI for direct use.
 
 **Requires Python 3.11+** (use [uv](https://docs.astral.sh/uv/) to install it automatically). See [Local Development](docs/guides/local-development.md) to get the MCP server running on your machine, or the [Agent Integration Guide](docs/guides/agent-integration-guide.md) for the conceptual overview of rules, hooks, and agent-driven memory plus the integration reference.
 
+## How to think about agent memory
+
+The model never remembers anything — at inference time, a memory is just tokens in context, and it makes no difference whether they came from a markdown file, a vector store, or a graph. Memory is a **context-assembly policy problem**: how did the right items get selected, who was allowed to see them, what happens when they conflict, and can you reconstruct what an agent knew when it acted?
+
+Two principles drive everything here. First, give the agent **100% of what it needs and 0% of what it doesn't** — no retrieval trick compensates for missing context, and garbage overlap degrades performance even when the right facts are present. Second, **work backwards from the forensic investigation**: who or what did the thing, what memories were in context, who wrote them, were they in conflict, did storing them violate policy, and which other agents were exposed to them?
+
+That second principle is the honest dividing line. One developer coding on one machine? Use your harness's built-in memory and be happy. Just you, beyond coding? llm-wiki or Obsidian is the right answer. But a fleet of agents sharing fast-changing operational memory, a team of developers with coding agents in a controlled environment, or agents in a healthcare process — and any scenario where the forensic questions will actually be asked — need identity, scopes, curation, contradiction handling, and audit. That's what MemoryHub is.
+
+The full argument, including when *not* to use MemoryHub: [What Agent Memory Really Is](docs/guides/what-is-agent-memory.md).
+
 ## Why MemoryHub
 
-- **Governed memory operations.** Every write, read, update, and deletion is access-controlled by [five-tier scope isolation](docs/design/governance.md) enforced at the SQL level. Memories carry [version history with provenance branches](docs/design/memory-tree.md), contradiction detection, and a [three-layer curation rules engine](docs/design/curator-agent.md) with inline secrets/PII scanning. Enterprise-scope memories require human approval. This is the substrate that makes all other capabilities trustworthy.
+- **Governed memory operations.** Every write, read, update, and deletion is access-controlled by [six-tier scope isolation](docs/design/governance.md) enforced at the SQL level. Memories carry [version history with provenance branches](docs/design/memory-tree.md), contradiction detection, and a [three-layer curation rules engine](docs/design/curator-agent.md) with inline secrets/PII scanning. Enterprise-scope memories require human approval. This is the substrate that makes all other capabilities trustworthy.
 
 - **Shared agent memory.** Agents don't just remember for themselves — they build an organizational hive mind. [Project-scoped memories](docs/design/memory-tree.md) surface for every agent working in that context, with auto-enrollment on first write to open projects so agents can start contributing without manual membership setup. [Campaign scoping](planning/archive/campaign-domain-framework.md) enables bounded cross-project initiatives where knowledge discovered by one project's agent is available to all enrolled projects. Domain tags enable crosscutting retrieval. [Two-vector retrieval](docs/design/two-vector-retrieval.md) blends query relevance with session focus context via RRF and cross-encoder reranking, so search results match both what the agent asked and what it's currently working on. [Real-time push notifications](docs/agent-memory-ergonomics/design.md) keep agent swarms current. A planned promotion pipeline will lift patterns discovered by individual agents into organizational knowledge.
 
 - **Inference cost optimization.** [Cache-optimized assembly](research/infra/vllm-kv-cache.md) returns memories in a deterministic, epoch-locked order designed for KV cache prefix hits across vLLM (2x throughput, 152x TTFT), Anthropic (90% cost reduction), OpenAI (50%), and Gemini (75-90%). The key insight: the first agent pays full inference cost; subsequent agents with overlapping memory contexts get the cached prefix nearly free. Token budget caps and weight-based stub/full injection keep context windows lean. [Governed context compaction](research/surveys/retrieval-compaction-persistence.md) is on the roadmap.
 
-- **Compliance-ready architecture.** Version history, provenance branches, and a planned [immutable audit trail](docs/design/governance.md) position MemoryHub for EU AI Act transparency requirements (enforcement begins August 2026), GDPR data governance, HIPAA, and financial regulations. Compaction will use readable summaries — not opaque tokens — so the compliance team can inspect what was kept.
+- **Compliance-oriented architecture.** Version history, provenance branches, structured audit events, and a planned [durable audit trail](docs/design/governance.md) position MemoryHub for EU AI Act transparency requirements (enforcement begins August 2026), GDPR data governance, HIPAA, and financial regulations. Compaction will use readable summaries — not opaque tokens — so the compliance team can inspect what was kept.
 
 - **Framework-agnostic integration.** Works with any agent framework that speaks MCP. A [typed Python SDK](sdk/README.md), a CLI, a [project config wizard](docs/agent-memory-ergonomics/design.md) that generates agent rule files, and a designed integration path for [LlamaStack](planning/llamastack-integration/overview.md).
 
-- **Kubernetes-native on OpenShift AI.** [Single PostgreSQL backend](docs/design/storage-layer.md) handling relational, vector, and graph queries. FIPS compliance by delegation. Air-gap deployable with on-cluster embedding models. Red Hat UBI images. An [llm-d integration path](research/infra/vllm-kv-cache.md) for automatic cache-aware routing at the infrastructure level.
+- **Kubernetes-native on OpenShift AI.** [PostgreSQL + pgvector](docs/design/storage-layer.md) handling relational, vector, and graph queries in one database, with MinIO for object storage. FIPS compliance by delegation. Air-gap deployable with on-cluster embedding models. Red Hat UBI images. An [llm-d integration path](research/infra/vllm-kv-cache.md) for automatic cache-aware routing at the infrastructure level.
 
 **Status (2026-04-15).** Core memory operations, OAuth 2.1 + JWT auth with service-layer RBAC, the dashboard UI, the published Python SDK, the agent-memory-ergonomics work (search shape, session focus vector with cross-encoder reranking, project config + rule generation), and cache-optimized memory assembly with compilation epochs are all shipped. The Kubernetes operator and the curator-as-background-agent layer are still on the roadmap. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem status table.
 
@@ -26,7 +36,7 @@ It works with any agent framework that speaks MCP — Claude Code, LlamaStack wo
 
 | Component | Path | What it is |
 |---|---|---|
-| **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing 14 tools (search, read, write, update, delete, similarity, relationships, curation, contradiction, session registration, session focus, project discovery) over streamable-HTTP. The primary agent surface. |
+| **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing memory operations (search, read, write, update, delete, similarity, relationships, curation, contradictions, threads, session registration, project discovery) over streamable-HTTP via profile-selectable tool sets — compact (4 action-dispatch tools, default), full (13), minimal (5). The primary agent surface. |
 | **Server-side library** | [`src/memoryhub_core/`](src/memoryhub_core/) | SQLAlchemy models, service layer, embedding integration, RBAC enforcement (`core/authz.py`). Distribution name `memoryhub-core`; import name `memoryhub_core`. The MCP server, BFF, alembic migrations, and the seed-OAuth-clients script all import from here. |
 | **Python SDK** | [`sdk/`](sdk/) | `pip install memoryhub` — typed async client wrapping the MCP tools. OAuth 2.1 token management is automatic. See [`sdk/README.md`](sdk/README.md). |
 | **CLI** | [`memoryhub-cli/`](memoryhub-cli/) | `pip install memoryhub-cli` — terminal client for search/read/write/delete plus `memoryhub config init` for generating project-level `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md` rule files. |
@@ -126,37 +136,7 @@ MemoryHub supports two authentication paths. **API keys** are the simplest optio
 
 MemoryHub splits configuration into two files with different lifecycles: project-level policy lives in `.memoryhub.yaml` at the repo root (committed, shared across all contributors), while per-developer connection params and secrets live in `~/.config/memoryhub/config.json` (not committed, managed by `memoryhub login`).
 
-`memoryhub config init` is an interactive wizard that asks about session shape, loading pattern, focus source, and retrieval defaults, then writes `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md`. Both files are meant to be committed so every contributor's agent inherits the same loading pattern. On first run, any legacy `.claude/rules/memoryhub-integration.md` is backed up to `.bak` before the new rule file is written.
-
-**From inside Claude Code**, you can run the same wizard without leaving the prompt:
-
-```bash
-# One-time install of the slash command
-curl -o ~/.claude/commands/memoryhub-init.md \
-  https://raw.githubusercontent.com/redhat-ai-americas/memory-hub/main/tools/claude-commands/memoryhub-init.md
-```
-
-Then type `/memoryhub-init` in any project. It runs `memoryhub config init` and prints remaining setup steps.
-
-After hand-editing `.memoryhub.yaml`, run `memoryhub config regenerate` to re-render the rule file from the YAML without touching the YAML itself.
-
-The YAML has two top-level keys — `memory_loading` (when and how agents load memory) and `retrieval_defaults` (defaults applied to SDK/agent search calls):
-
-```yaml
-memory_loading:
-  mode: focused                   # focused | broad
-  pattern: lazy_with_rebias       # eager | lazy | lazy_with_rebias | jit
-  focus_source: auto              # auto | declared | directory | first_turn
-  session_focus_weight: 0.4
-  on_topic_shift: rebias          # rebias | warn | ignore
-
-retrieval_defaults:
-  max_results: 20
-  max_response_tokens: 4000
-  default_mode: full              # full | index | full_only
-```
-
-See [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md) for the full schema, field reference, and rule file templates.
+`memoryhub config init` is an interactive wizard that asks about session shape, loading pattern, focus source, and retrieval defaults, then writes both files — commit them so every contributor's agent inherits the same loading pattern. After hand-editing the YAML, `memoryhub config regenerate` re-renders the rule file. The YAML schema (`memory_loading` + `retrieval_defaults`), field reference, rule-file templates, and the `/memoryhub-init` slash command for running the wizard from inside Claude Code are all documented in [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md) and the [CLI README](memoryhub-cli/README.md).
 
 ## Architecture at a glance
 
@@ -172,7 +152,7 @@ See [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/desi
                           ┌──────────▼──────────┐
                           │   memory-hub-mcp    │
                           │   (FastMCP 3)       │
-                          │   14 tools          │
+                          │   4 tools (compact) │
                           └──────────┬──────────┘
                                      │
               ┌──────────────────────┼──────────────────────┐
@@ -189,9 +169,7 @@ See [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/desi
       └─────────────────┘   └──────────────────┘
 ```
 
-Every memory operation flows through the MCP server, which delegates to the service layer in `src/memoryhub_core/`. The service layer enforces authorization via `core/authz.py` (JWT-first, session-fallback). The OAuth 2.1 authorization server runs as a separate service. PostgreSQL with pgvector handles relational, vector, and graph queries; an external all-MiniLM-L6-v2 embedding model and an `ms-marco-MiniLM-L12-v2` cross-encoder reranker both run on OpenShift AI's vLLM serving. Reranker is optional with graceful cosine fallback when unavailable.
-
-For the full design and the deployment topology, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). For the per-subsystem map, see [`docs/SYSTEMS.md`](docs/SYSTEMS.md).
+Every memory operation flows through the MCP server; authorization, curation, and governance are enforced in the service layer — no surface talks to PostgreSQL directly. The full design, data flows, and deployment topology live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the per-subsystem map is [`docs/SYSTEMS.md`](docs/SYSTEMS.md).
 
 ## Documentation
 
@@ -259,23 +237,7 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-Each subproject has its own venv and `pytest`:
-
-```bash
-# MCP server
-cd memory-hub-mcp && make install && .venv/bin/pytest tests/ -q --ignore=tests/examples/
-
-# SDK
-cd sdk && .venv/bin/pytest tests/ -q --ignore=tests/test_rbac_live.py
-
-# CLI
-cd memoryhub-cli && .venv/bin/pytest tests/ -q
-
-# Dashboard BFF
-cd memoryhub-ui/backend && .venv/bin/pytest tests/ -q
-```
-
-See [`CLAUDE.md`](CLAUDE.md) for project conventions, the issue-tracker workflow, and the MCP-server scaffold rules.
+Each subproject (MCP server, SDK, CLI, BFF, auth) has its own venv and `pytest` suite — per-subproject setup commands are in [`CONTRIBUTING.md`](CONTRIBUTING.md). See [`CLAUDE.md`](CLAUDE.md) for project conventions, the issue-tracker workflow, and the MCP-server scaffold rules.
 
 ## Contributing
 
@@ -291,11 +253,5 @@ Apache 2.0 — see [`LICENSE`](LICENSE).
 
 ## Links
 
-- [Local development](docs/guides/local-development.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Subsystems](docs/SYSTEMS.md)
-- [Agent memory ergonomics design](docs/agent-memory-ergonomics/)
-- [Agent integration guide](docs/guides/agent-integration-guide.md)
-- [Hooks integration guide](docs/guides/hooks-integration.md)
-- [Python SDK on PyPI](https://pypi.org/project/memoryhub/)
-- [GitHub issues](https://github.com/redhat-ai-americas/memory-hub/issues)
+- [What agent memory really is](docs/guides/what-is-agent-memory.md) · [Agent integration guide](docs/guides/agent-integration-guide.md) · [Architecture](docs/ARCHITECTURE.md) · [Subsystems](docs/SYSTEMS.md)
+- [Python SDK on PyPI](https://pypi.org/project/memoryhub/) · [GitHub issues](https://github.com/redhat-ai-americas/memory-hub/issues)

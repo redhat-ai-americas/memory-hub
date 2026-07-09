@@ -26,6 +26,7 @@ This directory holds shipped architecture and user-facing reference material, or
 
 ## Guides ([`guides/`](guides/))
 
+- [`what-is-agent-memory.md`](guides/what-is-agent-memory.md) — What agent memory really is: context assembly, the harness, local vs. platform locality, and when you don't need MemoryHub. Start here if you're new to agentic memory.
 - [`agent-integration-guide.md`](guides/agent-integration-guide.md) — How agents use MemoryHub (loading patterns, session lifecycle) plus the full integration reference. Start here to wire up an agent.
 - [`hooks-integration.md`](guides/hooks-integration.md) — SessionStart/hook-based memory injection for agent harnesses.
 - [`local-development.md`](guides/local-development.md) — Running MemoryHub locally.
