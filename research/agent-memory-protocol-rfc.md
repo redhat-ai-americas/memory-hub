@@ -1,205 +1,169 @@
 # Agent Memory Protocol: A Proposal for Standardized Agent Memory
 
-RFC-AMP-001 | Draft | April 2026
+RFC-AMP-001 | Draft 2 | July 2026 (revises the April 2026 draft; argument reframed, implementation claims aligned with shipped code)
 Authors: Wes Jackson
 
 ## Abstract
 
-This document proposes that agent memory should be a first-class protocol primitive rather than a set of application-specific tools exposed over existing transport layers. The Model Context Protocol (MCP) provides three primitives -- tools, resources, and prompts -- but every production memory system today (Mem0, Zep, Letta, LangMem, MemoryHub) exposes memory through MCP tools with incompatible schemas, incompatible semantics, and no shared governance model. This creates an interoperability problem that cannot be solved by tool-schema standardization alone: memory operations have fundamentally different access patterns (high-frequency reads, budget-aware responses), lifecycle requirements (versioning, contradiction detection, curation), and governance needs (scope-based RBAC, audit trails) from tool invocations, and treating them identically in protocol design leads to preventable integration failures. We propose either a fourth MCP primitive (`memory`) or a companion Agent Memory Protocol (AMP) that standardizes session-scoped identity, tree-structured memory with typed branches, budget-aware retrieval, inline curation, contradiction detection, scope-based governance, and version history. The design is grounded in operational experience from MemoryHub, a Kubernetes-native agent memory system deployed on OpenShift with 13 MCP tools, OAuth 2.1 authentication, and a production curation pipeline.
+Every production agent memory system today (Mem0, Zep, Letta, LangMem, MemoryHub) exposes memory through MCP tools with incompatible schemas, incompatible semantics, and no shared governance model. This document proposes standardizing not the tool names but the **semantic contract** of agent memory: session-scoped identity, tree-structured memory with typed branches, budget-aware retrieval that never silently drops results, mandatory write-time curation with structured feedback, contradiction reporting, scope-based governance enforced at the query level, and preserved version history supporting forensic reconstruction. The contract can be carried three ways — a fourth MCP primitive, a companion protocol, or an MCP extension — and this document argues the packaging matters less than the contract, while recommending the primitive as the best ergonomic outcome if MCP governance permits. The design is grounded in operational experience from MemoryHub, a Kubernetes-native agent memory system deployed on OpenShift with a profile-based MCP tool surface, OAuth 2.1 authentication, and a production curation pipeline.
 
 ## 1. Motivation
 
-Every production agent memory system today exposes memory as MCP tools. MemoryHub exposes 13 tools. Mem0 exposes a different set. Zep, Letta, and LangMem each have their own schemas, parameter names, and response shapes. An agent that works with MemoryHub's `search_memory(query, max_results, mode, max_response_tokens, focus, include_branches)` cannot use Zep's memory API without rewriting its integration layer. The tool names differ, the parameters differ, the response structures differ, and the semantic contracts differ.
+### 1.1 The interoperability wall
 
-This is not merely an inconvenience. Three categories of problem emerge from treating memory as tools.
+An agent that works with MemoryHub's `search_memory(query, max_results, mode, max_response_tokens, focus, include_branches)` cannot use Zep's memory API without rewriting its integration layer. Mem0's `add_memory`/`search_memory` pair, Letta's tier management, and LangMem's namespace operations all differ in names, parameters, response shapes, and — more importantly — semantic contracts. "Supports MCP memory" today means "was tested against one vendor's tool schemas." Switching memory backends means changing tool descriptions, parameter mappings, response parsing, and instruction text. That is vendor lock-in at the integration layer — the exact problem MCP was designed to solve for tools.
 
-**The semantic mismatch.** MCP tools model actions an agent takes on its environment: send an email, query a database, create a file. Memory is not an environmental action. When an agent writes a memory, it is modifying its own cognitive state -- adding a belief, recording a preference, capturing a decision. When it searches memory, it is consulting its own knowledge, not querying an external system. The distinction matters because memory operations have fundamentally different access patterns from tool invocations. Memory reads are high-frequency (potentially every conversational turn), latency-sensitive, and context-dependent in ways that tool calls are not. A tool call to "send email" has clear inputs and outputs; a memory search must account for scope, recency, token budget, contradiction state, and relevance -- none of which are concerns for typical tool invocations.
+### 1.2 The convention problem
 
-**The convention problem.** Protocol-level concerns are disguised as usage instructions. In MemoryHub, the consuming agent's CLAUDE.md file contains a paragraph instructing the agent to call `register_session` at conversation start, to pass `project_id` on every `search_memory` call, and to use `report_contradiction` when observations conflict with stored memories. These are not optional best practices -- they are correctness requirements. An agent that forgets to pass `project_id` silently misses project-scoped memories. An agent that skips `register_session` gets authentication errors on every subsequent call. When protocol-level behavior depends on natural-language instructions in a markdown file, the failure mode is silent omission, and the only defense is hoping the LLM follows instructions reliably. Protocol primitives enforce contracts that instructions cannot.
+Protocol-level concerns are today disguised as usage instructions. In MemoryHub, the consuming agent's rule file instructs it to establish a session first, pass `project_id` on searches, and call the contradiction-reporting operation when observations conflict with stored memories. These are correctness requirements expressed as natural language, and the failure mode is silent omission: an agent that forgets `project_id` silently misses project-scoped memories. When correctness depends on an LLM reliably following markdown instructions, integrations are brittle in ways that specifications can fix.
 
-**The interoperability wall.** An agent framework that supports "MCP memory" today means it has been tested against one specific memory server's tool schemas. Switching memory backends requires changing tool descriptions, adjusting parameter mappings, rewriting response parsing, and updating all instruction text. There is no abstract "memory" capability that an agent can depend on the way it depends on "tools" as an MCP primitive. The result is vendor lock-in at the integration layer -- the exact problem MCP was designed to solve for tools.
+### 1.3 What standardization can and cannot fix — an honest accounting
 
-**Why not just standardize the tool schemas?** The obvious lighter-weight alternative is to publish a standard set of MCP tool schemas for memory operations -- a "memory tool convention" -- without touching the protocol. This would help with interoperability but cannot solve three structural problems. First, session establishment ordering: a tool convention can document that `register_session` must be called first, but it cannot enforce it -- the agent's LLM must remember to follow the convention, and silent failure when it doesn't is the predictable result. Second, governance enforcement: tools are independently invocable by design, but memory operations require pre-conditions (authenticated session, authorized scope, curation pipeline) that must be guaranteed by the transport layer, not hoped for by the application layer. Third, transport-level differentiation: memory operations have fundamentally different access patterns from tools (high-frequency reads on nearly every turn, budget-aware responses, stateless focus biasing) that a protocol can optimize for but a tool convention cannot. A convention standardizes the message format; a protocol standardizes the contract. Memory needs the latter.
+The April draft of this RFC argued that a tool-schema convention "cannot solve" session ordering, governance enforcement, and transport differentiation, and that only a protocol change could. On reflection, that overstated the case, and the argument deserves an honest restatement, because the proposal is stronger without the weak claims.
+
+**Session establishment is already a solved protocol problem.** MemoryHub's `register_session` shim exists because early MCP clients could not reliably send HTTP Authorization headers — a client-implementation gap, not a protocol-design gap. MCP puts identity on the transport via OAuth 2.1; when clients implement that correctly, the ordering problem disappears without any new primitive. What remains genuinely missing is the *handshake payload*: a standard way for the server to return the caller's resolved scopes, capabilities, curation rules, and limits (Section 5).
+
+**Governance enforcement lives in the server regardless of packaging.** A tool-based server rejects unauthorized calls exactly as a primitive-based one would. What a specification adds is not enforcement power but **conformance requirements**: a conforming server MUST run write-time curation, MUST apply scope filtering at the query level, MUST preserve version history. Those MUSTs are equally expressible in a rigorous tool convention. The value is in specifying them at all — today, no two systems agree on what a memory server must guarantee.
+
+**Access-pattern differences are real but do not, by themselves, require a new primitive.** Memory reads are high-frequency (nearly every conversational turn in MemoryHub's production traffic, versus sporadic calls for other tools), latency-sensitive, and budget-constrained. These facts justify contract features — token budgets, stub degradation, stateless focus — not necessarily transport changes.
+
+**What, then, does protocol-level packaging actually buy?** Three things a convention delivers only weakly. **Capability negotiation:** a client that sees a `memory` capability in the handshake knows the full contract is available, versioned, and conformant — versus inspecting tool lists and guessing. **Contract enforcement surface:** client libraries can implement the memory contract once (budget handling, stub expansion, curation-feedback interpretation) instead of per-vendor glue. **A schema authority:** conventions without an owner fragment; a primitive or named extension has a specification to conform to and a test suite to pass.
+
+So the proposal, precisely stated: **standardize the semantic contract of agent memory (Sections 5–10), and carry it in whichever packaging the ecosystem can adopt (Section 11), preferring a first-class MCP primitive for ergonomics.** The contract is the contribution; the packaging is logistics.
 
 ## 2. Background
 
-### 2.1 MCP Today
+### 2.1 MCP today
 
-The Model Context Protocol defines three primitives. **Tools** are functions that agents can call to act on their environment -- reading files, querying APIs, executing commands. **Resources** are read-only data sources that provide context without side effects. **Prompts** are reusable prompt templates that structure agent interactions. Transport is streamable-HTTP; authentication is OAuth 2.1. MCP has achieved significant adoption as the standard interface between agents and external capabilities.
+The Model Context Protocol defines three primitives. **Tools** are functions agents call to act on their environment. **Resources** are read-only data sources. **Prompts** are reusable templates. Transport is streamable-HTTP; authentication is OAuth 2.1. MCP has achieved broad adoption as the standard interface between agents and external capabilities, but it does not define a memory primitive: the specification treats context as something provided through tools and resources rather than as a distinct concern with its own lifecycle, governance, and access patterns.
 
-MCP does not define a memory primitive. The specification acknowledges that agents need context, but treats it as something provided through tools and resources rather than as a distinct concern with its own lifecycle, governance, and access patterns.
+### 2.2 The agent memory landscape (April 2026 snapshot)
 
-### 2.2 The Agent Memory Landscape
+Five systems represent the state of the art, and all expose memory through MCP tools or vendor SDKs.
 
-As of April 2026, five systems represent the state of the art in agent memory, and all expose memory through MCP tools.
+**Mem0** provides a hybrid architecture (vector, graph, key-value) with automatic memory extraction. **Zep/Graphiti** implements a bi-temporal knowledge graph distinguishing when events occurred from when they were ingested, enabling explicit fact invalidation and temporal queries. **Letta** (formerly MemGPT) uses an OS-inspired hierarchy where the agent itself manages transitions between core, archival, and recall memory. **LangMem** organizes memory into semantic, episodic, and procedural categories. **MemoryHub** is a Kubernetes-native system with tree-structured memories, six governance scopes, inline curation (secrets/PII detection, embedding dedup), cross-encoder reranking with stateless session focus, OAuth 2.1 authentication, and a profile-based MCP tool surface (a compact action-dispatch profile by default; flat-tool profiles for smaller models).
 
-**Mem0** provides a hybrid three-tier architecture (vector, graph, key-value) with automatic memory extraction and retrieval. It reports accuracy improvements over OpenAI's built-in memory on vendor-published benchmarks.
+These systems have independently converged on hybrid storage and similar lifecycle stages (write, store, retrieve, use, decay). The convergence in architecture has not produced convergence in interface — which is precisely the situation a contract specification exists to fix.
 
-**Zep/Graphiti** implements a bi-temporal knowledge graph that distinguishes when events occurred from when they were ingested, enabling explicit fact invalidation and temporal queries.
+### 2.3 What memory is not
 
-**Letta** (formerly MemGPT) uses an OS-inspired memory hierarchy where the agent itself manages tier transitions between core memory (always in context), archival memory (vector-searchable), and recall memory (conversation history).
+**Memory is not a tool** — operationally, not philosophically. Tools are invoked deliberately for specific purposes; memory is consulted pervasively as part of reasoning. Tools have clear success/failure semantics; memory retrieval is a matter of degree. Tools are stateless between invocations; memory is inherently stateful and temporally ordered. None of this makes carrying memory operations over tool-shaped messages impossible (MemoryHub does exactly that in production); it means the *contract* governing those messages must address concerns — budgets, scopes, versions, contradictions — that the generic tool contract does not.
 
-**LangMem** organizes memory into semantic (facts), episodic (past experiences), and procedural (self-modifying instructions) categories, implementing Karpathy's system prompt learning concept.
+**Memory is not a resource.** MCP resources are read-only; memory is read-write, and the write path carries governance requirements (curation, scope enforcement, dedup) that resources do not contemplate.
 
-**MemoryHub** is a Kubernetes-native system with tree-structured memories, six scope tiers with governance rules, inline curation (secrets/PII detection, embedding-based dedup), cross-encoder reranking with session focus, OAuth 2.1 authentication, and 13 MCP tools deployed on OpenShift.
-
-These systems have independently converged on hybrid architectures and similar lifecycle stages (write, store, retrieve, use, decay). Yet each exposes a different tool surface. An agent built for Mem0's `add_memory` / `search_memory` pair cannot use MemoryHub's richer interface without rework, and vice versa. The convergence in architecture has not produced convergence in interface.
-
-### 2.3 What Memory Is Not
-
-Memory is not a tool. The distinction is operational, not philosophical. Tools are invoked deliberately for specific purposes; memory is consulted pervasively as part of reasoning -- in MemoryHub's production data, `search_memory` is called on nearly every conversational turn while other tools are called sporadically. Tools have clear success/failure semantics; memory retrieval is a matter of degree (more relevant, less relevant, missing context). Tools are stateless between invocations; memory is inherently stateful and temporally ordered. Tools have uniform latency expectations; memory operations require budget-aware responses that shape their output to fit the consumer's context window. These differences mean that memory benefits from protocol-level treatment -- transport priority, session-scoped identity, capability negotiation -- that the tool abstraction cannot provide.
-
-Memory is not a resource. MCP resources are read-only data sources. Memory is read-write, and the write path has governance requirements (curation, scope enforcement, dedup) that resources do not contemplate. Resources are static or externally updated; memory is updated by the agent itself as a consequence of its operation.
-
-Memory is not caching. Caches have straightforward invalidation strategies (TTL, LRU). Memory relevance is contextual, semantic, and temporal. A memory written six months ago may be more relevant than one written yesterday, depending on the query. There is no TTL that captures "still relevant when the agent is doing deployment work, irrelevant when writing tests."
+**Memory is not caching.** Caches have mechanical invalidation strategies (TTL, LRU). Memory relevance is contextual, semantic, and temporal: a memory written six months ago may beat one written yesterday, depending on the query. No TTL captures "still relevant during deployment work, irrelevant while writing tests" — which is why staleness handling requires contradiction reporting (Section 7.7) rather than expiry alone.
 
 ## 3. Design Principles
 
-Six principles guide this proposal. Each emerged from operational experience building and running MemoryHub.
+Six principles guide the contract. Each emerged from operational experience building and running MemoryHub.
 
-**Memory is cognitive state, not environment action.** The protocol should treat memory operations as modifications to and queries against the agent's belief state, not as generic function calls. This means memory operations can have different transport-level treatment: higher priority, lower latency budgets, and tighter integration with the agent's reasoning loop. In MemoryHub, the observation that agents call `search_memory` on nearly every turn while calling other tools sporadically confirmed that memory access patterns are categorically different from tool access patterns.
+**Memory is cognitive state, not environment action.** Treat memory operations as modifications to and queries against the agent's belief state. In MemoryHub's production traffic, memory search runs on nearly every turn while other tools run sporadically — the access pattern is categorically different, and the contract (budgets, stubs, focus) exists to serve it.
 
-**Curation is mandatory, not optional.** Without write-time quality gates, memory stores fill with garbage within weeks. MemoryHub's inline curation pipeline -- regex-based secrets detection, PII scanning, embedding-based dedup -- runs on every write in single-digit milliseconds. The protocol should require that conforming servers implement a curation pipeline and report curation outcomes to the caller. Making curation optional is equivalent to making it absent, because no implementation will prioritize it without a specification requirement.
+**Curation is mandatory, not optional.** Without write-time quality gates, memory stores fill with garbage within weeks. MemoryHub's inline pipeline — regex secrets/PII detection, embedding-based dedup — runs on every write in single-digit milliseconds. A conforming server must implement a curation pipeline and report outcomes to the caller. Optional curation is absent curation: no implementation prioritizes it without a specification requirement.
 
-**Retrieval must be budget-aware.** Returning the top-K most similar memories without regard to the consumer's context window is a recipe for either wasted tokens (K too large) or missed context (K too small). MemoryHub's `max_response_tokens` parameter lets the caller declare a token budget; the server packs results in relevance order, degrades to stubs when the budget is exhausted, and reports `has_more` so the caller knows what it missed. The protocol should standardize this contract because every memory consumer faces the same context-window scarcity, and leaving budget management to ad-hoc convention produces brittle integrations.
+**Retrieval must be budget-aware.** Returning top-K without regard to the consumer's context window wastes tokens (K too large) or misses context (K too small). The caller declares a token budget; the server packs results in relevance order, degrades to stubs when the budget is exhausted, and reports `has_more`. Every memory consumer faces context-window scarcity; leaving budget management to ad-hoc convention produces brittle integrations.
 
-**Governance is structural, not bolted on.** Scope-based access control, audit trails, and version history are not enterprise upsells -- they are correctness requirements for any multi-user or multi-agent deployment. In MemoryHub, every tool call passes through `authorize_read()` or `authorize_write()` before touching the service layer, and RBAC violations in `search_memory` are prevented by SQL-level scope filtering (impossible by construction, not merely unlikely). The protocol should define governance as a required layer, not an optional extension, because retrofitting access control onto a system that launched without it creates security gaps that are difficult to close.
+**Governance is structural, not bolted on.** Scope-based access control, audit trails, and version history are correctness requirements for any multi-user or multi-agent deployment, not enterprise upsells. In MemoryHub, every operation passes authorization before touching the service layer, and search applies the authorized-scope filter at the SQL level — violations are impossible by construction rather than merely unlikely. Retrofitting access control onto a system that launched without it leaves gaps that are hard to close.
 
-**Statelessness where possible.** MemoryHub's session focus mechanism passes the focus string per call rather than storing it on a server-side session. This eliminated every coordination question about pod-local state, distributed caching, and session affinity. The protocol should prefer stateless designs and require explicit justification for server-side state. The cost of a per-call focus re-embed (~50ms) is negligible compared to the operational complexity of session state management in a horizontally scaled deployment.
+**Statelessness where possible.** MemoryHub passes the session-focus string per call rather than storing it server-side, which eliminated every coordination question about pod-local state, distributed caching, and session affinity. The cost — re-embedding the focus string per call, ~50ms warm — is negligible against the operational complexity of session state in a horizontally scaled deployment. The contract prefers stateless designs and requires explicit justification for server-side state.
 
-**No human-in-the-loop friction on the hot path.** The MCP specification requires HITL approval for sampling requests. MemoryHub's curation pipeline initially included LLM sampling for ambiguous dedup decisions; this was removed when it became clear that a HITL approval dialog on every ambiguous write would make the system unusable. Instead, `write_memory` returns curation feedback (similar_count, nearest_id, nearest_score) and the calling agent's existing LLM decides what to do. The protocol should not require HITL involvement for standard memory operations. HITL is appropriate for policy-tier memory creation and explicit review workflows, not for the write and search hot paths.
+**No human-in-the-loop friction on the hot path.** MemoryHub's curation pipeline initially included LLM sampling for ambiguous dedup decisions; under MCP's HITL-approval requirement for sampling, that would have put an approval dialog on every ambiguous write. Instead, the write response returns structured curation feedback (similar count, nearest match, score) and the calling agent's own LLM — which has full conversational context — decides. HITL belongs on policy-tier memory creation and explicit review workflows, not on the write and search hot paths.
 
 ## 4. Protocol Overview
 
-The Agent Memory Protocol defines the interface between an agent and its memory backend. It can be realized as a new MCP primitive (Section 11.1), a companion protocol (Section 11.2), or an MCP extension (Section 11.3). Regardless of realization, the protocol has three layers.
+The Agent Memory Protocol defines the interface between an agent and its memory backend, in three layers, independent of packaging (Section 11).
 
-**Transport and session layer.** Session establishment, identity claims, scope resolution, and capability negotiation. This layer answers: who is the agent, what tenant does it belong to, and what memory capabilities does the server offer?
+**Transport and session layer.** Identity claims, scope resolution, and capability negotiation. Who is the agent, what tenant does it belong to, what does this server guarantee?
 
-**Operations layer.** The core memory operations: write, read, search, update, delete, relate, contradict, and curate. Each operation has defined request/response schemas, error semantics, and governance hooks. This layer is where memory backends differentiate -- a graph-backed server and a vector-backed server expose the same operations with different performance characteristics.
+**Operations layer.** The core operations: write, read, search, update, delete, relate, contradict, curate. Each has defined request/response schemas, error semantics, and governance hooks. This is where backends differentiate — a graph-backed and a vector-backed server expose the same operations with different performance characteristics.
 
-**Governance layer.** Scope-based access control, curation rules, audit requirements, and version management. This layer defines what the server must enforce regardless of backend implementation. A conforming server must implement scope filtering, curation pipelines, and version history; the specific mechanisms are backend-dependent.
+**Governance layer.** Scope-based access control, curation rules, audit requirements, version management. This layer defines what a conforming server must enforce regardless of backend.
 
-The relationship to MCP is additive, not competitive. MCP continues to handle tools, resources, and prompts. The memory protocol handles the distinct concerns of persistent, governed, agent-owned knowledge.
+The relationship to MCP is additive, not competitive: MCP continues to handle tools, resources, and prompts; this contract handles the distinct concerns of persistent, governed, agent-owned knowledge.
 
 ## 5. Session and Identity
 
-### The Problem with register_session
+MemoryHub's `register_session` tool is a compatibility shim that should not exist, and its existence is instructive. It was created because early MCP clients could not reliably send HTTP Authorization headers, so agents establish identity by calling a tool — which means an agent can forget to call it, call it wrong, or call it late, and every other operation implicitly depends on it having happened. Tools are supposed to be independently invocable; session establishment creates ordering that the tool abstraction does not model.
 
-MemoryHub's `register_session` tool is a compatibility shim that should not exist. It was created because MCP clients (including Claude Code) could not reliably send HTTP Authorization headers in early implementations, so the agent calls `register_session(api_key="...")` as its first tool invocation to establish identity. This works but is wrong in three ways.
+The fix has two parts, only one of which is new. **Identity belongs on the transport**: OAuth 2.1 bearer tokens, exactly as MCP already specifies — this is a client-implementation obligation, not a protocol gap. **Capability exchange belongs in the handshake**, and this is the genuinely missing piece: on connection, the server should resolve the caller's tenant, accessible scopes, and applicable curation rules, and return a session descriptor containing the accessible scopes, the server's supported operations and optional capabilities, the active curation rules that will apply to writes, and server-imposed limits (max results, rate limits). Today that information is discoverable only by trial and error or by reading vendor docs.
 
-First, session identity is a protocol concern, not an application concern. Every memory operation depends on knowing who the caller is. Encoding this as a tool call means the agent can forget to call it, call it with wrong parameters, or call it at the wrong time. MemoryHub's integration instructions include a paragraph reminding agents to call `register_session` before doing anything else -- a protocol-level requirement expressed as a natural-language instruction.
-
-Second, it conflates authentication with capability discovery. The agent needs to know not just "am I authenticated?" but "what scopes can I access? What memory capabilities does this server offer? What curation rules apply to me?" A protocol handshake can exchange this information; a tool call returns a single response and hopes the agent parses it correctly.
-
-Third, it creates a temporal dependency in the tool invocation sequence. Every other tool call must happen after `register_session`. Tools are supposed to be independently invocable; session establishment creates implicit ordering that the tool abstraction does not model.
-
-### Protocol-Level Session Establishment
-
-The protocol should define session establishment as part of the connection handshake, not as a tool call. During handshake, the client presents identity claims (JWT, API key, or platform token). The server validates the claims, resolves the caller's tenant, scopes, and applicable curation rules, and returns a session descriptor that includes the caller's accessible scopes, the server's capabilities (which optional operations it supports), the active curation rules that will apply to writes, and any server-imposed limits (max results, rate limits).
-
-This maps naturally to OAuth 2.1. The identity token carries `sub`, `tenant_id`, and operational scopes. The server resolves access-tier scopes from its RBAC configuration. MemoryHub already does this at the JWT validation layer; the proposal is to formalize it as a protocol exchange rather than leaving it to implementation-specific auth flows.
+This maps naturally onto OAuth 2.1: the token carries `sub`, `tenant_id`, and operational scopes; the server resolves access-tier scopes from its RBAC configuration. MemoryHub already does the resolution at JWT-validation time; the proposal is to standardize the descriptor it returns.
 
 ## 6. Data Model
 
-### 6.1 Memory Structure
+### 6.1 Memory structure
 
-A memory is a tree-structured node with typed branches. The flat-list model (used by most memory systems) was rejected in MemoryHub's design because it cannot represent the relationship between a memory and its justification, provenance, or approval chain without overloading the content field or maintaining parallel data structures.
+A memory is a tree-structured node with typed branches. The flat-list model used by most systems cannot represent the relationship between a memory and its justification, provenance, or approval chain without overloading the content field or maintaining parallel structures.
 
-Each memory node carries: **content** (the memory text), **weight** (a float between 0 and 1 controlling injection priority -- not relevance, but importance), **scope** (who can access it), **branch_type** (for non-root nodes: rationale, provenance, approval, description, tech-stack), **metadata** (timestamps, version info, curation flags, domain tags), and an **embedding** (vector representation for semantic search).
+Each node carries: **content** (the memory text), **weight** (a float 0–1 controlling injection priority — not relevance), **scope** (who can access it), **branch_type** (for non-root nodes: rationale, provenance, description, evidence, approval are the conventional core set), **metadata** (timestamps, version info, curation flags, domain tags), and an **embedding**. The contract defines the node structure but leaves the branching taxonomy extensible; the core requirement is that branches are structurally linked to their parent, not stored as separate memories with a string-typed relationship field.
 
-The protocol should define the node structure but leave the branching taxonomy extensible. MemoryHub's branch types (rationale, provenance, approval) are useful defaults, but other implementations may need domain-specific branch types. The core requirement is that branches are structurally linked to their parent -- not stored as separate memories with a string-typed relationship field.
-
-Weight deserves emphasis because it is commonly misunderstood. Weight is not relevance. A memory with weight 0.5 that is highly relevant to a query still gets a high relevance score in search; the weight controls whether it is injected as full content or as a stub. This separation of relevance (query-dependent, computed at search time) from priority (memory-dependent, set at write time) is essential for context window management. Enterprise policy memories carry weight 1.0 and are always injected in full; low-priority user preferences carry lower weights and appear as stubs unless the agent explicitly requests full content.
+Weight deserves emphasis because it is commonly misunderstood. **Weight is not relevance.** A weight-0.5 memory that is highly relevant to a query still ranks high in search; weight controls whether it is injected as full content or as a stub. This separation of relevance (query-dependent, computed at search time) from priority (memory-dependent, set at write time) is essential for context-window management: enterprise policy memories carry weight 1.0 and always inject in full; low-priority preferences appear as stubs unless expanded.
 
 ### 6.2 Scopes
 
-Scopes form a hierarchy that determines both visibility and governance. MemoryHub's hierarchy is: user, project, campaign, role, organizational, enterprise. Each scope tier has different rules for who can read, who can write, and what governance applies.
+Scopes form a hierarchy determining both visibility and governance. MemoryHub's hierarchy is user, project, campaign, role, organizational, enterprise. The contract should define a minimum set (user, project, organizational, enterprise) and allow servers to extend it (campaign, role, domain-specific tiers). Enterprise is in the minimum set because the governance argument (Section 10) depends on a highest-authority tier where human approval is mandatory.
 
-The protocol should define a minimum scope set (user, project, organizational, enterprise) and allow servers to extend it with additional tiers (campaign, role, domain-specific scopes). Enterprise scope is in the minimum set because the governance argument for memory-as-protocol (Section 10) depends on having a highest-authority tier where human approval is mandatory. The key semantic contracts are:
-
-User-scope memories are private to one identity. Only the owning identity's agents can read or write them. This is a security property, not just a convenience: if another actor could modify a user's memories, they could alter the agent's behavior and attribute the consequences to the user.
-
-Project-scope memories are shared within a project context. Any authorized agent working in the project can read and write them. The protocol must define how project membership is determined (claim in the identity token, server-side lookup, or both).
-
-Organizational and enterprise scopes have escalating governance requirements. Enterprise/policy memories should require human approval for creation and modification. Organizational memories should support provenance tracking back to the source observations that motivated them.
+Key semantic contracts: **user-scope memories are private to one identity** — this is a security property, not a convenience, because an actor who can modify a user's memories can alter that user's agents' behavior and attribute the consequences to the user. **Project-scope memories are shared within a project context**, and the contract must define how membership is determined (identity-token claim, server-side lookup, or both). **Organizational and enterprise scopes carry escalating governance**: enterprise/policy creation requires human approval; organizational memories should support provenance back to the observations that motivated them.
 
 ### 6.3 Versioning
 
-Every memory node must carry version metadata. MemoryHub uses an `isCurrent` flag with a version chain: updating a memory creates a new node, marks the old one as not current, and links the new version to the old one. The full chain is preserved and traversable.
+Every memory node must carry version metadata. MemoryHub uses an `is_current` flag with a version chain: updates create a new node, mark the old one not-current, and link the versions; the full chain is preserved and traversable.
 
-This is not optional. Without version history, two critical capabilities are impossible. **Forensic reconstruction** -- determining exactly what an agent knew at a given point in time -- requires being able to query "which version of memory M was current on March 15th?" This matters for incident investigation: when an agent takes an unexpected action, the version history shows what beliefs influenced the decision. **Staleness detection** -- identifying memories that no longer reflect reality -- requires comparing the current version against accumulated contradiction reports, which only makes sense if versions are preserved rather than overwritten.
-
-The protocol should require that conforming servers preserve version history and support temporal queries against it. The storage mechanism is implementation-dependent; the capability is not.
+This is not optional, because two capabilities are impossible without it. **Forensic reconstruction** — determining exactly what an agent knew at a point in time — requires answering "which version of memory M was current on March 15th?" When an agent takes an unexpected action, the version history shows what beliefs influenced it. **Staleness detection** requires comparing the current version against accumulated contradiction reports, which only makes sense if versions persist. A conforming server must preserve version history and support temporal queries against it; the storage mechanism is implementation-dependent, the capability is not.
 
 ### 6.4 Relationships
 
-Memories do not exist in isolation. MemoryHub defines four relationship types between memory nodes: `derived_from` (provenance -- this memory was produced from that one), `supersedes` (an organizational memory replaces a user memory on the same topic), `conflicts_with` (two memories contradict each other), and `related_to` (general association). These are stored as directed edges in a relationships table and are queryable through `get_relationships` and `create_relationship`.
-
-The protocol should define relationship operations and a minimum set of relationship types. Graph-backed implementations will naturally support richer relationship semantics; vector-backed implementations can support the minimum set through a relationships table. The key requirement is that relationship operations are first-class -- not encoded as metadata fields on memory nodes, which makes them unqueryable and fragile.
+Memories do not exist in isolation. MemoryHub defines five relationship types between nodes: `derived_from` (provenance), `supersedes` (a broader-scope memory replaces a narrower one on the same topic), `conflicts_with` (contradiction), `related_to` (general association), and `mentions` (a memory references an extracted entity). The contract should define relationship operations and a minimum type set; graph-backed implementations will support richer semantics, and vector-backed ones can meet the minimum with a relationships table. The requirement is that relationships are first-class and queryable — not metadata fields on nodes, which are unqueryable and fragile.
 
 ## 7. Core Operations
 
 ### 7.1 Write
 
-`memory.write` creates a memory node. The request includes content, scope, weight, optional parent_id (for branches), optional branch_type, optional domain tags, and optional metadata. The server must run its curation pipeline before persisting: at minimum, secrets detection and dedup checking.
+`memory.write` creates a node. Request: content, scope, weight, optional parent_id (for branches), branch_type, domain tags, metadata. The server must run its curation pipeline before persisting — at minimum, secrets detection and dedup checking.
 
-The response must include the created memory and curation feedback. The protocol should define three categories of curation feedback: **duplicate detection** (how many similar memories exist, the nearest match identifier and similarity score), **content flags** (any policy violations detected -- secrets, PII, profanity), and **disposition** (whether the write was accepted, flagged for review, or blocked). MemoryHub implements these as `similar_count`, `nearest_id`, `nearest_score`, and `flags`; other implementations may use different field names, but the semantic categories must be present. This feedback is essential because it shifts ambiguous-case judgment to the calling agent's LLM, which has full conversational context and can make better decisions than any isolated curation check. A write that is blocked (secrets detected, exact duplicate) returns a structured error with the blocking reason and, for duplicates, a pointer to the existing memory.
+The response must include the created memory and structured curation feedback in three categories: **duplicate detection** (similar-memory count, nearest match ID and score), **content flags** (secrets, PII, policy violations), and **disposition** (accepted, flagged, or blocked). Field names may vary; the semantic categories must be present. This feedback shifts ambiguous-case judgment to the calling agent's LLM, which has conversational context no isolated curation check can match. A blocked write returns a structured error with the reason and, for duplicates, a pointer to the existing memory.
 
-Scope-based governance applies at write time. The server must verify that the caller is authorized to write at the requested scope before executing the curation pipeline. Writes to enterprise/policy scope must require elevated authorization (human approval or a designated service identity).
+Scope governance applies at write time: the server verifies write authorization at the requested scope before running curation; enterprise/policy writes require elevated authorization.
 
 ### 7.2 Read
 
-`memory.read` retrieves a memory by ID. The response includes the full node content, metadata, branch indicators (`has_rationale`, `has_children`), and optionally version history and branches.
-
-MemoryHub's `read_memory` supports paginated version history (`history_offset`, `history_max_versions`) so the caller can traverse the version chain without loading the entire history. This pagination was added after observing that agents sometimes trigger version history requests on memories with dozens of versions, which would blow out the response if returned unpaginated.
+`memory.read` retrieves a node by ID: full content, metadata, branch indicators (`has_rationale`, `has_children`), and optionally version history and branches. Version history must be paginated — MemoryHub added `history_offset`/`history_max_versions` after observing agents trigger history requests on memories with dozens of versions.
 
 ### 7.3 Search
 
-`memory.search` is the most complex and most important operation. It performs semantic retrieval against the memory store, subject to scope filtering, token budget constraints, and optional focus biasing.
+`memory.search` is the most complex and most important operation: semantic retrieval subject to scope filtering, token budgets, and optional focus biasing.
 
-Required parameters: `query` (the search text). Optional parameters: `max_results` (page size), `max_response_tokens` (token budget for the entire response), `mode` (full/index/full_only -- controlling stub behavior), `scope` (filter to specific scope tiers), `project_id` (for project and campaign scope inclusion), `include_branches` (whether to nest branches under parents), `focus` (a string biasing retrieval toward a topic), `session_focus_weight` (how strongly the focus biases results), and `domains` (crosscutting knowledge tags for boosting).
+Required: `query`. Optional: `max_results`, `max_response_tokens` (budget for the whole response), `mode` (full/index/full_only), `scope` filters, `project_id`, `include_branches`, `focus` (a string biasing retrieval toward a topic), `session_focus_weight`, and `domains` (crosscutting tags for boosting).
 
-The response includes an ordered list of results, each annotated with `result_type` (full or stub), `relevance_score`, `has_rationale`, and `has_children`. Pagination metadata (`total_matching`, `has_more`) tells the caller whether more results exist. When focus is provided, the response includes `pivot_suggested` (a boolean indicating the query has drifted far from the focus) and optionally `focus_fallback_reason` (if the reranker was unreachable and retrieval fell back to plain cosine).
+The response is an ordered result list, each entry annotated with `result_type` (full or stub), `relevance_score`, and branch indicators, plus pagination metadata (`total_matching`, `has_more`). With focus provided, the response includes `pivot_suggested` (the query has drifted from the focus beyond a threshold) and `focus_fallback_reason` when reranking degraded to plain cosine.
 
-The token budget contract is the most important detail for agent developers. Results are packed in relevance order. When the budget is exhausted, remaining results degrade to stubs but are still included so the agent never silently misses a ranked match. The agent sees both the full results it can use immediately and the stubs it could expand with `memory.read` if needed. This is strictly better than hard-cutoff top-K, which silently discards potentially relevant results.
+The token-budget contract is the detail that matters most to agent developers: results pack in relevance order, and when the budget is exhausted, remaining results degrade to stubs **but are still included** — the agent never silently misses a ranked match, and can expand any stub via `memory.read`. This is strictly better than hard-cutoff top-K.
 
 ### 7.4 Update
 
-`memory.update` creates a new version of an existing memory, preserving the previous version in the history chain. The request includes the memory ID and the fields to update (content, weight, scope, domain tags). The server must verify the caller is authorized to write at the memory's scope, run the curation pipeline on the new content, and create the version link.
-
-Importantly, update is not an in-place mutation. The previous version persists with `isCurrent=false`. This is a correctness requirement for forensics and staleness detection, not an implementation preference.
+`memory.update` creates a new version, preserving the old one in the chain. The server verifies scope authorization, runs curation on the new content, and links the versions. Update is not in-place mutation — the previous version persists with `is_current=false`. This is a forensics correctness requirement, not an implementation preference.
 
 ### 7.5 Delete
 
-`memory.delete` performs a soft delete with an audit trail. The memory and its entire version chain are marked as deleted but not physically removed. The audit log records who deleted what, when, and (if provided) why.
-
-Hard deletion should be available as a separate operation for GDPR right-to-erasure compliance, but it must also be audit-logged. The audit entry for a hard delete records that the memory existed and was erased, without preserving the content.
+`memory.delete` soft-deletes with an audit record: the memory and its version chain are marked deleted, not physically removed. Hard deletion exists as a separate operation for GDPR right-to-erasure, and it too is audit-logged — the entry records that a memory existed and was erased, without preserving content.
 
 ### 7.6 Relate
 
-`memory.relate` creates or queries relationships between memories. Creation requires the source ID, target ID, relationship type, and optional metadata. The server must verify the caller is authorized to write on both source and target memories.
-
-Querying returns all relationships for a given memory, filtered by the caller's access scope. Relationships pointing to memories the caller cannot access are omitted, with an `omitted_count` reported so the caller knows the graph is incomplete. This design (from MemoryHub's `get_relationships`) balances transparency with access control: the caller learns that hidden relationships exist without seeing the underlying data.
+`memory.relate` creates or queries relationships. Creation requires authorization on both source and target. Queries return relationships filtered by the caller's access scope; edges pointing at inaccessible memories are omitted with an `omitted_count`, so the caller learns the graph is incomplete without seeing hidden data.
 
 ### 7.7 Contradict
 
-`memory.contradict` reports an observed contradiction against a stored memory. The request includes the memory ID, the observed behavior that conflicts, and an optional confidence score. The server accumulates contradiction reports and surfaces the count as part of the memory's metadata.
+`memory.contradict` reports an observed contradiction: memory ID, the conflicting observation, optional confidence. The server accumulates reports and surfaces the count in the memory's metadata; MemoryHub flags a memory for curation when the count crosses a configurable threshold (default 5).
 
-Contradiction detection is a first-class operation because staleness is the most insidious failure mode in agent memory. A stale memory is not structurally wrong -- it has a valid embedding, a plausible content, and a genuine similarity to relevant queries. Only its temporal relationship to reality makes it unreliable. Without a formal mechanism for agents to report "this memory doesn't match what I'm seeing," stale memories persist indefinitely and silently degrade agent behavior.
-
-MemoryHub triggers a curation flag when the contradiction count for a memory exceeds a configurable threshold (default 5). The protocol should standardize the contradiction reporting interface and leave the threshold and response to server configuration.
+Contradiction reporting is first-class because staleness is the most insidious failure mode in agent memory. A stale memory is not structurally wrong — valid embedding, plausible content, genuine query similarity — only its temporal relationship to reality makes it unreliable. Without a formal channel for "this memory doesn't match what I'm seeing," stale memories persist indefinitely and silently degrade behavior.
 
 ### 7.8 Curate
 
-`memory.curate` encompasses two sub-operations: setting curation rules and querying similar memories for manual dedup assessment.
-
-Rule-setting allows users (within their scope) to adjust curation parameters. MemoryHub's three-layer rules engine (system > organizational > user) enforces that system-layer rules marked as `override=true` cannot be weakened by user rules. A user can raise their dedup similarity threshold if their memories are intentionally similar; they cannot disable secrets scanning.
-
-Similar-memory querying (`get_similar_memories` in MemoryHub) returns paged results of memories similar to a given memory ID, with similarity scores. This supports agent-driven dedup: the agent writes a memory, sees `similar_count: 3` in the curation feedback, calls `memory.curate` to inspect the similar memories, and decides whether to update an existing memory instead of creating a near-duplicate.
+`memory.curate` covers rule management and similarity inspection. Rules are layered — system > organizational > user — with system rules markable as unoverridable: a user can raise their own dedup threshold; they cannot disable secrets scanning. Similarity inspection returns paged memories similar to a given ID, supporting agent-driven dedup: write, see `similar_count: 3` in the feedback, inspect, and decide whether to update an existing memory instead of creating a near-duplicate.
 
 ## Wire Format Examples
 
-To make the protocol concrete, here are representative request/response pairs for the two most critical operations. Field names are illustrative; a formal JSON Schema would accompany the final specification.
+Illustrative request/response pairs for the two most critical operations; a formal JSON Schema would accompany the final specification.
 
 **memory.write request:**
 ```json
@@ -274,130 +238,110 @@ To make the protocol concrete, here are representative request/response pairs fo
 }
 ```
 
-The key elements visible in these examples: curation feedback on write (the caller sees 1 similar memory at 0.82 similarity and can decide whether to update it instead), budget-aware search (2 of 12 matches returned, one as full content, one as stub), and scope tagging on every result.
+Visible in the examples: curation feedback on write (one similar memory at 0.82 — the caller can update it instead), budget-aware search (2 of 12 matches returned, one full, one stub, nothing silently dropped), and scope tagging on every result.
 
 ## 8. Retrieval Contracts
 
-This section defines the contract between a memory server and its consumers for search result shaping. It is the most important section for agent developers because it directly affects context engineering -- what goes into the agent's context window and in what form.
+The contract between a memory server and its consumers for result shaping — the section that most directly affects context engineering.
 
-**Full vs. stub.** Every search result is either full (complete content) or a stub (compressed summary with metadata). The weight on the memory controls the default: high-weight memories are full, low-weight memories are stubs. The caller can override this with mode control: `index` mode returns all stubs (for exploration), `full_only` mode returns all full (for zero-round-trip answers). Stubs must include enough information for the agent to decide whether to expand -- a topic label alone is too lossy; a first-paragraph preview with metadata is the minimum.
+**Full vs. stub.** Every result is full content or a stub (compressed summary with metadata). Weight sets the default; the caller can override with `index` mode (all stubs, for exploration) or `full_only` (zero-round-trip answers). Stubs must carry enough to decide whether to expand — a topic label is too lossy; a preview with metadata is the minimum.
 
-**Token budgets.** The `max_response_tokens` parameter is a soft cap on the entire response payload. The server packs results in relevance order. When the budget is reached, remaining results degrade to stubs. No result is silently dropped. The budget mechanism must be documented as a soft cap (the server may slightly exceed it to avoid splitting a result) rather than a hard limit.
+**Token budgets.** `max_response_tokens` is a soft cap on the whole response. Results pack in relevance order; past the budget, results degrade to stubs; nothing is silently dropped. Soft cap, not hard limit — the server may slightly exceed it rather than split a result.
 
-**Branch handling.** By default, branches whose parent is also in the result set are omitted -- the parent's `has_rationale` and `has_children` flags signal that branches exist, and the agent can expand them via `memory.read`. When `include_branches` is true, branches are nested under their parent in a `branches` field rather than ranked as siblings. Branches whose parent is not in the result set are always returned as top-level entries. This design keeps default responses lean while making depth available on demand.
+**Branch handling.** By default, branches whose parent is in the result set are omitted; the parent's `has_rationale`/`has_children` flags signal their existence and the agent expands on demand. With `include_branches`, branches nest under their parent rather than ranking as siblings. Branches whose parent is absent return as top-level entries. Lean by default, deep on demand.
 
-**Focus-aware retrieval.** When the caller provides a focus string, the server biases retrieval toward that topic. MemoryHub implements this as a two-vector retrieval pipeline: pgvector cosine recall, cross-encoder reranking, and reciprocal-rank fusion of rerank scores with focus-cosine scores. The focus path is stateless (focus is passed per call), optional (omitting focus falls through to plain cosine), and graceful-fallback (if the reranker is unreachable, the response documents the fallback). The protocol should define the focus parameter and the `pivot_suggested` signal (indicating the query has drifted from the focus) but leave the ranking implementation to the server.
+**Focus-aware retrieval.** With a focus string, the server biases retrieval toward that topic. MemoryHub implements this as two-vector retrieval: pgvector cosine recall, cross-encoder reranking, reciprocal-rank fusion of rerank and focus-cosine ranks. The focus path is stateless (passed per call), optional (absent focus falls through to plain cosine), and graceful (reranker unreachable → documented fallback). The contract defines the focus parameter and the `pivot_suggested` signal; ranking implementation is the server's.
 
-**Cache-optimized ordering.** For agents that use compilation epochs (periodic full-context rebuilds), search results should have stable ordering across calls with the same parameters. This enables KV cache reuse in the language model. The protocol should recommend but not require stable ordering, since it is an optimization that depends on the agent framework's architecture.
+**Cache-optimized ordering.** For agents that periodically rebuild full context, stable result ordering across identical calls enables KV-cache reuse in the serving layer. Recommended, not required — the benefit depends on the agent framework's architecture.
 
 ## 9. Curation and Quality
 
-Curation is the difference between a memory system that works for weeks and one that degrades into noise within days. MemoryHub's operational experience confirmed that without write-time curation, memory stores fill with duplicates, secrets, PII, and trivial observations that drown out useful memories.
+Curation is the difference between a memory system that works for weeks and one that degrades into noise within days. MemoryHub's operational experience: without write-time curation, stores fill with duplicates, secrets, PII, and trivia that drown the useful memories.
 
-**Write-time pipeline.** Curation must be inline, not async. MemoryHub's pipeline runs in the write path: Tier 1 (regex scanning for secrets and PII patterns, microseconds) and Tier 2 (embedding similarity against existing memories in the same owner/scope, milliseconds). The total curation overhead is single-digit milliseconds. Async curation (scanning memories after they are persisted and retrievable) creates a window where uncurated memories can be served to agents, which defeats the purpose.
+**Write-time, inline, not async.** MemoryHub's pipeline runs in the write path: Tier 1 regex scanning (secrets, PII — microseconds) and Tier 2 embedding similarity within the owner/scope (milliseconds); total overhead is single-digit milliseconds. Async curation creates a window where uncurated memories are served, defeating the purpose.
 
-**Three-layer rules.** Curation rules are scoped to three layers: system (platform defaults, some marked unoverridable), organizational (admin-configured), and user (agent-adjustable). The system layer includes secrets scanning and hard dedup thresholds. Users can tune their own dedup sensitivity but cannot weaken security scanning. This layering balances platform security with user autonomy.
+**Three-layer rules.** System (platform defaults, some unoverridable), organizational (admin-configured), user (agent-adjustable). Users tune their own dedup sensitivity; nobody weakens security scanning.
 
-**No LLM sampling for curation.** The MCP specification requires HITL approval for sampling requests. Applying this to write-time dedup decisions would mean popping an approval dialog on every ambiguous write -- unacceptable friction for a hot-path operation. MemoryHub's solution is to return similarity information in the write response and let the calling agent's existing LLM handle the judgment. The agent has full conversational context and makes better decisions than an isolated curation prompt could. The protocol should prohibit LLM sampling on the write path and require structured curation feedback instead.
-
-**Curation feedback.** The write response must include: the number of similar existing memories above the flag threshold, the ID and similarity score of the nearest match, any curation flags applied, and whether the write was blocked. This information enables agent-driven memory hygiene without additional tool calls and without HITL friction.
+**No LLM sampling on the write path.** Structured feedback instead (Section 3, sixth principle; Section 7.1). The calling agent's LLM, with full conversational context, makes better ambiguous-case decisions than an isolated curation prompt — and without HITL friction.
 
 ## 10. Governance
 
-Governance in a memory protocol is not an enterprise feature to be added later. It is a structural requirement for any deployment where more than one agent or user shares a memory backend.
+Governance is a structural requirement for any deployment where more than one agent or user shares a memory backend, not an enterprise feature added later.
 
-**RBAC model.** The protocol defines scope-based access control: every memory has a scope, every caller has authorized scopes, and the server filters all operations accordingly. In MemoryHub, `search_memory` builds the authorized-scopes filter at the SQL level -- RBAC violations are impossible by construction, not prevented by post-hoc checks. The protocol should require that search operations apply scope filtering at the query level, not as a post-fetch filter that leaks information through timing or result count.
+**RBAC model.** Every memory has a scope; every caller has authorized scopes; the server filters all operations accordingly. The contract requires scope filtering **at the query level** — in MemoryHub, search builds the authorized-scope filter into the SQL, making violations impossible by construction — not as a post-fetch filter that leaks information through timing or result counts.
 
-**Audit trails.** Every memory operation must be audit-logged with the operation type, actor identity, target memory, governance decision (permitted or denied), and for write operations, the before and after states. The audit trail must be append-only: entries cannot be modified or deleted, even by administrators. MemoryHub's audit schema uses PostgreSQL row-level security with a dedicated `audit_writer` role that has INSERT-only permissions.
+**Audit trails.** Every operation must be audit-logged: operation type, actor identity, target memory, governance decision, and before/after states for writes. The trail must be append-only — unmodifiable even by administrators. Implementation status in MemoryHub, stated plainly: structured audit events are emitted on every tool call site today; the durable append-only store is in progress (the design targets PostgreSQL row-level security with an INSERT-only writer role). The contract specifies the requirement; MemoryHub is partway through meeting it.
 
-**Forensic reconstruction.** The combination of version history and audit trails enables reconstruction of exactly what an agent knew at any point in time. This capability matters for incident investigation: "Why did the agent deploy to production without running tests?" can be answered by reconstructing the memory state that influenced the decision and the audit trail showing which memories were served. The protocol should require that conforming servers support temporal queries ("what did memory M say at time T?") against the version history.
+**Forensic reconstruction.** Version history plus audit trail enables reconstructing exactly what an agent knew at any point in time. "Why did the agent deploy to production without running tests?" is answerable by reconstructing the memory state that influenced the decision and the trail of which memories were served. Conforming servers must support temporal queries against version history.
 
-**The attribution problem.** If agent memories influence agent behavior, and agent behavior has real consequences, then whoever controls the memories controls the outcome. The protocol must enforce that user-scope memories can only be written by the owning user's agents, that all writes are audit-logged with actor identity, and that version history preserves the provenance of every change. This does not make tampering impossible (direct database access bypasses any application-level control), but it makes tampering detectable, which is the practical standard for enterprise compliance.
+**The attribution problem.** If memories influence agent behavior and agent behavior has real consequences, whoever controls the memories controls the outcome. The contract enforces that user-scope memories are writable only by the owning user's agents, that all writes are logged with actor identity, and that version history preserves the provenance of every change. This does not make tampering impossible — direct database access bypasses any application-level control — but it makes tampering *detectable*, which is the practical standard for enterprise compliance.
 
-## 11. Transport and Compatibility
+## 11. Packaging Options
 
-### 11.1 Option A: New MCP Primitive
+Three ways to carry the contract. The contract (Sections 5–10) is identical in all three.
 
-Memory becomes a fourth primitive alongside tools, resources, and prompts. MCP clients discover memory capability through the existing capability negotiation mechanism. When a server advertises `memory` capability, the client knows it can issue `memory.write`, `memory.search`, and other memory operations using standardized schemas.
+### 11.1 Option A: New MCP primitive
 
-Advantages: single protocol, single transport, single auth model. Agents that already speak MCP gain memory capability without additional integration. Server implementers extend their existing MCP servers rather than running a second service.
+Memory becomes a fourth primitive alongside tools, resources, and prompts, discovered through capability negotiation. Advantages: single protocol, transport, and auth model; client libraries implement the memory contract once; the strongest schema authority. Disadvantages: requires Anthropic's buy-in and adds real complexity to a deliberately simple protocol; every MCP client library carries an implementation burden; a migration window (clients without `memory` support falling back to the tool facade of Section 13) adds ecosystem complexity for a while.
 
-Disadvantages: MCP is governed by Anthropic, and adding a primitive requires their buy-in. The memory primitive's governance layer (scope-based RBAC, curation pipelines, audit trails) adds substantial complexity to a protocol that currently has a clean, simple design. Memory operations have different latency profiles and access patterns from tools, which may strain MCP's transport assumptions. The implementation burden on MCP client libraries (Claude Code, Cursor, Zed, Continue, and others) is non-trivial -- each must implement the memory primitive alongside tools, resources, and prompts. A phased rollout (clients that do not implement `memory` fall back to the tool facade described in Section 13) mitigates this, but the migration window adds ecosystem complexity.
+### 11.2 Option B: Companion protocol (AMP)
 
-### 11.2 Option B: Companion Protocol (AMP)
+A standalone protocol with its own governance, bridgeable to MCP through a standard adapter. Advantages: independent evolution, memory-specific design freedom, adoptable by non-MCP agent stacks. Disadvantages: agents speak two protocols; the bridge adds latency and complexity; auth must be coordinated or duplicated.
 
-A standalone Agent Memory Protocol with its own transport, authentication, and governance layer, bridgeable to MCP through a standard adapter. AMP-aware agents connect to memory directly; legacy MCP agents access memory through an MCP tool facade that translates between protocols.
+### 11.3 Option C: MCP extension
 
-Advantages: independent governance -- AMP can evolve on its own release cadence without coordinating with MCP's roadmap. The protocol can be designed specifically for memory's access patterns (high-frequency reads, budget-aware responses, stateless focus) without compromising MCP's simplicity. Multiple agent protocols (not just MCP) could adopt AMP.
-
-Disadvantages: agents must speak two protocols. The bridge adapter adds latency and complexity. Auth must be coordinated between AMP and MCP, or agents must authenticate twice.
-
-### 11.3 Option C: MCP Extension
-
-Use MCP's extension mechanism (if one exists or is created) to define memory as a capability that extends the base protocol without modifying it. Extensions would be namespaced (`amp/memory.write`, `amp/memory.search`) and discovered through capability negotiation.
-
-Advantages: lightest-weight integration path. No changes to MCP core. Servers opt in by registering the extension; clients opt in by recognizing the namespace.
-
-Disadvantages: depends on MCP having a robust extension mechanism, which as of this writing does not exist in a formalized way. Risk of fragmentation if multiple memory extensions emerge without coordination.
+Namespaced operations (`amp/memory.write`, `amp/memory.search`) discovered via capability negotiation, using whatever extension mechanism MCP formalizes. Advantages: lightest-weight path; no core changes; opt-in on both sides. Disadvantages: depends on the maturity of MCP's extension story at adoption time, and un-owned extensions tend toward fragmentation.
 
 ### 11.4 Recommendation
 
-Option A (new MCP primitive) is the best outcome for the ecosystem if Anthropic is willing. It gives agents a single, coherent protocol with memory as a first-class concern. The complexity increase is justified because memory is not a niche use case -- every production agent system needs it, and every one is currently building ad-hoc solutions.
-
-If Option A is not feasible, Option B (companion protocol) is the fallback. AMP as a standalone protocol has the advantage of being implementable without waiting for MCP governance decisions. The bridge adapter cost is real but manageable, and the independent evolution path means memory-specific concerns do not need to compete for MCP roadmap priority.
-
-Option C is acceptable as a short-term measure but is not a long-term solution. Extensions without formal specification tend toward fragmentation.
+Option A is the best ecosystem outcome if MCP governance permits: memory is not a niche capability — every production agent system needs it and every one is currently building an ad-hoc version — and a first-class primitive gives clients one coherent contract. If A is not feasible on a reasonable timeline, Option B is the fallback: implementable without waiting on anyone, at the price of a bridge. Option C is a pragmatic interim wherever a formalized extension mechanism exists. In all three cases the work that matters — agreeing on the contract — is the same, which is why this document spends its pages there.
 
 ## 12. Security Considerations
 
-Agent memory introduces security concerns that do not exist for stateless tool invocations.
+Agent memory introduces concerns that stateless tool invocation does not have.
 
-**Memory poisoning.** If an agent persists information from untrusted inputs (processed documents, web scrapes), an attacker can inject false beliefs into long-term storage. The protocol's curation pipeline (Section 9) provides a first line of defense through content scanning, but content-level scanning cannot detect semantically plausible false statements. Defense in depth requires provenance tracking (every memory records its source), scope isolation (untrusted inputs go to a sandboxed scope), and contradiction detection (agents can flag memories that do not match observed reality).
+**Memory poisoning.** An agent that persists information from untrusted inputs (processed documents, web content) can have false beliefs injected into long-term storage. Write-time scanning (Section 9) is the first line of defense but cannot detect semantically plausible falsehoods. Defense in depth: provenance tracking (every memory records its source), scope isolation (untrusted inputs land in a sandboxed scope), and contradiction reporting (agents flag memories that contradict observation).
 
-**Cascade corruption.** In multi-agent systems, Agent A hallucinating a fact and writing it to shared memory means Agent B reads it as ground truth and may write derived conclusions, propagating the hallucination. The protocol's scope hierarchy limits blast radius (a user-scope hallucination cannot reach organizational scope without curator promotion), and provenance chains enable tracing corrupted beliefs back to their source. But the fundamental problem -- distinguishing agent-generated beliefs from externally verified facts -- remains an open problem.
+**Cascade corruption.** In multi-agent systems, Agent A's hallucination written to shared memory becomes Agent B's ground truth, and B's derived conclusions propagate it. The scope hierarchy limits blast radius (a user-scope hallucination cannot reach organizational scope without curated promotion), and provenance chains allow tracing corrupted beliefs to their source. The fundamental problem — distinguishing agent-generated beliefs from externally verified facts — remains open.
 
-**Scope isolation.** The protocol requires that scope enforcement happens at the query level, not as a post-fetch filter. This prevents timing-based information leakage (where the presence or absence of hidden results changes response latency) and ensures that cross-scope reads require explicit authorization.
+**Scope isolation.** Enforcement at the query level, not post-fetch (Section 10), prevents timing-based leakage and ensures cross-scope reads require explicit authorization.
 
-**Secret and PII detection.** The protocol requires that conforming servers implement content scanning for common secret and PII patterns. This is a protocol requirement, not an implementation suggestion, because a memory store that ingests API keys and social security numbers from agent conversations is a liability regardless of what other security measures are in place. MemoryHub's regex-based scanning catches AWS keys, GitHub tokens, private key headers, SSNs, email addresses, and phone numbers, with curation rules that system administrators cannot disable.
+**Secret and PII detection.** Required of conforming servers, not suggested: a memory store that ingests API keys and SSNs from agent conversations is a liability regardless of other measures. MemoryHub's scanning covers cloud credentials, tokens, private-key headers, SSNs, emails, and phone numbers, under system-layer rules administrators cannot disable.
 
-**OAuth 2.1 alignment.** The protocol's authentication model is OAuth 2.1, supporting `client_credentials` for agents and SDKs, `authorization_code` with PKCE for browser-based humans, and token exchange (RFC 8693) for platform-integrated agents. Short-lived JWTs (5-15 minute TTL) limit blast radius from token leakage. This alignment is deliberate: OAuth 2.1 is already the MCP authentication standard, and memory should not introduce a divergent auth model.
+**OAuth 2.1 alignment.** `client_credentials` for agents and SDKs, `authorization_code`+PKCE for humans in browsers, RFC 8693 token exchange for platform-integrated agents, short-lived JWTs (5–15 minutes) to bound token-leak blast radius. Deliberately the same model as MCP — memory should not introduce a divergent auth story.
 
 ## 13. Migration Path
 
-Existing memory-as-tools implementations can migrate incrementally.
+Existing memory-as-tools implementations migrate incrementally.
 
-**Adapter pattern.** A conforming AMP server can expose its operations through MCP tools as a backward-compatibility layer. MemoryHub's current 13-tool surface is essentially this adapter: `write_memory` maps to `memory.write`, `search_memory` maps to `memory.search`, and so on. The adapter adds protocol-level session establishment, standardized response schemas, and capability negotiation on top of the existing tool implementations.
+**Adapter pattern.** A conforming server exposes its operations through MCP tools as a compatibility layer. MemoryHub's tool surface is essentially this adapter already — its flat tools map one-to-one onto the contract operations (`write_memory` → `memory.write`, `search_memory` → `memory.search`), and its compact action-dispatch profile demonstrates that the operation set also survives repackaging into a different tool shape without semantic change. That survivability is itself evidence the contract, not the tool schema, is the stable layer.
 
-**Gradual adoption.** Servers implement the protocol alongside their existing tool surface. Clients that understand the protocol use it directly; clients that do not continue using the tool facade. Over time, as client support matures, the tool facade can be deprecated. MemoryHub's existing `register_session` compatibility shim demonstrates this pattern at a smaller scale: JWT-authenticated clients skip it entirely, while API-key clients continue using it until they migrate.
+**Gradual adoption.** Servers implement the contract alongside their existing tool surface; contract-aware clients use it directly; others continue on the facade until it is deprecated. MemoryHub's `register_session` shim already demonstrates the pattern: JWT-authenticated clients skip it entirely while API-key clients keep using it.
 
-**Schema mapping.** The protocol defines canonical schemas for all operations. Existing implementations map their current schemas to the canonical ones. Where the existing schema is richer (MemoryHub's branch types, Zep's temporal metadata, Letta's tier management), the extra fields pass through as metadata extensions. Where the existing schema is simpler (a basic vector store with write/search), the implementation reports reduced capabilities during handshake and the client adapts.
+**Schema mapping.** The contract defines canonical schemas; existing implementations map onto them. Richer schemas (MemoryHub's branch types, Zep's temporal metadata, Letta's tiers) pass extra fields through as metadata extensions; simpler ones (a bare vector store) report reduced capabilities at handshake and the client adapts.
 
 ## 14. Open Questions
 
-Several significant questions remain unresolved.
+**Multi-cluster federation.** Conflict resolution across servers, synchronous vs. eventual cross-cluster search, whether organizational scopes span clusters. MemoryHub's single-cluster deployment does not yet force these decisions.
 
-**Multi-cluster federation.** How do memory operations work across multiple memory servers in different clusters or regions? MemoryHub's current single-cluster deployment does not address this. Federation requires decisions about conflict resolution (which server's version wins?), latency tolerance (is cross-cluster search synchronous or eventual?), and scope mapping (do organizational scopes span clusters?).
+**Standard evaluation benchmarks.** The field measures conversation-history recall and little else. Needed: temporal reasoning (recent preferred over stale?), curation quality (are secrets and dupes actually caught?), multi-agent consistency (do agents converge on coherent beliefs?), and governance compliance (are scope restrictions enforced under test?).
 
-**Standard evaluation benchmarks.** The field lacks benchmarks for agent memory beyond conversation-history recall. Needed: benchmarks for temporal reasoning (does the agent prefer recent over stale?), curation quality (does the pipeline catch secrets and dedup effectively?), multi-agent consistency (do agents converge on coherent beliefs?), and governance compliance (does the system correctly enforce scope restrictions?).
+**Memory compilation and synthesis.** The compiled-knowledge pattern (Karpathy's llm-wiki) suggests servers should support periodic synthesis. The contract does not yet define how a "compiled" memory differs from a "raw" one, nor how compilation epochs interact with version history.
 
-**Memory compilation and synthesis.** Karpathy's LLM Wiki pattern -- agents maintaining compiled, structured knowledge rather than raw interaction logs -- suggests that memory systems should support periodic synthesis operations. The protocol does not yet define how a server would signal that a memory is "compiled" versus "raw," or how compilation epochs interact with version history.
+**Agent-to-agent sharing.** The scope hierarchy does not cleanly model Agent A sharing one memory with Agent B without exposing it to the whole project. Per-memory ACLs would add substantial complexity; the right abstraction is open.
 
-**Agent-to-agent memory sharing.** The current scope model assumes a hierarchy (user, project, organizational). It does not cleanly model peer-to-peer memory sharing where Agent A wants to share a specific memory with Agent B without making it visible to the entire project or organization. Adding per-memory ACLs would increase complexity substantially; the right abstraction is an open question.
+**Weight calibration.** Agent-set weights with scope defaults work; whether weights should decay with disuse is an empirical question awaiting more production data.
 
-**Memory weight calibration.** MemoryHub uses agent-set weights with scope-based defaults. The optimal weight assignment strategy -- and whether weights should decay over time based on access patterns -- remains an empirical question that requires more production data to answer.
-
-**Formal consistency models.** Multi-agent memory consistency lacks formal models. The computer architecture community's work on cache coherence (MESI, MOESI) provides tools and inspiration, but agent memory conflict is semantic rather than bitwise, and detecting conflict requires understanding meaning, not just comparing values. Developing formal models for semantic consistency is a prerequisite for provably correct multi-agent memory systems.
+**Formal consistency models.** Multi-agent memory consistency lacks formal treatment. Cache-coherence work (MESI/MOESI) inspires, but memory conflict is semantic, not bitwise — detecting it requires understanding meaning. Formal models for semantic consistency are a prerequisite for provably correct multi-agent memory.
 
 ## 15. Prior Art and References
 
-This proposal draws on operational experience and published research from the following sources.
+**Systems.** Mem0 (hybrid multi-tier architecture, https://mem0.ai; arXiv:2504.19413). Zep/Graphiti (bi-temporal knowledge graph, https://www.getzep.com/; arXiv:2501.13956). Letta/MemGPT (OS-inspired memory hierarchy, https://www.letta.com/; arXiv:2310.08560). LangMem (semantic/episodic/procedural memory, https://blog.langchain.com/langmem-sdk-launch/). MemoryHub (tree-structured governed memory, deployed on OpenShift AI; this repository).
 
-**Systems.** Mem0 (hybrid multi-tier architecture, https://mem0.ai). Zep/Graphiti (bi-temporal knowledge graph, https://www.getzep.com/; arXiv:2501.13956). Letta/MemGPT (OS-inspired memory hierarchy, https://www.letta.com/; arXiv:2310.08560). LangMem (semantic/episodic/procedural memory, https://blog.langchain.com/langmem-sdk-launch/). MemoryHub (tree-structured governed memory, deployed on OpenShift AI).
+**Foundational work.** Karpathy on the LLM memory problem and the operating-system analogy (YC AI Startup School, June 2025); on context engineering (X, June 2025); on system prompt learning (X, May 2025); the llm-wiki compiled-knowledge pattern (GitHub Gist, April 2026).
 
-**Foundational work.** Karpathy on the LLM memory problem and the operating system analogy (YC AI Startup School, June 2025). Karpathy on context engineering (X, June 2025). Karpathy on system prompt learning (X, May 2025). Karpathy's LLM Wiki / compiled knowledge base pattern (GitHub Gist, April 2026).
+**Research.** "Multi-Agent Memory from a Computer Architecture Perspective" (arXiv:2603.10062) — consistency challenges and cache-coherence parallels. "Governing Evolving Memory in LLM Agents: SSGM Framework" (arXiv:2603.11768) — structured governance with retention, decay, and write validation. MAGMA (arXiv:2601.03236) — multi-graph memory architecture. Liu et al., "Lost in the Middle" (TACL 2024; arXiv:2307.03172) — attention degradation in long contexts. Lewis et al., "Retrieval-Augmented Generation" (NeurIPS 2020; arXiv:2005.11401).
 
-**Research.** "Multi-Agent Memory from a Computer Architecture Perspective" (arXiv:2603.10062, March 2026) -- catalogs consistency challenges and draws parallels to hardware cache coherence. "Governing Evolving Memory in LLM Agents: SSGM Framework" (arXiv:2603.11768, 2026) -- proposes structured governance including retention policies, temporal decay, and write validation. MAGMA multi-graph architecture (arXiv:2601.03236, 2026) -- multi-graph approach with separate episodic, semantic, and procedural graphs. Liu et al., "Lost in the Middle" (TACL, 2024; arXiv:2307.03172) -- attention degradation in long contexts. Lewis et al., "Retrieval-Augmented Generation" (NeurIPS, 2020; arXiv:2005.11401) -- foundational RAG work. Salesforce Engineering, "How Agentic Memory Enables Durable, Reliable AI Agents" (2026) -- production-scale multi-agent memory.
+**Standards.** Model Context Protocol specification. OAuth 2.1. RFC 8693 (Token Exchange). RFC 9728 (OAuth Protected Resource Metadata).
 
-**Standards.** Model Context Protocol (MCP) specification. OAuth 2.1 (RFC in progress). RFC 8693 (Token Exchange). RFC 9728 (OAuth Protected Resource Metadata).
-
-**Regulatory.** EU AI Act (enforcement August 2026). GDPR right to erasure. HIPAA Security Rule. Deloitte "State of Generative AI in the Enterprise" (Q3 2025).
+**Regulatory.** EU AI Act (enforcement begins August 2026). GDPR right to erasure. HIPAA Security Rule.
