@@ -29,7 +29,6 @@ from statistics import median
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from memoryhub_core.models.base import Base
 from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.services.memory import search_memories, search_memories_with_focus
 from tests.perf.metrics import mrr, precision_at_k, recall_at_k
@@ -230,7 +229,7 @@ async def _seed_corpus(
     for mem in corpus:
         embedding = await embedding_service.embed(mem["content"])
         node = MemoryNode(
-            id=uuid.uuid5(uuid.NAMESPACE_DNS, mem["id"]),
+            id=uuid.uuid5(uuid.NAMESPACE_DNS, f"{tenant_id}-{mem['id']}"),
             content=mem["content"],
             stub=mem["content"][:100],
             scope="user",
@@ -261,7 +260,7 @@ async def _run_queries(
 
     for q in queries:
         relevant_ids = {
-            str(uuid.uuid5(uuid.NAMESPACE_DNS, m["id"]))
+            str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{tenant_id}-{m['id']}"))
             for m in corpus
             if m["topic"] == q["relevant_topic"]
         }
@@ -351,7 +350,10 @@ async def run_scale_benchmark(
         async with engine.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\""))
-            await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(
+                MemoryNode.metadata.create_all,
+                tables=[MemoryNode.__table__],
+            )
 
         for scale in scales:
             logger.info("Starting scale tier: %d memories", scale)

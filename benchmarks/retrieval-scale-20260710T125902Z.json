@@ -1,0 +1,31 @@
+{
+  "benchmark": "retrieval-scale",
+  "timestamp": "2026-07-10T17:58:35.290970+00:00",
+  "config": {
+    "scales": [
+      10000
+    ],
+    "runs_per_scale": 3,
+    "queries": 16,
+    "topics": 8,
+    "db_host": "localhost",
+    "db_port": "15433"
+  },
+  "tiers": [
+    {
+      "scale": 10000,
+      "seed_time_s": 13.343969249999645,
+      "queries": 16,
+      "latency_p50_ms": 93.94579200125008,
+      "latency_p95_ms": 107.16712499925052,
+      "latency_p99_ms": 107.16712499925052,
+      "recall_at_10": 0.0006000000000000001,
+      "precision_at_10": 0.075,
+      "mrr_score": 0.1875,
+      "keyword_recall_at_10": 0.0006000000000000001,
+      "keyword_precision_at_10": 0.075,
+      "keyword_mrr_score": 0.13541666666666669
+    }
+  ],
+  "total_seconds": 27.424257582999417
+}

@@ -42,7 +42,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from memoryhub_core.models.base import Base
 from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.services.memory import search_memories, search_memories_with_focus
 from tests.perf.metrics import mrr, recall_at_k
@@ -146,7 +145,10 @@ async def run_longmemeval_benchmark(
         async with engine.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
-            await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(
+                MemoryNode.metadata.create_all,
+                tables=[MemoryNode.__table__],
+            )
 
         question_results: list[QuestionResult] = []
 
