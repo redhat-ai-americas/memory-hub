@@ -28,9 +28,13 @@ logger = logging.getLogger(__name__)
 
 
 # The deployed reranker reports max_client_batch_size=32 from /info.
-# K_RECALL in production should match this so each rerank fits in a
-# single API call.
-RERANK_MAX_BATCH = 32
+# This is a hard server-side limit -- larger batches are rejected.
+RERANK_API_BATCH = 32
+
+# Rerank pool size: how many candidates from the recall pool to rerank.
+# Can exceed RERANK_API_BATCH; batched_rerank chunks the pool into
+# API-sized batches and merges by score.
+RERANK_POOL_SIZE = int(os.environ.get("MEMORYHUB_RERANK_POOL_SIZE", "24"))
 
 
 class RerankerService(ABC):
@@ -48,7 +52,7 @@ class RerankerService(ABC):
 
         Args:
             query: The query string to score candidates against.
-            texts: Candidate texts. Length must be <= RERANK_MAX_BATCH.
+            texts: Candidate texts. Length must be <= RERANK_API_BATCH.
 
         Returns:
             A list of input indices sorted by descending relevance.
@@ -56,10 +60,21 @@ class RerankerService(ABC):
             scores for every input.
 
         Raises:
-            ValueError: If `texts` exceeds RERANK_MAX_BATCH.
+            ValueError: If `texts` exceeds RERANK_API_BATCH.
             httpx.HTTPError: If the network call fails. Callers in
                 `search_memories` catch this and degrade to the cosine
                 fallback path; do not retry inside the implementation.
+        """
+        ...
+
+    @abstractmethod
+    async def rerank_with_scores(
+        self, query: str, texts: list[str]
+    ) -> list[tuple[int, float]]:
+        """Return (index, score) pairs in descending score order.
+
+        Same contract as rerank() but preserves the cross-encoder scores
+        for cross-batch merging in batched_rerank().
         """
         ...
 
@@ -92,10 +107,10 @@ class HttpRerankerService(RerankerService):
                 "HttpRerankerService called without a configured URL; "
                 "set MEMORYHUB_RERANKER_URL or pass url=... to construct."
             )
-        if len(texts) > RERANK_MAX_BATCH:
+        if len(texts) > RERANK_API_BATCH:
             raise ValueError(
                 f"rerank batch size {len(texts)} exceeds "
-                f"RERANK_MAX_BATCH={RERANK_MAX_BATCH}; the deployed reranker "
+                f"RERANK_API_BATCH={RERANK_API_BATCH}; the deployed reranker "
                 "rejects larger batches in a single call"
             )
         response = await self._client.post(
@@ -106,6 +121,27 @@ class HttpRerankerService(RerankerService):
         # Service returns [{"index": int, "score": float}, ...] sorted
         # descending by score. Extract indices preserving that order.
         return [item["index"] for item in data]
+
+    async def rerank_with_scores(
+        self, query: str, texts: list[str]
+    ) -> list[tuple[int, float]]:
+        if not self.url:
+            raise RuntimeError(
+                "HttpRerankerService called without a configured URL; "
+                "set MEMORYHUB_RERANKER_URL or pass url=... to construct."
+            )
+        if len(texts) > RERANK_API_BATCH:
+            raise ValueError(
+                f"rerank batch size {len(texts)} exceeds "
+                f"RERANK_API_BATCH={RERANK_API_BATCH}; the deployed reranker "
+                "rejects larger batches in a single call"
+            )
+        response = await self._client.post(
+            self.url, json={"query": query, "texts": texts}
+        )
+        response.raise_for_status()
+        data = response.json()
+        return [(item["index"], item["score"]) for item in data]
 
     @property
     def is_configured(self) -> bool:
@@ -132,6 +168,34 @@ class NoopRerankerService(RerankerService):
     async def rerank(self, query: str, texts: list[str]) -> list[int]:
         return list(range(len(texts)))
 
+    async def rerank_with_scores(
+        self, query: str, texts: list[str]
+    ) -> list[tuple[int, float]]:
+        return [(i, 1.0 - i * 0.01) for i in range(len(texts))]
+
     @property
     def is_configured(self) -> bool:
         return False
+
+
+async def batched_rerank(
+    reranker: RerankerService, query: str, texts: list[str]
+) -> list[int]:
+    """Rerank texts in batches of RERANK_API_BATCH, merge by score.
+
+    When len(texts) <= RERANK_API_BATCH, makes a single call.
+    Otherwise splits into chunks, reranks each, and merges by
+    cross-encoder score to produce a global ranking.
+    """
+    if len(texts) <= RERANK_API_BATCH:
+        return await reranker.rerank(query, texts)
+
+    all_scored: list[tuple[int, float]] = []
+    for chunk_start in range(0, len(texts), RERANK_API_BATCH):
+        chunk_texts = texts[chunk_start : chunk_start + RERANK_API_BATCH]
+        chunk_scores = await reranker.rerank_with_scores(query, chunk_texts)
+        for local_idx, score in chunk_scores:
+            all_scored.append((chunk_start + local_idx, score))
+
+    all_scored.sort(key=lambda pair: pair[1], reverse=True)
+    return [idx for idx, _ in all_scored]

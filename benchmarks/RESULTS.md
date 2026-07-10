@@ -122,12 +122,35 @@ Result files: `retrieval-scale-20260710T125826Z.json`, `retrieval-scale-20260710
 
 **Note:** These use mock (hash-based) embeddings, not semantic embeddings. The relevance numbers are not meaningful in absolute terms -- only the latency scaling and relative vector-vs-hybrid comparison matter. At 1K scale, hybrid search improves MRR by 75% (0.191 to 0.335).
 
+### 4. Cross-Encoder Pool Size Sweep -- Latency vs Quality Tradeoff
+
+**What it measures:** How many candidates to send through the cross-encoder reranker before diminishing returns set in. Larger pools produce better rankings but cost proportionally more reranker time.
+
+**Dataset:** 733 production memories. 10 diverse queries (factual, semantic, code/config, vague). Baseline = pool size 64 (largest tested).
+
+**Method:** Decouple the recall pool size (`RERANK_POOL_SIZE`) from the TEI API batch limit (`RERANK_API_BATCH=32`). Pool sizes above 32 use batched reranking (split into 32-item chunks, merge by cross-encoder score). Measure avg/p50/p95 latency and top-5/top-10 result set overlap with the pool=64 baseline.
+
+#### Run: 2026-07-10 (v0.2, 733 production memories)
+
+| Pool Size | Avg Latency | p50 | p95 | Top-5 Overlap | Top-10 Overlap |
+|-----------|------------|-----|-----|---------------|----------------|
+| 16 | 1,588ms | 1,630ms | 2,293ms | 94.0% | 90.0% |
+| 24 | 2,088ms | 2,172ms | 2,422ms | 94.0% | 93.0% |
+| **32 (prev default)** | **2,679ms** | **2,833ms** | **3,134ms** | **98.0%** | **96.0%** |
+| 48 | 3,848ms | 3,960ms | 4,383ms | 98.0% | 99.0% |
+| 64 | 5,143ms | 5,204ms | 5,696ms | 100% | 100% |
+
+Result file: `pool-sweep-20260710T154357Z.json`
+
+**Decision: Set default pool size to 24.** The 32->24 reduction cuts avg latency by 22% (2,679ms -> 2,088ms) with 94% top-5 overlap and 93% top-10 overlap. The 6-7% miss rate represents candidates ranked 25th-32nd by cosine that the cross-encoder would have promoted -- rare enough at this corpus size that the latency savings justify the tradeoff. The pool size is configurable via `MEMORYHUB_RERANK_POOL_SIZE` env var for deployments that prefer accuracy over speed.
+
 ## Retrieval Pipeline Changelog
 
 Track what changed between measurement points so deltas are attributable.
 
 | Date | Change | Issues | Expected Impact |
 |------|--------|--------|-----------------|
+| 2026-07-10 | Cross-encoder pool size tuned to 24 (was 32) | #274 | -22% hybrid latency (2.7s->2.1s), 94% top-5 overlap |
 | 2026-07-10 | Hybrid keyword+vector search with RRF blend | #305 | +recall on exact-match queries (CLI commands, config keys) |
 | 2026-07-10 | Alembic 024: tsvector generated column + GIN index | #305 | Zero-cost keyword index, auto-populates on existing data |
 | -- | Time-decay recency bias (not yet shipped) | #306 | Better ranking of recent memories over stale ones |

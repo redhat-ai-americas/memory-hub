@@ -35,7 +35,11 @@ from memoryhub_core.services.exceptions import (
     MemoryNotFoundError,
 )
 from memoryhub_core.services.pattern import PatternSignal, detect_patterns
-from memoryhub_core.services.rerank import RERANK_MAX_BATCH, RerankerService
+from memoryhub_core.services.rerank import (
+    RERANK_POOL_SIZE,
+    RerankerService,
+    batched_rerank,
+)
 from memoryhub_core.storage.chunker import semantic_chunk
 from memoryhub_core.storage.s3 import S3StorageAdapter
 
@@ -1258,11 +1262,11 @@ async def search_memories_with_focus(
             pivot_reason=pivot_reason,
         )
 
-    # Recall pool: at least RERANK_MAX_BATCH so the rerank stage has
+    # Recall pool: at least RERANK_POOL_SIZE so the rerank stage has
     # headroom over max_results, and at least max_results so the
     # blend has the requested page worth of candidates even when
-    # max_results > RERANK_MAX_BATCH.
-    k_recall = max(RERANK_MAX_BATCH, max_results)
+    # max_results > RERANK_POOL_SIZE.
+    k_recall = max(RERANK_POOL_SIZE, max_results)
 
     use_pgvector = True
     try:
@@ -1340,24 +1344,24 @@ async def search_memories_with_focus(
         node.id: idx + 1 for idx, node in enumerate(candidate_nodes)
     }
 
-    # Cross-encoder rerank stage (top RERANK_MAX_BATCH only).
+    # Cross-encoder rerank stage (top RERANK_POOL_SIZE candidates).
     used_reranker = False
     fallback_reason: str | None = None
     if reranker is not None and getattr(reranker, "is_configured", True):
-        rerank_pool = candidate_nodes[:RERANK_MAX_BATCH]
+        rerank_pool = candidate_nodes[:RERANK_POOL_SIZE]
         try:
-            order = await reranker.rerank(
-                query, [n.content for n in rerank_pool]
+            order = await batched_rerank(
+                reranker, query, [n.content for n in rerank_pool]
             )
             # Replace the query-cosine ranks for the reranked subset
-            # with cross-encoder ranks. Items beyond RERANK_MAX_BATCH
+            # with cross-encoder ranks. Items beyond RERANK_POOL_SIZE
             # keep their cosine rank.
             for new_rank, original_idx in enumerate(order, start=1):
                 node = rerank_pool[original_idx]
                 rank_query[node.id] = new_rank
-            # Items at positions [RERANK_MAX_BATCH..k_recall) need
+            # Items at positions [RERANK_POOL_SIZE..k_recall) need
             # ranks shifted to live after the reranked block.
-            for idx in range(RERANK_MAX_BATCH, len(candidate_nodes)):
+            for idx in range(len(rerank_pool), len(candidate_nodes)):
                 rank_query[candidate_nodes[idx].id] = idx + 1
             used_reranker = True
         except Exception as exc:  # pragma: no cover - network error
