@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Integer, and_, func, or_, select, update
+from sqlalchemy import Integer, and_, func, or_, select, text as sa_text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.config import AppSettings
@@ -1118,6 +1118,7 @@ class FocusedSearchResult:
     fallback_reason: str | None = None
     graph_neighbors_added: int = 0
     graph_fallback_reason: str | None = None
+    keyword_matches: int = 0
     pattern_signals: list[PatternSignal] = field(default_factory=list)
 
 
@@ -1173,6 +1174,7 @@ async def search_memories_with_focus(
     entity_names: list[str] | None = None,
     content_type: str | None = None,
     temporal_status: str | None = None,
+    keyword_boost_weight: float = 0.15,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -1422,16 +1424,49 @@ async def search_memories_with_focus(
                     rank_graph[nid] = rank_counter
                     rank_counter += 1
 
+    # Keyword recall: run a parallel tsvector query to find candidates
+    # that match query keywords but may have been missed by vector
+    # recall (e.g., exact CLI commands, config keys, acronyms).
+    use_keyword_boost = keyword_boost_weight > 0.0 and use_pgvector
+    rank_keyword: dict[uuid.UUID, int] = {}
+    if use_keyword_boost:
+        try:
+            tsquery = func.plainto_tsquery("english", query)
+            keyword_stmt = (
+                select(
+                    MemoryNode,
+                    func.ts_rank(MemoryNode.search_vector, tsquery).label("kw_rank"),
+                )
+                .where(*filters, MemoryNode.search_vector.op("@@")(tsquery))
+                .order_by(sa_text("kw_rank DESC"))
+                .limit(k_recall)
+            )
+            kw_result = await session.execute(keyword_stmt)
+            kw_rows = kw_result.all()
+
+            existing_ids = {node.id for node in candidate_nodes}
+            for rank_idx, row in enumerate(kw_rows, start=1):
+                kw_node = row[0]
+                rank_keyword[kw_node.id] = rank_idx
+                if kw_node.id not in existing_ids:
+                    candidate_nodes.append(kw_node)
+                    existing_ids.add(kw_node.id)
+        except Exception as exc:
+            logger.warning("keyword recall failed, skipping: %s", exc)
+            use_keyword_boost = False
+
     # RRF blend: rank_query carries the cross-encoder ranks (or
     # cosine fallback ranks); rank_focus carries the focus-cosine
     # ranks; rank_domain carries domain-overlap ranks (when active);
-    # rank_graph carries graph proximity ranks (when active).
-    # Domain and graph weights are carved proportionally from query
-    # and focus so all weights always sum to 1.0.
+    # rank_graph carries graph proximity ranks (when active);
+    # rank_keyword carries keyword match ranks (when active).
+    # Boost weights are carved proportionally from query and focus
+    # so all weights always sum to 1.0.
     base_q = 1.0 - session_focus_weight
     weight_d = domain_boost_weight if use_domain_boost else 0.0
     weight_g = graph_boost_weight if use_graph_boost else 0.0
-    carve_total = weight_d + weight_g
+    weight_k = keyword_boost_weight if use_keyword_boost else 0.0
+    carve_total = weight_d + weight_g + weight_k
     remaining = 1.0 - carve_total
     weight_q = remaining * base_q
     weight_f = remaining * session_focus_weight
@@ -1452,7 +1487,12 @@ async def search_memories_with_focus(
             if use_graph_boost
             else 0.0
         )
-        blended_scores.append((node, score_q + score_f + score_d + score_g))
+        score_k = (
+            weight_k / (RRF_K + rank_keyword.get(node.id, k_recall + 1))
+            if use_keyword_boost
+            else 0.0
+        )
+        blended_scores.append((node, score_q + score_f + score_d + score_g + score_k))
     blended_scores.sort(key=lambda pair: pair[1], reverse=True)
 
     top_nodes = [node for node, _ in blended_scores[:max_results]]
@@ -1557,6 +1597,7 @@ async def search_memories_with_focus(
         fallback_reason=fallback_reason,
         graph_neighbors_added=graph_neighbors_added,
         graph_fallback_reason=graph_fallback_reason,
+        keyword_matches=len(rank_keyword),
         pattern_signals=pattern_signals,
     )
 

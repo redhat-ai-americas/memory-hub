@@ -11,8 +11,8 @@ from datetime import datetime
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, func, text
-from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
+from sqlalchemy import CheckConstraint, Computed, DateTime, ForeignKey, Index, String, Text, func, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from memoryhub_core.models.base import Base, TimestampMixin
@@ -106,6 +106,17 @@ class MemoryNode(TimestampMixin, Base):
     # Embedding (384 dims for sentence-transformers/all-MiniLM-L6-v2)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
 
+    # Full-text search vector (generated column, #305)
+    search_vector = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', coalesce(stub, '')), 'A') || "
+            "setweight(to_tsvector('english', coalesce(content, '')), 'B')",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+
     # Soft-delete
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
@@ -155,6 +166,7 @@ class MemoryNode(TimestampMixin, Base):
         Index("ix_memory_nodes_status", "status"),
         Index("ix_memory_nodes_scope_id", "scope_id"),
         Index("ix_memory_nodes_domains", "domains", postgresql_using="gin"),
+        Index("ix_memory_nodes_search_vector", "search_vector", postgresql_using="gin"),
         Index(
             "ix_memory_nodes_expires_at",
             "expires_at",

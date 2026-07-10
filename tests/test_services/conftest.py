@@ -102,6 +102,24 @@ async def async_session():
     }
     thread_table.constraints -= removed_constraints
 
+    # Patch TSVECTOR search_vector column: swap Computed(TSVECTOR) for
+    # plain nullable Text so SQLite can create the table (#305).
+    memory_table = MemoryNode.__table__
+    sv_col = memory_table.c.get("search_vector")
+    original_sv_type = None
+    original_sv_computed = None
+    removed_sv_indexes = set()
+    if sv_col is not None:
+        original_sv_type = sv_col.type
+        original_sv_computed = sv_col.computed
+        sv_col.type = Text()
+        sv_col.computed = None
+        removed_sv_indexes = {
+            idx for idx in memory_table.indexes
+            if any(c.name == "search_vector" for c in idx.columns)
+        }
+        memory_table.indexes -= removed_sv_indexes
+
     try:
         async with engine.begin() as conn:
             await conn.execute(text("PRAGMA journal_mode=WAL"))
@@ -121,6 +139,10 @@ async def async_session():
         source_msgs_col.type = original_source_msgs_type
         source_msgs_col.server_default = original_source_msgs_default
         thread_table.constraints |= removed_constraints
+        if sv_col is not None and original_sv_type is not None:
+            sv_col.type = original_sv_type
+            sv_col.computed = original_sv_computed
+            memory_table.indexes |= removed_sv_indexes
         await engine.dispose()
 
 

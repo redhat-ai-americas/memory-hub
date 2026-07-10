@@ -893,6 +893,7 @@ async def search_memory(
                 "pivot_reason": bundle.pivot_reason,
                 "used_reranker": bundle.used_reranker,
                 "fallback_reason": bundle.fallback_reason,
+                "keyword_matches": bundle.keyword_matches,
             }
             pattern_signals = bundle.pattern_signals
         else:
