@@ -21,6 +21,7 @@ dependencies = [
     "minio>=7.0",
     "alembic>=1.0",
     "openai>=1.0",
+    "google-genai>=1.66.0",
 ]
 
 [project.scripts]

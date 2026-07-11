@@ -2,10 +2,12 @@ import os
 
 from .base import LLM, Schema
 from .anthropic import AnthropicLLM
+from .gemini import GeminiLLM
 from .vllm import VllmLLM
 
 REGISTRY: dict[str, type[LLM]] = {
     "anthropic": AnthropicLLM,
+    "gemini": GeminiLLM,
     "vllm": VllmLLM,
 }
 
