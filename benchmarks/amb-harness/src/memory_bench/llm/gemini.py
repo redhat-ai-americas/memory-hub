@@ -159,9 +159,11 @@ class GeminiLLM(LLM):
                     or "UNAVAILABLE" in msg or "INTERNAL" in msg or "Bad Gateway" in msg
                 )
                 if retryable and attempt < _MAX_RETRIES - 1:
+                    if "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg:
+                        delay = max(delay, 60)
                     logger.warning("[gemini] retry %d/%d after %.0fs — %s", attempt + 1, _MAX_RETRIES, delay, msg[:120])
                     time.sleep(delay)
-                    delay *= 2
+                    delay = min(delay * 2, 600)
                     continue
                 raise
         raise RuntimeError(f"Gemini request failed after {_MAX_RETRIES} retries")

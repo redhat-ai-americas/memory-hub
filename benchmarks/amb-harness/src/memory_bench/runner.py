@@ -159,14 +159,19 @@ class EvalRunner:
             return dataset.build_rag_prompt(query, context, task_type, split, category, meta)
 
         async def _process_one(q) -> QueryResult:
-            for _attempt in range(4):
+            _max_attempts = 8
+            for _attempt in range(_max_attempts):
                 try:
                     return await _process_one_attempt(q)
                 except Exception as exc:
                     msg = str(exc)
-                    if _attempt < 3 and any(code in msg for code in ("502", "503", "529", "429", "overloaded", "quota")):
-                        wait = 15 * (2 ** _attempt)
-                        logger.warning("[query:%s] transient error (attempt %d/4), retrying in %ds: %s", q.id, _attempt + 1, wait, msg[:120])
+                    retryable = any(code in msg for code in ("502", "503", "529", "429", "overloaded", "quota", "RESOURCE_EXHAUSTED"))
+                    if _attempt < _max_attempts - 1 and retryable:
+                        if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg:
+                            wait = min(600, 60 * (2 ** min(_attempt, 3)))
+                        else:
+                            wait = 15 * (2 ** _attempt)
+                        logger.warning("[query:%s] transient error (attempt %d/%d), retrying in %ds: %s", q.id, _attempt + 1, _max_attempts, wait, msg[:120])
                         await asyncio.sleep(wait)
                     else:
                         raise
@@ -359,17 +364,51 @@ class EvalRunner:
                 ingested_docs_count = len(documents)
                 console.print(f"  ingested in {ingestion_ms:.0f}ms ({ingestion_ms / len(documents):.1f}ms/doc avg)\n")
 
+            # Load previous results to resume from where we left off
+            prev = self._load_previous(dataset.name, split, effective_name, mode.name)
+            prev_by_id: dict[str, QueryResult] = {}
+            if prev.get("results"):
+                import dataclasses
+                _qr_fields = {f.name for f in dataclasses.fields(QueryResult)}
+                for r in prev["results"]:
+                    prev_by_id[r["query_id"]] = QueryResult(**{k: v for k, v in r.items() if k in _qr_fields})
+                console.print(f"[dim]Resuming: {len(prev_by_id)} queries already completed.[/dim]")
+
             async def _run_all(progress, task_id):
                 concurrency = getattr(memory, "concurrency", _CONCURRENCY)
                 sem = asyncio.Semaphore(concurrency)
-                results = [None] * len(queries)
+                results: list[QueryResult | None] = [None] * len(queries)
+                completed = 0
+
+                for i, q in enumerate(queries):
+                    if q.id in prev_by_id:
+                        results[i] = prev_by_id[q.id]
+                        progress.advance(task_id)
 
                 async def bounded(i, q):
+                    nonlocal completed
                     async with sem:
                         results[i] = await _process_one(q)
                         progress.advance(task_id)
+                        completed += 1
+                        if completed % 10 == 0:
+                            done = [r for r in results if r is not None]
+                            partial = EvalSummary(
+                                dataset=dataset.name, split=split, category=category,
+                                memory_provider=memory.name, run_name=effective_name,
+                                mode=mode.name, oracle=oracle,
+                                total_queries=len(done),
+                                correct=sum(1 for r in done if r.correct),
+                                accuracy=0.0, ingestion_time_ms=round(ingestion_ms, 1),
+                                ingested_docs=ingested_docs_count,
+                                description=description, answer_llm=mode.llm_id,
+                                judge_llm=self._get_judge(dataset)._llm.model_id,
+                                results=done,
+                            )
+                            self._save(partial)
 
-                await asyncio.gather(*[bounded(i, q) for i, q in enumerate(queries)])
+                pending = [(i, q) for i, q in enumerate(queries) if q.id not in prev_by_id]
+                await asyncio.gather(*[bounded(i, q) for i, q in pending])
                 return results
 
             with Progress(SpinnerColumn(), "[progress.description]{task.description}", BarColumn(),
