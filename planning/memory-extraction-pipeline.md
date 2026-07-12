@@ -4,7 +4,7 @@
 **Date:** 2026-07-11
 **Revised:** 2026-07-11 (review pass: corrected existing-chunking inventory, added reconciliation guardrails, run-provenance/rollback, Layer 3 churn-trigger fixes)
 **Author:** @rdwj (designed with Claude Code Opus 4.6)
-**Builds on:** [autonomous-curation-agents.md](autonomous-curation-agents.md) (Trace Reviewer), [conversation-persistence.md](../docs/design/conversation-persistence.md) (#168), [knowledge-compilation.md](../docs/design/knowledge-compilation.md) (#171)
+**Builds on:** [autonomous-curation-agents.md](autonomous-curation-agents.md) (Dreamer), [conversation-persistence.md](../docs/design/conversation-persistence.md) (#168), [knowledge-compilation.md](../docs/design/knowledge-compilation.md) (#171)
 **Validated by:** AMB PersonaMem benchmark results (#332)
 
 ---
@@ -31,7 +31,7 @@ Significant extraction infrastructure is already implemented:
 
 | Component | File | Status |
 |-----------|------|--------|
-| Windowed conversation extraction | `services/conversation_extraction.py` | Functional (442 lines) |
+| Windowed dreaming extraction | `services/dreaming.py` | Functional (442 lines) |
 | Extraction cursor + provenance | `models/conversation.py` | Functional |
 | Entity extraction cascade (spaCy/GLiNER/LLM) | `services/extraction.py` | Functional (792 lines) |
 | Background extraction runner | `services/extraction_runner.py` | Functional (173 lines) |
@@ -77,11 +77,11 @@ The Layer 1 chunking work is therefore an investigation plus a gap-fix, not a bu
 
 ### Layer 2: Single-trace extraction pipeline (2-step)
 
-This is the core capability. The existing `conversation_extraction.py` does Step 1. Step 2 (reconciliation) is new.
+This is the core capability. The existing `services/dreaming.py` does Step 1. Step 2 (reconciliation) is new.
 
 #### Step 1: Windowed LLM extraction (mostly exists)
 
-The conversation extraction service already implements:
+The dreaming service already implements:
 - Sliding window over thread messages (per_turn / per_session / per_message modes)
 - LLM call with structured output (facts, preferences, events, entities)
 - Provenance tracking via `conversation_extractions` table
@@ -128,6 +128,42 @@ For dreaming, the near-duplicate gate should auto-resolve:
 This is the same lesson as the 2026-05-19 deploy incident applied to memory writes, and it directly implements the "recovery" metric in the platform benchmark's adversarial-resilience dimension (see `platform-memory-benchmark.md`, Dimension 3).
 
 **Measuring extraction quality directly.** PersonaMem only shows extraction's effect indirectly through end-to-end retrieval; if Step 1 over-extracts noise, the signal is muddy. AMA-Bench (see the benchmark doc's landscape table) separates memory *processing* quality from retrieval — use its processing axis, or a small hand-labeled trace set, to get direct precision/recall on Step 1 before Step 2 compounds its errors.
+
+### Benchmark harness requirements (added 2026-07-13)
+
+PersonaMem prescribes only the dataset, question types, and MCQ scoring; the
+harness protocol is AMB's, and the answer LLM is a config parameter. Our own
+data shows the answer model moves results ~3x more than retrieval quality
+(81.2% Pro vs 70.8% Flash Lite on identical retrieval, vs +3.1 for
+MemoryHub-over-BM25 same-model). Two sets of requirements follow.
+
+**Ingestion must be a pluggable mode in the AMB provider** — same adapter,
+two configs:
+
+1. *Library mode* (current): raw/chunked `write()` per document. This is the
+   Layer 1 instrument (#341/#343/#344) and has a structural ceiling on
+   PersonaMem: chunking preserves stale preferences alongside current ones,
+   so stale MCQ distractors stay retrievable.
+2. *Dreaming mode* (for #349): sessions persist as threads and the extraction
+   pipeline produces the searchable memories. Validity requirements:
+   - **Chronological ingestion** — reconciliation is order-dependent; no
+     batch-parallel writes.
+   - **Timestamps preserved** into thread metadata (temporal questions,
+     churn windows).
+   - **Extraction runs between sessions**, mimicking the async dream cycle,
+     not one pass at the end.
+   - **Clean attribution** — the search pool contains extracted memories
+     only, not the raw threads, or the run measures an unattributable blend.
+
+**Comparability pinning** — every leaderboard-comparable run records in its
+results metadata: answer model (`OMB_ANSWER_MODEL`, standard: Gemini 3.1 Pro
+Preview), harness mode (`rag`), retrieval k / context budget, dataset variant,
+and pipeline commit SHA. Runs off-standard (e.g., Flash matrix rows in the
+ablation) are flagged not-leaderboard-comparable. Cross-paper numbers are
+never cited as direct comparisons; only same-harness, same-model runs are.
+The vendored adapters (`cognee.py`, `hindsight.py`, `mem0.py`) make
+self-run competitor comparisons possible — optional Phase 8 stretch, with
+ingestion cost reported alongside accuracy.
 
 **The cheese test as acceptance criteria:**
 

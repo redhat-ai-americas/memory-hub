@@ -76,7 +76,7 @@ class AppSettings(BaseSettings):
     # Conversation thread persistence (#168)
     conv_inline_max_bytes: int = 8192  # Messages above this go to S3
 
-    # Conversation extraction pipeline (#168 Phase 3)
+    # Dreaming pipeline (#168 Phase 3)
     conv_extraction_model: str = ""
     conv_extraction_model_url: str = ""
     conv_extraction_window_size: int = 4

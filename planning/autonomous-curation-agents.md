@@ -11,7 +11,7 @@
 
 MemoryHub's curation today is deterministic and inline -- regex scanning and embedding dedup at write time (Phase 2a, shipped). This catches secrets, PII, and exact duplicates but cannot perform deeper analysis: reviewing session traces for missed memories, detecting population-level patterns across hundreds of users, verifying factual claims against current state, or merging convergent discoveries across agents.
 
-The Phase 3 "Background Curator" sketched in [curator-agent.md](../docs/design/curator-agent.md) describes these needs but envisions a single monolithic curator process. Real-world requirements diverge: trace review needs conversation thread access and fires after sessions complete; fact checking needs tool access and calendar awareness; pattern aggregation needs cross-tenant statistical reads that no other agent should have. These are different workloads with different trust boundaries, different model requirements, different scaling characteristics, and different cost profiles.
+The Phase 3 "Background Curator" sketched in [curator-agent.md](../docs/design/curator-agent.md) describes these needs but envisions a single monolithic curator process. Real-world requirements diverge: dreaming needs conversation thread access and fires after sessions complete; fact checking needs tool access and calendar awareness; pattern aggregation needs cross-tenant statistical reads that no other agent should have. These are different workloads with different trust boundaries, different model requirements, different scaling characteristics, and different cost profiles.
 
 This document designs a **fleet of specialized autonomous agents** running on-cluster as Kubernetes Deployments, each with precisely scoped RBAC, independently selectable models (including fine-tuned variants), and independent enable/disable for resource management.
 
@@ -31,7 +31,7 @@ This document designs a **fleet of specialized autonomous agents** running on-cl
 
 ### New in this document
 
-1. **Trace Reviewer agent** -- post-session extraction from completed conversation threads
+1. **Dreamer agent** -- post-session extraction from completed conversation threads
 2. **Curator agent** -- periodic deep dedup, merge, promotion with cross-scope visibility (detailed specification of the Phase 3 sketch)
 3. **Fact Checker agent** -- temporal awareness model, calendar-aware verification, tool access for external state checks
 4. **Statistician agent** -- population-level pattern aggregation, convergence signals, summary memories with provenance
@@ -50,17 +50,17 @@ Curation agents write memories, but those memories are *about* users' work, not 
 
 ### The problem
 
-If the Trace Reviewer extracts a memory from Wes's session and writes it with `owner_id: "trace-reviewer"`, the memory is invisible to Wes's future sessions (his agents search `owner_id: "wjackson"`). If it writes with `owner_id: "wjackson"`, audit logs cannot distinguish agent-written memories from user-written ones.
+If the Dreamer extracts a memory from Wes's session and writes it with `owner_id: "dreamer"`, the memory is invisible to Wes's future sessions (his agents search `owner_id: "wjackson"`). If it writes with `owner_id: "wjackson"`, audit logs cannot distinguish agent-written memories from user-written ones.
 
 ### Design: dual-field ownership
 
 Memories written by curation agents carry both fields:
 
-- **`owner_id`**: The user or scope the memory belongs to. This is who can read/search it. For the Trace Reviewer extracting from Wes's session, `owner_id: "wjackson"`. For the Statistician writing an organizational summary, `owner_id` follows the existing scope conventions.
-- **`actor_id` column** (added in #66): Automatically captures the service agent's identity on every write. Set from `claims["sub"]` (e.g., `"trace-reviewer"`, `"curator-agent"`, `"statistician"`).
+- **`owner_id`**: The user or scope the memory belongs to. This is who can read/search it. For the Dreamer extracting from Wes's session, `owner_id: "wjackson"`. For the Statistician writing an organizational summary, `owner_id` follows the existing scope conventions.
+- **`actor_id` column** (added in #66): Automatically captures the service agent's identity on every write. Set from `claims["sub"]` (e.g., `"dreamer"`, `"curator-agent"`, `"statistician"`).
 
 This means:
-- User-scoped memories extracted by the Trace Reviewer appear in the user's normal search results (owned by them)
+- User-scoped memories extracted by the Dreamer appear in the user's normal search results (owned by them)
 - Audit queries filter by the `actor_id` column to see everything a specific agent wrote
 - The user's agents can distinguish agent-written memories from their own if needed (e.g., to treat them with different confidence)
 
@@ -68,21 +68,21 @@ This means:
 
 | Agent | `owner_id` | `actor_id` column | Rationale |
 |---|---|---|---|
-| Trace Reviewer | Original thread owner | `"trace-reviewer"` | Memories belong to the user whose session was reviewed |
+| Dreamer | Original thread owner | `"dreamer"` | Memories belong to the user whose session was reviewed |
 | Curator | Follows target scope conventions | `"curator-agent"` | Promoted memories are organizational assets, not personal |
 | Fact Checker | Original memory owner (unchanged) | `"fact-checker"` | Fact Checker updates metadata, doesn't change ownership |
 | Statistician | Follows target scope conventions | `"statistician"` | Summary memories are organizational/campaign assets |
 
 ### OBO authorization
 
-When the Trace Reviewer writes a memory with `owner_id: "wjackson"`, it is acting on behalf of (OBO) that user. The MCP server must allow this for service agents with the appropriate scope. The authorization check becomes:
+When the Dreamer writes a memory with `owner_id: "wjackson"`, it is acting on behalf of (OBO) that user. The MCP server must allow this for service agents with the appropriate scope. The authorization check becomes:
 
 ```
 if caller.identity_type == "service" and "memory:write:{scope}" in caller.scopes:
     allow write with any owner_id in that scope
 ```
 
-This is already how the Curator identity works in [governance.md](../docs/design/governance.md) for organizational scope. The Trace Reviewer extends this pattern to user and project scope.
+This is already how the Curator identity works in [governance.md](../docs/design/governance.md) for organizational scope. The Dreamer extends this pattern to user and project scope.
 
 The `actor_id` column (added in #66) provides the audit trail: "this user-scoped memory was written by the trace-reviewer service agent after reviewing thread X." Combined with the `conversation_extractions` provenance table from #168, the full chain is: thread -> extraction -> memory (owned by user, written by agent).
 
@@ -109,7 +109,7 @@ The `actor_id` column (added in #66) provides the audit trail: "this user-scoped
 |         |               |               |               |           |
 |  +------v---------------v---------------v---------------v--------+  |
 |  |              Valkey (job queues + coordination)                 |  |
-|  |  trace_review_queue:{tenant}                                   |  |
+|  |  dreaming_queue:{tenant}                                   |  |
 |  |  curation_queue:{tenant}                                       |  |
 |  |  fact_check_queue:{tenant}                                     |  |
 |  |  stats_queue:{tenant}                                          |  |
@@ -137,31 +137,31 @@ The `actor_id` column (added in #66) provides the audit trail: "this user-scoped
 
 1. **Agents are MCP clients, not internal services.** Each agent authenticates via `register_session` with a service API key and calls the standard MCP tools (`memory(action=...)`) exactly like any other consumer. All RBAC, audit logging, and curation pipeline checks apply. No back-door database access.
 
-2. **CronJobs for periodic agents, Deployment for event-driven agents.** The Curator, Fact Checker, and Statistician run as Kubernetes CronJobs -- they start, process their queue, and exit. This avoids idle resource waste between runs and simplifies reasoning about lifecycle. The Trace Reviewer runs as a Deployment because it processes events promptly as sessions complete. All four have independent resource limits, independent model configuration, and independent enable/disable (suspend the CronJob or scale the Deployment to 0).
+2. **CronJobs for periodic agents, Deployment for event-driven agents.** The Curator, Fact Checker, and Statistician run as Kubernetes CronJobs -- they start, process their queue, and exit. This avoids idle resource waste between runs and simplifies reasoning about lifecycle. The Dreamer runs as a Deployment because it processes events promptly as sessions complete. All four have independent resource limits, independent model configuration, and independent enable/disable (suspend the CronJob or scale the Deployment to 0).
 
 3. **Valkey for queue coordination.** Consistent with the pattern established in [knowledge-compilation.md](../docs/design/knowledge-compilation.md). Each agent has its own queue. A scheduler (lightweight sidecar or CronJob) enqueues work; agent pods dequeue and process.
 
-4. **Leader election for singleton agents.** The Curator and Statistician must be singletons within a tenant to avoid conflicting writes. Leader election via Valkey `SET ... NX EX` (same pattern as the compilation scheduler). The Trace Reviewer and Fact Checker can run multiple replicas processing different queue items.
+4. **Leader election for singleton agents.** The Curator and Statistician must be singletons within a tenant to avoid conflicting writes. Leader election via Valkey `SET ... NX EX` (same pattern as the compilation scheduler). The Dreamer and Fact Checker can run multiple replicas processing different queue items.
 
 ---
 
 ## 5. Agent Specifications
 
-### 5.1 Trace Reviewer
+### 5.1 Dreamer
 
-**Purpose:** Review completed session traces (conversation threads) to extract memories that working agents missed during their sessions. An agent in the heat of problem-solving may not pause to write "I learned that the billing module requires TLS 1.3" -- the Trace Reviewer catches these.
+**Purpose:** Review completed session traces (conversation threads) to extract memories that working agents missed during their sessions. An agent in the heat of problem-solving may not pause to write "I learned that the billing module requires TLS 1.3" -- the Dreamer catches these.
 
-**Trigger model:** Event-driven. When a conversation thread transitions to `status = 'archived'` (see [conversation-persistence.md](../docs/design/conversation-persistence.md)), an event is published to `trace_review_queue:{tenant}`. The Trace Reviewer picks up the job.
+**Trigger model:** Event-driven. When a conversation thread transitions to `status = 'archived'` (see [conversation-persistence.md](../docs/design/conversation-persistence.md)), an event is published to `dreaming_queue:{tenant}`. The Dreamer picks up the job.
 
-**Alternative trigger (pre-#168):** Until conversation persistence ships, the Trace Reviewer can operate on the SDK extraction pipeline output (#240). Agents using the SDK's `Extractor` ABC produce candidate memories at session end. The Trace Reviewer's pre-#168 mode reads these candidates and evaluates whether additional memories should be extracted from the session context stored in the extraction provenance.
+**Alternative trigger (pre-#168):** Until conversation persistence ships, the Dreamer can operate on the SDK extraction pipeline output (#240). Agents using the SDK's `Extractor` ABC produce candidate memories at session end. The Dreamer's pre-#168 mode reads these candidates and evaluates whether additional memories should be extracted from the session context stored in the extraction provenance.
 
 **Processing flow:**
 
-1. Dequeue `thread_id` from `trace_review_queue:{tenant}`.
+1. Dequeue `thread_id` from `dreaming_queue:{tenant}`.
 2. Call `get_thread(thread_id, limit=..., include_tool_messages=true)` to retrieve the full conversation.
 3. Call `search(query=<thread_summary>, options={scope: "project", ...})` to see what memories already exist from this session.
 4. Submit the thread transcript + existing memories to the LLM with a review prompt: "What facts, decisions, preferences, or observations from this conversation are not captured in the existing memories?"
-5. For each identified gap, call `memory(action="write", content=..., scope=..., options={metadata: {source: "trace_review", thread_id: ...}})`.
+5. For each identified gap, call `memory(action="write", content=..., scope=..., options={metadata: {source: "dreaming", thread_id: ...}})`.
 6. The `conversation_extractions` provenance table links these new memories back to the source thread and messages.
 
 **What it does NOT do:**
@@ -169,14 +169,14 @@ The `actor_id` column (added in #66) provides the audit trail: "this user-scoped
 - Does not promote memories across scopes (that is the Curator's job)
 - Does not verify factual claims (that is the Fact Checker's job)
 
-**Scaling:** Multiple replicas can process different threads in parallel. No singleton constraint. HPA on `trace_review_queue` depth.
+**Scaling:** Multiple replicas can process different threads in parallel. No singleton constraint. HPA on `dreaming_queue` depth.
 
 **RBAC identity:**
 
 ```json
 {
-  "user_id": "trace-reviewer",
-  "name": "Trace Reviewer Agent",
+  "user_id": "dreamer",
+  "name": "Dreamer Agent",
   "identity_type": "service",
   "scopes": [
     "memory:read",
@@ -187,9 +187,9 @@ The `actor_id` column (added in #66) provides the audit trail: "this user-scoped
 }
 ```
 
-The Trace Reviewer needs `threads:read` to access completed conversation threads. It writes memories at user and project scope (matching the scope of the original thread). It cannot write to organizational or enterprise scope -- those require the Curator's promotion pipeline.
+The Dreamer needs `threads:read` to access completed conversation threads. It writes memories at user and project scope (matching the scope of the original thread). It cannot write to organizational or enterprise scope -- those require the Curator's promotion pipeline.
 
-**Model selection:** Mid-tier model (e.g., Llama 4 Scout or equivalent). The task is extraction, not complex reasoning. Fine-tuning opportunity: train on (thread, existing_memories, missed_memories) triples from human review of early Trace Reviewer outputs.
+**Model selection:** Mid-tier model (e.g., Llama 4 Scout or equivalent). The task is extraction, not complex reasoning. Fine-tuning opportunity: train on (thread, existing_memories, missed_memories) triples from human review of early Dreamer outputs.
 
 ### 5.2 Curator Agent
 
@@ -674,12 +674,12 @@ Disabled by default to avoid surprising agents that don't expect injected contex
 
 | Agent | `identity_type` | Read scope | Write scope | Special permissions | Singleton? |
 |---|---|---|---|---|---|
-| Trace Reviewer | `service` | All (via `memory:read`) | user, project | `threads:read` | No |
+| Dreamer | `service` | All (via `memory:read`) | user, project | `threads:read` | No |
 | Curator | `service` | All (via `memory:read`) | organizational, role, campaign | `memory:knowledge_curator` | Yes |
 | Fact Checker | `service` | All (via `memory:read`) | user, project, campaign (metadata only) | None | No |
 | Statistician | `service` | All (via `memory:read`) | organizational, campaign | `memory:knowledge_curator` | Yes |
 
-**Principle of least privilege:** Each agent has the minimum permissions required for its task. The Trace Reviewer cannot promote to organizational scope. The Fact Checker cannot create summary memories. The Statistician cannot modify individual user memories.
+**Principle of least privilege:** Each agent has the minimum permissions required for its task. The Dreamer cannot promote to organizational scope. The Fact Checker cannot create summary memories. The Statistician cannot modify individual user memories.
 
 **Audit trail:** All four agents operate through the standard MCP tool path, so every operation is audit-logged. The `actor_id` on audit entries distinguishes `trace-reviewer`, `curator-agent`, `fact-checker`, and `statistician` from each other and from human-bound agents.
 
@@ -699,7 +699,7 @@ All four agents deploy to a new `memoryhub-agents` namespace, separate from `mem
 
 Two patterns, depending on trigger model:
 
-**Event-driven agent (Deployment)** -- Trace Reviewer only:
+**Event-driven agent (Deployment)** -- Dreamer only:
 
 ```yaml
 apiVersion: apps/v1
@@ -708,7 +708,7 @@ metadata:
   name: trace-reviewer
   namespace: memoryhub-agents
 spec:
-  replicas: 1  # HPA on trace_review_queue depth; set to 0 to disable
+  replicas: 1  # HPA on dreaming_queue depth; set to 0 to disable
   selector:
     matchLabels:
       app: memoryhub-agent
@@ -721,7 +721,7 @@ spec:
         image: memoryhub-agent:latest
         env:
         - name: AGENT_TYPE
-          value: "trace-reviewer"
+          value: "dreamer"
         - name: MH_MCP_URL
           value: "http://memory-hub-mcp.memory-hub-mcp.svc:8000"
         - name: MH_API_KEY
@@ -797,12 +797,12 @@ CronJobs are the right fit for periodic agents because they avoid idle resource 
 
 | Agent | K8s kind | CPU request | Memory request | LLM calls/run |
 |---|---|---|---|---|
-| Trace Reviewer | Deployment | 250m | 256Mi | 1-5 per thread |
+| Dreamer | Deployment | 250m | 256Mi | 1-5 per thread |
 | Curator | CronJob | 500m | 512Mi | 50-200 per sweep |
 | Fact Checker | CronJob | 250m | 256Mi | 10-50 per sweep |
 | Statistician | CronJob | 500m | 512Mi | 20-100 per run |
 
-**Enable/disable:** For the Trace Reviewer Deployment, set `replicas: 0`. For CronJob agents, set `suspend: true`. The Valkey queue accumulates work while an agent is disabled; it drains the backlog on the next run.
+**Enable/disable:** For the Dreamer Deployment, set `replicas: 0`. For CronJob agents, set `suspend: true`. The Valkey queue accumulates work while an agent is disabled; it drains the backlog on the next run.
 
 ### Valkey topology
 
@@ -810,7 +810,7 @@ All four agents share a single Valkey instance in the `memoryhub-agents` namespa
 
 | Queue | Key pattern | Consumers |
 |---|---|---|
-| Trace review | `trace_review_queue:{tenant_id}` | Trace Reviewer |
+| Dreaming | `dreaming_queue:{tenant_id}` | Dreamer |
 | Curation tasks | `curation_queue:{tenant_id}:{task_type}` | Curator |
 | Fact check | `fact_check_queue:{tenant_id}` | Fact Checker |
 | Statistics | `stats_queue:{tenant_id}` | Statistician |
@@ -826,7 +826,7 @@ This Valkey instance is separate from any future Valkey used by the MCP server f
 
 Each agent specifies its LLM endpoint and model via environment variables. There is no shared model pool. This allows:
 
-- **Cost optimization:** Lower-tier agents (Trace Reviewer, Fact Checker) use cheaper models.
+- **Cost optimization:** Lower-tier agents (Dreamer, Fact Checker) use cheaper models.
 - **Quality optimization:** Higher-stakes agents (Curator, Statistician) use more capable models.
 - **Independent upgrades:** Upgrading the Curator's model does not affect the Fact Checker.
 - **Fine-tuning:** Each agent can use a fine-tuned variant of its base model without affecting others.
@@ -835,7 +835,7 @@ Each agent specifies its LLM endpoint and model via environment variables. There
 
 | Agent | Recommended tier | Rationale |
 |---|---|---|
-| Trace Reviewer | Mid-tier | Extraction task; moderate context; high volume |
+| Dreamer | Mid-tier | Extraction task; moderate context; high volume |
 | Curator | Top-tier | Judgment-heavy; promotion has blast radius; low volume |
 | Fact Checker | Mid-tier | Classification task; plugin-assisted; high volume |
 | Statistician | Top-tier | Synthesis from many sources; statistical accuracy matters |
@@ -848,7 +848,7 @@ Each agent accumulates training signal from its operations:
 
 | Agent | Training signal | Training data shape |
 |---|---|---|
-| Trace Reviewer | Human review of extracted memories | (thread_transcript, existing_memories, reviewer_additions) |
+| Dreamer | Human review of extracted memories | (thread_transcript, existing_memories, reviewer_additions) |
 | Curator | Promotion approval queue decisions | (candidate_memory, decontextualized_version, approve/reject + reason) |
 | Fact Checker | Verified/false-positive fact check results | (memory_content, verification_evidence, correct/incorrect) |
 | Statistician | Human review of summary memories | (source_memory_cluster, generated_summary, accept/edit/reject) |
@@ -877,7 +877,7 @@ The autonomous curation agents and the knowledge compilation service (#171) are 
 
 3. **Fact Checker flags, compilation reflects.** When the Fact Checker flags a memory as expired, the compiled article referencing it gets `lint_status: "issues"` on its next lint sweep.
 
-4. **Trace Reviewer extracts, compilation grows.** New memories extracted by the Trace Reviewer expand the source material pool. Delta compilation picks up new memories and integrates them.
+4. **Dreamer extracts, compilation grows.** New memories extracted by the Dreamer expand the source material pool. Delta compilation picks up new memories and integrates them.
 
 The curation agents do NOT call compilation tools (`compile_knowledge`, `query_knowledge`). They operate at the memory node level; compilation operates at the article level. The bridge is the memory store itself -- curation agents modify memories, and the compilation service reads them.
 
@@ -887,7 +887,7 @@ The curation agents do NOT call compilation tools (`compile_knowledge`, `query_k
 
 ### Phase 0: Prerequisites (before any agent work)
 
-- [ ] **Conversation persistence (#168) -- at least thread archival.** The Trace Reviewer needs `get_thread` to function. Without #168, the Trace Reviewer can only operate on SDK extraction pipeline output (#240), which is a degraded mode.
+- [ ] **Conversation persistence (#168) -- at least thread archival.** The Dreamer needs `get_thread` to function. Without #168, the Dreamer can only operate on SDK extraction pipeline output (#240), which is a degraded mode.
 - [ ] **`relevant_until` column migration.** The Fact Checker needs temporal metadata. Single Alembic migration, no backfill.
 - [ ] **Valkey deployment in `memoryhub-agents` namespace.** Job queues require Valkey. Follow the pattern from knowledge compilation (#171).
 
@@ -915,15 +915,15 @@ The Fact Checker depends on the `relevant_until` schema change and is lower-risk
 - [ ] CalendarPlugin (the simplest plugin, ships first)
 - [ ] MCP tool changes: `relevant_until` in write options, `temporal_status` in search/read responses
 
-### Phase 3: Trace Reviewer (months 3-4)
+### Phase 3: Dreamer (months 3-4)
 
-The Trace Reviewer depends on conversation persistence (#168) for full functionality. It can ship in degraded mode (SDK extraction pipeline only) before #168.
+The Dreamer depends on conversation persistence (#168) for full functionality. It can ship in degraded mode (SDK extraction pipeline only) before #168.
 
 - [ ] Service identity and API key for `trace-reviewer`
 - [ ] Event listener for thread archival events (requires #168 event integration)
 - [ ] Thread review pipeline: load thread, compare to existing memories, identify gaps
 - [ ] Provenance linkage via `conversation_extractions` table
-- [ ] HPA scaling on `trace_review_queue` depth
+- [ ] HPA scaling on `dreaming_queue` depth
 
 ### Phase 4: Statistician (months 4-6)
 
@@ -989,7 +989,7 @@ Connects the Curator to the five-stage promotion pipeline from [campaign-domain-
 **What this depends on:**
 - [curator-agent.md](../docs/design/curator-agent.md) Phase 2a (inline pipeline) -- **implemented**
 - [governance.md](../docs/design/governance.md) service agent identity model -- **implemented**
-- [conversation-persistence.md](../docs/design/conversation-persistence.md) #168 -- **designed, not implemented** (required for Trace Reviewer full mode)
+- [conversation-persistence.md](../docs/design/conversation-persistence.md) #168 -- **designed, not implemented** (required for Dreamer full mode)
 - Valkey infrastructure -- **required for all agents** (can share with #171 compilation or deploy separately)
 - LLM inference endpoints on RHOAI -- **existing infrastructure** (embedding model deployed; LLM for agent reasoning is new)
 

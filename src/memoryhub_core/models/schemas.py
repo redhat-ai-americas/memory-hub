@@ -577,7 +577,7 @@ class ConversationMessageRead(BaseModel):
 
 
 class ConversationExtractionRead(BaseModel):
-    """Output schema for reading a conversation extraction provenance record."""
+    """Output schema for reading a dreaming extraction provenance record."""
 
     model_config = ConfigDict(from_attributes=True)
 

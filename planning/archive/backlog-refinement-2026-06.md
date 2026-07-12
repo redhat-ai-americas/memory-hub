@@ -153,7 +153,7 @@ Decisions made:
 - [ ] **#287** -- Fact Checker Agent (temporal expiry, verification plugins)
   - Exit predicate: verifies facts, updates relevant_until, CalendarPlugin works, tests pass
   - Can parallelize with #285 (most independent pair)
-- [ ] **#288** -- Trace Reviewer Agent (post-session memory extraction)
+- [ ] **#288** -- Dreamer Agent (post-session memory extraction)
   - Exit predicate: extracts memories from completed threads, OBO writes succeed
   - Note: full mode needs conversation persistence (#168); basic mode works without
 - [ ] **#289** -- Statistician Agent (population-level pattern aggregation)

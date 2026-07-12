@@ -7,7 +7,7 @@ In-flight designs for unimplemented or partially implemented features. When a de
 | File | Topic | Status |
 |---|---|---|
 | [turn-level-hooks.md](turn-level-hooks.md) | Per-turn (UserPromptSubmit/Stop) hooks for auto-rebias and extraction across agent harnesses | Draft |
-| [autonomous-curation-agents.md](autonomous-curation-agents.md) | Curation agent fleet: Curator (#285) and Statistician (#289) remain; framework, Fact Checker, Trace Reviewer shipped | In flight |
+| [autonomous-curation-agents.md](autonomous-curation-agents.md) | Curation agent fleet: Curator (#285) and Statistician (#289) remain; framework, Fact Checker, Dreamer shipped | In flight |
 | [knowledge-layer.md](knowledge-layer.md) | content_type + graduate action; canonical disambiguation of graduate vs promote (§8.4) | Partially shipped (#237); proposal sections remain |
 | [token-compression.md](token-compression.md) | Retrieval-time token reduction (#246); Phase 0 shipped, Phases 1–5 open | In flight |
 | [system-benchmarks.md](system-benchmarks.md) | Infra benchmark framework (#271–#274) | In flight |
