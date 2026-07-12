@@ -1,7 +1,14 @@
 # EvalHub Integration for Benchmark and Tuning Infrastructure
 
-**Status:** Research + spike proposal
-**Date:** 2026-07-13
+**Status:** Spike complete — GO (see `research/evalhub-spike-findings.md`, #357)
+**Date:** 2026-07-13 (spike reviewed 2026-07-13)
+**Decisions from review:** pin oras/olot AND report upstream; Pro leaderboard
+runs stay on cron loop (no checkpoint chaining for now); operator deploy
+after #354, before #355, own namespace, IaC via deploy-evalhub.sh; MLflow
+experiments `memoryhub/<benchmark_id>/<dataset_variant>` with volatile
+dimensions (mode, answer model, SHA, toggles) as tags; custom
+EnvironmentCardMetadata populated in the adapter (server version, pipeline
+SHA, retrieval config, harness commit).
 **Author:** @rdwj (researched with Claude in Cowork)
 
 ## What EvalHub is
