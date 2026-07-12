@@ -1,0 +1,20 @@
+{
+  "dataset": "personamem",
+  "split": "32k",
+  "category": null,
+  "memory_provider": "memoryhub",
+  "run_name": "memoryhub-flash-lite",
+  "mode": "rag",
+  "oracle": false,
+  "total_queries": 589,
+  "correct": 417,
+  "accuracy": 0.7079796264855688,
+  "ingestion_time_ms": 0.0,
+  "ingested_docs": 0,
+  "description": null,
+  "answer_llm": "gemini:gemini-3.1-flash-lite",
+  "judge_llm": "gemini:gemini-2.5-flash-lite",
+  "avg_retrieve_time_ms": 3168.1,
+  "avg_context_tokens": 26695.4,
+  "result_count": 589
+}

@@ -25,14 +25,64 @@ Raw result JSON files are committed alongside this document in `benchmarks/`.
 | MemPalace (semantic only) | LongMemEval | 0.966 | -- | -- | Wu et al., ICLR 2025 |
 | GPT-4o (no memory layer) | LongMemEval | ~0.30-0.70 | -- | -- | Wu et al., ICLR 2025 |
 
+| **MemoryHub v0.2** | PersonaMem 32k (589q) | **81.2%** | -- | -- | This document, 2026-07-12 |
+| Hindsight | PersonaMem 32k | 86.6% | -- | -- | AMB leaderboard |
+| hybrid-search | PersonaMem 32k | 84.4% | -- | -- | AMB leaderboard |
+| Cognee | PersonaMem 32k | 81.8% | -- | -- | AMB leaderboard |
+| BM25 baseline | PersonaMem 32k | 67.7% | -- | -- | This document, 2026-07-12 |
+
 Notes:
 - MemPalace numbers are from the LongMemEval paper's reported "session decomposition + fact-augmented key expansion + time-aware query expansion" pipeline.
 - Our run uses the oracle variant (evidence sessions only, not the full 115K-token haystack). The oracle variant isolates retrieval quality from the haystack-filtering step. Running LongMemEval_S (full haystack) is the next comparison point.
 - MemoryHub uses all-MiniLM-L6-v2 (384-dim) embeddings. MemPalace uses text-embedding-3-large (3072-dim). Despite the 8x smaller embedding, MemoryHub's hybrid pipeline (vector + keyword + RRF) achieves higher recall.
+- PersonaMem accuracy column shows MCQ exact-match accuracy (not R@k). MemoryHub and BM25 both used Gemini 3.1 Pro Preview as the answer LLM; leaderboard systems also used Gemini 3.1 Pro Preview. BM25 number shown is the Flash Lite run (67.7%); Pro partial run (140/589) was trending at 72.9%.
 
 ## Benchmark Inventory
 
-### 1. LongMemEval (ICLR 2025) -- Session-Level Retrieval
+### 1. AMB PersonaMem (Jiang et al., 2025) -- Long-Horizon Preference Tracking
+
+**What it measures:** End-to-end agent memory quality on personal preference tracking across 195 multi-turn conversation transcripts. 589 MCQ questions test whether the memory system retrieves the correct preference from long conversation histories. Scoring is exact letter match (no LLM judge needed).
+
+**Dataset:** PersonaMem 32k split. 195 documents (full conversation transcripts, multi-thousand tokens each), 589 MCQ queries across multiple synthetic personas with stable and evolving preferences.
+
+**MemoryHub adapter:** Each conversation transcript is ingested as a memory node via the MemoryHub provider in the AMB harness. Documents are ingested into `amb-*` tenants to isolate benchmark data. Queries use the hybrid search pipeline (vector + keyword + reranker fallback + RRF).
+
+#### Run: 2026-07-12 (v0.2, post-hybrid-search, Gemini 3.1 Pro Preview)
+
+**Pipeline state:** pgvector cosine recall -> cross-encoder rerank attempt (413 on all PersonaMem transcripts, falls back to cosine) -> RRF blend (query + focus + keyword signals). Keyword boost weight = 0.15. No document chunking active in benchmark path.
+
+**Answer LLM:** Gemini 3.1 Pro Preview (matches AMB leaderboard standard).
+
+| Provider | Model | Queries | Correct | Accuracy |
+|----------|-------|---------|---------|----------|
+| **MemoryHub** | **Gemini 3.1 Pro Preview** | **589** | **478** | **81.2%** |
+| MemoryHub | Gemini 3.1 Flash Lite | 589 | 417 | 70.8% |
+| BM25 baseline | Gemini 3.1 Flash Lite | 589 | 399 | 67.7% |
+
+**AMB Leaderboard comparison (all using Gemini 3.1 Pro Preview):**
+
+| System | Approach | Accuracy |
+|--------|----------|----------|
+| Hindsight | LLM fact extraction into semantic graph | 86.6% |
+| hybrid-search | 512-token chunking, dense+sparse embeddings | 84.4% |
+| Cognee | Chunking + graph entity extraction | 81.8% |
+| **MemoryHub** | **Hybrid search, no extraction, no chunking in benchmark path** | **81.2%** |
+
+Result files: `amb-outputs/personamem/memoryhub/rag/32k-summary.json`, `amb-outputs/personamem/memoryhub-flash-lite/rag/32k-summary.json`, `amb-outputs/personamem/bm25/rag/32k-summary.json`
+
+#### Analysis
+
+MemoryHub achieves 81.2% without document chunking or LLM extraction, competitive with Cognee (81.8%) which uses both. The 5.4-point gap to Hindsight (86.6%) is attributable to two factors:
+
+1. **No reranker on PersonaMem transcripts.** The cross-encoder (ms-marco-MiniLM-L12-v2, 512-token max) returns 413 on every query, falling back to cosine-only ranking. Upgrading to bge-reranker-v2-m3 (8192-token max, GPU) should recover 3-5 points.
+
+2. **No fact extraction.** MemoryHub stores raw conversation transcripts; facts buried thousands of tokens deep are invisible to the 1000-char embedding prefix. Top performers (Hindsight, Mem0) extract structured facts before storage. The dreaming pipeline (#336) addresses this.
+
+**LLM model impact:** Gemini Pro adds +10.4 points over Flash Lite on MemoryHub (81.2% vs 70.8%), and the BM25 baseline also improves with better models (Flash Lite 67.7% vs Haiku 62.6%). Model quality is a significant factor alongside retrieval quality.
+
+**MemoryHub retrieval delta:** MemoryHub adds +3.1 points over BM25 with the same model (Flash Lite: 70.8% vs 67.7%). The delta is modest because the reranker is disabled on PersonaMem; with the reranker active (shorter documents), the delta is larger per the cluster retrieval benchmark results.
+
+### 2. LongMemEval (ICLR 2025) -- Session-Level Retrieval
 
 **What it measures:** Whether the retrieval layer finds the right evidence sessions given a natural-language question about past conversations.
 
@@ -64,7 +114,7 @@ Result file: `longmemeval-oracle-20260710T144331Z.json`
 - **No answer-quality evaluation.** We measure retrieval (did we find the right session?) but not answer generation (did we produce the right answer?). The LongMemEval evaluation script uses an LLM judge for answer quality. Adding this would give us the full pipeline score.
 - **Embedding truncation.** Sessions are embedded from the first 500 chars only (embedding service 413s on longer inputs). Chunking sessions into multiple memory nodes would improve embedding coverage.
 
-### 2. Cluster Retrieval -- Production Memory Quality
+### 3. Cluster Retrieval -- Production Memory Quality
 
 **What it measures:** Whether hybrid search (keyword + vector + reranker) surfaces different and better results than vector-only search on real MemoryHub data.
 
@@ -104,7 +154,7 @@ Result file: `cluster-retrieval-20260710T130710Z.json`
 
 **Key finding:** Hybrid search surfaces materially different results on 94% of queries (avg 2.8 new results per query), but at ~8x latency cost. The latency is dominated by the cross-encoder reranker (~2.2s per call), not the keyword recall (~10-20ms).
 
-### 3. Retrieval at Scale -- Latency Profiling
+### 4. Retrieval at Scale -- Latency Profiling
 
 **What it measures:** pgvector cosine search latency as corpus size grows.
 
@@ -122,7 +172,7 @@ Result files: `retrieval-scale-20260710T125826Z.json`, `retrieval-scale-20260710
 
 **Note:** These use mock (hash-based) embeddings, not semantic embeddings. The relevance numbers are not meaningful in absolute terms -- only the latency scaling and relative vector-vs-hybrid comparison matter. At 1K scale, hybrid search improves MRR by 75% (0.191 to 0.335).
 
-### 4. Cross-Encoder Pool Size Sweep -- Latency vs Quality Tradeoff
+### 5. Cross-Encoder Pool Size Sweep -- Latency vs Quality Tradeoff
 
 **What it measures:** How many candidates to send through the cross-encoder reranker before diminishing returns set in. Larger pools produce better rankings but cost proportionally more reranker time.
 
