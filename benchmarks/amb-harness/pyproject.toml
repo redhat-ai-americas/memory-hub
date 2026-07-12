@@ -23,6 +23,9 @@ dependencies = [
     "openai>=1.0",
     "google-genai>=1.66.0",
     "memoryhub>=0.14.0",
+    "eval-hub-sdk>=0.4.2",
+    "oras>=0.2.42",
+    "olot>=1.0.0",
 ]
 
 [project.scripts]
