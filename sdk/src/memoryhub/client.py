@@ -482,6 +482,7 @@ class MemoryHubClient:
         domain_boost_weight: float | None = None,
         raw_results: bool = False,
         content_type: str | None = None,
+        disabled_signals: list[str] | None = None,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -533,6 +534,9 @@ class MemoryHubClient:
             content_type: Filter by content type. "declarative" for facts and
                 preferences (default search scope), "behavioral" for demonstrated
                 patterns. Omit to search all types.
+            disabled_signals: RRF signals to disable for ablation testing.
+                Valid names: reranker, focus, keyword, domain, graph.
+                Vector similarity is always active.
         """
         defaults = self._project_config.retrieval_defaults
         loading = self._project_config.memory_loading
@@ -568,6 +572,8 @@ class MemoryHubClient:
             opts["session_focus_weight"] = session_focus_weight
         if content_type is not None:
             opts["content_type"] = content_type
+        if disabled_signals is not None:
+            opts["disabled_signals"] = disabled_signals
 
         data = await self._call_action(
             "search",
