@@ -748,6 +748,11 @@ class _StubReranker(RerankerService):
         self.calls += 1
         return list(range(len(texts) - 1, -1, -1))
 
+    async def rerank_with_scores(self, query, texts):
+        self.calls += 1
+        n = len(texts)
+        return [(i, 1.0 - i / max(1, n)) for i in range(n - 1, -1, -1)]
+
 
 async def test_search_with_focus_no_focus_short_circuits(
     async_session, embedding_service
@@ -850,6 +855,9 @@ async def test_search_with_focus_falls_back_when_reranker_fails(
         is_configured = True
 
         async def rerank(self, query, texts):
+            raise RuntimeError("simulated reranker outage")
+
+        async def rerank_with_scores(self, query, texts):
             raise RuntimeError("simulated reranker outage")
 
     bundle = await search_memories_with_focus(
