@@ -2,6 +2,7 @@
 
 **Status:** Preliminary landscape analysis + design sketch (for #337)
 **Date:** 2026-07-11
+**Revised:** 2026-07-11 (review pass: corrected PersonaMem attribution, added cost dimension, dimension sequencing)
 **Author:** @rdwj (designed with Claude Code Opus 4.6)
 
 ---
@@ -101,6 +102,8 @@ The benchmark should run against any memory system that exposes CRUD + search op
 
 **What it measures:** Conflict resolution + lifecycle management. Systems that store raw traces will accumulate stale values. Systems with extraction + reconciliation will maintain current state. Systems with versioning can answer temporal queries.
 
+**Design principle worth stating explicitly:** this dimension uses exact ground-truth checkpoint queries — no LLM judge. Given LoCoMo's judge accepted 63% of intentionally wrong answers, judge-free scoring wherever ground truth permits is a deliberate credibility feature of this benchmark, not an implementation detail.
+
 ### Dimension 2: Collection Health Under Load
 
 **Setup:** 1000 agent sessions produce memories at varying rates. Some sessions produce redundant information (multiple agents discovering the same fact). Some produce contradictions. Some produce noise (low-value observations).
@@ -124,6 +127,8 @@ The benchmark should run against any memory system that exposes CRUD + search op
 - Recovery: after adversarial memories are identified, can the system roll back to a clean state?
 
 **What it measures:** Platform-level security, not per-attack defense. OWASP ASI06 compliance.
+
+**Known v1 limitation:** synthetically labeled adversarial sessions may carry superficial markers a curation pipeline can learn to detect without real robustness. Acceptable for v1; note it in the methodology and plan for attack diversity (paraphrase variants, benign-looking poisoning) in v2.
 
 ### Dimension 4: Pattern Emergence
 
@@ -150,6 +155,27 @@ The benchmark should run against any memory system that exposes CRUD + search op
 - Regression detection: does any management action (curation, compaction) hurt downstream performance?
 
 **What it measures:** The compound value -- the whole point. Does a well-managed memory system make the agent measurably better?
+
+**Caution:** this is the hardest and most confounded dimension — agent model quality dominates memory quality in task success rates. Treat as v2/aspirational; see "Dimension sequencing" below.
+
+### Dimension 6: Cost Efficiency
+
+**Setup:** Instrument every dimension's run with token and compute accounting: LLM tokens spent on ingestion/extraction, maintenance, and query-time processing, per session ingested.
+
+**Scoring:**
+- Cost per session ingested (tokens, and dollars at reference pricing)
+- Cost per point of composite score (efficiency frontier)
+- Marginal cost of each management capability vs its marginal score contribution
+
+**What it measures:** Extraction pipelines trade tokens for quality; a benchmark that ignores cost favors expensive systems. Reporting cost also rewards architectures that reason over compact metadata (like provenance-driven reflection) rather than re-reading raw traces. Every serious deployer asks this question; no memory benchmark answers it.
+
+### Dimension sequencing
+
+Ship in phases rather than all six at once:
+
+- **v1: Dimensions 1-3 + 6.** Temporal consistency is nearly implementable today (the cheese-test simulator is the only new artifact), collection health and adversarial resilience follow from the same simulator, and cost accounting is instrumentation. All four score without an LLM judge.
+- **v2: Dimension 4** (pattern emergence) — needs a reliable scoring method for insights (open question 3).
+- **v2+: Dimension 5** (downstream improvement) — most confounded, needs the most design care. Don't let it block publishing v1.
 
 ## 5. Implementation Sketch
 
@@ -199,8 +225,9 @@ Composite score with weighted dimensions:
 | Adversarial resilience | 0.15 | Security; OWASP ASI06 |
 | Pattern emergence | 0.10 | Differentiator; novel |
 | Downstream improvement | 0.15 | The compound value |
+| Cost efficiency | reported, unweighted | Orthogonal axis; report as $/score frontier rather than folding into the composite |
 
-Weights are preliminary. The benchmark should also report per-dimension scores so systems can see where they're strong/weak.
+Weights are preliminary. **Per-dimension scores are the primary output; the composite is secondary.** Composite weights are the first thing competitors will dispute — leading with the per-dimension breakdown (and publishing the weighting as one suggested view) deflects that argument and is more honest about what a single number can capture.
 
 ## 6. Strategic Considerations
 
@@ -213,9 +240,11 @@ Publishing a benchmark where your own product excels invites skepticism. Mitigat
 - Invite external systems (Mem0, Hindsight, Cognee) to run against it
 - Publish the methodology before the results
 
-### The PersonaMem precedent
+### The AMB precedent
 
-PersonaMem was created by Vectorize (who built Hindsight, the top performer). They defined the benchmark, excelled at it, and published. It worked because the benchmark was genuinely useful -- it measured something nobody else was measuring (long-horizon preference tracking). If our platform benchmark measures something genuinely unmeasured (and it does -- nobody grades the librarian), the same dynamic applies.
+(Corrected 2026-07-11: an earlier draft attributed PersonaMem to Vectorize. PersonaMem is an academic benchmark — Jiang et al., 2025. What Vectorize built is **AMB**, the open harness that runs PersonaMem/LoCoMo/LongMemEval/BEAM against pluggable memory providers, plus Hindsight, the top performer on it.)
+
+The precedent still holds — arguably more strongly, because AMB-the-harness is the closer analog to what we're proposing. Vectorize built the measurement infrastructure, ran their own system against it openly alongside competitors, and published everything (datasets, prompts, scoring, results). It earned credibility because the harness was genuinely useful independent of Hindsight's placement on it. If our platform benchmark measures something genuinely unmeasured (and it does -- nobody grades the librarian), the same dynamic applies: the benchmark must stand on its own as measurement infrastructure, with MemoryHub as one provider among several.
 
 ### Naming
 
