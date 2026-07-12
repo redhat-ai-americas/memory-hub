@@ -56,3 +56,13 @@ findings.md
 COMMIT_PLAN.md
 terminology.md
 data/longmemeval/
+benchmarks/amb-harness/data/
+benchmarks/amb-harness/.venv/
+benchmarks/amb-harness/uv.lock
+benchmarks/amb-harness/outputs/
+benchmarks/amb-harness/ui/
+benchmarks/amb-harness/api/
+benchmarks/amb-harness/.blob_manifest.json
+benchmarks/amb-harness/blob-manifest.json
+benchmarks/amb-harness/catalog.json
+benchmarks/amb-harness/results-manifest.json

@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+outputs/
+!outputs/**/*.json.gz
+outputs/**/_store/
+outputs/**/*.json.bak
+data/*.json
+data/tempo/
+.datasets/
+.data/
+.vercel
+.env*.local
+benchmarks/amb-harness/.venv/
+benchmarks/amb-harness/uv.lock
+benchmarks/amb-harness/data/
+benchmarks/amb-harness/outputs/

@@ -1,0 +1,20 @@
+{
+  "dataset": "personamem",
+  "split": "32k",
+  "category": null,
+  "memory_provider": "bm25",
+  "run_name": "bm25",
+  "mode": "rag",
+  "oracle": false,
+  "total_queries": 589,
+  "correct": 399,
+  "accuracy": 0.6774193548387096,
+  "ingestion_time_ms": 351.9,
+  "ingested_docs": 195,
+  "description": null,
+  "answer_llm": "gemini:gemini-3.1-flash-lite",
+  "judge_llm": "gemini:gemini-2.5-flash-lite",
+  "avg_retrieve_time_ms": 7.9,
+  "avg_context_tokens": 5148.8,
+  "result_count": 589
+}

@@ -1,0 +1,4 @@
+# Raw result files are too large (18-89MB) for git.
+# Commit *-summary.json files only.
+*.json
+!*-summary.json
