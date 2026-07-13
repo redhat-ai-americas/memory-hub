@@ -1,7 +1,7 @@
 apiVersion: mlflow.opendatahub.io/v1
 kind: MLflow
 metadata:
-  name: memoryhub-mlflow
+  name: mlflow
   namespace: memoryhub-eval
 spec:
   backendStoreUri: "sqlite:////mlflow/mlflow.db"

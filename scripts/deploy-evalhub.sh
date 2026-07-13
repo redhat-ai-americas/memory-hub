@@ -127,8 +127,8 @@ fi
 # ---------------------------------------------------------------------------
 banner "MLflow"
 
-if oc get mlflow memoryhub-mlflow --context "$CONTEXT" -n "$NS" &>/dev/null; then
-    info "MLflow CR memoryhub-mlflow already exists"
+if oc get mlflow mlflow --context "$CONTEXT" -n "$NS" &>/dev/null; then
+    info "MLflow CR mlflow already exists"
 else
     info "Creating MLflow CR..."
     oc apply --context "$CONTEXT" -f "$MANIFEST_DIR/mlflow.yaml"
@@ -150,7 +150,7 @@ else
     fi
 
     info "Waiting for MLflow deployment..."
-    if ! oc rollout status deployment/memoryhub-mlflow --context "$CONTEXT" -n "$NS" --timeout=120s 2>/dev/null; then
+    if ! oc rollout status deployment/mlflow --context "$CONTEXT" -n "$NS" --timeout=120s 2>/dev/null; then
         warn "MLflow deployment not ready after 120s. Check: oc get pods --context $CONTEXT -n $NS"
     else
         info "MLflow deployment ready"
@@ -202,7 +202,7 @@ banner "Deploy complete ($(elapsed)s)"
 
 info "Namespace:  $NS"
 info "EvalHub:    memoryhub-evalhub"
-info "MLflow:     memoryhub-mlflow"
+info "MLflow:     mlflow"
 info ""
 info "Next steps:"
 info "  1. Build and push adapter container (if not already done)"
