@@ -3,7 +3,9 @@ FROM registry.access.redhat.com/ubi9/python-311:latest
 USER 0
 
 ENV PYTHONUNBUFFERED=1 \
-    HOME=/tmp
+    HOME=/tmp \
+    OMB_CACHE_DIR=/tmp/datasets \
+    HF_HOME=/tmp/huggingface
 
 WORKDIR /opt/app-root/src
 
