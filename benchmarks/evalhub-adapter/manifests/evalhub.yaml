@@ -10,3 +10,5 @@ spec:
   env:
     - name: MLFLOW_TRACKING_URI
       value: https://mlflow.redhat-ods-applications.svc:8443
+    - name: DB_URL
+      value: "file:/tmp/evalhub.db?cache=shared"
