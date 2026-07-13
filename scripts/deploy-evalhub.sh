@@ -229,12 +229,12 @@ else
     # SQLite file-backed DB loses providers on pod restart; always re-register
     info "Registering provider memoryhub-amb..."
     PROVIDER_OUTPUT=$(evalhub providers create --file "$CONFIG_DIR/provider.yaml" 2>&1) || true
-    PROVIDER_ID=$(echo "$PROVIDER_OUTPUT" | grep -oP '(?<=Provider created: )[a-f0-9-]+' || true)
+    PROVIDER_ID=$(echo "$PROVIDER_OUTPUT" | sed -n 's/.*Provider created: \([a-f0-9-]*\).*/\1/p')
     if [ -n "$PROVIDER_ID" ]; then
         info "Provider registered: $PROVIDER_ID"
         # Update smoke-eval.yaml with current provider ID
         if [ -f "$CONFIG_DIR/smoke-eval.yaml" ]; then
-            sed -i.bak "s/provider_id: .*/provider_id: $PROVIDER_ID/" "$CONFIG_DIR/smoke-eval.yaml"
+            sed -i.bak "s|provider_id: .*|provider_id: $PROVIDER_ID|" "$CONFIG_DIR/smoke-eval.yaml"
             rm -f "$CONFIG_DIR/smoke-eval.yaml.bak"
             info "Updated smoke-eval.yaml with provider ID"
         fi
