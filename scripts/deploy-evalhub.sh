@@ -111,6 +111,18 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# BuildConfig and ImageStream
+# ---------------------------------------------------------------------------
+banner "BuildConfig"
+
+if oc get buildconfig memoryhub-evalhub-adapter --context "$CONTEXT" -n "$NS" &>/dev/null; then
+    info "BuildConfig memoryhub-evalhub-adapter already exists"
+else
+    info "Creating BuildConfig and ImageStream..."
+    oc apply --context "$CONTEXT" -f "$MANIFEST_DIR/buildconfig.yaml"
+fi
+
+# ---------------------------------------------------------------------------
 # Model auth Secret (Gemini API key)
 # ---------------------------------------------------------------------------
 banner "Model auth Secret"

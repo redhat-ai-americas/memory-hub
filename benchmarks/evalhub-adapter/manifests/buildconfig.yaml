@@ -1,0 +1,26 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: memoryhub-evalhub-adapter
+  namespace: memoryhub-eval
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: memoryhub-evalhub-adapter
+  namespace: memoryhub-eval
+spec:
+  failedBuildsHistoryLimit: 5
+  successfulBuildsHistoryLimit: 5
+  output:
+    to:
+      kind: ImageStreamTag
+      name: memoryhub-evalhub-adapter:latest
+  runPolicy: Serial
+  source:
+    binary: {}
+    type: Binary
+  strategy:
+    dockerStrategy:
+      dockerfilePath: benchmarks/evalhub-adapter/Containerfile
+    type: Docker
