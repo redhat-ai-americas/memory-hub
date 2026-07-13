@@ -1,0 +1,20 @@
+name: ablation-no-reranker
+description: RRF without reranker signal
+model:
+  url: https://generativelanguage.googleapis.com
+  name: gemini-3.1-flash-lite
+  auth:
+    secret_ref: gemini-api-key
+benchmarks:
+  - id: personamem-mcq
+    provider_id: b7a94a1e-f499-4deb-afe9-e52d53445604
+    parameters:
+      mode: library
+      dataset: personamem
+      dataset_variant: "32k"
+      memory_provider: memoryhub
+      skip_ingestion: true
+      query_limit: 589
+      disabled_signals: reranker
+experiment:
+  name: memoryhub/personamem-mcq/32k
