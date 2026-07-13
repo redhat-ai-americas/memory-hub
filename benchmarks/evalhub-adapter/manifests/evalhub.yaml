@@ -7,3 +7,6 @@ spec:
   replicas: 1
   database:
     type: sqlite
+  env:
+    - name: MLFLOW_TRACKING_URI
+      value: https://mlflow.redhat-ods-applications.svc:8443
