@@ -281,9 +281,25 @@ Layer 1 is independent and can start as soon as #332 lands. Layers 2 and 3 are s
 
 ## 5. Open Questions
 
-0. **Why did the 80.0% baseline underperform despite existing ingestion chunking?** (New; blocks Layer 1 scoping.) See Layer 1 — benchmark path bypass, corpus predating the chunker, or search not surfacing chunk children. Answer empirically before building anything.
+0. **ANSWERED (2026-07-12, #341/#344, PR #356).** The benchmark path had
+   bypassed chunking (fixed via SDK rewrite). But the diagnostic run then
+   showed naive chunking REGRESSES accuracy: 51.6% chunked vs 70.8%
+   unchunked (Flash Lite). Root cause: parent documents compete with their
+   chunks in the vector index, `mode="full_only"` filters chunks without
+   expanding chunk hits to their parents, and the answerer receives ~22x
+   less context per query. Consequence: retrieval must match on chunks but
+   deliver parents (or parent context). This is #343's core scope — see
+   revised question 1.
 
-1. **Chunk display strategy.** When search returns a chunk, what does the agent see? Options: (a) the chunk text only, (b) the chunk plus surrounding context from the parent, (c) the parent's full content with the chunk highlighted. Option (b) is probably right but needs UX testing.
+1. **Chunk display strategy — now load-bearing, not UX polish.** The #344
+   regression shows chunk-hit -> parent-expansion is the correctness fix,
+   not a display preference. #343 implements: match on chunk embeddings,
+   dedupe multiple chunk hits to one parent, deliver parent content (or a
+   windowed slice around the hit) to the answerer, and keep parents from
+   competing with their own chunks in the candidate pool. Re-test must hold
+   the answerer's context budget comparable between chunked and unchunked
+   configs — otherwise the comparison conflates retrieval quality with
+   context volume (that budget gap is most of the 19-point regression).
 
 2. **Reconciliation threshold tuning.** The 0.90 auto-update threshold is inherited from the curation pipeline. It may need adjustment for extraction-produced candidates — and note the asymmetry: LLM-phrased candidates score systematically higher cosine against LLM-phrased memories than the human-written memories the thresholds were tuned on. Tune from the reconciliation decision log, not intuition.
 
