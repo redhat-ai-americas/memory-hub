@@ -182,20 +182,21 @@ else
         warn "Run: oc port-forward svc/memoryhub-evalhub 8080:8080 --context $CONTEXT -n $NS"
     fi
 
+    TOKEN=$(oc whoami --context "$CONTEXT" -t 2>/dev/null || true)
+
     info "Configuring evalhub CLI..."
     evalhub config set base_url "$EVALHUB_URL" 2>/dev/null || true
+    [ -n "$TOKEN" ] && evalhub config set token "$TOKEN" 2>/dev/null || true
+    evalhub config set tenant "$NS" 2>/dev/null || true
 
-    if evalhub providers describe memoryhub-amb --format json 2>/dev/null | grep -q '"name"'; then
-        info "Provider memoryhub-amb already registered"
+    # SQLite in-memory DB loses providers on restart; always re-register
+    info "Registering provider memoryhub-amb..."
+    if evalhub providers create --file "$CONFIG_DIR/provider.yaml" 2>/dev/null; then
+        info "Provider registered successfully"
     else
-        info "Registering provider memoryhub-amb..."
-        if evalhub providers create --file "$CONFIG_DIR/provider.yaml" 2>/dev/null; then
-            info "Provider registered successfully"
-        else
-            warn "Provider registration failed (server may not be reachable yet)"
-            warn "Re-run after EvalHub is accessible:"
-            warn "  evalhub providers create --file $CONFIG_DIR/provider.yaml"
-        fi
+        warn "Provider registration failed (server may not be reachable yet)"
+        warn "Re-run after EvalHub is accessible:"
+        warn "  evalhub providers create --file $CONFIG_DIR/provider.yaml"
     fi
 fi
 
