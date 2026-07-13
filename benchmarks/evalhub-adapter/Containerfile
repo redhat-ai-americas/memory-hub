@@ -1,0 +1,26 @@
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+USER 0
+
+ENV PYTHONUNBUFFERED=1 \
+    HOME=/tmp
+
+WORKDIR /opt/app-root/src
+
+# Install the AMB harness and adapter together
+COPY benchmarks/amb-harness/pyproject.toml benchmarks/amb-harness/
+COPY benchmarks/amb-harness/src/ benchmarks/amb-harness/src/
+COPY benchmarks/evalhub-adapter/src/ benchmarks/evalhub-adapter/src/
+COPY benchmarks/evalhub-adapter/main.py .
+COPY benchmarks/evalhub-adapter/pyproject.toml benchmarks/evalhub-adapter/
+
+# Install dependencies
+RUN pip install --no-cache-dir \
+    ./benchmarks/amb-harness \
+    ./benchmarks/evalhub-adapter \
+    oras>=0.2.42 \
+    olot>=1.0.0
+
+USER 1001
+
+ENTRYPOINT ["python", "main.py"]

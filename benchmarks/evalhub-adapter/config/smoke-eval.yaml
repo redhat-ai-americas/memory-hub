@@ -1,0 +1,15 @@
+name: memoryhub-smoke-20q
+description: 20-query PersonaMem smoke test for EvalHub adapter validation
+provider: memoryhub-amb
+model:
+  url: https://api.anthropic.com
+  name: claude-haiku-4-5-20251001
+benchmarks:
+  - personamem-mcq
+experiment: memoryhub/personamem-mcq/32k
+parameters:
+  mode: library
+  dataset: personamem
+  dataset_variant: "32k"
+  memory_provider: bm25
+  query_limit: 20

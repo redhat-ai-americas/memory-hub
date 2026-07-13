@@ -1,0 +1,9 @@
+apiVersion: trustyai.opendatahub.io/v1alpha1
+kind: EvalHub
+metadata:
+  name: memoryhub-evalhub
+  namespace: memoryhub-eval
+spec:
+  replicas: 1
+  database:
+    type: sqlite

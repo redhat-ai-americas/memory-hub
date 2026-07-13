@@ -10,6 +10,7 @@ from pathlib import Path
 
 from evalhub.adapter.models.adapter import FrameworkAdapter
 from evalhub.adapter.models.job import (
+    EnvironmentCardMetadata,
     JobCallbacks,
     JobResults,
     JobSpec,
@@ -36,6 +37,7 @@ class AMBAdapter(FrameworkAdapter):
             memory_provider: memory provider name (default "memoryhub")
             memoryhub_url:   MemoryHub server URL (optional)
             memoryhub_api_key: MemoryHub API key (optional)
+            disabled_signals: comma-separated signal names to disable (optional)
             query_limit:     max queries (optional, None = all)
             category:        category filter (optional)
             output_dir:      output directory (optional)
@@ -77,6 +79,12 @@ class AMBAdapter(FrameworkAdapter):
             os.environ["MEMORYHUB_URL"] = params["memoryhub_url"]
         if params.get("memoryhub_api_key"):
             os.environ["MEMORYHUB_API_KEY"] = params["memoryhub_api_key"]
+
+        # Wire disabled signals for ablation testing
+        if params.get("disabled_signals"):
+            os.environ["MEMORYHUB_DISABLED_SIGNALS"] = params["disabled_signals"]
+        elif "MEMORYHUB_DISABLED_SIGNALS" in os.environ:
+            del os.environ["MEMORYHUB_DISABLED_SIGNALS"]
 
         dataset_name = params.get("dataset", "personamem")
         split = params.get("dataset_variant", "32k")
@@ -160,12 +168,32 @@ class AMBAdapter(FrameworkAdapter):
             "k": params.get("k"),
             "dataset_variant": split,
             "pipeline_sha": params.get("pipeline_sha"),
+            "disabled_signals": params.get("disabled_signals"),
             "memory_provider": memory_name,
             "ingestion_time_ms": summary.ingestion_time_ms,
             "ingested_docs": summary.ingested_docs,
             "answer_llm": summary.answer_llm,
             "judge_llm": summary.judge_llm,
         }
+
+        env_card = EnvironmentCardMetadata(
+            framework_name="memoryhub-amb",
+            framework_version=params.get("pipeline_sha", "unknown"),
+            model_id=answer_model,
+            model_provider=answer_provider,
+            generated_by="memoryhub-evalhub-adapter",
+            custom={
+                "memoryhub_server_version": params.get("server_version", "unknown"),
+                "pipeline_sha": params.get("pipeline_sha", "unknown"),
+                "retrieval_config": {
+                    "mode": mode_name,
+                    "k": params.get("k"),
+                    "memory_provider": memory_name,
+                    "disabled_signals": params.get("disabled_signals"),
+                },
+                "harness_commit": params.get("pipeline_sha", "unknown"),
+            },
+        )
 
         callbacks.report_status(
             JobStatusUpdate(
@@ -185,6 +213,7 @@ class AMBAdapter(FrameworkAdapter):
             num_examples_evaluated=summary.total_queries,
             duration_seconds=duration,
             evaluation_metadata=eval_metadata,
+            env_card=env_card,
         )
 
 

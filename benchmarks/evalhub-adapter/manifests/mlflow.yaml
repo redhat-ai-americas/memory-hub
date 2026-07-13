@@ -1,0 +1,15 @@
+apiVersion: mlflow.opendatahub.io/v1
+kind: MLflow
+metadata:
+  name: memoryhub-mlflow
+  namespace: memoryhub-eval
+spec:
+  backendStoreUri: "sqlite:////mlflow/mlflow.db"
+  serveArtifacts: true
+  artifactsDestination: "file:///mlflow/artifacts"
+  storage:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi

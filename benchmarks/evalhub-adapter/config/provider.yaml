@@ -1,0 +1,33 @@
+name: memoryhub-amb
+title: MemoryHub AMB Harness
+description: >-
+  Open Memory Benchmark (AMB) harness adapter for MemoryHub retrieval
+  evaluation. Wraps the AMB harness as an EvalHub FrameworkAdapter to
+  measure MCQ accuracy across memory retrieval configurations.
+tags:
+  - memory
+  - retrieval
+  - rag
+runtime:
+  k8s:
+    image: quay.io/rdwj/memoryhub-evalhub-adapter:latest
+    entrypoint: ["python", "main.py"]
+    cpu_request: "500m"
+    memory_request: "1Gi"
+    cpu_limit: "2"
+    memory_limit: "4Gi"
+benchmarks:
+  - id: personamem-mcq
+    name: PersonaMem MCQ
+    description: >-
+      Multiple-choice question benchmark from PersonaMem measuring
+      memory retrieval accuracy across five question types.
+    category: memory-retrieval
+    metrics:
+      - name: mcq_accuracy
+        description: Overall MCQ accuracy (correct / total)
+    primary_score: mcq_accuracy
+    pass_criteria:
+      metric: mcq_accuracy
+      threshold: 0.70
+      lower_is_better: false
