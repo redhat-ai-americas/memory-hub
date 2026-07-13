@@ -27,6 +27,7 @@ data:
           "user_id": "wjackson",
           "name": "Wes Jackson",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "tenant_id": "default",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
           "project_memberships": [],
           "_comment": "primary operator"
@@ -35,6 +36,7 @@ data:
           "user_id": "dev-test",
           "name": "Test User",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "tenant_id": "default",
           "scopes": ["user", "project"],
           "project_memberships": [],
           "_comment": "local development and integration testing"
@@ -43,6 +45,7 @@ data:
           "user_id": "rdwj-agent-1",
           "name": "RDWJ Agent 1",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "tenant_id": "default",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
           "project_memberships": [],
           "_comment": "agent automation slot 1"
@@ -51,6 +54,7 @@ data:
           "user_id": "rdwj-agent-2",
           "name": "RDWJ Agent 2",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "tenant_id": "default",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
           "project_memberships": [],
           "_comment": "agent automation slot 2"
@@ -59,6 +63,7 @@ data:
           "user_id": "kagenti-ci",
           "name": "Kagenti CI",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
+          "tenant_id": "default",
           "scopes": ["user", "project"],
           "project_memberships": [],
           "_comment": "kagenti-adk E2E test runner (see docs/SYSTEMS.md)"
@@ -68,6 +73,7 @@ data:
           "name": "Trace Reviewer Agent",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "identity_type": "service",
+          "tenant_id": "default",
           "scopes": ["user", "project"],
           "project_memberships": [],
           "_comment": "reviews completed session traces to extract missed memories (#284)"
@@ -77,6 +83,7 @@ data:
           "name": "Curator Agent",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "identity_type": "service",
+          "tenant_id": "default",
           "scopes": ["organizational", "role", "campaign"],
           "project_memberships": [],
           "_comment": "periodic deep curation: dedup, merge, promotion (#284)"
@@ -86,6 +93,7 @@ data:
           "name": "Fact Checker Agent",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "identity_type": "service",
+          "tenant_id": "default",
           "scopes": ["user", "project", "campaign"],
           "project_memberships": [],
           "_comment": "periodic verification of factual claims in memories (#284)"
@@ -95,6 +103,7 @@ data:
           "name": "Statistician Agent",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "identity_type": "service",
+          "tenant_id": "default",
           "scopes": ["organizational", "campaign"],
           "project_memberships": [],
           "_comment": "population-level pattern aggregation and convergence signals (#284)"

@@ -20,7 +20,7 @@ from src.core.authz import (
     AuthenticationError,
     authorize_read,
     get_claims_from_context,
-    get_tenant_filter,
+    resolve_tenant,
 )
 from src.tools._deps import get_db_session, get_s3_adapter, release_db_session
 
@@ -91,6 +91,15 @@ async def read_memory(
             ),
         ),
     ] = None,
+    tenant_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Target tenant to read from. Omit to use the session's "
+                "own tenant. Must be a tenant the caller is authorized for."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Retrieve a memory by ID, with optional paginated version history.
@@ -124,7 +133,7 @@ async def read_memory(
             claims = get_claims_from_context()
         except AuthenticationError as exc:
             raise ToolError(str(exc)) from exc
-        tenant = get_tenant_filter(claims)
+        tenant = resolve_tenant(claims, tenant_id)
 
         session, gen = await get_db_session()
 

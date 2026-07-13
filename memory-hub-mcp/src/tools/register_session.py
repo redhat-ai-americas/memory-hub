@@ -37,6 +37,7 @@ from src.core.audit import record_event
 from src.core.authz import get_tenant_filter
 from src.tools._deps import get_db_session, release_db_session
 from src.tools.auth import (
+    DEFAULT_TENANT_ID,
     AuthServiceUnavailableError,
     authenticate,
     authenticate_remote,
@@ -339,7 +340,7 @@ async def register_session(
         await ctx.info(f"Session {session_id} registered for user: {user['user_id']}")
 
     tenant = get_tenant_filter(
-        {"sub": user["user_id"], "tenant_id": user.get("tenant_id", "default")}
+        {"sub": user["user_id"], "tenant_id": user.get("tenant_id", DEFAULT_TENANT_ID)}
     )
     projects = await _fetch_user_projects(user["user_id"], tenant)
 

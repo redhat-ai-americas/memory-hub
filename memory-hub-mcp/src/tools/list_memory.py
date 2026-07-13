@@ -23,7 +23,7 @@ from src.core.authz import (
     AuthenticationError,
     build_authorized_scopes,
     get_claims_from_context,
-    get_tenant_filter,
+    resolve_tenant,
 )
 from src.tools._deps import get_db_session, release_db_session
 
@@ -93,6 +93,15 @@ async def list_memory(
             ),
         ),
     ] = True,
+    tenant_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Target tenant to list from. Omit to use the session's "
+                "own tenant. Must be a tenant the caller is authorized for."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """List memories in a scope without semantic search.
@@ -107,7 +116,7 @@ async def list_memory(
         raise ToolError(str(exc)) from None
 
     authorized = build_authorized_scopes(claims)
-    tenant = get_tenant_filter(claims)
+    tenant = resolve_tenant(claims, tenant_id)
 
     campaign_ids: set[str] | None = None
     if project_id:

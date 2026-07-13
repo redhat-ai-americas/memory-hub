@@ -483,6 +483,7 @@ class MemoryHubClient:
         raw_results: bool = False,
         content_type: str | None = None,
         disabled_signals: list[str] | None = None,
+        tenant_id: str | None = None,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -537,6 +538,7 @@ class MemoryHubClient:
             disabled_signals: RRF signals to disable for ablation testing.
                 Valid names: reranker, focus, keyword, domain, graph.
                 Vector similarity is always active.
+            tenant_id: Optional tenant identifier.
         """
         defaults = self._project_config.retrieval_defaults
         loading = self._project_config.memory_loading
@@ -574,6 +576,8 @@ class MemoryHubClient:
             opts["content_type"] = content_type
         if disabled_signals is not None:
             opts["disabled_signals"] = disabled_signals
+        if tenant_id is not None:
+            opts["tenant_id"] = tenant_id
 
         data = await self._call_action(
             "search",
@@ -640,6 +644,7 @@ class MemoryHubClient:
         history_offset: int = 0,
         history_max_versions: int = 10,
         project_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> Memory:
         """Read a memory by ID, optionally with paginated version history.
 
@@ -658,11 +663,14 @@ class MemoryHubClient:
             history_offset: Versions to skip from newest (default 0).
             history_max_versions: Max versions to return (1-100, default 10).
             project_id: Project identifier for campaign enrollment verification.
+            tenant_id: Optional tenant identifier.
         """
         opts: dict[str, Any] = {"include_versions": include_versions}
         if include_versions:
             opts["history_offset"] = history_offset
             opts["history_max_versions"] = history_max_versions
+        if tenant_id is not None:
+            opts["tenant_id"] = tenant_id
         data = await self._call_action(
             "read",
             memory_id=memory_id,
@@ -681,6 +689,7 @@ class MemoryHubClient:
         include_branches: bool = False,
         current_only: bool = True,
         content_type: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Enumerate memories without semantic ranking.
 
@@ -697,6 +706,7 @@ class MemoryHubClient:
             current_only: If True, only current versions.
             content_type: Filter by content type. "declarative" for facts and
                 preferences, "behavioral" for demonstrated patterns. Omit to list all types.
+            tenant_id: Optional tenant identifier.
         """
         opts: dict[str, Any] = {
             "max_results": max_results,
@@ -707,6 +717,8 @@ class MemoryHubClient:
             opts["cursor"] = cursor
         if content_type is not None:
             opts["content_type"] = content_type
+        if tenant_id is not None:
+            opts["tenant_id"] = tenant_id
         return await self._call_action(
             "list",
             scope=scope,
@@ -758,6 +770,7 @@ class MemoryHubClient:
         domains: list[str] | None = None,
         force: bool = False,
         content_type: str | None = None,
+        tenant_id: str | None = None,
     ) -> WriteResult:
         """Write a new memory.
 
@@ -777,6 +790,7 @@ class MemoryHubClient:
                 and preferences, "behavioral" for demonstrated patterns and
                 successful approaches. Behavioral memories are not injected by
                 default — use the reconstruct action to retrieve them.
+            tenant_id: Optional tenant identifier.
 
         Returns:
             A WriteResult. When curation detects a near-duplicate, the memory is
@@ -800,6 +814,8 @@ class MemoryHubClient:
             opts["force"] = True
         if content_type is not None:
             opts["content_type"] = content_type
+        if tenant_id is not None:
+            opts["tenant_id"] = tenant_id
         data = await self._call_action(
             "write",
             content=content,
@@ -818,6 +834,7 @@ class MemoryHubClient:
         metadata: dict[str, Any] | None = None,
         project_id: str | None = None,
         domains: list[str] | None = None,
+        tenant_id: str | None = None,
     ) -> Memory:
         """Update an existing memory (creates a new version).
 
@@ -830,6 +847,7 @@ class MemoryHubClient:
             metadata: New metadata dict (replaces existing).
             project_id: Project identifier for campaign enrollment verification.
             domains: Domain tags for the memory, e.g. ['React', 'Spring Boot'].
+            tenant_id: Optional tenant identifier.
         """
         if content is None and weight is None and metadata is None:
             raise ValueError("update() requires at least one of: content, weight, metadata")
@@ -840,6 +858,8 @@ class MemoryHubClient:
             opts["metadata"] = metadata
         if domains is not None:
             opts["domains"] = domains
+        if tenant_id is not None:
+            opts["tenant_id"] = tenant_id
         data = await self._call_action(
             "update",
             memory_id=memory_id,
@@ -849,17 +869,28 @@ class MemoryHubClient:
         )
         return Memory.model_validate(data)
 
-    async def delete(self, memory_id: str, *, project_id: str | None = None) -> DeleteResult:
+    async def delete(
+        self,
+        memory_id: str,
+        *,
+        project_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> DeleteResult:
         """Soft-delete a memory and its entire version chain.
 
         Args:
             memory_id: ID of the memory to delete.
             project_id: Project identifier for campaign enrollment verification.
+            tenant_id: Optional tenant identifier.
         """
+        opts: dict[str, Any] = {}
+        if tenant_id is not None:
+            opts["tenant_id"] = tenant_id
         data = await self._call_action(
             "delete",
             memory_id=memory_id,
             project_id=project_id,
+            options=opts or None,
         )
         return DeleteResult.model_validate(data)
 
@@ -1758,12 +1789,12 @@ class MemoryHubClient:
 
         return self._run_sync(_do())
 
-    def delete_sync(self, memory_id: str) -> DeleteResult:
+    def delete_sync(self, memory_id: str, **kwargs) -> DeleteResult:
         """Synchronous wrapper for delete()."""
 
         async def _do():
             async with self:
-                return await self.delete(memory_id)
+                return await self.delete(memory_id, **kwargs)
 
         return self._run_sync(_do())
 

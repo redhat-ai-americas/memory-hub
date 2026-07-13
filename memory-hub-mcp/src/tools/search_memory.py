@@ -54,7 +54,7 @@ from src.core.authz import (
     AuthenticationError,
     build_authorized_scopes,
     get_claims_from_context,
-    get_tenant_filter,
+    resolve_tenant,
 )
 from src.tools._deps import (
     get_db_session,
@@ -691,6 +691,15 @@ async def search_memory(
             ),
         ),
     ] = None,
+    tenant_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Target tenant to search in. Omit to use the session's "
+                "own tenant. Must be a tenant the caller is authorized for."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Search memories using semantic similarity.
@@ -774,7 +783,7 @@ async def search_memory(
     # Build RBAC visibility filter + resolve caller tenant for SQL-level
     # isolation. Tenant filter is ALWAYS applied, independent of scopes.
     authorized = build_authorized_scopes(claims)
-    tenant = get_tenant_filter(claims)
+    tenant = resolve_tenant(claims, tenant_id)
 
     # Resolve campaign membership when project_id is provided. The
     # campaign_ids set feeds into _build_search_filters so campaign-scoped

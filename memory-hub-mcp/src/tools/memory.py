@@ -41,13 +41,15 @@ _SEARCH_OPTS = frozenset({
     "current_only", "owner_id", "graph_depth",
     "graph_relationship_types", "graph_boost_weight", "entities",
     "content_type", "verbose", "temporal_status", "disabled_signals",
+    "tenant_id",
 })
 _LIST_OPTS = frozenset({
     "max_results", "cursor", "include_branches", "current_only",
-    "content_type", "verbose",
+    "content_type", "verbose", "tenant_id",
 })
 _READ_OPTS = frozenset({
     "include_versions", "history_offset", "history_max_versions", "hydrate",
+    "tenant_id",
 })
 _SIMILAR_OPTS = frozenset({"threshold", "max_results", "offset"})
 _RELATIONSHIPS_OPTS = frozenset({
@@ -59,7 +61,7 @@ _RECONSTRUCT_OPTS = frozenset({"owner_id"})
 _WRITE_OPTS = frozenset({
     "weight", "parent_id", "branch_type", "metadata", "domains",
     "project_description", "force", "owner_id", "content_type",
-    "driver_id", "relevant_until",
+    "driver_id", "relevant_until", "tenant_id",
 })
 _UPDATE_OPTS = frozenset({"weight", "metadata", "domains", "driver_id"})
 _SET_RULE_OPTS = frozenset({

@@ -30,7 +30,7 @@ from src.core.authz import (
     AuthenticationError,
     authorize_write,
     get_claims_from_context,
-    get_tenant_filter,
+    resolve_tenant,
 )
 from src.tools._deps import (
     get_db_session,
@@ -202,6 +202,15 @@ async def write_memory(
             ),
         ),
     ] = None,
+    tenant_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Target tenant for this write. Omit to use the session's "
+                "own tenant. Must be a tenant the caller is authorized for."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Create a new memory node or branch in the memory tree.
@@ -230,12 +239,7 @@ async def write_memory(
     if owner_id is None:
         owner_id = claims["sub"]
 
-    # Tool-layer writes always create new memories in the caller's own
-    # tenant. Phase 2 wired this into authorize_write; Phase 3 plumbs the
-    # same tenant_id through the service-layer insert so every row is
-    # stamped explicitly (rather than relying on the column's
-    # server_default of "default").
-    write_tenant_id = get_tenant_filter(claims)
+    write_tenant_id = resolve_tenant(claims, tenant_id)
 
     # Resolve campaign membership when writing to campaign scope.
     campaign_ids: set[str] | None = None

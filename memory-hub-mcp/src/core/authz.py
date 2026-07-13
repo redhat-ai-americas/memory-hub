@@ -8,7 +8,7 @@ authorize_read / authorize_write helpers consume uniformly.
 import os
 
 from src.core.logging import get_logger
-from src.tools.auth import get_current_user
+from src.tools.auth import DEFAULT_TENANT_ID, get_current_user
 
 log = get_logger("authz")
 
@@ -86,7 +86,7 @@ def get_claims_from_context() -> dict:
         claims = {
             "sub": token.claims.get("sub", token.client_id),
             "identity_type": token.claims.get("identity_type", "user"),
-            "tenant_id": token.claims.get("tenant_id", "default"),
+            "tenant_id": token.claims.get("tenant_id", DEFAULT_TENANT_ID),
             "scopes": list(token.scopes),
             "project_memberships": token.claims.get("project_memberships", []),
         }
@@ -105,7 +105,7 @@ def get_claims_from_context() -> dict:
         claims = {
             "sub": jwt_claims.get("sub", "unknown"),
             "identity_type": jwt_claims.get("identity_type", "user"),
-            "tenant_id": jwt_claims.get("tenant_id", "default"),
+            "tenant_id": jwt_claims.get("tenant_id", DEFAULT_TENANT_ID),
             "scopes": scopes,
             "project_memberships": jwt_claims.get("project_memberships", []),
         }
@@ -125,7 +125,7 @@ def get_claims_from_context() -> dict:
         claims = {
             "sub": user["user_id"],
             "identity_type": user.get("identity_type", "user"),
-            "tenant_id": user.get("tenant_id", "default"),
+            "tenant_id": user.get("tenant_id", DEFAULT_TENANT_ID),
             "scopes": scopes,
             "project_memberships": user.get("project_memberships", []),
         }
@@ -150,7 +150,7 @@ def authorize_read(
     # not even learn that the memory exists. Run BEFORE scope/owner checks
     # so a tenant mismatch short-circuits everything else, including blanket
     # "memory:read" scopes.
-    if memory.tenant_id != claims.get("tenant_id", "default"):
+    if memory.tenant_id != claims.get("tenant_id", DEFAULT_TENANT_ID):
         return False
 
     scopes = claims.get("scopes", [])
@@ -202,7 +202,7 @@ def authorize_write(
     # The tenant_id passed in is the tenant of the memory being written; the
     # caller's tenant comes from claims. Mismatch is a hard reject regardless
     # of scope/identity_type.
-    if tenant_id != claims.get("tenant_id", "default"):
+    if tenant_id != claims.get("tenant_id", DEFAULT_TENANT_ID):
         return False
 
     scopes = claims.get("scopes", [])
@@ -305,7 +305,31 @@ def get_tenant_filter(claims: dict) -> str:
     Phase 2 introduces this helper; Phase 4 wires it into the read/search
     service paths.
     """
-    return claims.get("tenant_id", "default")
+    return claims.get("tenant_id", DEFAULT_TENANT_ID)
+
+
+def resolve_tenant(claims: dict, override: str | None = None) -> str:
+    """Return the effective tenant for this request.
+
+    When *override* is provided and the caller is authorized for that
+    tenant, it takes precedence over the session/claims tenant. When
+    omitted (or matches the caller's own tenant), falls back to the
+    claims tenant.
+
+    Phase 1: callers may only use their own tenant.
+    Phase 2: ``authorized_tenants`` in claims enables cross-tenant access.
+    """
+    own_tenant = claims.get("tenant_id", DEFAULT_TENANT_ID)
+    if override is None or override == own_tenant:
+        return own_tenant
+    authorized = claims.get("authorized_tenants")
+    if authorized and override in authorized:
+        return override
+    from fastmcp.exceptions import ToolError
+    raise ToolError(
+        f"Not authorized for tenant '{override}'. "
+        f"Your session is scoped to tenant '{own_tenant}'."
+    )
 
 
 def authorize_thread_read(
@@ -319,7 +343,7 @@ def authorize_thread_read(
     Scope-level threads:read permissions provide broader access.
     """
     # Tenant isolation first
-    if thread.tenant_id != claims.get("tenant_id", "default"):
+    if thread.tenant_id != claims.get("tenant_id", DEFAULT_TENANT_ID):
         return False
 
     caller_id = claims["sub"]
@@ -368,7 +392,7 @@ def authorize_thread_write(
     threads:write permissions provide broader access.
     """
     # Tenant isolation first
-    if thread.tenant_id != claims.get("tenant_id", "default"):
+    if thread.tenant_id != claims.get("tenant_id", DEFAULT_TENANT_ID):
         return False
 
     caller_id = claims["sub"]
@@ -419,7 +443,7 @@ def authorize_thread_admin(
 
     Only thread owner or holders of threads:admin scope permission.
     """
-    if thread.tenant_id != claims.get("tenant_id", "default"):
+    if thread.tenant_id != claims.get("tenant_id", DEFAULT_TENANT_ID):
         return False
 
     caller_id = claims["sub"]

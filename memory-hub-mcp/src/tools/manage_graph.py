@@ -33,6 +33,7 @@ from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
 from src.core.audit import record_event
 from src.core.authz import (
+    DEFAULT_TENANT_ID,
     AuthenticationError,
     authorize_read,
     get_claims_from_context,
@@ -478,7 +479,7 @@ async def _handle_get_relationships(
                 proxy = SimpleNamespace(
                     scope=node_data.get("scope", "user"),
                     owner_id=node_data.get("owner_id", ""),
-                    tenant_id=node_data.get("tenant_id", "default"),
+                    tenant_id=node_data.get("tenant_id", DEFAULT_TENANT_ID),
                 )
                 if not authorize_read(
                     claims, proxy,
@@ -504,7 +505,7 @@ async def _handle_get_relationships(
             proxy = SimpleNamespace(
                 scope=node_dump.get("scope", "user"),
                 owner_id=node_dump.get("owner_id", ""),
-                tenant_id=node_dump.get("tenant_id", "default"),
+                tenant_id=node_dump.get("tenant_id", DEFAULT_TENANT_ID),
             )
             if authorize_read(
                 claims, proxy,

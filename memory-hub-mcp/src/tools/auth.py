@@ -23,6 +23,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_TENANT_ID = os.environ.get("MEMORYHUB_DEFAULT_TENANT", "default")
+
 # Module-level session state (one session per MCP process/connection).
 _current_session: dict[str, Any] | None = None
 _session_expires_at: datetime | None = None
@@ -82,6 +84,12 @@ def _load_users() -> None:
     try:
         data = json.loads(raw)
         users: list[dict[str, Any]] = data.get("users", [])
+        for u in users:
+            if "tenant_id" not in u:
+                logger.warning(
+                    "User %s missing tenant_id, will use default: %s",
+                    u.get("user_id", "?"), DEFAULT_TENANT_ID,
+                )
         _users_by_key = {u["api_key"]: u for u in users if "api_key" in u}
         logger.info("Loaded %d user record(s) for authentication", len(_users_by_key))
     except (json.JSONDecodeError, KeyError) as exc:
@@ -147,7 +155,7 @@ async def authenticate_remote(api_key: str) -> dict[str, Any] | None:
             "user_id": data["user_id"],
             "name": data["name"],
             "identity_type": data.get("identity_type", "user"),
-            "tenant_id": data.get("tenant_id", "default"),
+            "tenant_id": data.get("tenant_id", DEFAULT_TENANT_ID),
             "scopes": data["scopes"],
         }
         _remote_key_cache[key_hash] = (user_dict, time.time() + _CACHE_TTL)
