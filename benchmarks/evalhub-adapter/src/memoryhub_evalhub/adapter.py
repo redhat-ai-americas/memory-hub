@@ -205,13 +205,9 @@ class AMBAdapter(FrameworkAdapter):
             },
         )
 
-        callbacks.report_status(
-            JobStatusUpdate(
-                status=JobStatus.COMPLETED,
-                phase=JobPhase.COMPLETED,
-                progress=1.0,
-            )
-        )
+        # Do NOT send COMPLETED here -- report_results() in main.py
+        # sends the COMPLETED event with metrics and MLflow run ID.
+        # Sending it twice causes a 409 Conflict on the sidecar.
 
         return JobResults(
             id=config.id,
