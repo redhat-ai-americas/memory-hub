@@ -9,15 +9,19 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /opt/app-root/src
 
-# Install the AMB harness and adapter together
+# Install the AMB harness, SDK, and adapter together
 COPY benchmarks/amb-harness/pyproject.toml benchmarks/amb-harness/
 COPY benchmarks/amb-harness/src/ benchmarks/amb-harness/src/
 COPY benchmarks/evalhub-adapter/src/ benchmarks/evalhub-adapter/src/
 COPY benchmarks/evalhub-adapter/main.py .
 COPY benchmarks/evalhub-adapter/pyproject.toml benchmarks/evalhub-adapter/
+COPY sdk/pyproject.toml sdk/
+COPY sdk/README.md sdk/
+COPY sdk/src/ sdk/src/
 
-# Install dependencies
+# Install dependencies (local SDK overrides PyPI version)
 RUN pip install --no-cache-dir \
+    ./sdk \
     ./benchmarks/amb-harness \
     ./benchmarks/evalhub-adapter \
     oras>=0.2.42 \

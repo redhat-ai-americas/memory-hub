@@ -227,17 +227,43 @@ else
     evalhub config set tenant "$NS" 2>/dev/null || true
 
     # SQLite file-backed DB loses providers on pod restart; always re-register
+    # Generate provider spec with MemoryHub connection env vars
+    MEMORYHUB_MCP_URL="http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/"
+    MEMORYHUB_KEY=$(bash -c 'cat ~/.config/memoryhub/api-key 2>/dev/null' | tr -d '[:space:]')
+    MEMORYHUB_DB_PASSWORD=$(oc get secret memoryhub-db-credentials --context "$CONTEXT" -n memory-hub-mcp \
+        -o jsonpath='{.data.MEMORYHUB_DB_PASSWORD}' 2>/dev/null | base64 -d || true)
+
+    PROVIDER_SPEC=$(mktemp)
+    trap "rm -f $PROVIDER_SPEC" EXIT
+    python3 -c "
+import yaml, sys
+with open('$CONFIG_DIR/provider.yaml') as f:
+    spec = yaml.safe_load(f)
+spec.setdefault('runtime', {}).setdefault('k8s', {})['env'] = [
+    {'name': 'MEMORYHUB_URL', 'value': '$MEMORYHUB_MCP_URL'},
+    {'name': 'MEMORYHUB_API_KEY', 'value': '$MEMORYHUB_KEY'},
+    {'name': 'MEMORYHUB_DB_HOST', 'value': 'memoryhub-pg.memoryhub-db.svc.cluster.local'},
+    {'name': 'MEMORYHUB_DB_PORT', 'value': '5432'},
+    {'name': 'MEMORYHUB_DB_USER', 'value': 'memoryhub'},
+    {'name': 'MEMORYHUB_DB_PASS', 'value': '$MEMORYHUB_DB_PASSWORD'},
+    {'name': 'MEMORYHUB_DB_NAME', 'value': 'memoryhub'},
+]
+yaml.dump(spec, sys.stdout, default_flow_style=False)
+" > "$PROVIDER_SPEC"
+
     info "Registering provider memoryhub-amb..."
-    PROVIDER_OUTPUT=$(evalhub providers create --file "$CONFIG_DIR/provider.yaml" 2>&1) || true
+    PROVIDER_OUTPUT=$(evalhub providers create --file "$PROVIDER_SPEC" 2>&1) || true
     PROVIDER_ID=$(echo "$PROVIDER_OUTPUT" | sed -n 's/.*Provider created: \([a-f0-9-]*\).*/\1/p')
     if [ -n "$PROVIDER_ID" ]; then
         info "Provider registered: $PROVIDER_ID"
-        # Update smoke-eval.yaml with current provider ID
-        if [ -f "$CONFIG_DIR/smoke-eval.yaml" ]; then
-            sed -i.bak "s|provider_id: .*|provider_id: $PROVIDER_ID|" "$CONFIG_DIR/smoke-eval.yaml"
-            rm -f "$CONFIG_DIR/smoke-eval.yaml.bak"
-            info "Updated smoke-eval.yaml with provider ID"
-        fi
+        # Update all eval configs with current provider ID
+        for cfg in "$CONFIG_DIR/smoke-eval.yaml" "$CONFIG_DIR"/matrix/*.yaml; do
+            if [ -f "$cfg" ]; then
+                sed -i.bak "s|provider_id: .*|provider_id: $PROVIDER_ID|" "$cfg"
+                rm -f "${cfg}.bak"
+            fi
+        done
+        info "Updated eval configs with provider ID"
     else
         warn "Provider registration failed (server may not be reachable yet)"
         warn "Re-run after EvalHub is accessible:"

@@ -7,7 +7,7 @@ model:
     secret_ref: gemini-api-key
 benchmarks:
   - id: personamem-mcq
-    provider_id: 7b488af5-50b7-4793-8cdc-7e0f2efee1d8
+    provider_id: b7a94a1e-f499-4deb-afe9-e52d53445604
     parameters:
       mode: library
       dataset: personamem

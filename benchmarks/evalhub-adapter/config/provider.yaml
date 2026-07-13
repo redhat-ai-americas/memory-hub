@@ -16,6 +16,9 @@ runtime:
     memory_request: "1Gi"
     cpu_limit: "2"
     memory_limit: "4Gi"
+    # MemoryHub connection env vars are injected at registration time
+    # by deploy-evalhub.sh (not committed to git with real values).
+    # DB env vars only needed when skip_ingestion is false.
 benchmarks:
   - id: personamem-mcq
     name: PersonaMem MCQ

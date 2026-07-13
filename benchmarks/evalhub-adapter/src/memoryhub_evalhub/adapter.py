@@ -38,6 +38,7 @@ class AMBAdapter(FrameworkAdapter):
             memoryhub_url:   MemoryHub server URL (optional)
             memoryhub_api_key: MemoryHub API key (optional)
             disabled_signals: comma-separated signal names to disable (optional)
+            skip_ingestion:  if true, skip data ingestion (reuse existing data)
             query_limit:     max queries (optional, None = all)
             category:        category filter (optional)
             output_dir:      output directory (optional)
@@ -96,12 +97,20 @@ class AMBAdapter(FrameworkAdapter):
         elif "MEMORYHUB_DISABLED_SIGNALS" in os.environ:
             del os.environ["MEMORYHUB_DISABLED_SIGNALS"]
 
+        # Wire DB connection for memoryhub provider (params override env vars)
+        for db_key in ("MEMORYHUB_DB_HOST", "MEMORYHUB_DB_PORT", "MEMORYHUB_DB_USER",
+                       "MEMORYHUB_DB_PASS", "MEMORYHUB_DB_NAME"):
+            param_key = db_key.lower()
+            if params.get(param_key):
+                os.environ[db_key] = str(params[param_key])
+
         dataset_name = params.get("dataset", "personamem")
         split = params.get("dataset_variant", "32k")
         mode_name = params.get("mode", "library")
         memory_name = params.get("memory_provider", "memoryhub")
         query_limit = params.get("query_limit")
         category = params.get("category")
+        skip_ingestion = params.get("skip_ingestion", False)
         output_dir = Path(params.get("output_dir", "outputs"))
 
         ds = get_dataset(dataset_name)
@@ -127,6 +136,7 @@ class AMBAdapter(FrameworkAdapter):
             mode=mode,
             category=category,
             query_limit=query_limit,
+            skip_ingestion=skip_ingestion,
             run_name=run_name,
             description=f"EvalHub job {config.id}",
         )
