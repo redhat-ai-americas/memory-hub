@@ -10,7 +10,7 @@ tags:
   - rag
 runtime:
   k8s:
-    image: quay.io/rdwj/memoryhub-evalhub-adapter:latest
+    image: image-registry.openshift-image-registry.svc:5000/memoryhub-eval/memoryhub-evalhub-adapter:latest
     entrypoint: ["python", "main.py"]
     cpu_request: "500m"
     memory_request: "1Gi"
