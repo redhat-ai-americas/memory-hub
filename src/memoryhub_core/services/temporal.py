@@ -159,6 +159,8 @@ def compute_temporal_status(relevant_until: datetime | None) -> str | None:
     if relevant_until is None:
         return None
     now = datetime.now(UTC)
+    if relevant_until.tzinfo is None:
+        relevant_until = relevant_until.replace(tzinfo=UTC)
     if relevant_until < now:
         return "expired"
     if relevant_until < now + timedelta(days=7):
