@@ -111,6 +111,31 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Model auth Secret (Gemini API key)
+# ---------------------------------------------------------------------------
+banner "Model auth Secret"
+
+if oc get secret gemini-api-key --context "$CONTEXT" -n "$NS" &>/dev/null; then
+    info "Secret gemini-api-key already exists"
+else
+    if [ -f "$HOME/.secrets" ]; then
+        GEMINI_KEY=$(bash -c 'source "$HOME/.secrets" 2>/dev/null; echo "$GEMINI_API_KEY"')
+        if [ -n "$GEMINI_KEY" ]; then
+            info "Creating Secret gemini-api-key from ~/.secrets..."
+            oc create secret generic gemini-api-key \
+                --from-literal=api-key="$GEMINI_KEY" \
+                --context "$CONTEXT" -n "$NS"
+        else
+            warn "GEMINI_API_KEY not found in ~/.secrets; skipping Secret creation"
+            warn "Create manually: oc create secret generic gemini-api-key --from-literal=api-key=<key> --context $CONTEXT -n $NS"
+        fi
+    else
+        warn "~/.secrets not found; skipping Secret creation"
+        warn "Create manually: oc create secret generic gemini-api-key --from-literal=api-key=<key> --context $CONTEXT -n $NS"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # EvalHub CR
 # ---------------------------------------------------------------------------
 banner "EvalHub"

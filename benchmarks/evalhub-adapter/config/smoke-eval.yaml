@@ -1,8 +1,10 @@
 name: memoryhub-smoke-20q
 description: 20-query PersonaMem smoke test for EvalHub adapter validation
 model:
-  url: https://api.anthropic.com
-  name: claude-haiku-4-5-20251001
+  url: https://generativelanguage.googleapis.com
+  name: gemini-2.5-flash-lite-preview-06-17
+  auth:
+    secret_ref: gemini-api-key
 benchmarks:
   - id: personamem-mcq
     provider_id: dbde4786-1ef9-4dca-8d88-64c430b0501b
