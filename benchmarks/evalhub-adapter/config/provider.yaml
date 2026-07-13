@@ -24,10 +24,7 @@ benchmarks:
       memory retrieval accuracy across five question types.
     category: memory-retrieval
     metrics:
-      - name: mcq_accuracy
-        description: Overall MCQ accuracy (correct / total)
-    primary_score: mcq_accuracy
-    pass_criteria:
+      - mcq_accuracy
+    primary_score:
       metric: mcq_accuracy
-      threshold: 0.70
       lower_is_better: false
