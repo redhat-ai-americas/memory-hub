@@ -150,10 +150,14 @@ else
     fi
 
     info "Waiting for MLflow deployment..."
-    if ! oc rollout status deployment/mlflow --context "$CONTEXT" -n "$NS" --timeout=120s 2>/dev/null; then
-        warn "MLflow deployment not ready after 120s. Check: oc get pods --context $CONTEXT -n $NS"
+    MLFLOW_NS=$(oc get mlflow mlflow --context "$CONTEXT" -n "$NS" -o jsonpath='{.status.address.url}' 2>/dev/null | sed 's|.*://mlflow\.\(.*\)\.svc.*|\1|' || echo "redhat-ods-applications")
+    if [ -z "$MLFLOW_NS" ]; then
+        MLFLOW_NS="redhat-ods-applications"
+    fi
+    if ! oc rollout status deployment/mlflow --context "$CONTEXT" -n "$MLFLOW_NS" --timeout=120s 2>/dev/null; then
+        warn "MLflow deployment not ready after 120s. Check: oc get pods --context $CONTEXT -n $MLFLOW_NS"
     else
-        info "MLflow deployment ready"
+        info "MLflow deployment ready (namespace: $MLFLOW_NS)"
     fi
 fi
 
