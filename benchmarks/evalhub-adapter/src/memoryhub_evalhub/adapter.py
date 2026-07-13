@@ -74,6 +74,16 @@ class AMBAdapter(FrameworkAdapter):
         os.environ["OMB_ANSWER_LLM"] = answer_provider
         os.environ["OMB_ANSWER_MODEL"] = answer_model
 
+        # Resolve model credentials from mounted secret
+        from evalhub.adapter import resolve_model_credentials
+        creds = resolve_model_credentials()
+        if creds.api_key:
+            env_key = {
+                "anthropic": "ANTHROPIC_API_KEY",
+                "gemini": "GOOGLE_API_KEY",
+            }.get(answer_provider, "OPENAI_API_KEY")
+            os.environ[env_key] = creds.api_key
+
         # Wire MemoryHub connection if provided
         if params.get("memoryhub_url"):
             os.environ["MEMORYHUB_URL"] = params["memoryhub_url"]
