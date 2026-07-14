@@ -60,6 +60,7 @@ from src.tools._deps import (
     get_db_session,
     get_embedding_service,
     get_reranker_service,
+    get_s3_adapter,
     release_db_session,
 )
 
@@ -139,6 +140,8 @@ def _compact_entry(
         entry["content"] = item.content
     else:
         entry["content"] = item.stub
+    entry["content_truncated"] = item.content_truncated
+    entry["full_available"] = item.full_available
     if relevance_score is not None:
         entry["relevance_score"] = round(relevance_score, 4)
     return entry
@@ -700,6 +703,19 @@ async def search_memory(
             ),
         ),
     ] = None,
+    content_mode: Annotated[
+        Literal["stub", "full"],
+        Field(
+            description=(
+                "Content delivery mode for S3-backed memories. "
+                "'stub' (default): returns the stored prefix with honesty flags "
+                "(content_truncated, full_available) so agents can follow up "
+                "with read_memory(hydrate=true) for specific memories. "
+                "'full': hydrates full content from S3 storage before returning. "
+                "Use 'full' in eval/benchmark harnesses."
+            ),
+        ),
+    ] = "stub",
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Search memories using semantic similarity.
@@ -992,6 +1008,32 @@ async def search_memory(
                 response["pivot_reason"] = focus_meta["pivot_reason"]
             return response
 
+        # --- S3 hydration for content_mode="full" ---
+        if content_mode == "full":
+            s3 = get_s3_adapter()
+            if s3 is not None:
+                for idx, (item, score) in enumerate(results):
+                    if (
+                        isinstance(item, MemoryNodeRead)
+                        and item.storage_type == "s3"
+                        and item.content_ref
+                    ):
+                        try:
+                            full_content = await s3.get_content(item.content_ref)
+                            results[idx] = (
+                                item.model_copy(update={
+                                    "content": full_content,
+                                    "content_truncated": False,
+                                    "full_available": False,
+                                }),
+                                score,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "S3 hydration failed for %s: %s",
+                                item.id, exc,
+                            )
+
         # mode='index' degrades every full result to stub form. Done before
         # branch handling so nested branches are also stubs in this mode.
         if mode == "index":
@@ -1181,6 +1223,7 @@ async def search_memory(
             "results": formatted,
             "total_matching": total_matching,
             "has_more": total_matching > len(formatted),
+            "content_mode": content_mode,
         }
         if compilation_meta is not None:
             response["compilation_hash"] = compilation_meta["compilation_hash"]
