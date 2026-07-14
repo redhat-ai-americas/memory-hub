@@ -16,5 +16,16 @@ benchmarks:
       skip_ingestion: true
       query_limit: 589
       disabled_signals: keyword
+      expected_manifest:
+        signals:
+          vector: {active: true}
+          reranker: {active: false}
+          keyword: {active: true}
+          focus: {active: false}
+          domain: {active: false}
+          graph: {active: false}
+        corpus:
+          tenant_id: amb-benchmark
+          chunk_nodes: 0
 experiment:
   name: memoryhub/personamem-mcq/32k

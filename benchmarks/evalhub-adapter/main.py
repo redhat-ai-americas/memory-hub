@@ -30,6 +30,16 @@ def main() -> None:
 
     results = adapter.run_benchmark_job(job, callbacks)
 
+    manifest = getattr(adapter, "preflight_manifest", None)
+    if manifest:
+        import json
+        from pathlib import Path
+
+        manifest_path = Path("outputs") / "preflight-manifest.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+        logger.info("Preflight manifest written to %s", manifest_path)
+
     # Save to MLflow before reporting so mlflow_run_id is included
     mlflow_run_id = callbacks.mlflow.save(results, job)
     if mlflow_run_id:

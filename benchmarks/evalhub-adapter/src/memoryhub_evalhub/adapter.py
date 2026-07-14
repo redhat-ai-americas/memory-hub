@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -104,6 +105,40 @@ class AMBAdapter(FrameworkAdapter):
             if params.get(param_key):
                 os.environ[db_key] = str(params[param_key])
 
+        # -- Preflight: probe deployment and enforce expectations --------
+        from memoryhub_evalhub.preflight import run_preflight, enforce_manifest
+
+        db_url = (
+            f"postgresql://{os.environ.get('MEMORYHUB_DB_USER', 'memoryhub')}"
+            f":{os.environ.get('MEMORYHUB_DB_PASS', '')}"
+            f"@{os.environ.get('MEMORYHUB_DB_HOST', 'localhost')}"
+            f":{os.environ.get('MEMORYHUB_DB_PORT', '25432')}"
+            f"/{os.environ.get('MEMORYHUB_DB_NAME', 'memoryhub')}"
+        )
+        tenant_id = os.environ.get("MEMORYHUB_TENANT_ID", "amb-benchmark")
+
+        self.preflight_manifest = asyncio.run(run_preflight(
+            db_url=db_url,
+            tenant_id=tenant_id,
+            reranker_url=os.environ.get("MEMORYHUB_RERANKER_URL"),
+        ))
+
+        expected = params.get("expected_manifest")
+        if expected:
+            ok, diff = enforce_manifest(self.preflight_manifest, expected)
+            if not ok:
+                raise RuntimeError(
+                    f"Preflight manifest mismatch -- deployment does not "
+                    f"match config expectations.\n\n{diff}\n\n"
+                    f"Fix the deployment or update expected_manifest in "
+                    f"the config."
+                )
+            logger.info("Preflight passed: manifest matches expected_manifest")
+        else:
+            logger.warning(
+                "No expected_manifest in config; preflight ran but not enforced"
+            )
+
         dataset_name = params.get("dataset", "personamem")
         split = params.get("dataset_variant", "32k")
         mode_name = params.get("mode", "library")
@@ -194,6 +229,7 @@ class AMBAdapter(FrameworkAdapter):
             "ingested_docs": summary.ingested_docs,
             "answer_llm": summary.answer_llm,
             "judge_llm": summary.judge_llm,
+            "preflight_manifest": getattr(self, "preflight_manifest", None),
         }
 
         env_card = EnvironmentCardMetadata(
@@ -212,6 +248,7 @@ class AMBAdapter(FrameworkAdapter):
                     "disabled_signals": params.get("disabled_signals"),
                 },
                 "harness_commit": params.get("pipeline_sha", "unknown"),
+                "preflight_manifest": getattr(self, "preflight_manifest", None),
             },
         )
 
