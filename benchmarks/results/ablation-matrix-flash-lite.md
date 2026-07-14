@@ -38,7 +38,10 @@ but require:
 
 - **Reranker:** TEI GPU service deployed and `MEMORYHUB_RERANKER_URL` set (#342)
 - **Focus:** Session focus set via `set_focus` tool (no active focus in benchmark mode)
-- **Keyword:** BM25 index populated (requires `tsvector` column, not yet in schema)
+- **Keyword:** `search_vector` tsvector column and GIN index exist in deployed
+  schema (migration `024_add_search_vector`), but keyword recall only runs
+  inside `search_memories_with_focus()` -- the benchmark's non-focus search
+  path does not invoke it. Activation is #372.
 - **Domain:** Domain tags on memories (benchmark data has no domain tags)
 - **Graph:** Relationship edges between memories (benchmark data has no edges)
 
@@ -67,8 +70,135 @@ conversations, favoring keyword match over semantic similarity.
 | no-graph | 198342a1-751f-4227-8222-def225b0acfa |
 | bm25-only | 63cf17f2-3210-47fb-a47c-2c77ccbf2f00 |
 
+## Baseline discrepancy investigation (#369)
+
+**Question:** Why 48.4% here vs 70.8% in the #332 Flash Lite baseline?
+
+### H1: Corpus contamination -- CONFIRMED (primary cause)
+
+The amb-benchmark corpus contains 6,614 nodes: 195 parent documents and
+6,419 chunk nodes (`branch_type='chunk'`). All have `is_current=true` and
+populated embeddings. The 70.8% baseline was measured against an unchunked
+corpus (195 parents only); this matrix reused the chunked corpus via
+`skip_ingestion=True`.
+
+**Evidence (SQL, `memoryhub-db` via port-forward 2026-07-14):**
+
+```
+SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE branch_type='chunk') as chunks,
+       COUNT(*) FILTER (WHERE branch_type IS NULL OR branch_type != 'chunk') as parents
+FROM memory_nodes WHERE tenant_id = 'amb-benchmark';
+
+ total | chunks | parents
+-------+--------+---------
+  6614 |   6419 |     195
+```
+
+**Mechanism:** `_build_search_filters()` (`memory.py:693`) does not filter on
+`branch_type`. The SQL recall query (`search_memories()` L953-961) returns
+`max_results=10` by cosine distance from all 6,614 nodes. At a 33:1
+chunk-to-parent ratio, chunks dominate the top-k. Parent documents are
+displaced, reducing context from ~27K tokens (unchunked) to ~1.2K tokens
+(chunked), which directly explains the accuracy drop.
+
+The 48.4% result is within noise of the #344 chunked diagnostic (51.6%,
+1,193 avg context tokens). Both reflect the same underlying issue: chunk
+nodes competing with parents in the vector recall pool without exclusion
+or deduplication.
+
+**RESULTS.md line 86** previously documented this mechanism:
+
+> Parent documents are now competing with their own chunks in the vector
+> index, diluting retrieval scores.
+
+### H2: Retrieval path difference -- ELIMINATED (subsumed by H1)
+
+Both the 70.8% and 48.4% runs use identical retrieval code:
+
+- Same provider: `memoryhub.py:retrieve()` with `k=10`,
+  `weight_threshold=0.0`, `mode="full_only"`
+- Same service function: `search_memories()` (non-focus path, cosine-only)
+- No focus parameter passed; the benchmark never triggers
+  `search_memories_with_focus()` or keyword/RRF logic
+- No code changes between runs (`e2cbea6` provider rewrite predates both)
+
+The gap is corpus state, not retrieval logic.
+
+### H3: Tenant/scope pool difference -- ELIMINATED (subsumed by H1)
+
+Both runs search `tenant_id='amb-benchmark'` with
+`owner_id='amb-{user_id}'` and `scope='project'`. The pool difference is
+chunk contamination (6,419 additional nodes), not tenant or scope isolation.
+
+```
+SELECT COUNT(DISTINCT owner_id) FROM memory_nodes
+WHERE tenant_id = 'amb-benchmark';
+-- Result: 37 (same distinct owners for both runs)
+```
+
+### H4: tsvector contradiction -- RESOLVED (results doc was wrong)
+
+The `search_vector` column EXISTS in the deployed schema and is fully
+operational:
+
+| Artifact | Claim | Actual state |
+|----------|-------|--------------|
+| `models/memory.py:110` | Declares weighted `to_tsvector` (generated column) | Correct |
+| Migration `024_add_search_vector` | Adds column + GIN index | Applied |
+| Deployed DB schema | `search_vector tsvector`, `ix_memory_nodes_search_vector GIN` | Present |
+| All 6,614 amb-benchmark nodes | `search_vector IS NOT NULL` | 6,614/6,614 populated |
+| `ts_rank()` query test | Returns ranked results for `'favorite food'` | Works |
+| **This doc, line 40** | **"requires tsvector column, not yet in schema"** | **WRONG** |
+
+The keyword signal is inactive for the benchmark, but not because the
+schema is missing. The actual reason: the benchmark provider does not pass
+a `focus` parameter, so the MCP tool routes to `search_memories()` (the
+non-focus path at `search_memory.py:922`), which is cosine-only. Keyword
+recall via `plainto_tsquery` only runs inside `search_memories_with_focus()`
+at L1445-1469, which requires a focus string to activate.
+
+**Correction applied:** line 40 "not yet in schema" replaced below.
+
+### Attribution summary
+
+| Factor | Contribution | Verdict |
+|--------|-------------|---------|
+| Chunk contamination of vector recall pool | ~22 points (48.4% vs 70.8%) | CONFIRMED |
+| Retrieval code path difference | 0 points | ELIMINATED |
+| Tenant/scope pool difference | 0 points | ELIMINATED |
+| Missing tsvector schema | n/a (column exists; doc was wrong) | RESOLVED |
+
+The entire 22-point gap is attributable to corpus contamination: 6,419
+chunk nodes in the amb-benchmark search pool that were not present during
+the 70.8% baseline run. No other factor contributes.
+
+### Corpus statement for Matrix A
+
+**Matrix A must run against a clean corpus of exactly 195 PersonaMem 32k
+parent documents, produced by fresh ingestion with `reset=True` and
+`semantic_chunk()` disabled (i.e., no chunk children).** The current
+amb-benchmark corpus (195 parents + 6,419 chunks) must be reset before
+Matrix A. The reset procedure is: run the benchmark with
+`skip_ingestion=False`, which triggers the DELETE at
+`memoryhub.py:131` followed by fresh ingestion. Chunking must be
+disabled in the provider's `ingest()` path or the server's
+`semantic_chunk()` must be bypassed.
+
+Verify pre-Matrix-A corpus state:
+```sql
+SELECT COUNT(*) as total,
+       COUNT(*) FILTER (WHERE branch_type = 'chunk') as chunks
+FROM memory_nodes WHERE tenant_id = 'amb-benchmark';
+-- Expected: total=195, chunks=0
+```
+
 ## Next steps
 
-1. **#342 (reranker upgrade):** Deploy bge-reranker-v2-m3 on TEI GPU, re-run matrix
-2. **Keyword signal:** Add BM25/tsvector to search path, re-run matrix
-3. **Re-run with active signals:** Only meaningful after at least reranker + keyword are deployed
+1. **#372 (keyword signal activation):** Wire the keyword recall path into
+   the non-focus search function, or ensure the benchmark triggers the
+   focused path. The tsvector column and GIN index are already deployed;
+   only the code path needs activation.
+2. **#342 (reranker upgrade):** Deploy bge-reranker-v2-m3 on TEI GPU
+3. **#371 (system map + preflight):** Encode the corpus check above as a
+   preflight assertion
+4. **#360 re-scoped (Matrix A):** Re-run with clean corpus + active signals
