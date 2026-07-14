@@ -1,70 +1,46 @@
-# Session Summary: 2026-07-14 -- Matrix A Execution
+# Session Summary -- 2026-07-14 - Dreaming - Matrix A Execution + H6 Audit
 
-## What landed
+**Plan:** NEXT_SESSION-dreaming.md / #365, #342, #360   **Commits:** e9c96c9..e99b18f (bench/matrix-a, fix/evalhub-pg-persistence, feat/reranker-upgrade)
+**Deployed:** dev (EvalHub PG, GPU reranker, MCP server redeployed via golden test)   **Model:** Opus 4.6
 
-### #365: EvalHub PVC persistence (PR #384)
-Switched EvalHub from in-memory SQLite to PostgreSQL (shared memoryhub-pg
-instance, dedicated `evalhub` database). Provider registrations now survive
-pod restarts. The PVC approach from the session plan didn't apply -- the
-EvalHub CRD's `pvcManaged`/`pvcName` fields are on the lmevaljob CR (job
-outputs), not the evalhubs CR (server database). PostgreSQL was the
-correct path, verified by pod deletion + restart test.
+## Plan vs. actual
+Planned: #365 (EvalHub PVC) then #342 (reranker GPU) then #360 (Matrix A), strictly sequential. Shipped: all three plus the H6 context-delivery audit that was listed as "3b, if time permits." Slipped: none.
+Scope: expanded to include H6 audit after Matrix A results pointed at content delivery as the root cause.
 
-### #342: Reranker upgrade (PR #385)
-Deployed bge-reranker-v2-m3 on L40S GPU via TEI 1.6, replacing
-ms-marco-MiniLM-L12-v2 (CPU, 512-token max). New model handles 8192
-tokens at float16. Added `deploy/reranker/` kustomize manifests and
-`MEMORYHUB_RERANKER_URL` to the MCP server deployment. Golden test
-(preserve-DB) passed after fixing a pre-existing deploy-full.sh ordering
-bug (auth infra must run before MCP deployment, not after).
+## Shipped
+- `e9c96c9` EvalHub switched from SQLite to PostgreSQL for persistent state (#365, PR #384)
+- `140490d` bge-reranker-v2-m3 deployed on L40S GPU, replacing ms-marco-MiniLM-L12-v2 (#342, PR #385)
+- `bf489bc` Matrix A: 4 configs x 589 queries, all at 46.5% (274/589) (#360, PR #386)
+- `14f9902` H6 audit: confirmed MCP delivers 5.2x less context than BM25-local
+- `e99b18f` H6 audit report at benchmarks/results/h6-content-delivery-audit.md
 
-### #360: Matrix A (PR #386)
-Ran the full 4-config diagnostic ablation on 589 PersonaMem queries:
+## Verification and confidence
+- EvalHub PG: provider survived pod deletion + restart (live verification)
+- Reranker GPU: /info and /rerank endpoints verified, golden test (preserve-DB) passed in 7m7s
+- Matrix A: all 4 runs completed (589 queries each, ~20 min each), preflight before first run
+- H6 audit: side-by-side BM25 vs MCP context dump for 5 queries, DB content length verified
+- Confidence: **high** on all findings. The 274/589 identity across all 4 configs is deterministic, not statistical.
 
-| Configuration | Correct | Accuracy |
-|---|---|---|
-| vector-only | 274 | 46.5% |
-| vector + keyword | 274 | 46.5% |
-| vector + reranker | 274 | 46.5% |
-| vector + keyword + reranker | 274 | 46.5% |
+## Judgment calls and deviations
+- EvalHub: session plan said PVC for SQLite, but `pvcManaged`/`pvcName` are on the lmevaljob CRD (job outputs), not the evalhubs CRD (server DB). Switched to PostgreSQL instead -- correct per verify-before-propagating rule.
+- deploy-full.sh: moved `prepare_auth_infra` before `deploy_mcp` to fix a pre-existing race where the MCP pod started before the auth secret existed.
+- Added `amb-benchmark` tenant user to the MCP users.json configmap -- benchmark data is in that tenant but no API key existed for it.
+- Installed local SDK editable in harness to get `disabled_signals` support (not yet published to PyPI). Reverted the pyproject.toml at session close.
 
-All four produced exactly 274/589. H2 (pool exhaustion) conclusively
-confirmed. Keyword and reranker cannot differentiate at 195 docs.
+## Backlog delta
+- Closed (via PRs, pending merge): #365, #342, #360
+- New finding (not yet filed): H6 content truncation defect -- `s3_prefix_chars=1000` truncates all memories >1024 bytes at write time; search never hydrates from S3. This is the single largest performance blocker.
 
-## Key findings
+## Drift and forward-collisions
+- Backward: #343 (chunking fix) -- Matrix A confirms chunking cannot differentiate until H6 is fixed. The exit predicate ("chunked >= unchunked baseline") is unreachable while the baseline itself is truncated. Re-scope candidate.
+- Forward: The H6 finding (search must hydrate from S3 or raise the inline threshold) is prerequisite for any retrieval quality work. It touches services/memory.py write + search paths.
 
-1. **46.5% falsifies the ~70% prediction.** The clean-corpus vector-only
-   baseline is 24pp below the 70.8% #332 baseline. The #369 attribution
-   (that the clean corpus would restore 70%) is wrong.
+## For the reviewer
+- Sanity-check: the 46.5% vector-only number vs the 70.8% #332 baseline. What changed between #332 and now? Was #332 run before S3 spill was enabled, so memories were stored inline at full length?
+- Thin verification: the perf/cross_encoder test now hits a 503 on the old reranker URL (scaled to 0). Not fixed -- it's a perf test with a hardcoded URL.
+- Wants guidance: should H6 be fixed by raising the inline threshold (Option B, simple) or by adding S3 hydration to the search path (Option A, correct long-term)? Option B is a one-line config change; Option A is a feature.
 
-2. **H6 (lossy content delivery) is now mandatory.** The 21pp gap between
-   BM25-local (67.7%) and MCP-vector (46.5%) cannot be ranking when
-   the candidate set is identical. Something in the MCP path is delivering
-   less content to the answerer.
-
-3. **Signal work is moot at 195 docs.** All signal combinations produce
-   identical results. Differentiation requires #343 (chunking to grow
-   per-user pool) or fixing the content delivery path.
-
-## Issues encountered
-
-- `disabled_signals` not published in PyPI SDK (only in local dev) --
-  required `uv add --editable ../../sdk` in the harness
-- No `amb-benchmark` tenant user in the MCP users.json -- first run
-  returned empty context (0% accuracy). Added amb-benchmark user to
-  the configmap.
-- deploy-full.sh ordering: MCP pod raced with auth secret creation.
-  Fixed by moving `prepare_auth_infra` before `deploy_mcp`.
-
-## PRs created
-
-- #384: EvalHub PostgreSQL persistence (#365)
-- #385: Reranker upgrade to bge-reranker-v2-m3 (#342)
-- #386: Matrix A results (#360)
-
-## What's next
-
-1. H6 context-delivery audit (highest priority)
-2. Reproduce #332 baseline to understand the 70.8% discrepancy
-3. #343 chunking fix (independent, grows per-user pool for signal
-   differentiation)
+## Risks / watch-fors
+- The `disabled_signals` parameter is in the local SDK but not published to PyPI. The EvalHub adapter (K8s job path) will also need the published SDK before Matrix A can run via EvalHub jobs.
+- Two docs reference the old reranker model name (ARCHITECTURE.md, SYSTEMS.md). Low priority but will confuse readers.
+- The old ms-marco reranker is scaled to 0 but still deployed. Could be deleted to free namespace clutter.
