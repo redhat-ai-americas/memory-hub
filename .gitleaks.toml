@@ -1,3 +1,15 @@
+[[rules]]
+id = "memoryhub-hex-api-key"
+description = "MemoryHub API key (hex format: mh-(dev|prod)-<16 hex chars>)"
+regex = '''mh-(dev|prod)-[a-f0-9]{16}'''
+
+  [rules.allowlist]
+  paths = [
+    '''dev-users\.json$''',
+    '''tests\/.*\.py$''',
+    '''\.claude\/worktrees\/''',
+  ]
+
 [allowlist]
   description = "MemoryHub project allowlist for false positives"
 

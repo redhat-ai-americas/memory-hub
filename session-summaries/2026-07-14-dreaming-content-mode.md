@@ -29,7 +29,7 @@ Planned: implement content_mode (stub|full) on search, honesty flags, threshold 
 - S3 hydration placed at MCP layer (not service layer) to match existing read_memory pattern and avoid threading S3 adapter through service signatures
 - Graceful per-item degradation over fail-fast on S3 errors -- a single unreachable S3 object shouldn't tank the whole search
 - Golden test incomplete (UI not deployed) -- accepted since UI isn't relevant to #387's exit predicate
-- Created amb-benchmark API key via auth admin rotate-api-key for verification (key: mh-dev-5c3c065b659ad4b0)
+- Created amb-benchmark API key via auth admin rotate-api-key for verification (rotated; stored in memoryhub-auth cluster secret)
 
 ## Backlog delta
 
