@@ -9,6 +9,7 @@ Required env vars:
     MEMORYHUB_PROJECT_ID -- project for benchmark memories (default: amb-benchmark)
 
 Optional env vars:
+    MEMORYHUB_TENANT_ID        -- explicit tenant for search/write (default: session tenant)
     MEMORYHUB_DISABLED_SIGNALS -- comma-separated signal names to disable
                                   (reranker, focus, keyword, domain, graph)
 
@@ -20,10 +21,13 @@ Reset-only env vars (raw SQL DELETE for test scaffolding):
     MEMORYHUB_DB_NAME    -- default memoryhub
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from memoryhub import MemoryHubClient
 from sqlalchemy import text
@@ -50,6 +54,7 @@ class MemoryHubProvider(MemoryProvider):
         self._memory_to_doc_id: dict[str, str] = {}
         self._reset = False
         self._disabled_signals: list[str] | None = None
+        self._tenant_id: str | None = None
 
     def prepare(self, store_dir: Path, unit_ids: set[str] | None = None, reset: bool = True) -> None:
         self._url = os.environ.get("MEMORYHUB_URL")
@@ -67,6 +72,8 @@ class MemoryHubProvider(MemoryProvider):
         db_pass = os.environ.get("MEMORYHUB_DB_PASS", "")
         db_name = os.environ.get("MEMORYHUB_DB_NAME", "memoryhub")
         self._db_url = f"postgresql+asyncpg://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+
+        self._tenant_id = os.environ.get("MEMORYHUB_TENANT_ID") or None
 
         raw_disabled = os.environ.get("MEMORYHUB_DISABLED_SIGNALS", "")
         self._disabled_signals = (
@@ -98,7 +105,7 @@ class MemoryHubProvider(MemoryProvider):
 
             for i, doc in enumerate(documents):
                 owner = f"amb-{doc.user_id}" if doc.user_id else "amb-default"
-                result = await client.write(
+                write_kwargs: dict[str, Any] = dict(
                     content=doc.content,
                     scope="project",
                     project_id=self._project_id,
@@ -106,6 +113,9 @@ class MemoryHubProvider(MemoryProvider):
                     content_type="experiential",
                     force=True,
                 )
+                if self._tenant_id:
+                    write_kwargs["tenant_id"] = self._tenant_id
+                result = await client.write(**write_kwargs)
 
                 if result.memory:
                     self._doc_to_memory_id[doc.id] = result.memory.id
@@ -147,7 +157,7 @@ class MemoryHubProvider(MemoryProvider):
         owner = f"amb-{user_id}" if user_id else "amb-default"
 
         async with MemoryHubClient(url=self._url, api_key=self._api_key) as client:
-            results = await client.search(
+            search_kwargs: dict[str, Any] = dict(
                 query=query,
                 max_results=k,
                 owner_id=owner,
@@ -156,6 +166,9 @@ class MemoryHubProvider(MemoryProvider):
                 mode="full_only",
                 disabled_signals=self._disabled_signals,
             )
+            if self._tenant_id:
+                search_kwargs["tenant_id"] = self._tenant_id
+            results = await client.search(**search_kwargs)
 
         documents = []
         for memory in results.results:

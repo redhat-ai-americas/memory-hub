@@ -1,0 +1,19 @@
+name: smoke-keyword-on
+description: 20-query smoke with keyword signal active (default)
+model:
+  url: https://generativelanguage.googleapis.com
+  name: gemini-3.1-flash-lite
+  auth:
+    secret_ref: gemini-api-key
+benchmarks:
+  - id: personamem-mcq
+    provider_id: 88a72afc-a6d5-4bf9-9751-6f52e4e1a091
+    parameters:
+      mode: library
+      dataset: personamem
+      dataset_variant: "32k"
+      memory_provider: memoryhub
+      skip_ingestion: true
+      query_limit: 20
+experiment:
+  name: memoryhub/personamem-mcq/32k
