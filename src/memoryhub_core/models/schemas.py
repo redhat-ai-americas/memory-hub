@@ -150,6 +150,8 @@ class MemoryNodeRead(BaseModel):
     # node is itself current.
     current_version_id: uuid.UUID | None = None
     relationships: list["RelationshipRead"] | None = None  # populated when requested
+    content_truncated: bool = False
+    full_available: bool = False
 
 
 class MemoryNodeStub(BaseModel):
@@ -168,6 +170,8 @@ class MemoryNodeStub(BaseModel):
     domains: list[str] | None = None
     content_type: ContentType | None = None
     created_at: datetime | None = None  # needed for cache-optimized sort ordering (#175)
+    content_truncated: bool = True
+    full_available: bool = True
 
 
 class RelationshipCreate(BaseModel):

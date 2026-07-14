@@ -1971,6 +1971,10 @@ def node_to_read(
 
     relevant_until = getattr(node, "relevant_until", None)
 
+    is_s3 = node.storage_type == "s3"
+    content_truncated = is_s3
+    full_available = is_s3 and bool(node.content_ref)
+
     return MemoryNodeRead(
         id=node.id,
         parent_id=node.parent_id,
@@ -2000,4 +2004,6 @@ def node_to_read(
         has_rationale=has_rationale,
         branch_count=branch_count,
         current_version_id=current_version_id,
+        content_truncated=content_truncated,
+        full_available=full_available,
     )
