@@ -195,6 +195,24 @@ class TestMemoryNodeRead:
         assert restored.id == node.id
         assert restored.scope == node.scope
 
+    def test_honesty_flags_default_inline(self):
+        """MemoryNodeRead defaults: content_truncated=False, full_available=False.
+
+        Inline memories contain the full content, so no truncation signal is
+        needed and there is no S3 object to hydrate from.
+        """
+        data = _make_read_data()
+        node = MemoryNodeRead(**data)
+        assert node.content_truncated is False
+        assert node.full_available is False
+
+    def test_honesty_flags_explicit_override(self):
+        """MemoryNodeRead accepts explicit honesty flag values."""
+        data = _make_read_data(content_truncated=True, full_available=True)
+        node = MemoryNodeRead(**data)
+        assert node.content_truncated is True
+        assert node.full_available is True
+
 
 # ---------------------------------------------------------------------------
 # MemoryNodeStub
@@ -225,6 +243,34 @@ class TestMemoryNodeStub:
         assert stub.branch_type is None
         assert stub.has_children is False
         assert stub.has_rationale is False
+
+    def test_stub_honesty_flags_default(self):
+        """MemoryNodeStub defaults: content_truncated=True, full_available=True.
+
+        Stubs always represent a truncated view of the content, and by default
+        the full content is assumed to be retrievable from S3.
+        """
+        stub = MemoryNodeStub(
+            id=uuid.uuid4(),
+            stub="stub text",
+            scope="user",
+            weight=0.7,
+        )
+        assert stub.content_truncated is True
+        assert stub.full_available is True
+
+    def test_stub_honesty_flags_explicit_override(self):
+        """MemoryNodeStub accepts explicit honesty flag overrides."""
+        stub = MemoryNodeStub(
+            id=uuid.uuid4(),
+            stub="stub text",
+            scope="user",
+            weight=0.7,
+            content_truncated=False,
+            full_available=False,
+        )
+        assert stub.content_truncated is False
+        assert stub.full_available is False
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,21 @@ there is no working set in this pattern.
 This pattern minimizes startup token cost at the price of missing
 implicit context. Use it for narrow one-shot tooling sessions.
 
+## Content delivery
+
+- Search results may include **truncated content** for large memories
+  backed by S3 storage. Check `content_truncated` and `full_available`
+  flags on each result.
+- When `content_truncated` is true, call
+  `memory(action="read", memory_id="...", options={"hydrate": true})`
+  to retrieve the full content on demand.
+- For eval harnesses or batch pipelines that need complete content
+  inline, pass `options: {"content_mode": "full"}` to search. This
+  hydrates S3-backed content in the response at the cost of larger
+  payloads.
+- For interactive agent sessions, prefer the default (truncated) mode
+  and hydrate individual memories only when needed.
+
 ## Memory hygiene
 
 - Keep memories concise and self-contained. Another agent should

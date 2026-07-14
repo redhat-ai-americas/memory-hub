@@ -105,6 +105,34 @@ def test_memory_extra_fields_allowed():
     assert mem.model_extra["another_extra"] == 42
 
 
+@pytest.mark.parametrize(
+    "content_truncated, full_available",
+    [
+        pytest.param(False, False, id="inline-defaults"),
+        pytest.param(True, True, id="s3-backed"),
+        pytest.param(True, False, id="s3-no-ref"),
+    ],
+)
+def test_memory_honesty_flags(content_truncated, full_available):
+    """SDK Memory model preserves content_truncated and full_available (#387)."""
+    data = dict(
+        MEMORY_MINIMAL,
+        content_truncated=content_truncated,
+        full_available=full_available,
+    )
+    mem = Memory(**data)
+
+    assert mem.content_truncated is content_truncated
+    assert mem.full_available is full_available
+
+
+def test_memory_honesty_flags_default():
+    """SDK Memory model defaults: content_truncated=False, full_available=False."""
+    mem = Memory(**MEMORY_MINIMAL)
+    assert mem.content_truncated is False
+    assert mem.full_available is False
+
+
 # ---------------------------------------------------------------------------
 # SearchResult tests
 # ---------------------------------------------------------------------------

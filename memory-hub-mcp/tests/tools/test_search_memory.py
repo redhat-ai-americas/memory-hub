@@ -1896,3 +1896,81 @@ async def test_search_memory_forwards_entities_to_service():
     assert count_kwargs.get("entity_names") == ["PostgreSQL"], (
         f"Expected entity_names=['PostgreSQL'] in count_search_matches kwargs, got {count_kwargs}"
     )
+
+
+# ---------------------------------------------------------------------------
+# #387 -- _compact_entry() honesty flags (content_truncated / full_available)
+# ---------------------------------------------------------------------------
+
+
+class TestCompactEntryHonestyFlags:
+    """Verify that _compact_entry includes content_truncated and full_available."""
+
+    def test_compact_entry_full_inline(self):
+        """Inline MemoryNodeRead: content_truncated=False, full_available=False."""
+        from src.tools.search_memory import _compact_entry
+
+        full, _score = _fake_full_result("full inline content", weight=0.9)
+        assert full.content_truncated is False
+        assert full.full_available is False
+
+        entry = _compact_entry(full, "full")
+        assert entry["content_truncated"] is False
+        assert entry["full_available"] is False
+
+    def test_compact_entry_full_s3(self):
+        """S3-backed MemoryNodeRead with explicit honesty flags."""
+        import uuid as _uuid
+        from datetime import datetime
+
+        from src.tools.search_memory import _compact_entry
+        from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, StorageType
+
+        node = MemoryNodeRead(
+            id=_uuid.uuid4(),
+            parent_id=None,
+            content="truncated prefix...",
+            stub="truncated prefix...",
+            storage_type=StorageType.S3,
+            content_ref="s3://memoryhub/abc123",
+            weight=0.9,
+            scope=MemoryScope.USER,
+            branch_type=None,
+            owner_id="wjackson",
+            tenant_id="default",
+            is_current=True,
+            version=1,
+            previous_version_id=None,
+            metadata=None,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            content_truncated=True,
+            full_available=True,
+        )
+
+        entry = _compact_entry(node, "full")
+        assert entry["content_truncated"] is True
+        assert entry["full_available"] is True
+
+    def test_compact_entry_stub_defaults(self):
+        """MemoryNodeStub defaults: content_truncated=True, full_available=True."""
+        from src.tools.search_memory import _compact_entry
+
+        stub, _score = _fake_search_result("stub text", weight=0.5)
+        assert stub.content_truncated is True
+        assert stub.full_available is True
+
+        entry = _compact_entry(stub, "stub")
+        assert entry["content_truncated"] is True
+        assert entry["full_available"] is True
+
+    def test_compact_entry_includes_relevance_score_when_provided(self):
+        """Relevance score is present alongside honesty flags in compact output."""
+        from src.tools.search_memory import _compact_entry
+
+        full, _score = _fake_full_result("test content", weight=0.9)
+        entry = _compact_entry(full, "full", relevance_score=0.85)
+
+        assert "content_truncated" in entry
+        assert "full_available" in entry
+        assert entry["relevance_score"] == 0.85

@@ -22,6 +22,8 @@ When you need full metadata (weight, scope, timestamps, branches) for curation d
 
 To expand a stub or get version history for a specific memory, use `memory(action="read", memory_id=...)`.
 
+Large memories (S3-backed) may arrive truncated. Check `content_truncated` and `full_available` flags on each result. When `content_truncated` is true, call `memory(action="read", memory_id="...", options={"hydrate": true})` to get the full content.
+
 ## Hook-injected context
 
 If a `<memoryhub-context>` block is present in your conversation context, a SessionStart hook has already loaded project and user memories for you. Use these as your working set:
