@@ -240,3 +240,46 @@ amb-benchmark tenant, preflight-verified manifest.
 3. **Defer keyword/reranker tuning** until the per-user pool grows (#343)
    or the content delivery gap is closed. At 195 docs, these signals
    literally cannot differentiate.
+
+## H6 Context-Delivery Audit (2026-07-14)
+
+### Finding: Content truncation at ingestion, not retrieval
+
+**Root cause**: `AppSettings.s3_threshold_bytes = 1024` (config.py:72).
+Any content over 1024 bytes triggers the "oversized" path. PersonaMem
+documents average 27,912 chars (min 3,923, max 60,818) -- all are
+oversized.
+
+In the oversized path with S3 configured (memory.py:155):
+`db_content = data.content[:s3_prefix_chars]` where
+`s3_prefix_chars = 1000`. The full content is uploaded to MinIO, but
+only the first 1000 chars are stored in PostgreSQL.
+
+**The search path returns DB content, never hydrating from S3.** Every
+search result contains only the 1000-char prefix. The answerer receives
+~1000 tokens per memory instead of the full ~5000+ tokens.
+
+### Measured impact
+
+| Path | Context/query | Chars/memory | Accuracy |
+|------|--------------|-------------|----------|
+| BM25 local | 5,179 tokens (28K chars) | Full (~28K avg) | 67.7% |
+| MCP (MemoryHub) | 997 tokens (5K chars) | Truncated (1000 chars) | 46.5% |
+
+Ratio: BM25 delivers **5.2x more context** than MCP per query.
+
+### Classification
+
+This is a **MemoryHub product defect** (MemoryHub-first rule applies).
+The search tool returns a stub where it should either:
+1. Hydrate from S3 before returning results, or
+2. Return the content_ref so the client can fetch full content, or
+3. Not truncate the DB column in the first place (raise the threshold
+   or store full content inline for memories under some reasonable limit)
+
+### Fix priority
+
+This is the single largest performance blocker. Fixing content delivery
+is worth more than keyword, reranker, and chunking combined at this
+corpus size. Every signal improvement is invisible while the answerer
+sees only 3.6% of each document.
