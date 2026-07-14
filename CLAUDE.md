@@ -124,6 +124,31 @@ When deploying, always use `deploy-full.sh` directly (it preserves the existing 
 
 After restoring from backup, verify `alembic_version` matches the actual schema before running `upgrade head`. Backup dumps can have stale version markers that cause migrations to fail on duplicate columns.
 
+## Verify Before Propagating
+
+Capability claims about our own codebase, deployed infrastructure, or third-party software get verified against code, docs, or live state before they propagate into issues, plans, or reviews. A 10-minute doc read beats a feature request, and a grep beats a rebuild.
+
+Before writing an issue that assumes "X doesn't exist" or "Y can't do Z," check. Before scoping work around a capability you haven't confirmed, confirm it. Three citations from the dreaming arc retro (2026-07-13): the chunking investigation assumed chunking wasn't active (it was), the PVC fix assumed the operator wouldn't reconcile it away (it did), and the sidecar triage assumed forwarding worked out of the box (it didn't).
+
+When verification reveals a genuine gap that warrants a code change, that change goes through a dedicated PR with explicit human approval, not silently bundled into the current branch.
+
+## MemoryHub-First for Benchmark Blockers
+
+When eval/benchmark work hits a MemoryHub limitation (server, MCP tool
+surface, SDK), stop and surface it before building a harness-side
+workaround. MemoryHub is the product; the benchmark is the instrument. A
+workaround in the harness hides a product gap and makes the benchmarked
+system diverge from what customers get.
+
+Litmus: "Would a customer hit this?" Yes -> file the MemoryHub issue
+(limitation, impact, proposed fix) and surface it before proceeding. No
+(pure benchmark scaffolding: skip_ingestion, corpus reset,
+checkpoint/resume) -> harness-side is fine.
+
+Precedents: tenant_id hardcoding (#368, correctly fixed in MemoryHub),
+disabled_signals (correctly added to the SDK), SDK-to-MCP send limitation
+(surfaced 2026-07-14).
+
 ## Testing
 - pytest for all Python testing
 - 80%+ coverage target
