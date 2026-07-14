@@ -69,7 +69,7 @@ class AppSettings(BaseSettings):
 
     log_level: str = "INFO"
     version_retention_days: int = 90
-    s3_threshold_bytes: int = 1024    # Content above this is chunked (and goes to S3 if configured)
+    s3_threshold_bytes: int = 102400  # Content above this is chunked (and goes to S3 if configured)
     s3_prefix_chars: int = 1000       # Chars used for embedding on oversized content (~250 tokens)
     session_ttl_seconds: int = 3600   # API-key session lifetime; auto-extends on activity
 
