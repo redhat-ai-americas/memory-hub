@@ -484,6 +484,7 @@ class MemoryHubClient:
         content_type: str | None = None,
         disabled_signals: list[str] | None = None,
         tenant_id: str | None = None,
+        content_mode: Literal["stub", "full"] | None = None,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -578,6 +579,8 @@ class MemoryHubClient:
             opts["disabled_signals"] = disabled_signals
         if tenant_id is not None:
             opts["tenant_id"] = tenant_id
+        if content_mode is not None:
+            opts["content_mode"] = content_mode
 
         data = await self._call_action(
             "search",
