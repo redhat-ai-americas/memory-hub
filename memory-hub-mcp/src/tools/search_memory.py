@@ -937,6 +937,7 @@ async def search_memory(
             }
             pattern_signals = bundle.pattern_signals
         else:
+            reranker = get_reranker_service()
             results = await search_memories(
                 query=query,
                 session=session,
@@ -955,6 +956,7 @@ async def search_memory(
                 content_type=content_type,
                 temporal_status=temporal_status,
                 disabled_signals=set(disabled_signals) if disabled_signals else None,
+                reranker=reranker,
             )
 
             # Pattern detection on the non-focus path: embed the query

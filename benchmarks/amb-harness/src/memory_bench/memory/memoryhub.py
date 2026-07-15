@@ -12,6 +12,8 @@ Optional env vars:
     MEMORYHUB_TENANT_ID        -- explicit tenant for search/write (default: session tenant)
     MEMORYHUB_DISABLED_SIGNALS -- comma-separated signal names to disable
                                   (reranker, focus, keyword, domain, graph)
+    MEMORYHUB_FOCUS_MODE       -- "persona" to pass persona name as focus string,
+                                  enabling 2-vector retrieval (default: off)
 
 Reset-only env vars (raw SQL DELETE for test scaffolding):
     MEMORYHUB_DB_HOST    -- default localhost
@@ -55,6 +57,7 @@ class MemoryHubProvider(MemoryProvider):
         self._reset = False
         self._disabled_signals: list[str] | None = None
         self._tenant_id: str | None = None
+        self._focus_mode: str | None = None
 
     def prepare(self, store_dir: Path, unit_ids: set[str] | None = None, reset: bool = True) -> None:
         self._url = os.environ.get("MEMORYHUB_URL")
@@ -80,6 +83,8 @@ class MemoryHubProvider(MemoryProvider):
             [s.strip() for s in raw_disabled.split(",") if s.strip()]
             if raw_disabled else None
         )
+
+        self._focus_mode = os.environ.get("MEMORYHUB_FOCUS_MODE", "").strip().lower() or None
 
         self._doc_to_memory_id.clear()
         self._memory_to_doc_id.clear()
@@ -151,6 +156,13 @@ class MemoryHubProvider(MemoryProvider):
     ) -> tuple[list[Document], dict | None]:
         return asyncio.run(self._run_retrieve(query, k, user_id, query_timestamp))
 
+    @staticmethod
+    def _extract_persona_name(query: str) -> str | None:
+        """Extract persona name from "User: Name\n..." prefix."""
+        if query.startswith("User: "):
+            return query.split("\n", 1)[0].removeprefix("User: ").strip() or None
+        return None
+
     async def _run_retrieve(
         self, query: str, k: int, user_id: str | None, query_timestamp: str | None,
     ) -> tuple[list[Document], dict | None]:
@@ -169,6 +181,10 @@ class MemoryHubProvider(MemoryProvider):
             )
             if self._tenant_id:
                 search_kwargs["tenant_id"] = self._tenant_id
+            if self._focus_mode == "persona":
+                name = self._extract_persona_name(query)
+                if name:
+                    search_kwargs["focus"] = name
             results = await client.search(**search_kwargs)
 
         documents = []

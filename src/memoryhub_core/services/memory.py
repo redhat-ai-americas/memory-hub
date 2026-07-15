@@ -963,6 +963,7 @@ async def search_memories(
     temporal_status: str | None = None,
     keyword_boost_weight: float = 0.15,
     disabled_signals: set[str] | None = None,
+    reranker: RerankerService | None = None,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity with optional keyword recall.
 
@@ -972,6 +973,10 @@ async def search_memories(
     When keyword recall is active (default), the relevance score is an RRF
     blend of cosine and keyword ranks. When keyword is disabled, scoring
     falls back to cosine-rank-only RRF (equivalent to the previous behavior).
+
+    When a reranker is provided and not disabled, the top RERANK_POOL_SIZE
+    candidates are re-scored by a cross-encoder before the RRF blend. This
+    replaces cosine ranks with cross-encoder ranks for those candidates.
 
     Falls back to weight-based ordering with synthetic scores when pgvector
     is not available (e.g., SQLite in tests).
@@ -1089,7 +1094,27 @@ async def search_memories(
             logger.warning("keyword recall failed, skipping: %s", exc)
             use_keyword = False
 
-    # RRF blend: cosine rank + keyword rank (when active).
+    # Cross-encoder rerank stage (optional, independent of focus).
+    if (
+        reranker is not None
+        and getattr(reranker, "is_configured", True)
+        and "reranker" not in _disabled
+    ):
+        rerank_pool = candidate_nodes[:RERANK_POOL_SIZE]
+        try:
+            order = await batched_rerank(
+                reranker, query, [n.content for n in rerank_pool]
+            )
+            for new_rank, original_idx in enumerate(order, start=1):
+                node = rerank_pool[original_idx]
+                rank_cosine[node.id] = new_rank
+            for idx in range(len(rerank_pool), len(candidate_nodes)):
+                rank_cosine[candidate_nodes[idx].id] = idx + 1
+            logger.debug("search_memories: reranker applied to %d candidates", len(rerank_pool))
+        except Exception as exc:
+            logger.warning("search_memories reranker fallback: %s", exc)
+
+    # RRF blend: cosine/reranker rank + keyword rank (when active).
     weight_k = keyword_boost_weight if use_keyword else 0.0
     weight_q = 1.0 - weight_k
     miss_rank = k_recall + 1
@@ -1326,10 +1351,6 @@ async def search_memories_with_focus(
     _disabled = disabled_signals or set()
 
     if not focus_string or session_focus_weight <= 0.0:
-        # No-focus short-circuit. Skips both the focus embed and the
-        # rerank network call. Mirrors the production-tuning rule
-        # from the benchmark: when there's no focus signal, the
-        # cross-encoder doesn't help, so don't pay for it.
         plain = await search_memories(
             query=query,
             session=session,
@@ -1347,6 +1368,8 @@ async def search_memories_with_focus(
             entity_names=entity_names,
             content_type=content_type,
             temporal_status=temporal_status,
+            disabled_signals=disabled_signals,
+            reranker=reranker,
         )
         return FocusedSearchResult(results=plain)
 
