@@ -27,7 +27,7 @@ export MEMORYHUB_RETURN_CHUNKS=true
 export MEMORYHUB_K=10
 
 # Sweep matrix
-CHUNK_SIZES=(64 128 256 512 1024 2048)
+CHUNK_SIZES=(32 64 128 256 512 1024 2048)
 OVERLAPS=(0 10 25)
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
