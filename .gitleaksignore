@@ -1,0 +1,6 @@
+# Rotated credentials in git history -- keys are dead, history rewrite
+# would break every fork/clone for no security benefit (PR #394 scrubbed
+# the files from HEAD).
+64a66d7e4207657a5cb025c6c7eb4e0ab48fe296:session-summaries/2026-07-14-dreaming-content-mode.md:memoryhub-hex-api-key:32
+0a5131502bed5919e0894055babf1ebaa008b06a:session-summaries/2026-07-14-dreaming-content-mode.md:memoryhub-hex-api-key:32
+9fb9aa8e6a30f8d3b19e124be6970b810bdc37e2:NEXT_SESSION.md:memoryhub-hex-api-key:36

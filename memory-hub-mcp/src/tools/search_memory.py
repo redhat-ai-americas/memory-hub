@@ -645,6 +645,17 @@ async def search_memory(
             ),
         ),
     ] = None,
+    return_chunks: Annotated[
+        bool,
+        Field(
+            description=(
+                "(Advanced) When True, return matched chunks directly instead "
+                "of expanding them to their parent memories. Produces smaller, "
+                "more focused results. Use read_memory(hydrate=true) on the "
+                "parent_id if full context is needed. Default False."
+            ),
+        ),
+    ] = False,
     raw_results: Annotated[
         bool,
         Field(
@@ -922,6 +933,7 @@ async def search_memory(
                 content_type=content_type,
                 temporal_status=temporal_status,
                 disabled_signals=set(disabled_signals) if disabled_signals else None,
+                return_chunks=return_chunks,
             )
             graph_bundle = bundle
             results = bundle.results
@@ -937,6 +949,7 @@ async def search_memory(
             }
             pattern_signals = bundle.pattern_signals
         else:
+            reranker = get_reranker_service()
             results = await search_memories(
                 query=query,
                 session=session,
@@ -955,6 +968,8 @@ async def search_memory(
                 content_type=content_type,
                 temporal_status=temporal_status,
                 disabled_signals=set(disabled_signals) if disabled_signals else None,
+                reranker=reranker,
+                return_chunks=return_chunks,
             )
 
             # Pattern detection on the non-focus path: embed the query
@@ -1236,15 +1251,12 @@ async def search_memory(
             response["compilation_epoch"] = compilation_meta["compilation_epoch"]
             response["appendix_count"] = compilation_meta["appendix_count"]
         if focus_meta is not None:
-            # Surface only the agent-facing pivot fields by default. The
-            # internal `used_reranker` and `fallback_reason` are useful
-            # for operator debugging but noisy for the agent surface;
-            # they are still exposed when the rerank fell back so an
-            # operator can grep response logs.
             response["pivot_suggested"] = focus_meta["pivot_suggested"]
             response["pivot_reason"] = focus_meta["pivot_reason"]
+            response["used_reranker"] = focus_meta.get("used_reranker", False)
+            response["keyword_matches"] = focus_meta.get("keyword_matches", 0)
             if focus_meta["fallback_reason"]:
-                response["focus_fallback_reason"] = focus_meta["fallback_reason"]
+                response["reranker_fallback_reason"] = focus_meta["fallback_reason"]
         if focus_meta is not None and focus_meta.get("disabled_signals"):
             response["disabled_signals"] = focus_meta["disabled_signals"]
         elif focus_meta is None and disabled_signals:

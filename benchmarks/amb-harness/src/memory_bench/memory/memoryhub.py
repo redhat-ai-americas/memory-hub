@@ -12,6 +12,11 @@ Optional env vars:
     MEMORYHUB_TENANT_ID        -- explicit tenant for search/write (default: session tenant)
     MEMORYHUB_DISABLED_SIGNALS -- comma-separated signal names to disable
                                   (reranker, focus, keyword, domain, graph)
+    MEMORYHUB_FOCUS_MODE       -- "persona" to pass persona name as focus string,
+                                  enabling 2-vector retrieval (default: off)
+    MEMORYHUB_RETURN_CHUNKS    -- "true" to return matched chunks directly
+                                  instead of expanding to parent memories
+    MEMORYHUB_K                -- retrieval depth, default 70
 
 Reset-only env vars (raw SQL DELETE for test scaffolding):
     MEMORYHUB_DB_HOST    -- default localhost
@@ -55,6 +60,8 @@ class MemoryHubProvider(MemoryProvider):
         self._reset = False
         self._disabled_signals: list[str] | None = None
         self._tenant_id: str | None = None
+        self._focus_mode: str | None = None
+        self._return_chunks: bool = False
 
     def prepare(self, store_dir: Path, unit_ids: set[str] | None = None, reset: bool = True) -> None:
         self._url = os.environ.get("MEMORYHUB_URL")
@@ -80,6 +87,9 @@ class MemoryHubProvider(MemoryProvider):
             [s.strip() for s in raw_disabled.split(",") if s.strip()]
             if raw_disabled else None
         )
+
+        self._focus_mode = os.environ.get("MEMORYHUB_FOCUS_MODE", "").strip().lower() or None
+        self._return_chunks = os.environ.get("MEMORYHUB_RETURN_CHUNKS", "").lower() in ("1", "true", "yes")
 
         self._doc_to_memory_id.clear()
         self._memory_to_doc_id.clear()
@@ -146,10 +156,19 @@ class MemoryHubProvider(MemoryProvider):
             await engine.dispose()
 
     def retrieve(
-        self, query: str, k: int = 70, user_id: str | None = None,
+        self, query: str, k: int | None = None, user_id: str | None = None,
         query_timestamp: str | None = None,
     ) -> tuple[list[Document], dict | None]:
+        if k is None:
+            k = int(os.environ.get("MEMORYHUB_K", "70"))
         return asyncio.run(self._run_retrieve(query, k, user_id, query_timestamp))
+
+    @staticmethod
+    def _extract_persona_name(query: str) -> str | None:
+        """Extract persona name from "User: Name\n..." prefix."""
+        if query.startswith("User: "):
+            return query.split("\n", 1)[0].removeprefix("User: ").strip() or None
+        return None
 
     async def _run_retrieve(
         self, query: str, k: int, user_id: str | None, query_timestamp: str | None,
@@ -169,6 +188,13 @@ class MemoryHubProvider(MemoryProvider):
             )
             if self._tenant_id:
                 search_kwargs["tenant_id"] = self._tenant_id
+            if self._focus_mode == "persona":
+                name = self._extract_persona_name(query)
+                if name:
+                    search_kwargs["focus"] = name
+            if self._return_chunks:
+                search_kwargs["return_chunks"] = True
+                search_kwargs["raw_results"] = True
             results = await client.search(**search_kwargs)
 
         documents = []

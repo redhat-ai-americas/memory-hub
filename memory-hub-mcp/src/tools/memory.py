@@ -41,7 +41,7 @@ _SEARCH_OPTS = frozenset({
     "current_only", "owner_id", "graph_depth",
     "graph_relationship_types", "graph_boost_weight", "entities",
     "content_type", "verbose", "temporal_status", "disabled_signals",
-    "tenant_id", "content_mode",
+    "tenant_id", "content_mode", "return_chunks",
 })
 _LIST_OPTS = frozenset({
     "max_results", "cursor", "include_branches", "current_only",

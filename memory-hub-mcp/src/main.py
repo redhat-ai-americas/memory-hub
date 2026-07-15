@@ -41,6 +41,10 @@ from src.tools.thread import thread
 from src.tools.update_memory import update_memory
 from src.tools.write_memory import write_memory
 
+logging.basicConfig(
+    level=getattr(logging, os.getenv("MCP_LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 TOOL_PROFILE = os.getenv("MEMORYHUB_TOOL_PROFILE", "compact")

@@ -963,6 +963,8 @@ async def search_memories(
     temporal_status: str | None = None,
     keyword_boost_weight: float = 0.15,
     disabled_signals: set[str] | None = None,
+    reranker: RerankerService | None = None,
+    return_chunks: bool = False,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity with optional keyword recall.
 
@@ -972,6 +974,14 @@ async def search_memories(
     When keyword recall is active (default), the relevance score is an RRF
     blend of cosine and keyword ranks. When keyword is disabled, scoring
     falls back to cosine-rank-only RRF (equivalent to the previous behavior).
+
+    When a reranker is provided and not disabled, the top RERANK_POOL_SIZE
+    candidates are re-scored by a cross-encoder before the RRF blend. This
+    replaces cosine ranks with cross-encoder ranks for those candidates.
+
+    When return_chunks is True, chunk hits are returned directly instead
+    of being expanded to their parent memories. This produces smaller,
+    more focused results at the cost of losing surrounding context.
 
     Falls back to weight-based ordering with synthetic scores when pgvector
     is not available (e.g., SQLite in tests).
@@ -1089,7 +1099,27 @@ async def search_memories(
             logger.warning("keyword recall failed, skipping: %s", exc)
             use_keyword = False
 
-    # RRF blend: cosine rank + keyword rank (when active).
+    # Cross-encoder rerank stage (optional, independent of focus).
+    if (
+        reranker is not None
+        and getattr(reranker, "is_configured", True)
+        and "reranker" not in _disabled
+    ):
+        rerank_pool = candidate_nodes[:RERANK_POOL_SIZE]
+        try:
+            order = await batched_rerank(
+                reranker, query, [n.content for n in rerank_pool]
+            )
+            for new_rank, original_idx in enumerate(order, start=1):
+                node = rerank_pool[original_idx]
+                rank_cosine[node.id] = new_rank
+            for idx in range(len(rerank_pool), len(candidate_nodes)):
+                rank_cosine[candidate_nodes[idx].id] = idx + 1
+            logger.info("search_memories: reranker applied to %d candidates", len(rerank_pool))
+        except Exception as exc:
+            logger.warning("search_memories reranker fallback: %s", exc)
+
+    # RRF blend: cosine/reranker rank + keyword rank (when active).
     weight_k = keyword_boost_weight if use_keyword else 0.0
     weight_q = 1.0 - weight_k
     miss_rank = k_recall + 1
@@ -1104,7 +1134,10 @@ async def search_memories(
         )
         scored.append((node, score_q + score_k))
     scored.sort(key=lambda pair: pair[1], reverse=True)
-    scored = await _expand_chunks_to_parents(scored, session)
+    if return_chunks:
+        scored = [(n, s) for n, s in scored if n.branch_type == "chunk"]
+    else:
+        scored = await _expand_chunks_to_parents(scored, session)
 
     top_nodes = scored[:max_results]
 
@@ -1129,6 +1162,17 @@ async def search_memories(
                 has_rationale=has_rationale,
                 content_type=node.content_type, created_at=node.created_at,
             ), rrf_score))
+    used_reranker = (
+        reranker is not None
+        and getattr(reranker, "is_configured", True)
+        and "reranker" not in _disabled
+    )
+    logger.info(
+        "search_memories trace: candidates=%d reranker=%s keyword_hits=%d "
+        "results=%d disabled=%s",
+        len(candidate_nodes), used_reranker, len(rank_keyword),
+        len(results), sorted(_disabled),
+    )
     return results
 
 
@@ -1294,6 +1338,7 @@ async def search_memories_with_focus(
     temporal_status: str | None = None,
     keyword_boost_weight: float = 0.15,
     disabled_signals: set[str] | None = None,
+    return_chunks: bool = False,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -1326,10 +1371,6 @@ async def search_memories_with_focus(
     _disabled = disabled_signals or set()
 
     if not focus_string or session_focus_weight <= 0.0:
-        # No-focus short-circuit. Skips both the focus embed and the
-        # rerank network call. Mirrors the production-tuning rule
-        # from the benchmark: when there's no focus signal, the
-        # cross-encoder doesn't help, so don't pay for it.
         plain = await search_memories(
             query=query,
             session=session,
@@ -1347,6 +1388,9 @@ async def search_memories_with_focus(
             entity_names=entity_names,
             content_type=content_type,
             temporal_status=temporal_status,
+            disabled_signals=disabled_signals,
+            reranker=reranker,
+            return_chunks=return_chunks,
         )
         return FocusedSearchResult(results=plain)
 
@@ -1479,6 +1523,7 @@ async def search_memories_with_focus(
             for idx in range(len(rerank_pool), len(candidate_nodes)):
                 rank_query[candidate_nodes[idx].id] = idx + 1
             used_reranker = True
+            logger.info("focused_search: reranker applied to %d candidates", len(rerank_pool))
         except Exception as exc:  # pragma: no cover - network error
             fallback_reason = (
                 f"reranker call failed ({type(exc).__name__}); "
@@ -1491,10 +1536,12 @@ async def search_memories_with_focus(
         fallback_reason = (
             "no reranker configured; using cosine rank for query stage"
         )
+        logger.info("focused_search: no reranker configured")
     else:
         fallback_reason = (
             "reranker not configured (is_configured=False); using cosine rank"
         )
+        logger.info("focused_search: reranker disabled (is_configured=False or in disabled_signals)")
 
     # Focus cosine ranks across the candidate pool. Distance from the
     # focus vector ascending = best focus match first.
@@ -1617,7 +1664,10 @@ async def search_memories_with_focus(
         )
         blended_scores.append((node, score_q + score_f + score_d + score_g + score_k))
     blended_scores.sort(key=lambda pair: pair[1], reverse=True)
-    blended_scores = await _expand_chunks_to_parents(blended_scores, session)
+    if return_chunks:
+        blended_scores = [(n, s) for n, s in blended_scores if n.branch_type == "chunk"]
+    else:
+        blended_scores = await _expand_chunks_to_parents(blended_scores, session)
 
     top_nodes = [node for node, _ in blended_scores[:max_results]]
     if not top_nodes:
@@ -1711,6 +1761,13 @@ async def search_memories_with_focus(
         except Exception:
             pass  # pattern detection is best-effort
 
+    logger.info(
+        "focused_search trace: candidates=%d reranker=%s keyword_hits=%d "
+        "focus=%s pivot=%.3f/%s results=%d disabled=%s",
+        len(candidate_nodes), used_reranker, len(rank_keyword),
+        bool(use_focus), pivot_distance or 0.0, pivot_suggested,
+        len(formatted), sorted(_disabled),
+    )
     return FocusedSearchResult(
         results=formatted,
         pivot_suggested=pivot_suggested,
