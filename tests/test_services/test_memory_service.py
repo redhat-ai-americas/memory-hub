@@ -1437,7 +1437,7 @@ class MockS3Adapter:
 
 
 def _make_oversized_content() -> str:
-    """Return content exceeding the configured S3 threshold (102400 bytes).
+    """Return content exceeding both the embedding model limit and S3 threshold.
 
     Uses distinct paragraphs separated by double-newlines so that the
     semantic chunker produces multiple chunks (it splits on paragraph
@@ -1560,11 +1560,12 @@ async def test_create_memory_oversized_no_s3_truncates_embed_text(async_session,
         embedding_service.embed = original_embed
 
     settings = AppSettings()
+    embedding_max_chars = settings.embedding_max_tokens * 4
     # The first embed call is for the parent node
     assert len(captured_texts) >= 1
-    assert len(captured_texts[0]) == settings.s3_prefix_chars, (
-        f"embed text should be truncated to {settings.s3_prefix_chars} chars, "
-        f"got {len(captured_texts[0])}"
+    assert len(captured_texts[0]) == embedding_max_chars, (
+        f"embed text should be truncated to {embedding_max_chars} chars "
+        f"(embedding model limit), got {len(captured_texts[0])}"
     )
 
 

@@ -1,6 +1,6 @@
 """Cross-encoder reranker service interface and implementations.
 
-Wraps the deployed `ms-marco-MiniLM-L12-v2` cross-encoder reranker
+Wraps the deployed cross-encoder reranker (granite-embedding-reranker-english-r2)
 served via TEI (Text Embeddings Inference). Used by `search_memories`
 as the rerank stage of two-vector retrieval (#58).
 

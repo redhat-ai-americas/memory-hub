@@ -1,28 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: granite-reranker
-  namespace: reranker-model
+  name: granite-embedding
+  namespace: embedding-model
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: granite-reranker
+      app: granite-embedding
   template:
     metadata:
       labels:
-        app: granite-reranker
+        app: granite-embedding
     spec:
-      tolerations:
-        - key: nvidia.com/gpu
-          operator: Exists
-          effect: NoSchedule
       containers:
         - name: tei
-          image: ghcr.io/huggingface/text-embeddings-inference:1.9
+          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
           args:
             - --model-id
-            - ibm-granite/granite-embedding-reranker-english-r2
+            - ibm-granite/granite-embedding-small-english-r2
             - --port
             - "8080"
           env:
@@ -34,13 +30,11 @@ spec:
             - containerPort: 8080
           resources:
             requests:
-              cpu: "1"
-              memory: 4Gi
-              nvidia.com/gpu: "1"
+              cpu: "2"
+              memory: 8Gi
             limits:
               cpu: "4"
-              memory: 8Gi
-              nvidia.com/gpu: "1"
+              memory: 16Gi
           volumeMounts:
             - name: cache
               mountPath: /data
@@ -48,17 +42,17 @@ spec:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 300
+            initialDelaySeconds: 600
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 300
+            initialDelaySeconds: 180
             periodSeconds: 10
-            failureThreshold: 10
+            failureThreshold: 60
       volumes:
         - name: cache
           persistentVolumeClaim:
-            claimName: reranker-model-cache
+            claimName: embedding-model-cache

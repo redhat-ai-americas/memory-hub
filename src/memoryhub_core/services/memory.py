@@ -95,20 +95,22 @@ async def create_memory(
     verified the caller is allowed to write into this tenant; this function
     just persists that decision onto the row.
 
-    Content exceeding ``AppSettings.s3_threshold_bytes`` is always chunked into
+    Content exceeding the embedding model's context window is chunked into
     child nodes (``branch_type="chunk"``) for fine-grained search, and the
-    embedding is truncated to ``s3_prefix_chars`` to prevent 413 errors.
-    When ``s3_adapter`` is provided, the full content is also uploaded to MinIO;
-    otherwise it remains inline in the database.
+    parent embedding is truncated to fit the model's input limit. Chunks are
+    search infrastructure: they help FIND the right memory, but search returns
+    the parent (full content or stub), never raw chunks.
+
+    Storage is independent: content exceeding ``s3_threshold_bytes`` goes to
+    S3 (if configured), otherwise stays inline in PostgreSQL.
     """
     app_settings = AppSettings()
     content_bytes = len(data.content.encode("utf-8"))
-    needs_chunking = content_bytes > app_settings.s3_threshold_bytes
-    use_s3 = needs_chunking and s3_adapter is not None
+    embedding_max_chars = app_settings.embedding_max_tokens * 4
+    needs_chunking = len(data.content) > embedding_max_chars
+    use_s3 = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
 
-    # For oversized content, embed only the prefix (fits within embedder's
-    # ~512 token limit). Full content is searchable via chunk children.
-    embed_text = data.content[:app_settings.s3_prefix_chars] if needs_chunking else data.content
+    embed_text = data.content[:embedding_max_chars] if needs_chunking else data.content
     embedding = await embedding_service.embed(embed_text)
 
     stub = generate_stub(
@@ -154,16 +156,6 @@ async def create_memory(
         )
         db_content = data.content[:app_settings.s3_prefix_chars]
         storage_type = "s3"
-    elif needs_chunking:
-        # Oversized but no S3 — store full content inline, still chunk
-        content_ref = None
-        db_content = data.content
-        storage_type = "inline"
-        logger.warning(
-            "Memory %s exceeds S3 threshold (%d > %d bytes) but no S3 "
-            "adapter configured; storing inline with chunks",
-            memory_id, content_bytes, app_settings.s3_threshold_bytes,
-        )
     else:
         content_ref = None
         db_content = data.content
@@ -446,20 +438,16 @@ async def update_memory(
 
     app_settings = AppSettings()
 
-    # Determine storage strategy for the new version
+    # Determine storage and chunking strategy for the new version
     if content_changed:
         content_bytes = len(new_content.encode("utf-8"))
-        needs_chunking = content_bytes > app_settings.s3_threshold_bytes
-        use_s3 = needs_chunking and s3_adapter is not None
-        embed_text = new_content[:app_settings.s3_prefix_chars] if needs_chunking else new_content
+        embedding_max_chars = app_settings.embedding_max_tokens * 4
+        needs_chunking = len(new_content) > embedding_max_chars
+        use_s3 = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
+        embed_text = new_content[:embedding_max_chars] if needs_chunking else new_content
     else:
         needs_chunking = False
-        # Content unchanged — inherit S3 if the old node was S3-backed
-        # and we have an adapter, otherwise fall through to the else
-        # branch at the storage-type decision below.
         use_s3 = old_node.storage_type == "s3" and s3_adapter is not None
-        # For unchanged content, the old node's content field already
-        # holds the prefix (if S3) or full content (if inline)
         embed_text = new_content
 
     embedding = await embedding_service.embed(embed_text)
@@ -899,6 +887,61 @@ async def count_search_matches(
     return (await session.execute(stmt)).scalar() or 0
 
 
+async def _expand_chunks_to_parents(
+    scored_nodes: list[tuple[MemoryNode, float]],
+    session: AsyncSession,
+) -> list[tuple[MemoryNode, float]]:
+    """Replace chunk hits with their parent memories, keeping best scores.
+
+    Chunks are search infrastructure, not retrieval units. When a chunk
+    matches a query, the caller wants the parent memory (full content or
+    stub), not the chunk text. This function:
+    1. Identifies chunk hits (branch_type='chunk' with a parent_id)
+    2. Bulk-loads their parents
+    3. Replaces each chunk with its parent, preserving the chunk's score
+    4. Deduplicates: if the same parent appears via multiple chunks or
+       as both a direct hit and a chunk expansion, keeps the best score
+    """
+    chunk_parent_ids: set[uuid.UUID] = set()
+    for node, _ in scored_nodes:
+        if node.branch_type == "chunk" and node.parent_id is not None:
+            chunk_parent_ids.add(node.parent_id)
+
+    if not chunk_parent_ids:
+        return scored_nodes
+
+    parent_stmt = (
+        select(MemoryNode)
+        .where(
+            MemoryNode.id.in_(chunk_parent_ids),
+            MemoryNode.deleted_at.is_(None),
+        )
+    )
+    parent_result = await session.execute(parent_stmt)
+    parents_by_id: dict[uuid.UUID, MemoryNode] = {
+        p.id: p for p in parent_result.scalars().all()
+    }
+
+    best_scores: dict[uuid.UUID, tuple[MemoryNode, float]] = {}
+    for node, score in scored_nodes:
+        if node.branch_type == "chunk" and node.parent_id is not None:
+            parent = parents_by_id.get(node.parent_id)
+            if parent is None:
+                continue
+            effective_id = parent.id
+            effective_node = parent
+        else:
+            effective_id = node.id
+            effective_node = node
+
+        existing = best_scores.get(effective_id)
+        if existing is None or score > existing[1]:
+            best_scores[effective_id] = (effective_node, score)
+
+    result = sorted(best_scores.values(), key=lambda pair: pair[1], reverse=True)
+    return result
+
+
 async def search_memories(
     query: str,
     session: AsyncSession,
@@ -1056,6 +1099,7 @@ async def search_memories(
         )
         scored.append((node, score_q + score_k))
     scored.sort(key=lambda pair: pair[1], reverse=True)
+    scored = await _expand_chunks_to_parents(scored, session)
 
     top_nodes = scored[:max_results]
 
@@ -1570,6 +1614,7 @@ async def search_memories_with_focus(
         )
         blended_scores.append((node, score_q + score_f + score_d + score_g + score_k))
     blended_scores.sort(key=lambda pair: pair[1], reverse=True)
+    blended_scores = await _expand_chunks_to_parents(blended_scores, session)
 
     top_nodes = [node for node, _ in blended_scores[:max_results]]
     if not top_nodes:

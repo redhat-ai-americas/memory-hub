@@ -1,7 +1,7 @@
-"""Semantic chunker for oversized memory content.
+"""Semantic chunker for memory content that exceeds the embedding model's context.
 
 Splits text into chunks at paragraph and sentence boundaries,
-targeting ~256 tokens per chunk for embedding with all-MiniLM-L6-v2.
+targeting ~256 tokens per chunk for focused search embeddings.
 """
 
 import re
