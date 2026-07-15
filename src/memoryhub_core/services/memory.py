@@ -1134,7 +1134,9 @@ async def search_memories(
         )
         scored.append((node, score_q + score_k))
     scored.sort(key=lambda pair: pair[1], reverse=True)
-    if not return_chunks:
+    if return_chunks:
+        scored = [(n, s) for n, s in scored if n.branch_type == "chunk"]
+    else:
         scored = await _expand_chunks_to_parents(scored, session)
 
     top_nodes = scored[:max_results]
@@ -1662,7 +1664,9 @@ async def search_memories_with_focus(
         )
         blended_scores.append((node, score_q + score_f + score_d + score_g + score_k))
     blended_scores.sort(key=lambda pair: pair[1], reverse=True)
-    if not return_chunks:
+    if return_chunks:
+        blended_scores = [(n, s) for n, s in blended_scores if n.branch_type == "chunk"]
+    else:
         blended_scores = await _expand_chunks_to_parents(blended_scores, session)
 
     top_nodes = [node for node, _ in blended_scores[:max_results]]
