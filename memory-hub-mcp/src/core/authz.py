@@ -200,11 +200,13 @@ def authorize_write(
 ) -> bool:
     """Can this identity write a memory at this scope for this owner in this tenant?"""
     # Tenant isolation: reject cross-tenant writes before any other check.
-    # The tenant_id passed in is the tenant of the memory being written; the
-    # caller's tenant comes from claims. Mismatch is a hard reject regardless
-    # of scope/identity_type.
-    if tenant_id != claims.get("tenant_id", DEFAULT_TENANT_ID):
-        return False
+    # resolve_tenant() already validated cross-tenant access via
+    # authorized_tenants; honour that decision here.
+    own_tenant = claims.get("tenant_id", DEFAULT_TENANT_ID)
+    if tenant_id != own_tenant:
+        authorized = claims.get("authorized_tenants")
+        if not authorized or tenant_id not in authorized:
+            return False
 
     scopes = claims.get("scopes", [])
     if hasattr(scope, "value"):
