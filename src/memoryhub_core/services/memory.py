@@ -12,7 +12,8 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Integer, and_, func, or_, select, text as sa_text, update
+from sqlalchemy import Integer, and_, func, or_, select, update
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.config import AppSettings
@@ -1001,8 +1002,8 @@ async def search_memories(
     # Fetch a larger recall pool to compensate for chunk-to-parent collapse.
     # After expansion, multiple chunk hits from the same parent merge into
     # one result, so the pre-expansion pool must be larger than max_results.
-    CHUNK_EXPANSION_HEADROOM = 5
-    k_recall = max(RERANK_POOL_SIZE, max_results * CHUNK_EXPANSION_HEADROOM)
+    chunk_expansion_headroom = 5
+    k_recall = max(RERANK_POOL_SIZE, max_results * chunk_expansion_headroom)
 
     use_pgvector = True
     try:
@@ -1379,8 +1380,8 @@ async def search_memories_with_focus(
         )
 
     # Recall pool: large enough to survive chunk-to-parent collapse.
-    CHUNK_EXPANSION_HEADROOM = 5
-    k_recall = max(RERANK_POOL_SIZE, max_results * CHUNK_EXPANSION_HEADROOM)
+    chunk_expansion_headroom = 5
+    k_recall = max(RERANK_POOL_SIZE, max_results * chunk_expansion_headroom)
 
     use_pgvector = True
     try:
