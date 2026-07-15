@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: granite-reranker
-  namespace: reranker-model
+  name: granite-embedding
+  namespace: embedding-model
 spec:
   selector:
-    app: granite-reranker
+    app: granite-embedding
   ports:
     - port: 80
       targetPort: 8080

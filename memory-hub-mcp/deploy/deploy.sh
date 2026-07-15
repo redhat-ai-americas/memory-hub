@@ -168,8 +168,8 @@ oc create secret generic memoryhub-db-credentials \
     --from-literal=MEMORYHUB_DB_NAME=memoryhub \
     --from-literal=MEMORYHUB_DB_USER=memoryhub \
     --from-literal=MEMORYHUB_DB_PASSWORD="$DB_PASSWORD" \
-    --from-literal=MEMORYHUB_EMBEDDING_URL=https://all-minilm-l6-v2-embedding-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/embed \
-    --from-literal=MEMORYHUB_RERANKER_URL=https://ms-marco-minilm-l12-v2-reranker-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com \
+    --from-literal=MEMORYHUB_EMBEDDING_URL=https://granite-embedding-embedding-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/embed \
+    --from-literal=MEMORYHUB_RERANKER_URL=https://granite-reranker-reranker-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com \
     --dry-run=client -o json | oc apply --context "$CONTEXT" -f - -n "$NAMESPACE"
 echo "OK: memoryhub-db-credentials Secret created/updated in $NAMESPACE"
 oc apply --context "$CONTEXT" -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"

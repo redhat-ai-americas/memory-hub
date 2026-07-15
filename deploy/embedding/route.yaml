@@ -1,12 +1,12 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: granite-reranker
-  namespace: reranker-model
+  name: granite-embedding
+  namespace: embedding-model
 spec:
   to:
     kind: Service
-    name: granite-reranker
+    name: granite-embedding
   port:
     targetPort: 8080
   tls:

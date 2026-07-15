@@ -71,8 +71,8 @@ class MockEmbeddingService(EmbeddingService):
 class HttpEmbeddingService(EmbeddingService):
     """Embedding service that calls a remote HTTP endpoint.
 
-    Compatible with the all-MiniLM-L6-v2 model served via standard
-    embedding API: POST {"inputs": "text"} → [[float, ...]]
+    Compatible with TEI-served models (granite-embedding-small-english-r2,
+    all-MiniLM-L6-v2, etc.): POST {"inputs": "text"} -> [[float, ...]]
     """
 
     def __init__(self, url: str | None = None):
