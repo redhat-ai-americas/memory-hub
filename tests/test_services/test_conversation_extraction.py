@@ -200,18 +200,24 @@ class TestExtractWindow:
     @pytest.mark.asyncio
     async def test_extract_window_creates_memories(self):
         from memoryhub_core.models.conversation import ConversationExtraction
+        from memoryhub_core.services.reconciliation import ReconciliationResult
 
         session = _mock_session()
         thread = _mock_thread()
         messages = [_mock_message(1, "user", "Important fact")]
 
-        mock_memory_node = MagicMock()
-        mock_memory_node.id = uuid.uuid4()
+        mock_memory_id = uuid.uuid4()
+        mock_decision = ReconciliationResult(
+            candidate_stub="User prefers concise answers",
+            action="create",
+            memory_id=mock_memory_id,
+            reason="no_similar_memory",
+        )
 
-        with patch("memoryhub_core.services.memory.create_memory") as mock_create:
-            mock_create.return_value = (mock_memory_node, {"blocked": False})
+        with patch("memoryhub_core.services.dreaming.reconcile_candidate", new_callable=AsyncMock) as mock_reconcile:
+            mock_reconcile.return_value = mock_decision
 
-            with patch("memoryhub_core.services.conversation_extraction._call_extraction_llm") as mock_llm:
+            with patch("memoryhub_core.services.dreaming._call_extraction_llm") as mock_llm:
                 mock_llm.return_value = [
                     {"content": "User prefers concise answers", "weight": 0.8}
                 ]
@@ -227,39 +233,46 @@ class TestExtractWindow:
                     embedding_service=mock_embedding,
                 )
 
-        # Verify create_memory was called with correct scope/owner/tenant
-        assert mock_create.call_count == 1
-        call_args = mock_create.call_args
-        memory_data = call_args[0][0]
-        assert memory_data.scope == thread.scope
-        assert memory_data.owner_id == thread.owner_id
+        # Verify reconcile_candidate was called
+        assert mock_reconcile.call_count == 1
+        call_args = mock_reconcile.call_args
+        candidate = call_args[0][0]
+        assert candidate.content == "User prefers concise answers"
         assert call_args[1]["tenant_id"] == thread.tenant_id
 
         # Verify provenance record was created
         assert session.add.call_count == 1
         extraction_record = session.add.call_args[0][0]
         assert isinstance(extraction_record, ConversationExtraction)
-        assert extraction_record.memory_node_id == mock_memory_node.id
+        assert extraction_record.memory_node_id == mock_memory_id
         assert extraction_record.thread_id == thread.id
         assert extraction_record.source_messages == [1]
         assert extraction_record.extraction_model == "test-model"
         assert len(extraction_record.extraction_prompt_hash) == 64  # SHA-256
 
         # Verify result
-        assert result == [mock_memory_node.id]
+        assert result == [mock_memory_id]
         assert session.commit.called
 
     @pytest.mark.asyncio
-    async def test_extract_window_curation_blocks(self):
+    async def test_extract_window_reconciliation_skips(self):
+        from memoryhub_core.services.reconciliation import ReconciliationResult
+
         session = _mock_session()
         thread = _mock_thread()
         messages = [_mock_message(1, "user", "spam")]
 
-        with patch("memoryhub_core.services.memory.create_memory") as mock_create:
-            # Curation blocks the memory
-            mock_create.return_value = (None, {"blocked": True, "reason": "low quality"})
+        mock_decision = ReconciliationResult(
+            candidate_stub="spam content",
+            action="skip",
+            reason="exact_duplicate",
+            similarity_score=0.99,
+        )
 
-            with patch("memoryhub_core.services.conversation_extraction._call_extraction_llm") as mock_llm:
+        with patch("memoryhub_core.services.dreaming.reconcile_candidate", new_callable=AsyncMock) as mock_reconcile:
+            mock_reconcile.return_value = mock_decision
+
+            with patch("memoryhub_core.services.dreaming._call_extraction_llm") as mock_llm:
                 mock_llm.return_value = [{"content": "spam content", "weight": 0.9}]
 
                 mock_embedding = MagicMock()
@@ -273,7 +286,7 @@ class TestExtractWindow:
                     embedding_service=mock_embedding,
                 )
 
-        # No provenance record should be created
+        # No provenance record should be created for skipped items
         assert session.add.call_count == 0
         assert result == []
 
@@ -283,7 +296,7 @@ class TestExtractWindow:
         thread = _mock_thread()
         messages = [_mock_message(1, "user", "test")]
 
-        with patch("memoryhub_core.services.conversation_extraction._call_extraction_llm") as mock_llm:
+        with patch("memoryhub_core.services.dreaming._call_extraction_llm") as mock_llm:
             # LLM returns extraction with weight below 0.5 threshold
             mock_llm.return_value = [{"content": "irrelevant", "weight": 0.3}]
 
@@ -307,7 +320,7 @@ class TestExtractWindow:
         thread = _mock_thread()
         messages = [_mock_message(1, "user", "test")]
 
-        with patch("memoryhub_core.services.conversation_extraction._call_extraction_llm") as mock_llm:
+        with patch("memoryhub_core.services.dreaming._call_extraction_llm") as mock_llm:
             # LLM returns extraction with empty content
             mock_llm.return_value = [{"content": "", "weight": 0.9}]
 
@@ -348,7 +361,7 @@ class TestExtractFromThread:
             msg_result,  # Messages query
         ]
 
-        with patch("memoryhub_core.services.conversation_extraction._extract_window") as mock_extract:
+        with patch("memoryhub_core.services.dreaming._extract_window") as mock_extract:
             mock_extract.return_value = [uuid.uuid4()]
 
             mock_embedding = MagicMock()
@@ -424,7 +437,7 @@ class TestExtractFromThread:
             msg_result,
         ]
 
-        with patch("memoryhub_core.services.conversation_extraction._extract_window") as mock_extract:
+        with patch("memoryhub_core.services.dreaming._extract_window") as mock_extract:
             mock_extract.return_value = [uuid.uuid4()]
 
             mock_embedding = MagicMock()
@@ -461,7 +474,7 @@ class TestExtractFromThread:
             msg_result,
         ]
 
-        with patch("memoryhub_core.services.conversation_extraction._extract_window") as mock_extract:
+        with patch("memoryhub_core.services.dreaming._extract_window") as mock_extract:
             mock_extract.side_effect = ValueError("LLM error")
 
             mock_embedding = MagicMock()
@@ -516,7 +529,7 @@ class TestExtractFromThread:
             msg_result,
         ]
 
-        with patch("memoryhub_core.services.conversation_extraction._extract_window") as mock_extract:
+        with patch("memoryhub_core.services.dreaming._extract_window") as mock_extract:
             mock_extract.return_value = [uuid.uuid4()]
 
             mock_embedding = MagicMock()
