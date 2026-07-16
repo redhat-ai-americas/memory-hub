@@ -324,6 +324,20 @@ async def write_memory(
             ),
         ),
     ] = None,
+    extract_facts: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Fact extraction mode: 'eager' extracts via MCP sampling "
+                "during this call regardless of content size; 'off' skips "
+                "extraction; 'background' defers to the background dreaming "
+                "path (not yet implemented, currently a no-op). Omit to use "
+                "the server default (eager only when content exceeds the "
+                "chunking threshold). Only applies to root memories, not "
+                "branches."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Create a new memory node or branch in the memory tree.
@@ -572,14 +586,33 @@ async def write_memory(
             embedding_service=embedding_service,
         )
 
-        # Eager fact extraction via MCP sampling. Same threshold as
-        # chunking: content large enough to chunk is large enough to
-        # extract. Non-fatal -- the write never fails on extraction failure.
+        # Eager fact extraction via MCP sampling. Non-fatal -- the write
+        # never fails on extraction failure.
         facts_extracted = None
         app_settings = AppSettings()
         embedding_max_chars = app_settings.embedding_max_tokens * 4
         is_oversized = len(content) > embedding_max_chars
-        if is_oversized and ctx and branch_type is None:
+
+        valid_extract_modes = {"eager", "off", "background", None}
+        if extract_facts not in valid_extract_modes:
+            raise ToolError(
+                f"Invalid extract_facts value '{extract_facts}'. "
+                "Valid values: 'eager', 'off', 'background', or omit."
+            )
+
+        extract_mode = extract_facts
+        if extract_mode == "background":
+            logger.debug("extract_facts=background: deferred (background fact extraction not yet implemented)")
+            extract_mode = None
+        if extract_mode is None and is_oversized and branch_type is None:
+            extract_mode = "eager"
+        if extract_mode == "eager" and branch_type is not None:
+            logger.debug("extract_facts=eager ignored for branch memory (branch_type=%s)", branch_type)
+            extract_mode = None
+
+        if extract_mode == "eager" and not ctx:
+            logger.warning("extract_facts=eager requested but no MCP context available; skipping extraction")
+        if extract_mode == "eager" and ctx:
             facts_extracted = await _extract_facts_via_sampling(
                 ctx=ctx,
                 content=content,

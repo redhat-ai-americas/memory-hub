@@ -3,6 +3,7 @@ description: >
   Extracts discrete facts, preferences, decisions, and knowledge from
   conversation messages to produce self-contained memory nodes. Used by
   the conversation extraction pipeline (#168 Phase 3).
+version: "1.0"
 
 parameters:
   - temperature: 0.0

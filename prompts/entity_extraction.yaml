@@ -3,6 +3,7 @@ description: >
   Structured extraction prompt for the Stage 3 LLM fallback in the entity
   extraction pipeline (#249). Extracts POLE+O entities and inter-entity
   relationships from agent memory content.
+version: "1.0"
 
 parameters:
   - temperature: 0.0
