@@ -1,92 +1,66 @@
-# Session Summary: 2026-07-16 -- Extraction Model Comparison + Pipeline Implementation
+# Session Summary -- 2026-07-16 - Dreaming - Extraction model comparison + pipeline
 
-## What landed
+**Plan:** NEXT_SESSION-dreaming.md   **Commits:** 96273d2..53b2df2 (feat/eager-fact-extraction)
+**Deployed:** none   **Model:** Opus 4.6
 
-### Part 1: Extraction model comparison (negative result)
+## Plan vs. actual
 
-Ran gemini-3.5-flash as the extraction model against the Flash Lite
-baseline. 195 PersonaMem docs, 589 queries at k=70.
+Planned: Part 1 (extraction model comparison) then Part 2 (permanent write-time extraction pipeline).
+Shipped: both parts, plus #406 filed for SDK/CLI extraction gap.
+Slipped: deployment of sampling-enabled MCP server (stop-and-ask gate; intentional).
+Scope: stayed in scope.
+
+## Shipped
+
+- 96273d2 extraction prompt at `prompts/fact_extraction.yaml` + `create_fact_children()` in memory service
+- 2a79e5c `retrieval_unit` search preference (`facts|chunks|parents|auto`) with pool discipline
+- d5f4ea5 MCP sampling integration in `write_memory` with 15s timeout and deferred fallback
+- 53b2df2 SDK `extract_facts` and `retrieval_unit` parameters + `_WRITE_OPTS`/`_SEARCH_OPTS` whitelist updates
+- Merged PR #402 (design docs), PR #407 (pipeline), PR #408 (session summary)
+- Closed #403 (eager fact extraction shipped)
+- Filed #406 (SDK/CLI extraction gap)
+
+## Extraction model comparison results
 
 | Extraction model | Facts in DB | Accuracy | Avg memories/query | Avg ctx chars | Empty contexts |
 |---|---|---|---|---|---|
 | gemini-3.1-flash-lite | 6,697 | **63.3%** | 70.0 | 6,030 | 0 |
 | gemini-3.5-flash | 6,522 | 57.7% | 64.3 | 6,949 | 43 |
 
-Delta: -5.6pp. Root causes:
+Delta: -5.6pp. gemini-2.5-flash was the originally planned model but is deprecated. gemini-3.5-flash had 35 JSON parse errors (18% of docs), produced wordier facts, and scored worse. Extraction model quality is not the lever; cheapest viable model wins. Haiku ceiling test skipped per plan (only if Flash beat Flash Lite meaningfully).
 
-1. **JSON parse errors:** 35 of 195 docs (18%) failed extraction due to
-   malformed JSON from 3.5-flash (extra content after the array). This
-   left 43 queries with zero retrieved facts.
-2. **Wordier facts:** 3.5-flash produced longer fact statements (6,949
-   avg chars vs 6,030), meaning fewer distinct facts fit in the
-   retrieval window despite similar total counts.
-3. **Slightly fewer facts:** 6,522 vs 6,697 (coverage gap from parse
-   failures).
+## Verification & confidence
 
-Conclusion: extraction model quality is NOT the lever for PersonaMem.
-The cheapest viable model (Flash Lite) wins. A stronger model
-over-elaborates and has worse JSON compliance. The pipeline should
-default to the cheapest model that can reliably produce structured
-output.
+- Unit tests: 702 passed, 8 failed (pre-existing in test_conversation_extraction), 1 skipped
+- Syntax: all modified files compile cleanly
+- Lint: clean after fixing UP041 (asyncio.TimeoutError -> TimeoutError)
+- Benchmark: extraction comparison run complete with stored results
+- Confidence: **medium** -- pipeline code is sound, but not integration-tested with live MCP sampling (requires deployed server)
 
-Note: gemini-2.5-flash was the originally planned model but is
-deprecated ("no longer available to new users"). gemini-3.5-flash was
-the next available step up.
+## Judgment calls & deviations
 
-### Part 2: Write-time fact extraction pipeline (PR #407, merged)
+- Used gemini-3.5-flash instead of gemini-2.5-flash (deprecated). Bigger capability step up than planned, which made the negative result more conclusive.
+- `retrieval_unit` filtering happens post-RRF rather than pre-recall. Pre-recall filtering would reduce the candidate pool size; post-RRF is simpler and matches the existing `return_chunks` pattern.
+- `create_fact_children()` is a public function (not underscore-prefixed like `_create_chunk_children`) because it's called from the MCP tool layer, not from within `create_memory()`. The sampling call can only happen at the tool level where `ctx` is available.
 
-Built eager fact extraction into the MemoryHub write path using MCP
-sampling, per `planning/eager-fact-extraction.md`. Four commits:
+## Backlog delta
 
-1. **Extraction prompt + create_fact_children()** -- versioned YAML
-   prompt at `prompts/fact_extraction.yaml`, public `create_fact_children()`
-   function in memory service. Facts are `branch_type="fact"` children
-   with extraction_run_id metadata for #348 provenance.
+Filed #406 (SDK/CLI extraction gap, design, Backlog). Closed #403 (eager extraction, Done). Merged PR #402 (design docs from docs/facts-pipeline-designs branch).
 
-2. **retrieval_unit search preference** -- new parameter
-   (`facts|chunks|parents|auto`) on both `search_memories()` and
-   `search_memories_with_focus()`. Pool discipline: one unit class per
-   RRF pool, preventing the #344 regression pattern.
+## Drift & forward-collisions
 
-3. **MCP sampling integration** -- `write_memory` calls `ctx.sample()`
-   with `result_type=FactExtractionResult` when content is oversized.
-   15s timeout; on failure, sets `facts_extracted="deferred"`. Writes
-   never fail on extraction failure.
+- Backward -- #347 (reconciliation): still valid, now more urgent since facts are being created. Cross-write fact dedup is explicitly deferred to #347 per the design doc.
+- Backward -- #348 (run provenance): `extraction_run_id` metadata is carried on every fact node, implementing the pattern #348 requires. #348 may be partly done.
+- Forward -- none identified.
 
-4. **SDK parameters** -- `extract_facts` (eager|background|off) on
-   `write()`, `retrieval_unit` on `search()`. Both forwarded via
-   `_WRITE_OPTS`/`_SEARCH_OPTS` whitelists.
+## For the reviewer
 
-### Issue filed
+- Sanity-check: the `retrieval_unit=auto` logic (facts-first with parent fallback) may need tuning. The current implementation checks if ANY fact nodes appear in the RRF-scored candidate pool. If only a few low-scoring facts exist, this could be worse than parent expansion. A threshold or minimum-count might be needed.
+- Thin verification: no live MCP sampling test. The `ctx.sample()` integration is structurally correct (matches FastMCP 3.4.2 docs) but hasn't been exercised end-to-end.
+- Wants guidance: should the `retrieval_unit=auto` policy be adjusted before the next benchmark run, or should we measure first and adjust based on data?
 
-- #406: Fact extraction gap for SDK/CLI callers (no MCP sampling
-  available). Design issue in Backlog.
+## Risks / watch-fors
 
-### Other
-
-- Committed CLAUDE.md competitor-citation rule (on feat/chunk-params-sweep)
-- Merged PR #402 (design docs: eager-fact-extraction, client-supplied
-  intelligence, d5-readiness-audit)
-
-## What didn't land
-
-- **Deployment of sampling-enabled MCP server.** The pipeline is
-  implemented but not deployed. Deployment changes the client-server
-  contract (stop-and-ask gate from session plan).
-- **Integration test with live sampling.** Requires a deployed server
-  with a sampling-capable client connected.
-- **Haiku extraction test.** Part 1 showed model quality doesn't help,
-  so the Haiku ceiling test was skipped (session plan said: only if
-  Flash extraction beats Flash Lite meaningfully).
-
-## Follow-ups
-
-- Deploy the sampling-enabled MCP server (next session, with explicit
-  approval per stop-and-ask gate)
-- Re-run PersonaMem benchmark with production pipeline facts (vs
-  prototype's standalone extraction)
-- #406: design solution for SDK/CLI callers
-- Container deployment: add `prompts/` to the Containerfile COPY and
-  build-context.sh
-- Clean up sweep projects (`amb-c32-o0-k10`, etc.) and
-  `amb-facts-flash` from the database
+- Containerfile does not COPY `prompts/` -- deployment will fail to load the extraction prompt until this is added.
+- `extract_facts` parameter is accepted by the SDK but ignored by the MCP write tool (it always extracts if oversized). The opt-in/opt-out dispatch needs wiring.
+- 15 sweep projects (`amb-c32-o0-k10`, etc.) + `amb-facts-flash` still in the database, consuming storage.

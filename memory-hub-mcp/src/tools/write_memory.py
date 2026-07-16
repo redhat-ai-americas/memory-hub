@@ -104,7 +104,7 @@ async def _extract_facts_via_sampling(
             ),
             timeout=FACT_EXTRACTION_TIMEOUT,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Fact extraction timed out for parent %s", parent_id)
         return "deferred"
     except Exception as exc:

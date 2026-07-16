@@ -39,6 +39,7 @@ planning/rfe_draft.md
 
 # Research drafts not ready for public commit
 research/agent-memory-benchmarks/
+research/amb-neutral-harness/
 
 # Claude Code worktrees
 .claude/worktrees/
