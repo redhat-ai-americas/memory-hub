@@ -19,6 +19,8 @@ Optional env vars:
     MEMORYHUB_K                -- retrieval depth, default 70
     MEMORYHUB_CHUNK_TARGET_TOKENS  -- target tokens per chunk (default: server default, 256)
     MEMORYHUB_CHUNK_OVERLAP_TOKENS -- overlap tokens between chunks (default: 0)
+    MEMORYHUB_EXTRACT_FACTS        -- fact extraction mode: eager, background, off
+                                     (default: None = server default)
 
 Reset-only env vars (raw SQL DELETE for test scaffolding):
     MEMORYHUB_DB_HOST    -- default localhost
@@ -66,6 +68,7 @@ class MemoryHubProvider(MemoryProvider):
         self._return_chunks: bool = False
         self._chunk_target_tokens: int | None = None
         self._chunk_overlap_tokens: int | None = None
+        self._extract_facts: str | None = None
 
     def prepare(self, store_dir: Path, unit_ids: set[str] | None = None, reset: bool = True) -> None:
         self._url = os.environ.get("MEMORYHUB_URL")
@@ -99,6 +102,9 @@ class MemoryHubProvider(MemoryProvider):
         self._chunk_target_tokens = int(raw_chunk_target) if raw_chunk_target else None
         raw_chunk_overlap = os.environ.get("MEMORYHUB_CHUNK_OVERLAP_TOKENS", "").strip()
         self._chunk_overlap_tokens = int(raw_chunk_overlap) if raw_chunk_overlap else None
+
+        raw_extract = os.environ.get("MEMORYHUB_EXTRACT_FACTS", "").strip().lower()
+        self._extract_facts = raw_extract if raw_extract in ("eager", "background", "off") else None
 
         self._doc_to_memory_id.clear()
         self._memory_to_doc_id.clear()
@@ -138,6 +144,8 @@ class MemoryHubProvider(MemoryProvider):
                     write_kwargs["chunk_target_tokens"] = self._chunk_target_tokens
                 if self._chunk_overlap_tokens is not None:
                     write_kwargs["chunk_overlap_tokens"] = self._chunk_overlap_tokens
+                if self._extract_facts is not None:
+                    write_kwargs["extract_facts"] = self._extract_facts
                 result = await client.write(**write_kwargs)
 
                 if result.memory:
