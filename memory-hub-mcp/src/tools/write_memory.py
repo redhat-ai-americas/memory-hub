@@ -1,13 +1,18 @@
 """Create a new memory node or branch in the memory tree."""
 
+import asyncio
 import logging
 import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
+import yaml
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
-from pydantic import Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
+from memoryhub_core.config import AppSettings
 from memoryhub_core.models.schemas import MemoryNodeCreate
 from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import (
@@ -18,7 +23,7 @@ from memoryhub_core.services.exceptions import (
     MemoryNotFoundError,
     ProjectInviteOnlyError,
 )
-from memoryhub_core.services.memory import create_memory
+from memoryhub_core.services.memory import create_fact_children, create_memory
 from memoryhub_core.services.project import ensure_project_membership
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
@@ -42,6 +47,94 @@ from src.tools._deps import (
 from src.tools._push_helpers import broadcast_after_write
 
 logger = logging.getLogger(__name__)
+
+FACT_EXTRACTION_TIMEOUT = 15.0
+_PROMPT_DIR = Path(__file__).resolve().parents[3] / "prompts"
+# Fallback for container deployments where the prompt is co-located
+_PROMPT_DIR_CONTAINER = Path("/opt/app-root/src/prompts")
+
+
+class ExtractedFact(BaseModel):
+    content: str
+    weight: float = 0.7
+    domains: list[str] = []
+
+
+class FactExtractionResult(BaseModel):
+    facts: list[ExtractedFact]
+
+
+def _load_extraction_prompt() -> dict:
+    """Load the fact extraction prompt from YAML."""
+    path = _PROMPT_DIR / "fact_extraction.yaml"
+    if not path.exists():
+        path = _PROMPT_DIR_CONTAINER / "fact_extraction.yaml"
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+async def _extract_facts_via_sampling(
+    ctx: Context,
+    content: str,
+    parent_id: uuid.UUID,
+    scope: str,
+    scope_id: str | None,
+    owner_id: str,
+    tenant_id: str,
+    domains: list[str] | None,
+    embedding_service: Any,
+    session: Any,
+) -> int | str:
+    """Run fact extraction via MCP sampling. Returns fact count or "deferred"."""
+    try:
+        prompt_config = _load_extraction_prompt()
+    except Exception as exc:
+        logger.warning("Failed to load extraction prompt: %s", exc)
+        return "deferred"
+
+    prompt_text = prompt_config["system_prompt"] + "\n\n" + content
+
+    try:
+        result = await asyncio.wait_for(
+            ctx.sample(
+                messages=prompt_text,
+                result_type=FactExtractionResult,
+                temperature=0.0,
+                max_tokens=4000,
+            ),
+            timeout=FACT_EXTRACTION_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Fact extraction timed out for parent %s", parent_id)
+        return "deferred"
+    except Exception as exc:
+        logger.warning("Fact extraction sampling failed for parent %s: %s", parent_id, exc)
+        return "deferred"
+
+    if not result.result or not result.result.facts:
+        return 0
+
+    prompt_version = prompt_config.get("version", "unknown")
+    extraction_run_id = f"eager:{prompt_version}:{datetime.now(UTC).isoformat()}"
+
+    facts = [f.model_dump() for f in result.result.facts]
+    try:
+        count = await create_fact_children(
+            facts=facts,
+            parent_id=parent_id,
+            scope=scope,
+            scope_id=scope_id,
+            owner_id=owner_id,
+            tenant_id=tenant_id,
+            domains=domains,
+            extraction_run_id=extraction_run_id,
+            embedding_service=embedding_service,
+            session=session,
+        )
+        return count
+    except Exception as exc:
+        logger.warning("Failed to create fact children for %s: %s", parent_id, exc)
+        return "deferred"
 
 
 async def _get_cache_impact(tenant_id: str, owner_id: str) -> dict:
@@ -479,6 +572,27 @@ async def write_memory(
             embedding_service=embedding_service,
         )
 
+        # Eager fact extraction via MCP sampling. Same threshold as
+        # chunking: content large enough to chunk is large enough to
+        # extract. Non-fatal -- the write never fails on extraction failure.
+        facts_extracted = None
+        app_settings = AppSettings()
+        embedding_max_chars = app_settings.embedding_max_tokens * 4
+        is_oversized = len(content) > embedding_max_chars
+        if is_oversized and ctx and branch_type is None:
+            facts_extracted = await _extract_facts_via_sampling(
+                ctx=ctx,
+                content=content,
+                parent_id=memory.id,
+                scope=scope,
+                scope_id=scope_id_value,
+                owner_id=owner_id,
+                tenant_id=write_tenant_id,
+                domains=domains,
+                embedding_service=embedding_service,
+                session=session,
+            )
+
         result = {
             "memory": memory.model_dump(mode="json"),
             "curation": {
@@ -489,6 +603,8 @@ async def write_memory(
                 "flags": curation_result["flags"],
             },
         }
+        if facts_extracted is not None:
+            result["facts_extracted"] = facts_extracted
         if was_auto_enrolled:
             result["auto_enrolled"] = {
                 "project_id": project_id,

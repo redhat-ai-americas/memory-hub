@@ -486,6 +486,7 @@ class MemoryHubClient:
         tenant_id: str | None = None,
         content_mode: Literal["stub", "full"] | None = None,
         return_chunks: bool = False,
+        retrieval_unit: str | None = None,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -584,6 +585,8 @@ class MemoryHubClient:
             opts["content_mode"] = content_mode
         if return_chunks:
             opts["return_chunks"] = True
+        if retrieval_unit is not None:
+            opts["retrieval_unit"] = retrieval_unit
 
         data = await self._call_action(
             "search",
@@ -779,6 +782,7 @@ class MemoryHubClient:
         tenant_id: str | None = None,
         chunk_target_tokens: int | None = None,
         chunk_overlap_tokens: int | None = None,
+        extract_facts: str | None = None,
     ) -> WriteResult:
         """Write a new memory.
 
@@ -797,8 +801,12 @@ class MemoryHubClient:
             content_type: Memory content type. "declarative" (default) for facts
                 and preferences, "behavioral" for demonstrated patterns and
                 successful approaches. Behavioral memories are not injected by
-                default — use the reconstruct action to retrieve them.
+                default -- use the reconstruct action to retrieve them.
             tenant_id: Optional tenant identifier.
+            extract_facts: Fact extraction mode. "eager" extracts via MCP
+                sampling during the write. "background" defers to the
+                dreaming path. "off" disables extraction. None uses the
+                server default (eager for oversized content).
 
         Returns:
             A WriteResult. When curation detects a near-duplicate, the memory is
@@ -828,6 +836,8 @@ class MemoryHubClient:
             opts["chunk_target_tokens"] = chunk_target_tokens
         if chunk_overlap_tokens is not None:
             opts["chunk_overlap_tokens"] = chunk_overlap_tokens
+        if extract_facts is not None:
+            opts["extract_facts"] = extract_facts
         data = await self._call_action(
             "write",
             content=content,

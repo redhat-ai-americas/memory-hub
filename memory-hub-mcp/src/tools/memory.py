@@ -41,7 +41,7 @@ _SEARCH_OPTS = frozenset({
     "current_only", "owner_id", "graph_depth",
     "graph_relationship_types", "graph_boost_weight", "entities",
     "content_type", "verbose", "temporal_status", "disabled_signals",
-    "tenant_id", "content_mode", "return_chunks",
+    "tenant_id", "content_mode", "return_chunks", "retrieval_unit",
 })
 _LIST_OPTS = frozenset({
     "max_results", "cursor", "include_branches", "current_only",
@@ -62,7 +62,7 @@ _WRITE_OPTS = frozenset({
     "weight", "parent_id", "branch_type", "metadata", "domains",
     "project_description", "force", "owner_id", "content_type",
     "driver_id", "relevant_until", "tenant_id",
-    "chunk_target_tokens", "chunk_overlap_tokens",
+    "chunk_target_tokens", "chunk_overlap_tokens", "extract_facts",
 })
 _UPDATE_OPTS = frozenset({"weight", "metadata", "domains", "driver_id"})
 _SET_RULE_OPTS = frozenset({

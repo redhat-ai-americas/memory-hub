@@ -321,6 +321,78 @@ async def _create_chunk_children(
     return True
 
 
+async def create_fact_children(
+    *,
+    facts: list[dict],
+    parent_id: uuid.UUID,
+    scope: str,
+    scope_id: str | None,
+    owner_id: str,
+    tenant_id: str,
+    domains: list[str] | None,
+    extraction_run_id: str,
+    embedding_service: EmbeddingService,
+    session: AsyncSession,
+    now: datetime | None = None,
+) -> int:
+    """Create fact child nodes from extraction results.
+
+    Each fact becomes an independently embedded child with
+    ``branch_type="fact"`` and provenance metadata linking back to the
+    extraction run.
+
+    Returns the number of fact nodes created.
+    """
+    if not facts:
+        return 0
+
+    if now is None:
+        now = datetime.now(UTC)
+
+    fact_texts = [f["content"] for f in facts]
+    fact_embeddings = await embedding_service.embed_batch(fact_texts)
+
+    for i, (fact, fact_emb) in enumerate(
+        zip(facts, fact_embeddings, strict=True)
+    ):
+        fact_weight = fact.get("weight", 0.7)
+        fact_domains = fact.get("domains") or domains
+        fact_stub = generate_stub(
+            content=fact["content"],
+            scope=scope,
+            weight=fact_weight,
+            branch_count=0,
+            has_rationale=False,
+        )
+        fact_node = MemoryNode(
+            id=uuid.uuid4(),
+            content=fact["content"],
+            stub=fact_stub,
+            scope=scope,
+            scope_id=scope_id,
+            weight=fact_weight,
+            owner_id=owner_id,
+            tenant_id=tenant_id,
+            parent_id=parent_id,
+            branch_type="fact",
+            metadata_={
+                "fact_index": i,
+                "total_facts": len(facts),
+                "extraction_run_id": extraction_run_id,
+            },
+            domains=fact_domains,
+            embedding=fact_emb,
+            is_current=True,
+            version=1,
+            storage_type="inline",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(fact_node)
+    await session.commit()
+    return len(facts)
+
+
 async def read_memory(
     memory_id: uuid.UUID,
     session: AsyncSession,
@@ -974,6 +1046,7 @@ async def search_memories(
     disabled_signals: set[str] | None = None,
     reranker: RerankerService | None = None,
     return_chunks: bool = False,
+    retrieval_unit: str | None = None,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity with optional keyword recall.
 
@@ -1143,8 +1216,21 @@ async def search_memories(
         )
         scored.append((node, score_q + score_k))
     scored.sort(key=lambda pair: pair[1], reverse=True)
-    if return_chunks:
+
+    unit = retrieval_unit or ("chunks" if return_chunks else None)
+    if unit == "facts":
+        scored = [(n, s) for n, s in scored if n.branch_type == "fact"]
+    elif unit == "chunks":
         scored = [(n, s) for n, s in scored if n.branch_type == "chunk"]
+    elif unit == "parents":
+        scored = await _expand_chunks_to_parents(scored, session)
+        scored = [(n, s) for n, s in scored if n.branch_type not in ("chunk", "fact")]
+    elif unit == "auto":
+        fact_hits = [(n, s) for n, s in scored if n.branch_type == "fact"]
+        if fact_hits:
+            scored = fact_hits
+        else:
+            scored = await _expand_chunks_to_parents(scored, session)
     else:
         scored = await _expand_chunks_to_parents(scored, session)
 
@@ -1348,6 +1434,7 @@ async def search_memories_with_focus(
     keyword_boost_weight: float = 0.15,
     disabled_signals: set[str] | None = None,
     return_chunks: bool = False,
+    retrieval_unit: str | None = None,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -1400,6 +1487,7 @@ async def search_memories_with_focus(
             disabled_signals=disabled_signals,
             reranker=reranker,
             return_chunks=return_chunks,
+            retrieval_unit=retrieval_unit,
         )
         return FocusedSearchResult(results=plain)
 
@@ -1673,8 +1761,21 @@ async def search_memories_with_focus(
         )
         blended_scores.append((node, score_q + score_f + score_d + score_g + score_k))
     blended_scores.sort(key=lambda pair: pair[1], reverse=True)
-    if return_chunks:
+
+    unit = retrieval_unit or ("chunks" if return_chunks else None)
+    if unit == "facts":
+        blended_scores = [(n, s) for n, s in blended_scores if n.branch_type == "fact"]
+    elif unit == "chunks":
         blended_scores = [(n, s) for n, s in blended_scores if n.branch_type == "chunk"]
+    elif unit == "parents":
+        blended_scores = await _expand_chunks_to_parents(blended_scores, session)
+        blended_scores = [(n, s) for n, s in blended_scores if n.branch_type not in ("chunk", "fact")]
+    elif unit == "auto":
+        fact_hits = [(n, s) for n, s in blended_scores if n.branch_type == "fact"]
+        if fact_hits:
+            blended_scores = fact_hits
+        else:
+            blended_scores = await _expand_chunks_to_parents(blended_scores, session)
     else:
         blended_scores = await _expand_chunks_to_parents(blended_scores, session)
 
