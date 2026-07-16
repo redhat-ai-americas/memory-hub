@@ -933,7 +933,7 @@ async def test_search_memory_no_focus_routes_to_plain_path():
 
     assert "pivot_suggested" not in result
     assert "pivot_reason" not in result
-    assert "focus_fallback_reason" not in result
+    assert "reranker_fallback_reason" not in result
 
 
 @pytest.mark.asyncio
@@ -957,7 +957,7 @@ async def test_search_memory_focus_routes_to_focused_path():
     assert len(result["results"]) == 1
     assert result["pivot_suggested"] is False
     assert result["pivot_reason"] is None
-    assert "focus_fallback_reason" not in result
+    assert "reranker_fallback_reason" not in result
 
 
 @pytest.mark.asyncio
@@ -1004,7 +1004,7 @@ async def test_search_memory_focus_fallback_reason_surfaces():
         focus="some focus",
     )
 
-    assert result["focus_fallback_reason"].startswith("reranker call failed")
+    assert result["reranker_fallback_reason"].startswith("reranker call failed")
 
 
 @pytest.mark.asyncio
