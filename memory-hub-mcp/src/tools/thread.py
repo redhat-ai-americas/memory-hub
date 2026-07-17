@@ -192,6 +192,11 @@ async def _dispatch_create(scope, opts, ctx):
     effective_owner = opts.get("owner_id") or caller_id
     create_opts = _forward(opts, _CREATE_OPTS)
     create_opts.pop("owner_id", None)
+    if effective_owner != caller_id:
+        participants = list(create_opts.get("participant_ids", []))
+        if caller_id not in participants:
+            participants.append(caller_id)
+        create_opts["participant_ids"] = participants
     data = ConversationThreadCreate(scope=scope, **create_opts)
 
     session, gen = await get_db_session()
