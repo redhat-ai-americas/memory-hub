@@ -22,7 +22,7 @@ _VALID_ACTIONS = frozenset({
 
 _CREATE_OPTS = frozenset({
     "title", "participant_ids", "participant_access",
-    "a2a_context_id", "scope_id", "metadata",
+    "a2a_context_id", "scope_id", "owner_id", "metadata",
 })
 _APPEND_OPTS = frozenset({"actor_id", "tool_call_id", "metadata", "a2a_context_id"})
 _GET_OPTS = frozenset({"limit", "before_sequence", "include_messages"})
@@ -189,7 +189,9 @@ async def _dispatch_create(scope, opts, ctx):
     ):
         raise ToolError(f"Not authorized to create threads in scope '{scope}'.")
 
+    effective_owner = opts.get("owner_id") or caller_id
     create_opts = _forward(opts, _CREATE_OPTS)
+    create_opts.pop("owner_id", None)
     data = ConversationThreadCreate(scope=scope, **create_opts)
 
     session, gen = await get_db_session()
@@ -198,7 +200,7 @@ async def _dispatch_create(scope, opts, ctx):
             session,
             tenant_id=tenant,
             data=data,
-            owner_id=caller_id,
+            owner_id=effective_owner,
             actor_id=caller_id,
             driver_id=claims.get("driver_id"),
         )

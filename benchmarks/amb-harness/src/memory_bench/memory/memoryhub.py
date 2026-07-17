@@ -211,9 +211,11 @@ class MemoryHubProvider(MemoryProvider):
             for p_idx, (persona_id, sessions) in enumerate(
                 sorted(persona_sessions.items()), 1
             ):
+                owner = f"amb-{persona_id}" if persona_id else "amb-default"
                 thread = await client.create_thread(
                     scope="project",
                     scope_id=self._project_id,
+                    owner_id=owner,
                     title=f"PersonaMem {persona_id}",
                     metadata={
                         "persona_id": persona_id,
