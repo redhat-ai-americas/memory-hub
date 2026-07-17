@@ -1,4 +1,4 @@
-"""Fact Checker Agent plugin.
+DAYS_BEFORE_EXPIRY = 7SEARCH_RESULTS_LIMIT = 50"""Fact Checker Agent plugin.
 
 Processes temporal expiry and runs verification plugins against
 memories with factual claims.
@@ -43,7 +43,7 @@ class CalendarPlugin(VerificationPlugin):
 
     Handles memories with relevant_until timestamps:
     - Past relevant_until -> mark as expired
-    - Within 7 days of relevant_until -> mark as expiring_soon
+    - Within DAYS_BEFORE_EXPIRY days of relevant_until -> mark as expiring_soon
     """
 
     def can_verify(self, memory: dict) -> bool:
