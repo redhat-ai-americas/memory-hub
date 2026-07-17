@@ -89,6 +89,45 @@ Example: `memory-tree: Add versioning with isCurrent flag`
 
 Credentials, API keys, and tokens must never appear in session summaries, plans, issues, or any committed documentation. Reference the secret's storage location instead (e.g., "stored in memoryhub-auth cluster secret" or "see ~/.config/memoryhub/api-key"). This applies to all key formats including hex-format keys (`mh-dev-<hex>`), OAuth client secrets, and database passwords. Incident: a hex-format API key committed in a session summary (2026-07-14) required rotation and git history scrubbing.
 
+## Secrets and Env Var Reference
+
+Where credentials live and how to use them. This eliminates "secrets archaeology" at session start.
+
+**Local developer machine:**
+- `~/.config/memoryhub/api-key` -- MemoryHub API key for SDK/MCP client auth
+- `~/.secrets` -- shell-sourceable file with `GEMINI_API_KEY`, `GOOGLE_API_KEY`, etc.
+
+**Cluster Secrets (mcp-rhoai context):**
+
+| Secret | Namespace | Keys | Used by |
+|--------|-----------|------|---------|
+| `memoryhub-pg-credentials` | `memoryhub-db` | `POSTGRES_PASSWORD` | DB access across all services |
+| `gemini-api-key` | `memory-hub-mcp` | `api-key` | MCP server extraction LLM auth |
+| `gemini-api-key` | `memoryhub-eval` | `api-key` | EvalHub adapter answer/judge LLM auth |
+| `evalhub-db-credentials` | `memoryhub-eval` | `db-url` | EvalHub PostgreSQL connection |
+
+**MCP server env vars (deployment `memory-hub-mcp` in `memory-hub-mcp` namespace):**
+- Connection: `MCP_TRANSPORT`, `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `MCP_HTTP_PATH`
+- Auth: `AUTH_JWKS_URI`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AUTH_API_KEY_VALIDATE_URL`, `AUTH_INTERNAL_SERVICE_KEY`, `MEMORYHUB_USERS_FILE`
+- Infrastructure: `MEMORYHUB_VALKEY_URL`, `MEMORYHUB_S3_ENDPOINT`, `MEMORYHUB_S3_ACCESS_KEY`, `MEMORYHUB_S3_SECRET_KEY`, `MEMORYHUB_S3_BUCKET`
+- Dreaming extraction: `MEMORYHUB_CONV_EXTRACTION_MODEL`, `MEMORYHUB_CONV_EXTRACTION_MODEL_URL`, `MEMORYHUB_CONV_EXTRACTION_API_KEY` (from secret)
+
+**Dreaming extraction LLM config:**
+The MCP server calls an OpenAI-compatible `/chat/completions` endpoint for fact extraction. The URL must NOT include `/v1/` (the code appends `/chat/completions` directly). For Gemini, use `https://generativelanguage.googleapis.com/v1beta/openai` as the URL. The API key goes in a Bearer token header. Model names must be current (check `https://generativelanguage.googleapis.com/v1beta/models?key=<key>` for available models; dated preview names get deprecated).
+
+**EvalHub adapter env vars (injected by `deploy-evalhub.sh` provider registration):**
+- `MEMORYHUB_URL` -- internal MCP service: `http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/`
+- `MEMORYHUB_API_KEY` -- from `~/.config/memoryhub/api-key` at registration time
+- `MEMORYHUB_DB_HOST` -- internal DB service: `memoryhub-pg.memoryhub-db.svc.cluster.local`
+- `MEMORYHUB_DB_PORT` -- `5432` (internal, not the port-forward 25432)
+- `MEMORYHUB_DB_USER` -- `memoryhub`
+- `MEMORYHUB_DB_PASS` -- from `memoryhub-pg-credentials` secret at registration time
+
+**Rebuilding after code changes (3 surfaces):**
+1. **MCP server** -- `bash memory-hub-mcp/deploy/build-context.sh && oc start-build memory-hub-mcp --from-dir=memory-hub-mcp/.build-context --follow --context mcp-rhoai -n memory-hub-mcp` then update deployment image digest
+2. **EvalHub adapter** -- create build context dir with `benchmarks/{amb-harness,evalhub-adapter}/` + `sdk/`, then `oc start-build memoryhub-evalhub-adapter --from-dir=<ctx> --follow --context mcp-rhoai -n memoryhub-eval`
+3. **Local harness** -- `cd benchmarks/amb-harness && uv run omb ...` (uses editable SDK)
+
 ## Deployment Reproducibility (IaC)
 
 Every change must be deployable from code without manual steps. When implementing a feature, verify that all of the following are captured in version-controlled code:
