@@ -31,7 +31,6 @@ class AMBAdapter(FrameworkAdapter):
       - parameters: {
             mode:            "library" | "dreaming"  (harness ingestion mode)
             answer_model:    model name override (optional, defaults to model.name)
-            k:               top-k for retrieval (optional)
             dataset:         dataset name (default "personamem")
             dataset_variant: split name (default "32k")
             pipeline_sha:    git SHA of the MemoryHub pipeline code
@@ -39,6 +38,13 @@ class AMBAdapter(FrameworkAdapter):
             memoryhub_url:   MemoryHub server URL (optional)
             memoryhub_api_key: MemoryHub API key (optional)
             disabled_signals: comma-separated signal names to disable (optional)
+            ingestion_mode:  "library" or "dreaming" (default: library)
+            project_id:      MemoryHub project ID (default: amb-benchmark)
+            focus_mode:      "persona" for 2-vector retrieval (optional)
+            return_chunks:   "true" to return chunks (optional)
+            k:               retrieval depth (optional)
+            extract_facts:   eager/background/off (optional)
+            tenant_id:       tenant ID override (optional)
             skip_ingestion:  if true, skip data ingestion (reuse existing data)
             query_limit:     max queries (optional, None = all)
             category:        category filter (optional)
@@ -54,7 +60,7 @@ class AMBAdapter(FrameworkAdapter):
         load_dotenv(override=True)
 
         from memory_bench.dataset import get_dataset
-        from memory_bench.llm import get_llm, get_answer_llm
+        from memory_bench.llm import get_answer_llm
         from memory_bench.memory import get_memory_provider
         from memory_bench.modes import get_mode
         from memory_bench.runner import EvalRunner
@@ -92,11 +98,23 @@ class AMBAdapter(FrameworkAdapter):
         if params.get("memoryhub_api_key"):
             os.environ["MEMORYHUB_API_KEY"] = params["memoryhub_api_key"]
 
-        # Wire disabled signals for ablation testing
-        if params.get("disabled_signals"):
-            os.environ["MEMORYHUB_DISABLED_SIGNALS"] = params["disabled_signals"]
-        elif "MEMORYHUB_DISABLED_SIGNALS" in os.environ:
-            del os.environ["MEMORYHUB_DISABLED_SIGNALS"]
+        # Wire harness configuration from job parameters
+        param_to_env = {
+            "disabled_signals": "MEMORYHUB_DISABLED_SIGNALS",
+            "project_id": "MEMORYHUB_PROJECT_ID",
+            "ingestion_mode": "MEMORYHUB_INGESTION_MODE",
+            "focus_mode": "MEMORYHUB_FOCUS_MODE",
+            "return_chunks": "MEMORYHUB_RETURN_CHUNKS",
+            "k": "MEMORYHUB_K",
+            "extract_facts": "MEMORYHUB_EXTRACT_FACTS",
+            "tenant_id": "MEMORYHUB_TENANT_ID",
+        }
+        for param_key, env_key in param_to_env.items():
+            val = params.get(param_key)
+            if val is not None:
+                os.environ[env_key] = str(val)
+            elif env_key in os.environ and param_key == "disabled_signals":
+                del os.environ[env_key]
 
         # Wire DB connection for memoryhub provider (params override env vars)
         for db_key in ("MEMORYHUB_DB_HOST", "MEMORYHUB_DB_PORT", "MEMORYHUB_DB_USER",
@@ -106,7 +124,7 @@ class AMBAdapter(FrameworkAdapter):
                 os.environ[db_key] = str(params[param_key])
 
         # -- Preflight: probe deployment and enforce expectations --------
-        from memoryhub_evalhub.preflight import run_preflight, enforce_manifest
+        from memoryhub_evalhub.preflight import enforce_manifest, run_preflight
 
         db_url = (
             f"postgresql://{os.environ.get('MEMORYHUB_DB_USER', 'memoryhub')}"
