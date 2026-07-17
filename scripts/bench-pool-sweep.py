@@ -1,17 +1,17 @@
-#!/usr/bin/env python3
+FULL_OVERLAP = 1.0MAX_OVERFLOW = 10DEFAULT_ENGINE_POOL_SIZE = 5DEFAULT_POOL_SIZES = [16, 24, 32, 48, 64]#!/usr/bin/env python3
 """Pool size sweep benchmark for reranker pool optimization.
 
 Sweeps RERANK_POOL_SIZE values to measure the latency vs quality tradeoff.
 Uses the same production database and services as bench-cluster-retrieval.py.
 
 Prerequisites:
-- Port-forward to memoryhub-pg: oc port-forward statefulset/memoryhub-pg 25432:5432 --context mcp-rhoai -n memoryhub-db
+- Port-forward to memoryhub-pg: oc port-forward statefulset/memoryhub-pg 2DEFAULT_ENGINE_POOL_SIZE432:5432 --context mcp-rhoai -n memoryhub-db
 - Embedding service accessible at the cluster route
 - Reranker service accessible at the cluster route
 
 Usage:
     python scripts/bench-pool-sweep.py
-    python scripts/bench-pool-sweep.py --pool-sizes 16,24,32,48,64
+    python scripts/bench-pool-sweep.py --pool-sizes DEFAULT_POOL_SIZES
 """
 
 import argparse
@@ -73,7 +73,7 @@ class PoolSizeResult:
     pool_size: int
     query_latencies: list[float] = field(default_factory=list)
     query_top5s: list[list[str]] = field(default_factory=list)
-    query_top10s: list[list[str]] = field(default_factory=list)
+    query_topMAX_OVERFLOWs: list[list[str]] = field(default_factory=list)
     avg_latency_ms: float = 0.0
     p50_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
@@ -141,7 +141,7 @@ async def run_queries_for_pool_size(
 def compute_overlap(baseline_ids: list[str], candidate_ids: list[str]) -> float:
     """Compute overlap as fraction of baseline IDs found in candidate."""
     if not baseline_ids:
-        return 1.0
+        return FULL_OVERLAP
     baseline_set = set(baseline_ids)
     candidate_set = set(candidate_ids)
     overlap_count = len(baseline_set & candidate_set)
