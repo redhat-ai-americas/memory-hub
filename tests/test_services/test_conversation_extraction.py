@@ -364,9 +364,13 @@ class TestExtractFromThread:
         ]
         msg_result = MagicMock()
         msg_result.scalars.return_value.all.return_value = messages
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
+
         session.execute.side_effect = [
             _mock_execute_result(thread),  # Thread query
             msg_result,  # Messages query
+            count_result,  # Existing memory count
         ]
 
         with patch("memoryhub_core.services.dreaming._extract_window") as mock_extract:
@@ -447,9 +451,12 @@ class TestExtractFromThread:
         ]
         msg_result = MagicMock()
         msg_result.scalars.return_value.all.return_value = messages
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
         session.execute.side_effect = [
             _mock_execute_result(thread),
             msg_result,
+            count_result,
         ]
 
         with patch("memoryhub_core.services.dreaming._extract_window") as mock_extract:
@@ -490,9 +497,12 @@ class TestExtractFromThread:
         messages = [_mock_message(1, "user", "test")]
         msg_result = MagicMock()
         msg_result.scalars.return_value.all.return_value = messages
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
         session.execute.side_effect = [
             _mock_execute_result(thread),
             msg_result,
+            count_result,
         ]
 
         with patch("memoryhub_core.services.dreaming._extract_window") as mock_extract:
@@ -545,9 +555,12 @@ class TestExtractFromThread:
         ]
         msg_result = MagicMock()
         msg_result.scalars.return_value.all.return_value = messages
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
         session.execute.side_effect = [
             _mock_execute_result(thread),
             msg_result,
+            count_result,
         ]
 
         with patch("memoryhub_core.services.dreaming._extract_window") as mock_extract:

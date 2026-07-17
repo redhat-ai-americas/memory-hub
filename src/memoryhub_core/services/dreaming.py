@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 import yaml
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.config import AppSettings
@@ -34,6 +34,7 @@ from memoryhub_core.models.conversation import (
     ConversationMessage,
     ConversationThread,
 )
+from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.services.reconciliation import (
     ExtractionCandidate,
     ReconciliationResult,
@@ -334,18 +335,22 @@ def _check_circuit_breaker(
     *,
     max_create_ratio: float = 20.0,
     min_decisions: int = 5,
+    has_existing_memories: bool = True,
 ) -> str | None:
     """Return a reason string if the circuit breaker trips, else None.
 
     Trips when the create:update ratio exceeds max_create_ratio after
-    at least min_decisions have been made.
+    at least min_decisions have been made. Skips the all-creates check
+    when has_existing_memories is False (initial population is expected
+    to produce only creates).
     """
     if len(decisions) < min_decisions:
         return None
     creates = sum(1 for d in decisions if d.action == "create")
     updates = sum(1 for d in decisions if d.action == "update")
+    skips = sum(1 for d in decisions if d.action == "skip")
 
-    if updates == 0 and creates >= min_decisions:
+    if updates == 0 and skips == 0 and creates >= min_decisions and has_existing_memories:
         return f"all creates ({creates}), zero updates (threshold {max_create_ratio}:1)"
     if updates > 0 and creates / updates > max_create_ratio:
         return f"create:update ratio {creates}:{updates} exceeds threshold {max_create_ratio}:1"
@@ -450,6 +455,16 @@ async def extract_from_thread(
     # Build windows
     windows = _compute_windows(messages, mode, settings.conv_extraction_window_size)
 
+    existing_count_result = await session.execute(
+        select(func.count()).select_from(MemoryNode).where(
+            MemoryNode.owner_id == thread.owner_id,
+            MemoryNode.tenant_id == thread.tenant_id,
+            MemoryNode.is_current.is_(True),
+            MemoryNode.deleted_at.is_(None),
+        )
+    )
+    has_existing_memories = existing_count_result.scalar_one() > 0
+
     total_extracted = 0
     total_failures = 0
     all_decisions: list[ReconciliationResult] = []
@@ -515,6 +530,7 @@ async def extract_from_thread(
                 all_decisions,
                 max_create_ratio=circuit_breaker_ratio,
                 min_decisions=circuit_breaker_min,
+                has_existing_memories=has_existing_memories,
             )
             if trip_reason is not None:
                 circuit_breaker_tripped = True
