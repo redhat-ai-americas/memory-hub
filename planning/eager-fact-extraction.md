@@ -30,6 +30,51 @@ Everything after candidate production — reconciliation, dedup,
 provenance, versioning, curation gates — is shared. If an implementation
 decision would fork the downstream, the decision is wrong.
 
+### Third trigger: session-close capture (added 2026-07-16, Wes)
+
+Eager extraction only sees content agents explicitly WRITE to MemoryHub.
+Most memorable session content — decisions made, corrections given,
+preferences revealed — is never written anywhere; it lives in the
+transcript and evaporates at `/exit`. Session-close capture is the
+missing ingestion trigger for the original dreaming pipeline: the
+conversation-persistence subsystem (#168) built thread storage and the
+windowed extractor exists, but nothing feeds interactive-agent
+transcripts into them. This does.
+
+| | Session-close capture |
+|---|---|
+| Trigger | harness session-end hook (Claude Code SessionEnd; harness-agnostic via CLI) |
+| Mechanism | hook runs `memoryhub capture-session <transcript-path>` — redaction gate, then transcript persisted as a thread; extraction ENQUEUED |
+| LLM | none at close (the session is ending — sampling has no live client). Default: the queue drains at the NEXT connected session via sampling ("session N's close enqueues; session N+1's connect dreams it"). Optional: server-side model where configured (cluster), or `memoryhub dream --model ...` (personal). |
+| Output | same fact candidates, same downstream — trigger three, pipeline one |
+
+Design requirements:
+
+1. **Opt-in, per project** (`.memoryhub.yaml`), never default-on.
+   Transcripts contain everything — secrets, third-party code, personal
+   context.
+2. **Redaction gate before the transcript leaves the machine:** run the
+   credential patterns (we maintain gitleaks rules; reuse them) over the
+   trace pre-persist. The 2026-07-14 credential incident is the
+   argument.
+3. **Retention choice:** `extract-and-discard` (facts kept, raw trace
+   dropped after extraction) vs `retain-thread` (full governed thread,
+   the original #168 design). Default extract-and-discard for personal;
+   retain-thread is the enterprise/audit posture.
+4. **Extraction cursor applies** (already in the conversation-extraction
+   schema): a session partially processed by eager extraction mid-flight
+   must not be re-extracted wholesale at close — cursor + reconciliation
+   absorb the overlap, but the cursor does the cheap half.
+5. **Harness-agnostic core:** the CLI is the contract; the Claude Code
+   SessionEnd hook is the first integration (`memoryhub config init`
+   already writes our SessionStart hook — this is its sibling). Other
+   harnesses wire their own end-of-session ritual to the same CLI.
+
+Consequence for sequencing: this raises the stakes on #347 again —
+session-close extraction over full traces will re-produce facts eager
+extraction already caught, making reconciliation the dedup backstop for
+THREE producers, not two.
+
 ## 2. Why (evidence)
 
 The 2026-07-15 sweep established that retrieval-unit granularity, not
