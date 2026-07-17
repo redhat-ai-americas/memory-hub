@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any, Callable, Awaitable
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from memoryhub_core.models.conversation import ConversationExtraction
 from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.models.reconciliation import (
     ReconciliationDecision as ReconciliationDecisionRow,
@@ -264,3 +266,151 @@ async def _log_decision(
         scope_id=scope_id,
     )
     session.add(row)
+
+
+# ---------------------------------------------------------------------------
+# Rollback
+# ---------------------------------------------------------------------------
+
+async def rollback_extraction_run(
+    extraction_run_id: str,
+    session: AsyncSession,
+) -> dict[str, Any]:
+    """Rollback all creates and updates from an extraction run.
+
+    For creates: soft-delete the created memory and its children.
+    For updates: soft-delete the new version and restore the prior version.
+    Skips decisions where post-run modifications have occurred.
+    """
+    stmt = (
+        select(ReconciliationDecisionRow)
+        .where(ReconciliationDecisionRow.extraction_run_id == extraction_run_id)
+        .order_by(ReconciliationDecisionRow.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    decisions = list(result.scalars().all())
+
+    if not decisions:
+        return {
+            "extraction_run_id": extraction_run_id,
+            "total_decisions": 0,
+            "rolled_back": {"creates": 0, "updates": 0, "skips": 0},
+            "skipped": {"post_run_modifications": 0, "already_deleted": 0},
+        }
+
+    now = datetime.now(UTC)
+    rolled_creates = 0
+    rolled_updates = 0
+    rolled_skips = 0
+    skipped_modified = 0
+    skipped_deleted = 0
+
+    for decision in decisions:
+        if decision.action == "skip":
+            rolled_skips += 1
+            continue
+
+        if decision.memory_id is None:
+            continue
+
+        memory = await session.get(MemoryNode, decision.memory_id)
+        if memory is None:
+            skipped_deleted += 1
+            continue
+
+        if memory.deleted_at is not None:
+            skipped_deleted += 1
+            continue
+
+        # Safety: check for post-run modifications (a newer version exists)
+        successor_stmt = select(MemoryNode.id).where(
+            MemoryNode.previous_version_id == decision.memory_id,
+        )
+        successor = await session.execute(successor_stmt)
+        if successor.scalar_one_or_none() is not None:
+            skipped_modified += 1
+            logger.warning(
+                "Skipping rollback of %s (action=%s): post-run modification exists",
+                decision.memory_id, decision.action,
+            )
+            continue
+
+        if decision.action == "create":
+            # Soft-delete the created memory and its children
+            memory.deleted_at = now
+            memory.is_current = False
+
+            children_stmt = select(MemoryNode).where(
+                MemoryNode.parent_id == decision.memory_id,
+                MemoryNode.deleted_at.is_(None),
+            )
+            children_result = await session.execute(children_stmt)
+            for child in children_result.scalars().all():
+                child.deleted_at = now
+                child.is_current = False
+
+            # Remove provenance records
+            await session.execute(
+                delete(ConversationExtraction).where(
+                    ConversationExtraction.memory_node_id == decision.memory_id,
+                )
+            )
+            rolled_creates += 1
+
+        elif decision.action == "update":
+            if decision.nearest_match_id is None:
+                skipped_modified += 1
+                continue
+
+            # Soft-delete the new version and its children
+            memory.deleted_at = now
+            memory.is_current = False
+
+            new_children_stmt = select(MemoryNode).where(
+                MemoryNode.parent_id == decision.memory_id,
+                MemoryNode.deleted_at.is_(None),
+            )
+            new_children_result = await session.execute(new_children_stmt)
+            for child in new_children_result.scalars().all():
+                child.deleted_at = now
+                child.is_current = False
+
+            # Restore the prior version
+            old_memory = await session.get(MemoryNode, decision.nearest_match_id)
+            if old_memory is not None:
+                old_memory.is_current = True
+                old_memory.expires_at = None
+
+                # Restore old version's children
+                old_children_stmt = select(MemoryNode).where(
+                    MemoryNode.parent_id == decision.nearest_match_id,
+                    MemoryNode.deleted_at.is_(None),
+                )
+                old_children_result = await session.execute(old_children_stmt)
+                for child in old_children_result.scalars().all():
+                    child.is_current = True
+                    child.expires_at = None
+
+            # Remove provenance records for the new version
+            await session.execute(
+                delete(ConversationExtraction).where(
+                    ConversationExtraction.memory_node_id == decision.memory_id,
+                )
+            )
+            rolled_updates += 1
+
+    await session.commit()
+
+    return {
+        "extraction_run_id": extraction_run_id,
+        "total_decisions": len(decisions),
+        "rolled_back": {
+            "creates": rolled_creates,
+            "updates": rolled_updates,
+            "skips": rolled_skips,
+        },
+        "skipped": {
+            "post_run_modifications": skipped_modified,
+            "already_deleted": skipped_deleted,
+        },
+    }
