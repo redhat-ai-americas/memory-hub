@@ -113,7 +113,7 @@ class AMBAdapter(FrameworkAdapter):
             val = params.get(param_key)
             if val is not None:
                 os.environ[env_key] = str(val)
-            elif env_key in os.environ and param_key == "disabled_signals":
+            elif env_key in os.environ:
                 del os.environ[env_key]
 
         # Wire DB connection for memoryhub provider (params override env vars)

@@ -1,5 +1,8 @@
-name: dreaming-smoke
-description: 20-query dreaming-mode smoke test to verify pipeline wiring
+name: dreaming-validate
+description: >
+  10-query pipeline validation run. Pro answerer against existing
+  amb-dreaming-tiny extracted memories (skip_ingestion). Validates the
+  end-to-end EvalHub machinery before committing to a full 589-query run.
 model:
   url: https://generativelanguage.googleapis.com
   name: gemini-3.1-pro-preview
@@ -13,10 +16,11 @@ benchmarks:
       dataset_variant: "32k"
       memory_provider: memoryhub
       ingestion_mode: dreaming
-      project_id: amb-granite-pro-dreaming-smoke
+      project_id: amb-dreaming-tiny
       disabled_signals: domain,graph
       focus_mode: persona
       k: 10
-      query_limit: 20
+      query_limit: 10
+      skip_ingestion: true
 experiment:
-  name: memoryhub/personamem-mcq/32k/dreaming-smoke
+  name: memoryhub/personamem-mcq/32k/dreaming-validate

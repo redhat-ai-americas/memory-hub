@@ -2,7 +2,7 @@ name: dreaming-tiny
 description: 5-query micro-test for rapid iteration on dreaming pipeline
 model:
   url: https://generativelanguage.googleapis.com
-  name: gemini-3.1-flash-lite
+  name: gemini-3.1-pro-preview
   auth:
     secret_ref: gemini-api-key
 benchmarks:
@@ -16,7 +16,6 @@ benchmarks:
       project_id: amb-dreaming-tiny
       disabled_signals: domain,graph
       focus_mode: persona
-      return_chunks: "true"
       k: 10
       query_limit: 5
 experiment:

@@ -19,7 +19,6 @@ benchmarks:
       project_id: amb-granite-pro-dreaming
       disabled_signals: domain,graph
       focus_mode: persona
-      return_chunks: "true"
       k: 10
       query_limit: 589
 experiment:
