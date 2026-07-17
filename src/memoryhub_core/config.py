@@ -80,6 +80,7 @@ class AppSettings(BaseSettings):
     # Dreaming pipeline (#168 Phase 3)
     conv_extraction_model: str = ""
     conv_extraction_model_url: str = ""
+    conv_extraction_api_key: str = ""
     conv_extraction_window_size: int = 4
     conv_extraction_timeout: int = 60
 

@@ -152,6 +152,7 @@ async def _dispatch_create(scope, opts, ctx):
     from memoryhub_core.models.schemas import ConversationThreadCreate
     from memoryhub_core.services.conversation import create_thread
     from src.core.authz import (
+        PROJECT_ISOLATION_ENABLED,
         AuthenticationError,
         authorize_write,
         get_claims_from_context,
@@ -169,7 +170,23 @@ async def _dispatch_create(scope, opts, ctx):
     tenant = get_tenant_filter(claims)
     caller_id = claims["sub"]
 
-    if not authorize_write(claims, scope, owner_id=caller_id, tenant_id=tenant):
+    project_ids: set[str] | None = None
+    scope_id_value = opts.get("scope_id")
+    if scope == "project" and PROJECT_ISOLATION_ENABLED and scope_id_value:
+        from src.tools.write_memory import ensure_project_membership
+        session_proj, gen_proj = await get_db_session()
+        try:
+            project_ids, _ = await ensure_project_membership(
+                session_proj, scope_id_value, caller_id, tenant,
+            )
+            await session_proj.commit()
+        finally:
+            await release_db_session(gen_proj)
+
+    if not authorize_write(
+        claims, scope, owner_id=caller_id, tenant_id=tenant,
+        project_ids=project_ids, scope_id=scope_id_value,
+    ):
         raise ToolError(f"Not authorized to create threads in scope '{scope}'.")
 
     create_opts = _forward(opts, _CREATE_OPTS)

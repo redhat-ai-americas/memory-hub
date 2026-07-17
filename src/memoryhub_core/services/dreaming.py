@@ -146,7 +146,7 @@ async def _call_extraction_llm(
     for attempt in range(_MAX_RETRIES):
         try:
             response = await client.post(
-                f"{url.rstrip('/')}/v1/chat/completions",
+                f"{url.rstrip('/')}/chat/completions",
                 json={
                     "model": model,
                     "messages": messages,
@@ -457,8 +457,12 @@ async def extract_from_thread(
     circuit_breaker_reason: str | None = None
     windows_completed = 0
 
+    headers = {}
+    if settings.conv_extraction_api_key:
+        headers["Authorization"] = f"Bearer {settings.conv_extraction_api_key}"
+
     async with httpx.AsyncClient(
-        timeout=settings.conv_extraction_timeout, verify=False,
+        timeout=settings.conv_extraction_timeout, verify=False, headers=headers,
     ) as client:
         for window in windows:
             window_start = window[0].sequence_number
