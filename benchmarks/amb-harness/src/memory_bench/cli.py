@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
-load_dotenv(dotenv_path=Path(__file__).parents[2] / ".env", override=True)
+load_dotenv(dotenv_path=Path(__file__).parents[2] / ".env", override=False)
 
 from .dataset import REGISTRY as DATASET_REGISTRY, get_dataset
 from .llm import REGISTRY as LLM_REGISTRY, get_llm, get_answer_llm
