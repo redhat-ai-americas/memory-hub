@@ -41,6 +41,7 @@ class Memory(BaseModel):
     result_type: str | None = None  # "full" or "stub"
     is_appendix: bool | None = None  # True when result is cache-stable appendix (#175)
     content_type: str | None = None  # "declarative" or "behavioral"
+    source: str = "agent"  # "agent", "dreaming", or "import"
     content_truncated: bool = False
     full_available: bool = False
 
