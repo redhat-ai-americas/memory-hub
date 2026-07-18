@@ -76,6 +76,9 @@ class MemoryHubProvider(MemoryProvider):
         self._ingestion_mode: str = "library"
         self._extraction_model: str | None = None
         self._extraction_model_url: str | None = None
+        self._retrieval_unit: str | None = None
+        self._source_filter: str | None = None
+        self._exclude_source: str | None = None
 
     def prepare(self, store_dir: Path, unit_ids: set[str] | None = None, reset: bool = True) -> None:
         self._url = os.environ.get("MEMORYHUB_URL")
@@ -114,13 +117,18 @@ class MemoryHubProvider(MemoryProvider):
         self._extract_facts = raw_extract if raw_extract in ("eager", "background", "off") else None
 
         raw_mode = os.environ.get("MEMORYHUB_INGESTION_MODE", "library").strip().lower()
-        if raw_mode not in ("library", "dreaming"):
+        if raw_mode not in ("library", "dreaming", "combined"):
             raise RuntimeError(
-                f"MEMORYHUB_INGESTION_MODE must be 'library' or 'dreaming', got '{raw_mode}'"
+                f"MEMORYHUB_INGESTION_MODE must be 'library', 'dreaming', or 'combined', got '{raw_mode}'"
             )
         self._ingestion_mode = raw_mode
         self._extraction_model = os.environ.get("MEMORYHUB_EXTRACTION_MODEL", "").strip() or None
         self._extraction_model_url = os.environ.get("MEMORYHUB_EXTRACTION_MODEL_URL", "").strip() or None
+
+        raw_ru = os.environ.get("MEMORYHUB_RETRIEVAL_UNIT", "").strip().lower()
+        self._retrieval_unit = raw_ru if raw_ru in ("facts", "chunks", "parents", "auto") else None
+        self._source_filter = os.environ.get("MEMORYHUB_SOURCE", "").strip() or None
+        self._exclude_source = os.environ.get("MEMORYHUB_EXCLUDE_SOURCE", "").strip() or None
 
         self._doc_to_memory_id.clear()
         self._memory_to_doc_id.clear()
@@ -136,6 +144,8 @@ class MemoryHubProvider(MemoryProvider):
 
         if self._ingestion_mode == "dreaming":
             await self._run_dreaming_ingest(documents)
+        elif self._ingestion_mode == "combined":
+            await self._run_combined_ingest(documents)
         else:
             await self._run_library_ingest(documents)
 
@@ -268,6 +278,14 @@ class MemoryHubProvider(MemoryProvider):
             total_personas, total_sessions, total_extractions, total_failures,
         )
 
+    async def _run_combined_ingest(self, documents: list[Document]) -> None:
+        """Combined mode: library ingest first, then dreaming extraction on top."""
+        logger.info("Combined mode: starting library ingest phase")
+        await self._run_library_ingest(documents)
+        logger.info("Combined mode: starting dreaming extraction phase")
+        await self._run_dreaming_ingest(documents)
+        logger.info("Combined mode: both phases complete")
+
     async def _reset_benchmark_data(self) -> None:
         """Delete previous benchmark data via raw SQL (test scaffolding)."""
         engine = create_async_engine(self._db_url, pool_size=2)
@@ -353,6 +371,12 @@ class MemoryHubProvider(MemoryProvider):
             if self._return_chunks:
                 search_kwargs["return_chunks"] = True
                 search_kwargs["raw_results"] = True
+            if self._retrieval_unit:
+                search_kwargs["retrieval_unit"] = self._retrieval_unit
+            if self._source_filter:
+                search_kwargs["source"] = self._source_filter
+            if self._exclude_source:
+                search_kwargs["exclude_source"] = self._exclude_source
             results = await client.search(**search_kwargs)
 
         documents = []
