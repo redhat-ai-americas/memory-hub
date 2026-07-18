@@ -187,6 +187,7 @@ async def create_memory(
         metadata_=node_metadata,
         domains=data.domains,
         content_type=data.content_type,
+        source=data.source or "agent",
         relevant_until=data.relevant_until,
         embedding=embedding,
         is_current=True,
@@ -773,6 +774,8 @@ def _build_search_filters(
     content_type: str | None = None,
     temporal_status: str | None = None,
     include_statuses: list[str] | None = None,
+    source: str | None = None,
+    exclude_source: str | None = None,
 ) -> list | None:
     """Build the SQL filter list shared by search_memories and count_search_matches.
 
@@ -897,6 +900,11 @@ def _build_search_filters(
     if content_type is not None:
         filters.append(MemoryNode.content_type == content_type)
 
+    if source is not None:
+        filters.append(MemoryNode.source == source)
+    if exclude_source is not None:
+        filters.append(MemoryNode.source != exclude_source)
+
     # Temporal status filter: restrict results by relevant_until semantics.
     if temporal_status is not None and temporal_status != "all":
         now_expr = func.now()
@@ -942,6 +950,8 @@ async def count_search_matches(
     entity_names: list[str] | None = None,
     content_type: str | None = None,
     temporal_status: str | None = None,
+    source: str | None = None,
+    exclude_source: str | None = None,
 ) -> int:
     """Count memories matching the same filter set used by search_memories.
 
@@ -962,6 +972,8 @@ async def count_search_matches(
         entity_names=entity_names,
         content_type=content_type,
         temporal_status=temporal_status,
+        source=source,
+        exclude_source=exclude_source,
     )
     if filters is None:
         return 0
@@ -1047,6 +1059,8 @@ async def search_memories(
     reranker: RerankerService | None = None,
     return_chunks: bool = False,
     retrieval_unit: str | None = None,
+    source: str | None = None,
+    exclude_source: str | None = None,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity with optional keyword recall.
 
@@ -1087,6 +1101,8 @@ async def search_memories(
         entity_names=entity_names,
         content_type=content_type,
         temporal_status=temporal_status,
+        source=source,
+        exclude_source=exclude_source,
     )
     if filters is None:
         return []
@@ -1140,7 +1156,9 @@ async def search_memories(
                     scope=node.scope, weight=node.weight,
                     branch_type=node.branch_type, has_children=has_children,
                     has_rationale=has_rationale,
-                    content_type=node.content_type, created_at=node.created_at,
+                    content_type=node.content_type,
+                    source=getattr(node, 'source', 'agent'),
+                    created_at=node.created_at,
                 ), score))
         return results
 
@@ -1255,7 +1273,9 @@ async def search_memories(
                 scope=node.scope, weight=node.weight,
                 branch_type=node.branch_type, has_children=has_children,
                 has_rationale=has_rationale,
-                content_type=node.content_type, created_at=node.created_at,
+                content_type=node.content_type,
+                source=getattr(node, 'source', 'agent'),
+                created_at=node.created_at,
             ), rrf_score))
     used_reranker = (
         reranker is not None
@@ -1435,6 +1455,8 @@ async def search_memories_with_focus(
     disabled_signals: set[str] | None = None,
     return_chunks: bool = False,
     retrieval_unit: str | None = None,
+    source: str | None = None,
+    exclude_source: str | None = None,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -1488,6 +1510,8 @@ async def search_memories_with_focus(
             reranker=reranker,
             return_chunks=return_chunks,
             retrieval_unit=retrieval_unit,
+            source=source,
+            exclude_source=exclude_source,
         )
         return FocusedSearchResult(results=plain)
 
@@ -1511,6 +1535,8 @@ async def search_memories_with_focus(
         entity_names=entity_names,
         content_type=content_type,
         temporal_status=temporal_status,
+        source=source,
+        exclude_source=exclude_source,
     )
     if filters is None:
         return FocusedSearchResult(
@@ -1850,6 +1876,7 @@ async def search_memories_with_focus(
                         has_children=has_children,
                         has_rationale=has_rationale,
                         content_type=node.content_type,
+                        source=getattr(node, 'source', 'agent'),
                         created_at=node.created_at,
                     ),
                     relevance_score,
@@ -2205,6 +2232,7 @@ def node_to_read(
         tenant_id=node.tenant_id,
         domains=node.domains,
         content_type=node.content_type,
+        source=getattr(node, 'source', 'agent'),
         content_hash=getattr(node, 'content_hash', None),
         is_current=node.is_current,
         version=node.version,

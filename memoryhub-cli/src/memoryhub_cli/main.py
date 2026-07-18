@@ -297,6 +297,12 @@ def search(
     content_type: str | None = typer.Option(
         None, "--content-type", help="Filter by content type: declarative or behavioral",
     ),
+    source: str | None = typer.Option(
+        None, "--source", help="Filter by source: agent, dreaming, import",
+    ),
+    exclude_source: str | None = typer.Option(
+        None, "--exclude-source", help="Exclude memories from a source (e.g. dreaming)",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o",
         help="Output format: table, json, quiet, compact",
@@ -312,6 +318,7 @@ def search(
                 query, scope=scope, max_results=max_results,
                 project_id=_project_id, domains=domains or None,
                 content_type=content_type,
+                source=source, exclude_source=exclude_source,
             )
 
     result = _run_command(_do(), output)

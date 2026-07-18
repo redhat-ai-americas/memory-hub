@@ -82,6 +82,7 @@ class MemoryNodeCreate(BaseModel):
         default=None, description="Crosscutting knowledge domain tags (e.g., 'React', 'Spring Boot')"
     )
     content_type: ContentType = Field(default=ContentType.EXPERIENTIAL, description="Memory classification type")
+    source: str | None = Field(default=None, description="Memory source: agent, dreaming, import")
     relevant_until: datetime | None = Field(
         default=None,
         description="Semantic expiry timestamp. NULL means evergreen or version-bound.",
@@ -140,6 +141,7 @@ class MemoryNodeRead(BaseModel):
     scope_id: str | None = None
     domains: list[str] | None = None
     content_type: ContentType = ContentType.EXPERIENTIAL
+    source: str = Field(default="agent", description="What produced this memory")
     content_hash: str | None = None
     is_current: bool
     version: int
@@ -177,6 +179,7 @@ class MemoryNodeStub(BaseModel):
     has_rationale: bool = False
     domains: list[str] | None = None
     content_type: ContentType | None = None
+    source: str = Field(default="agent", description="What produced this memory")
     created_at: datetime | None = None  # needed for cache-optimized sort ordering (#175)
     content_truncated: bool = True
     full_available: bool = True
