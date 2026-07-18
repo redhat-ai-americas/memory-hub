@@ -84,6 +84,9 @@ class MemoryNode(TimestampMixin, Base):
         String(20), nullable=False, server_default="active",
     )
 
+    # Provenance: what produced this memory (#349)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, server_default="agent")
+
     # Content-addressed entity IDs for deduplication (#247)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -167,6 +170,7 @@ class MemoryNode(TimestampMixin, Base):
         Index("ix_memory_nodes_scope_id", "scope_id"),
         Index("ix_memory_nodes_domains", "domains", postgresql_using="gin"),
         Index("ix_memory_nodes_search_vector", "search_vector", postgresql_using="gin"),
+        Index("ix_memory_nodes_source", "source"),
         Index(
             "ix_memory_nodes_expires_at",
             "expires_at",

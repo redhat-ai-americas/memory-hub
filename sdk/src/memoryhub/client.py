@@ -487,6 +487,8 @@ class MemoryHubClient:
         content_mode: Literal["stub", "full"] | None = None,
         return_chunks: bool = False,
         retrieval_unit: str | None = None,
+        source: str | None = None,
+        exclude_source: str | None = None,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -587,6 +589,10 @@ class MemoryHubClient:
             opts["return_chunks"] = True
         if retrieval_unit is not None:
             opts["retrieval_unit"] = retrieval_unit
+        if source is not None:
+            opts["source"] = source
+        if exclude_source is not None:
+            opts["exclude_source"] = exclude_source
 
         data = await self._call_action(
             "search",

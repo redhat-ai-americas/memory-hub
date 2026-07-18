@@ -166,6 +166,7 @@ async def reconcile_candidate(
                 metadata=candidate.metadata,
                 domains=candidate.domains,
                 content_type=candidate.content_type,
+                source="dreaming",
             )
             if actor_id:
                 data.actor_id = actor_id

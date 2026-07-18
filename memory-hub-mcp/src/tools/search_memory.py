@@ -697,6 +697,26 @@ async def search_memory(
             ),
         ),
     ] = None,
+    source: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Filter by memory source. 'agent' for agent-written memories, "
+                "'dreaming' for memories extracted by the dreaming pipeline, "
+                "'import' for bulk-imported memories. Omit to include all sources."
+            ),
+        ),
+    ] = None,
+    exclude_source: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Exclude memories from a specific source. Useful for ablation "
+                "testing: exclude_source='dreaming' reproduces the library-only "
+                "baseline by filtering out extracted memories."
+            ),
+        ),
+    ] = None,
     temporal_status: Annotated[
         str | None,
         Field(
@@ -947,6 +967,8 @@ async def search_memory(
                 disabled_signals=set(disabled_signals) if disabled_signals else None,
                 return_chunks=return_chunks,
                 retrieval_unit=retrieval_unit,
+                source=source,
+                exclude_source=exclude_source,
             )
             graph_bundle = bundle
             results = bundle.results
@@ -984,6 +1006,8 @@ async def search_memory(
                 reranker=reranker,
                 return_chunks=return_chunks,
                 retrieval_unit=retrieval_unit,
+                source=source,
+                exclude_source=exclude_source,
             )
 
             # Pattern detection on the non-focus path: embed the query
