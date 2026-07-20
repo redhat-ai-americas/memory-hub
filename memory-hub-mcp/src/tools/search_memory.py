@@ -142,6 +142,7 @@ def _compact_entry(
         entry["content"] = item.stub
     entry["content_truncated"] = item.content_truncated
     entry["full_available"] = item.full_available
+    entry["source"] = getattr(item, "source", "agent")
     if relevance_score is not None:
         entry["relevance_score"] = round(relevance_score, 4)
     return entry
