@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: reranker-model
+resources:
+  - deployment.yaml
+  - service.yaml
+  - route.yaml
+  - pvc.yaml

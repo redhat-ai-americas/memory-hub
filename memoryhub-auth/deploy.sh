@@ -48,6 +48,8 @@ else
     fi
 fi
 echo "  OAuth authorize: $OAUTH_AUTHORIZE_URL"
+# Resolve the apps domain for constructing redirect URIs
+APPS_DOMAIN=$(oc get ingress.config.openshift.io cluster --context "$CONTEXT" -o jsonpath='{.spec.domain}' 2>/dev/null || echo "")
 # AUTH_ISSUER_URL — try to resolve now (Route may already exist from a
 # previous deploy).  If not, it's resolved after the first apply creates
 # the Route, and the re-apply after the build embeds the real value.
@@ -120,7 +122,13 @@ if oc auth can-i --context "$CONTEXT" create oauthclients 2>/dev/null; then
         # Replace the placeholder secret with the actual value from the K8s Secret.
         OAUTH_SECRET_VALUE=$(oc get secret --context "$CONTEXT" openshift-oauth-client-secret -n "$PROJECT" \
             -o jsonpath='{.data.AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET}' | base64 -d)
-        sed "s|secret: PLACEHOLDER-SEE-COMMENTS-ABOVE|secret: $OAUTH_SECRET_VALUE|" \
+        # Resolve redirect URI for OAuthClient
+        if [ "$AUTH_ISSUER_URL" != "__AUTH_ISSUER__" ]; then
+            REDIRECT_URI="${AUTH_ISSUER_URL}/oauth/openshift/callback"
+        else
+            REDIRECT_URI="https://auth-server-${PROJECT}.${APPS_DOMAIN}/oauth/openshift/callback"
+        fi
+        sed "s|secret: PLACEHOLDER-SEE-COMMENTS-ABOVE|secret: $OAUTH_SECRET_VALUE|; s|__REDIRECT_URI__|$REDIRECT_URI|" \
             deploy/oauthclient.yaml | oc apply --context "$CONTEXT" -f - 2>&1
         echo "  OAuthClient CR applied."
     else

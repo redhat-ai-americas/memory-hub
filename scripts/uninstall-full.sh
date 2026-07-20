@@ -12,7 +12,7 @@
 # also reads from the DB namespace, so credentials stay in sync even without
 # deploy-full.sh.
 #
-# Usage: scripts/uninstall-full.sh [--yes] [--skip-db] [--skip-tile] [--no-backup]
+# Usage: scripts/uninstall-full.sh [--yes] [--skip-db] [--skip-tile] [--skip-models] [--no-backup]
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
@@ -23,10 +23,13 @@ MCP_PROJECT="memory-hub-mcp"
 AUTH_PROJECT="memoryhub-auth"
 UI_NAMESPACE="memoryhub-ui"
 RHOAI_NAMESPACE="redhat-ods-applications"
+EMBEDDING_MODEL_NAMESPACE="embedding-model"
+RERANKER_MODEL_NAMESPACE="reranker-model"
 
 YES=false
 SKIP_DB=false
 SKIP_TILE=false
+SKIP_MODELS=false
 NO_BACKUP=false
 
 START_TIME=$(date +%s)
@@ -75,14 +78,16 @@ parse_args() {
             --yes)        YES=true ;;
             --skip-db)    SKIP_DB=true ;;
             --skip-tile)  SKIP_TILE=true ;;
+            --skip-models) SKIP_MODELS=true ;;
             --no-backup)  NO_BACKUP=true ;;
             -h|--help)
-                echo "Usage: $SCRIPT_NAME [--yes] [--skip-db] [--skip-tile] [--no-backup]"
+                echo "Usage: $SCRIPT_NAME [--yes] [--skip-db] [--skip-tile] [--skip-models] [--no-backup]"
                 echo ""
-                echo "  --yes         Skip all confirmation prompts (non-interactive / CI mode)"
-                echo "  --skip-db     Preserve the database namespace and its PVC (no memory loss)"
-                echo "  --skip-tile   Leave RHOAI tile artifacts in redhat-ods-applications"
-                echo "  --no-backup   Skip automatic pre-uninstall database backup"
+                echo "  --yes           Skip all confirmation prompts (non-interactive / CI mode)"
+                echo "  --skip-db       Preserve the database namespace and its PVC (no memory loss)"
+                echo "  --skip-tile     Leave RHOAI tile artifacts in redhat-ods-applications"
+                echo "  --skip-models   Preserve embedding + reranker model namespaces"
+                echo "  --no-backup     Skip automatic pre-uninstall database backup"
                 exit 0
                 ;;
             *)
@@ -132,6 +137,12 @@ confirm() {
     echo "      - BuildConfig/memoryhub-ui"
     echo "      - ServiceAccount/memoryhub-ui"
     echo "    Namespace: $MCP_PROJECT  (MCP server + MinIO + Valkey)"
+    if [ "$SKIP_MODELS" = true ]; then
+        echo "    Models: PRESERVED  (--skip-models)"
+    else
+        echo "    Namespace: $EMBEDDING_MODEL_NAMESPACE  (Embedding model)"
+        echo "    Namespace: $RERANKER_MODEL_NAMESPACE  (Reranker model)"
+    fi
     echo "    Namespace: $AUTH_PROJECT  (Auth server)"
     if [ "$SKIP_DB" = true ]; then
         echo "    Database: PRESERVED  (--skip-db)"
@@ -311,6 +322,30 @@ remove_mcp_namespace() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 4b: Model namespaces
+# ---------------------------------------------------------------------------
+remove_model_namespaces() {
+    banner "4b. Model Namespaces"
+
+    if [ "$SKIP_MODELS" = true ]; then
+        skipped "Model namespaces (--skip-models)"
+        return 0
+    fi
+
+    for ns in "$EMBEDDING_MODEL_NAMESPACE" "$RERANKER_MODEL_NAMESPACE"; do
+        if oc get namespace --context "$CONTEXT" "$ns" &>/dev/null; then
+            info "Deleting namespace $ns (--wait=false)..."
+            oc delete namespace --context "$CONTEXT" "$ns" --ignore-not-found --wait=false
+        else
+            info "Namespace $ns does not exist -- skipping"
+        fi
+    done
+
+    echo ""
+    echo -e "  ${GREEN}Model namespaces deletion initiated${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # Step 5: Auth namespace
 # ---------------------------------------------------------------------------
 remove_auth_namespace() {
@@ -367,6 +402,12 @@ summary() {
     echo "    ${GREEN}✓${RESET} Namespace $UI_NAMESPACE"
     echo "    ${GREEN}✓${RESET} Legacy UI artifacts in $MCP_PROJECT"
     echo "    ${GREEN}✓${RESET} Namespace $MCP_PROJECT"
+    if [ "$SKIP_MODELS" = false ]; then
+        echo "    ${GREEN}✓${RESET} Namespace $EMBEDDING_MODEL_NAMESPACE"
+        echo "    ${GREEN}✓${RESET} Namespace $RERANKER_MODEL_NAMESPACE"
+    else
+        echo "    ${YELLOW}-${RESET} Model namespaces (skipped)"
+    fi
     echo "    ${GREEN}✓${RESET} Namespace $AUTH_PROJECT"
     if [ "$SKIP_DB" = false ]; then
         echo "    ${GREEN}✓${RESET} Namespace $DB_NAMESPACE (data deleted)"
@@ -398,6 +439,7 @@ main() {
     remove_ui_namespace
     remove_legacy_ui
     remove_mcp_namespace
+    remove_model_namespaces
     remove_auth_namespace
     remove_db_namespace
     summary

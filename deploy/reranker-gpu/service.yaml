@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: all-minilm-l6-v2
-  namespace: embedding-model
+  name: granite-reranker
+  namespace: reranker-model
 spec:
   selector:
-    app: all-minilm-l6-v2
+    app: granite-reranker
   ports:
     - port: 80
       targetPort: 8080

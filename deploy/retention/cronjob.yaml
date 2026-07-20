@@ -5,7 +5,7 @@
 # Phase 1: Soft-delete threads where expires_at <= now() and status='active'
 # Phase 2: Hard-delete threads past min_retention_days (respects legal_hold)
 #
-# Deploy: oc apply -f deploy/retention/cronjob.yaml -n memoryhub
+# Deploy: oc apply -f deploy/retention/cronjob.yaml -n memory-hub-mcp
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -28,7 +28,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: retention-sweep
-              image: image-registry.openshift-image-registry.svc:5000/memoryhub/memoryhub-core:latest
+              image: image-registry.openshift-image-registry.svc:5000/memory-hub-mcp/memory-hub-mcp:latest
               command:
                 - python
                 - -m
@@ -38,42 +38,39 @@ spec:
                   valueFrom:
                     secretKeyRef:
                       name: memoryhub-db-credentials
-                      key: host
+                      key: MEMORYHUB_DB_HOST
                 - name: MEMORYHUB_DB_PORT
                   valueFrom:
                     secretKeyRef:
                       name: memoryhub-db-credentials
-                      key: port
+                      key: MEMORYHUB_DB_PORT
                 - name: MEMORYHUB_DB_NAME
                   valueFrom:
                     secretKeyRef:
                       name: memoryhub-db-credentials
-                      key: database
+                      key: MEMORYHUB_DB_NAME
                 - name: MEMORYHUB_DB_USER
                   valueFrom:
                     secretKeyRef:
                       name: memoryhub-db-credentials
-                      key: username
+                      key: MEMORYHUB_DB_USER
                 - name: MEMORYHUB_DB_PASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: memoryhub-db-credentials
-                      key: password
+                      key: MEMORYHUB_DB_PASSWORD
                 - name: MEMORYHUB_S3_ENDPOINT
-                  valueFrom:
-                    secretKeyRef:
-                      name: memoryhub-s3-credentials
-                      key: endpoint
+                  value: "memoryhub-minio:9000"
                 - name: MEMORYHUB_S3_ACCESS_KEY
                   valueFrom:
                     secretKeyRef:
-                      name: memoryhub-s3-credentials
-                      key: access-key
+                      name: memoryhub-minio-credentials
+                      key: MINIO_ROOT_USER
                 - name: MEMORYHUB_S3_SECRET_KEY
                   valueFrom:
                     secretKeyRef:
-                      name: memoryhub-s3-credentials
-                      key: secret-key
+                      name: memoryhub-minio-credentials
+                      key: MINIO_ROOT_PASSWORD
                 - name: MEMORYHUB_S3_BUCKET
                   value: memoryhub
                 - name: MEMORYHUB_S3_SECURE

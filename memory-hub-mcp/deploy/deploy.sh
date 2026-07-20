@@ -27,6 +27,16 @@ CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Auth URLs are resolved at deploy time and substituted into the manifest
+# (same pattern as memoryhub-auth/deploy.sh).
+AUTH_JWKS_URI=""
+AUTH_ISSUER=""
+
+apply_manifest() {
+    sed "s|__AUTH_JWKS_URI__|${AUTH_JWKS_URI}|g; s|__AUTH_ISSUER__|${AUTH_ISSUER}|g" \
+        "$SCRIPT_DIR/openshift.yaml" | oc apply --context "$CONTEXT" -f - -n "$NAMESPACE"
+}
+
 echo "=== MemoryHub MCP Server Deployment ==="
 echo "Namespace:  $NAMESPACE"
 echo "Deployment: $DEPLOYMENT"
@@ -145,6 +155,21 @@ fi
 # Apply configmap first — the Deployment mounts it as a volume.
 oc apply --context "$CONTEXT" -f "$USERS_CM" -n "$NAMESPACE"
 
+# Resolve auth service URLs for JWT verification.
+echo ""
+echo "Resolving auth service URLs..."
+AUTH_ROUTE_HOST=$(oc get route auth-server --context "$CONTEXT" -n memoryhub-auth -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+if [ -n "$AUTH_ROUTE_HOST" ]; then
+    AUTH_JWKS_URI="https://${AUTH_ROUTE_HOST}/.well-known/jwks.json"
+    AUTH_ISSUER="https://${AUTH_ROUTE_HOST}"
+    echo "  AUTH_JWKS_URI=$AUTH_JWKS_URI"
+    echo "  AUTH_ISSUER=$AUTH_ISSUER"
+else
+    echo "WARNING: auth-server Route not found in memoryhub-auth namespace."
+    echo "  JWT verification will not work until auth is deployed and MCP is re-deployed."
+    echo "  Run: scripts/deploy-full.sh (deploys auth before MCP)"
+fi
+
 # Create the memoryhub-db-credentials Secret from the DB namespace's source of
 # truth. This replaces the old pattern of baking a placeholder password into
 # openshift.yaml and patching it post-deploy (#192).
@@ -162,17 +187,42 @@ fi
 DB_PASSWORD=$(oc get secret --context "$CONTEXT" "$DB_SRC_SECRET" -n "$DB_SRC_NAMESPACE" \
     -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
 
+echo ""
+echo "Resolving embedding and reranker service URLs..."
+EMBEDDING_SVC=$(oc get svc --context "$CONTEXT" -n embedding-model -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+RERANKER_SVC=$(oc get svc --context "$CONTEXT" -n reranker-model -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+EMBEDDING_ARGS=""
+RERANKER_ARGS=""
+
+if [ -n "$EMBEDDING_SVC" ]; then
+    EMBEDDING_URL="http://${EMBEDDING_SVC}.embedding-model.svc.cluster.local:80/embed"
+    EMBEDDING_ARGS="--from-literal=MEMORYHUB_EMBEDDING_URL=$EMBEDDING_URL"
+    echo "  Embedding: $EMBEDDING_URL"
+else
+    echo "  WARNING: No embedding service found in embedding-model namespace."
+    echo "  Search will use mock embeddings (hash-based, not semantic)."
+fi
+
+if [ -n "$RERANKER_SVC" ]; then
+    RERANKER_URL="http://${RERANKER_SVC}.reranker-model.svc.cluster.local:80"
+    RERANKER_ARGS="--from-literal=MEMORYHUB_RERANKER_URL=$RERANKER_URL"
+    echo "  Reranker: $RERANKER_URL"
+else
+    echo "  Reranker not found -- will use cosine-only ranking (still functional)."
+fi
+
 oc create secret generic memoryhub-db-credentials \
     --from-literal=MEMORYHUB_DB_HOST=memoryhub-pg.memoryhub-db.svc.cluster.local \
     --from-literal=MEMORYHUB_DB_PORT=5432 \
     --from-literal=MEMORYHUB_DB_NAME=memoryhub \
     --from-literal=MEMORYHUB_DB_USER=memoryhub \
     --from-literal=MEMORYHUB_DB_PASSWORD="$DB_PASSWORD" \
-    --from-literal=MEMORYHUB_EMBEDDING_URL=https://granite-embedding-embedding-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/embed \
-    --from-literal=MEMORYHUB_RERANKER_URL=https://granite-reranker-reranker-model.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com \
+    $EMBEDDING_ARGS \
+    $RERANKER_ARGS \
     --dry-run=client -o json | oc apply --context "$CONTEXT" -f - -n "$NAMESPACE"
 echo "OK: memoryhub-db-credentials Secret created/updated in $NAMESPACE"
-oc apply --context "$CONTEXT" -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
+apply_manifest
 
 # Step 4: Start binary build
 echo ""
@@ -194,7 +244,7 @@ oc start-build --context "$CONTEXT" "$DEPLOYMENT" --from-dir="$BUILD_DIR" -n "$N
 # failure family) — the fix is documented in the wave1-4-mcp-fixes retro.
 echo ""
 echo "Re-applying manifest to re-resolve image digest..."
-oc apply --context "$CONTEXT" -f "$SCRIPT_DIR/openshift.yaml" -n "$NAMESPACE"
+apply_manifest
 
 # Step 5: Force rollout restart so the new image digest is picked up
 echo ""

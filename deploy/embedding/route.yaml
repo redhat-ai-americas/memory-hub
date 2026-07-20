@@ -1,14 +1,12 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: granite-embedding
+  name: all-minilm-l6-v2
   namespace: embedding-model
-  annotations:
-    haproxy.router.openshift.io/timeout: 120s
 spec:
   to:
     kind: Service
-    name: granite-embedding
+    name: all-minilm-l6-v2
   port:
     targetPort: 8080
   tls:

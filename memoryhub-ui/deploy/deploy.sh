@@ -77,7 +77,12 @@ echo ""
 echo "Populating public Route URLs for the welcome-email feature..."
 MCP_ROUTE_HOST=$(oc get route memory-hub-mcp --context "$CONTEXT" -n memory-hub-mcp -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 AUTH_ROUTE_HOST=$(oc get route auth-server --context "$CONTEXT" -n memoryhub-auth -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-EMBEDDING_SVC_HOST=$(oc get svc all-minilm-l6-v2 --context "$CONTEXT" -n embedding-model -o jsonpath='{.metadata.name}.{.metadata.namespace}.svc.cluster.local' 2>/dev/null || echo "")
+EMBEDDING_SVC_NAME=$(oc get svc --context "$CONTEXT" -n embedding-model -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ -n "$EMBEDDING_SVC_NAME" ]; then
+    EMBEDDING_SVC_HOST="${EMBEDDING_SVC_NAME}.embedding-model.svc.cluster.local"
+else
+    EMBEDDING_SVC_HOST=""
+fi
 if [ -n "$MCP_ROUTE_HOST" ] && [ -n "$AUTH_ROUTE_HOST" ]; then
     MCP_PUBLIC_URL="https://$MCP_ROUTE_HOST/mcp/"
     AUTH_PUBLIC_URL="https://$AUTH_ROUTE_HOST"
