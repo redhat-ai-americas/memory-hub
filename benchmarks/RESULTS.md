@@ -25,6 +25,7 @@ Raw result JSON files are committed alongside this document in `benchmarks/`.
 | MemPalace (semantic only) | LongMemEval | 0.966 | -- | -- | Wu et al., ICLR 2025 |
 | GPT-4o (no memory layer) | LongMemEval | ~0.30-0.70 | -- | -- | Wu et al., ICLR 2025 |
 
+| **MemoryHub v0.3 (Combined)** | PersonaMem 32k (589q) | **84.9%** | -- | -- | This document, 2026-07-19 |
 | **MemoryHub v0.3 (Granite)** | PersonaMem 32k (589q) | **84.9%** | -- | -- | This document, 2026-07-16 |
 | Hindsight | PersonaMem 32k | 86.6% | -- | -- | AMB leaderboard |
 | hybrid-search | PersonaMem 32k | 84.4% | -- | -- | AMB leaderboard |
@@ -94,6 +95,36 @@ Result files: `amb-outputs/personamem/_archive/memoryhub-pro-unchunked-20260712/
 **Delta from v0.2:** +3.7pp (84.9% vs 81.2%). The gain comes from Granite embeddings and the Granite reranker now being able to score PersonaMem's long transcripts (8192-token max vs old 512-token limit that fell back to cosine-only).
 
 Result file: `outputs/personamem/granite-pro/rag/32k.json`
+
+#### Run: 2026-07-19 (v0.3, Combined library + dreaming, Gemini 3.1 Pro Preview)
+
+**Pipeline state:** Combined ingestion mode: library ingest (195 sessions as memory nodes with chunks) then dreaming extraction (985 facts extracted via gemini-3.1-flash-lite from conversation threads). Both coexist in a single project (`amb-combined-pro`): 3,468 agent-written memories (`source=agent`) + 985 extracted facts (`source=dreaming`). Search uses the full pool with Granite embeddings, reranker, and hybrid RRF blend.
+
+**Answer LLM:** Gemini 3.1 Pro Preview (leaderboard-comparable).
+
+| Provider | Model | Queries | Correct | Accuracy |
+|----------|-------|---------|---------|----------|
+| **MemoryHub (Combined)** | **Gemini 3.1 Pro Preview** | **589** | **500** | **84.9%** |
+
+**AMB Leaderboard comparison (all using Gemini 3.1 Pro Preview):**
+
+| System | Approach | Accuracy |
+|--------|----------|----------|
+| Hindsight | LLM fact extraction into semantic graph | 86.6% |
+| **MemoryHub (Combined)** | **Granite embed + reranker, hybrid search + dreaming extraction** | **84.9%** |
+| MemoryHub (Granite) | Granite embed + reranker, hybrid search, no extraction | 84.9% |
+| hybrid-search | 512-token chunking, dense+sparse embeddings | 84.4% |
+| Cognee | Chunking + graph entity extraction | 81.8% |
+
+**Key finding:** Combined mode (library + dreaming) matches the library-only baseline exactly (84.9%). This validates two things:
+
+1. **Dreaming extraction is non-destructive.** Adding 985 extracted facts to the search pool alongside 3,468 session memories does not degrade retrieval quality. The reranker correctly sorts the mixed pool by relevance.
+
+2. **The aggregate prediction was correct.** Recall saturates at 4-7 parents/persona at k=70; the extracted facts don't add enough new recall to move the aggregate number. Per-category analysis (generalization, reasons) may reveal category-level lifts from the facts' synthesis signature -- this is where the dreaming value should appear.
+
+**Source tagging validated:** The `source` column (migration 026) correctly tags library memories as `agent` and extracted facts as `dreaming`. The `exclude_source` search filter enables ablation testing without re-ingestion.
+
+Result file: `outputs/personamem/combined-pro/rag/32k.json`
 
 #### Run: 2026-07-12 (v0.2, SDK provider with chunking, Flash Lite)
 

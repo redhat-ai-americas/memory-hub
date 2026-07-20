@@ -108,6 +108,11 @@ class AMBAdapter(FrameworkAdapter):
             "k": "MEMORYHUB_K",
             "extract_facts": "MEMORYHUB_EXTRACT_FACTS",
             "tenant_id": "MEMORYHUB_TENANT_ID",
+            "source": "MEMORYHUB_SOURCE",
+            "exclude_source": "MEMORYHUB_EXCLUDE_SOURCE",
+            "retrieval_unit": "MEMORYHUB_RETRIEVAL_UNIT",
+            "extraction_model": "MEMORYHUB_EXTRACTION_MODEL",
+            "extraction_model_url": "MEMORYHUB_EXTRACTION_MODEL_URL",
         }
         for param_key, env_key in param_to_env.items():
             val = params.get(param_key)
