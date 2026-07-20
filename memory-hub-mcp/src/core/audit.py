@@ -16,7 +16,7 @@ logger = logging.getLogger("memoryhub.audit")
 
 
 def record_event(
-    event_type: str,
+    event_type: str | None,
     actor_id: str,
     driver_id: str,
     scope: str,
