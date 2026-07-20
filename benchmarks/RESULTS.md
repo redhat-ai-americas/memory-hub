@@ -129,13 +129,26 @@ Result file: `outputs/personamem/granite-pro/rag/32k.json`
 | suggest_new_ideas | 56/93 (60.2%) | 55/93 (59.1%) | -1.1pp |
 | **Overall** | **500/589 (84.9%)** | **500/589 (84.9%)** | **0.0pp** |
 
-**Key finding: identical retrieval, answering noise.** Comparing the retrieved context for all 589 queries reveals that the library-only and combined runs return byte-identical context. The dreaming facts (985 short extracted statements) never rank high enough to appear in the top-k retrieval results alongside the 3,468 longer session memories. The 12 queries that flipped between runs (6 gained, 6 lost) are pure Gemini Pro answering non-determinism, not retrieval signal.
+**Key finding: tenant mismatch invalidates this run.** Post-hoc analysis (2026-07-20) revealed that the dreaming memories were ingested under `tenant_id='default'` while searches used `tenant_id='amb-benchmark'`. The two memory populations were never visible to the same search. This run is effectively a duplicate of the library-only baseline, not a combined test.
 
-**Flipped query breakdown:**
-- **Gained** (library wrong, combined right): 5 in `recall_user_shared_facts`, 1 in `suggest_new_ideas`
-- **Lost** (library right, combined wrong): 3 in `track_full_preference_evolution`, 1 in `generalizing_to_new_scenarios`, 2 in `suggest_new_ideas`
+**Evidence:** All 589 queries return byte-identical retrieved context between the library-only and combined runs. The 12 queries that flipped (6 gained, 6 lost) are pure Gemini Pro answering non-determinism. A direct DB query confirms: `SELECT source, tenant_id, COUNT(*) FROM memory_nodes WHERE scope_id = 'amb-combined-pro' GROUP BY source, tenant_id` returns `agent/amb-benchmark: 3,468` and `dreaming/default: 985`.
 
-**Interpretation:** The registered prediction that dreaming's synthesis signature would lift generalization and reasons categories is not supported. The per-category deltas are LLM noise, not retrieval signal. Dreaming extraction is confirmed non-destructive (identical retrieval), but the extracted facts are too short and too numerous (985 facts competing against 3,468 longer documents) to surface in the top-k ranking. This points to a retrieval-side improvement opportunity: boosting short, high-signal extracted facts in the ranking function, or using a dedicated fact retrieval channel separate from the session memory search.
+**Root cause:** The harness `_run_dreaming_ingest()` creates threads and extracts facts via the MCP server, but never passes `tenant_id` to the thread/extraction pipeline. The library path explicitly passes `tenant_id` on each `write()` call; the dreaming path uses the session default tenant (`default`).
+
+**Per-category deltas (not meaningful given the above, but recorded for completeness):**
+
+| Category | Library | Combined | Delta |
+|----------|---------|----------|-------|
+| recall_user_shared_facts | 104/129 (80.6%) | 109/129 (84.5%) | +3.9pp |
+| track_full_preference_evolution | 131/139 (94.2%) | 128/139 (92.1%) | -2.2pp |
+| recalling_the_reasons_behind_previous_updates | 91/99 (91.9%) | 91/99 (91.9%) | 0.0pp |
+| generalizing_to_new_scenarios | 53/57 (93.0%) | 52/57 (91.2%) | -1.8pp |
+| provide_preference_aligned_recommendations | 50/55 (90.9%) | 50/55 (90.9%) | 0.0pp |
+| recalling_facts_mentioned_by_the_user | 15/17 (88.2%) | 15/17 (88.2%) | 0.0pp |
+| suggest_new_ideas | 56/93 (60.2%) | 55/93 (59.1%) | -1.1pp |
+| **Overall** | **500/589 (84.9%)** | **500/589 (84.9%)** | **0.0pp** |
+
+**Status:** This run must be re-done after fixing the tenant mismatch in the dreaming ingestion path. A preflight smoke-check system was added to `omb run` (2026-07-20) to prevent this class of bug from reaching full runs.
 
 **Source tagging validated:** The `source` column (migration 026) correctly tags library memories as `agent` and extracted facts as `dreaming`. The `exclude_source` search filter enables ablation testing without re-ingestion.
 
