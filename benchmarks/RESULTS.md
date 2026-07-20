@@ -116,11 +116,26 @@ Result file: `outputs/personamem/granite-pro/rag/32k.json`
 | hybrid-search | 512-token chunking, dense+sparse embeddings | 84.4% |
 | Cognee | Chunking + graph entity extraction | 81.8% |
 
-**Key finding:** Combined mode (library + dreaming) matches the library-only baseline exactly (84.9%). This validates two things:
+**Per-category comparison (library-only vs combined):**
 
-1. **Dreaming extraction is non-destructive.** Adding 985 extracted facts to the search pool alongside 3,468 session memories does not degrade retrieval quality. The reranker correctly sorts the mixed pool by relevance.
+| Category | Library | Combined | Delta |
+|----------|---------|----------|-------|
+| recall_user_shared_facts | 104/129 (80.6%) | 109/129 (84.5%) | +3.9pp |
+| track_full_preference_evolution | 131/139 (94.2%) | 128/139 (92.1%) | -2.2pp |
+| recalling_the_reasons_behind_previous_updates | 91/99 (91.9%) | 91/99 (91.9%) | 0.0pp |
+| generalizing_to_new_scenarios | 53/57 (93.0%) | 52/57 (91.2%) | -1.8pp |
+| provide_preference_aligned_recommendations | 50/55 (90.9%) | 50/55 (90.9%) | 0.0pp |
+| recalling_facts_mentioned_by_the_user | 15/17 (88.2%) | 15/17 (88.2%) | 0.0pp |
+| suggest_new_ideas | 56/93 (60.2%) | 55/93 (59.1%) | -1.1pp |
+| **Overall** | **500/589 (84.9%)** | **500/589 (84.9%)** | **0.0pp** |
 
-2. **The aggregate prediction was correct.** Recall saturates at 4-7 parents/persona at k=70; the extracted facts don't add enough new recall to move the aggregate number. Per-category analysis (generalization, reasons) may reveal category-level lifts from the facts' synthesis signature -- this is where the dreaming value should appear.
+**Key finding: identical retrieval, answering noise.** Comparing the retrieved context for all 589 queries reveals that the library-only and combined runs return byte-identical context. The dreaming facts (985 short extracted statements) never rank high enough to appear in the top-k retrieval results alongside the 3,468 longer session memories. The 12 queries that flipped between runs (6 gained, 6 lost) are pure Gemini Pro answering non-determinism, not retrieval signal.
+
+**Flipped query breakdown:**
+- **Gained** (library wrong, combined right): 5 in `recall_user_shared_facts`, 1 in `suggest_new_ideas`
+- **Lost** (library right, combined wrong): 3 in `track_full_preference_evolution`, 1 in `generalizing_to_new_scenarios`, 2 in `suggest_new_ideas`
+
+**Interpretation:** The registered prediction that dreaming's synthesis signature would lift generalization and reasons categories is not supported. The per-category deltas are LLM noise, not retrieval signal. Dreaming extraction is confirmed non-destructive (identical retrieval), but the extracted facts are too short and too numerous (985 facts competing against 3,468 longer documents) to surface in the top-k ranking. This points to a retrieval-side improvement opportunity: boosting short, high-signal extracted facts in the ranking function, or using a dedicated fact retrieval channel separate from the session memory search.
 
 **Source tagging validated:** The `source` column (migration 026) correctly tags library memories as `agent` and extracted facts as `dreaming`. The `exclude_source` search filter enables ablation testing without re-ingestion.
 
