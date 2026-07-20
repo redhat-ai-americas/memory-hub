@@ -1,0 +1,27 @@
+name: combined-pro-full
+description: >
+  Full 589-query PersonaMem in combined mode (library + dreaming).
+  Library memories (source=agent) + extracted facts (source=dreaming)
+  in one search pool. Granite embeddings, reranker, gemini-3.1-pro-preview
+  answerer. Part of #349 (Layer 2 benchmark).
+model:
+  url: https://generativelanguage.googleapis.com
+  name: gemini-3.1-pro-preview
+  auth:
+    secret_ref: gemini-api-key
+benchmarks:
+  - id: personamem-mcq
+    provider_id: 9b72673c-c757-434e-909f-e2f21a616de5
+    parameters:
+      dataset: personamem
+      dataset_variant: "32k"
+      memory_provider: memoryhub
+      ingestion_mode: combined
+      project_id: amb-combined-pro
+      disabled_signals: domain,graph
+      focus_mode: persona
+      k: 70
+      query_limit: 589
+      skip_ingestion: true
+experiment:
+  name: memoryhub/personamem-mcq/32k/combined-pro

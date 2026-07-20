@@ -165,7 +165,7 @@ class EvalRunner:
                     return await _process_one_attempt(q)
                 except Exception as exc:
                     msg = str(exc)
-                    retryable = any(code in msg for code in ("502", "503", "529", "429", "overloaded", "quota", "RESOURCE_EXHAUSTED"))
+                    retryable = any(code in msg for code in ("502", "503", "504", "529", "429", "overloaded", "quota", "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED", "ConnectError"))
                     if _attempt < _max_attempts - 1 and retryable:
                         if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg:
                             wait = min(600, 60 * (2 ** min(_attempt, 3)))
