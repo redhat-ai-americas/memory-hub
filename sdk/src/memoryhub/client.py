@@ -1563,6 +1563,7 @@ class MemoryHubClient:
         participant_access: dict[str, str] | None = None,
         a2a_context_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        tenant_id: str | None = None,
     ) -> ConversationThread:
         """Create a new conversation thread."""
         opts: dict[str, Any] = {}
@@ -1580,6 +1581,8 @@ class MemoryHubClient:
             opts["a2a_context_id"] = a2a_context_id
         if metadata is not None:
             opts["metadata"] = metadata
+        if tenant_id is not None:
+            opts["tenant_id"] = tenant_id
         data = await self._call_thread_action("create", scope=scope, options=opts or None)
         return ConversationThread.model_validate(data)
 
@@ -1653,6 +1656,7 @@ class MemoryHubClient:
         turn_range: tuple[int, int] | None = None,
         model: str | None = None,
         model_url: str | None = None,
+        tenant_id: str | None = None,
     ) -> ExtractionResult:
         """Trigger extraction pipeline on a thread."""
         opts: dict[str, Any] = {}
@@ -1662,6 +1666,8 @@ class MemoryHubClient:
             opts["model"] = model
         if model_url is not None:
             opts["model_url"] = model_url
+        if tenant_id is not None:
+            opts["tenant_id"] = tenant_id
         data = await self._call_thread_action("extract", thread_id=thread_id, options=opts or None)
         return ExtractionResult.model_validate(data)
 
