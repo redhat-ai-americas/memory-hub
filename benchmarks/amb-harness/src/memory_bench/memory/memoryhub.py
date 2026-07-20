@@ -390,5 +390,40 @@ class MemoryHubProvider(MemoryProvider):
 
         return documents, None
 
+    async def preflight_search(self, query: str, user_id: str | None = None):
+        """Search returning raw Memory objects with source metadata.
+
+        Used by the preflight checker to inspect source distribution
+        without modifying the benchmark retrieve pipeline.
+        """
+        owner = f"amb-{user_id}" if user_id else "amb-default"
+
+        async with MemoryHubClient(url=self._url, api_key=self._api_key) as client:
+            search_kwargs: dict[str, Any] = dict(
+                query=query,
+                max_results=self._resolve_k(None),
+                owner_id=owner,
+                project_id=self._project_id,
+                weight_threshold=0.0,
+                mode="full_only",
+                max_response_tokens=0,
+                disabled_signals=self._disabled_signals,
+            )
+            if self._tenant_id:
+                search_kwargs["tenant_id"] = self._tenant_id
+            if self._focus_mode == "persona":
+                name = self._extract_persona_name(query)
+                if name:
+                    search_kwargs["focus"] = name
+            if self._retrieval_unit:
+                search_kwargs["retrieval_unit"] = self._retrieval_unit
+            if self._source_filter:
+                search_kwargs["source"] = self._source_filter
+            if self._exclude_source:
+                search_kwargs["exclude_source"] = self._exclude_source
+            results = await client.search(**search_kwargs)
+
+        return results.results
+
     def cleanup(self) -> None:
         pass

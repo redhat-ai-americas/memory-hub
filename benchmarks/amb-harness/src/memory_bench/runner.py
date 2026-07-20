@@ -67,6 +67,8 @@ class EvalRunner:
         show_raw: bool = False,
         run_name: str | None = None,
         description: str | None = None,
+        no_preflight: bool = False,
+        expect_sources: list[str] | None = None,
     ) -> EvalSummary:
         effective_name = run_name or memory.name
         cat_label = f"  [bold]Category:[/bold] {category}" if category else ""
@@ -143,6 +145,26 @@ class EvalRunner:
             unit_ids = {uid for doc in documents if (uid := dataset.get_isolation_id(doc)) is not None}
 
         memory.prepare(store_dir, unit_ids=unit_ids, reset=not skip_ingestion)
+
+        # Preflight smoke check (MemoryHub + skip-ingestion only)
+        if not no_preflight and skip_ingestion:
+            from .memory.memoryhub import MemoryHubProvider
+            if isinstance(memory, MemoryHubProvider):
+                from .preflight import run_preflight
+                import typer as _typer
+                preflight = asyncio.run(run_preflight(
+                    memory=memory,
+                    queries=queries,
+                    expect_sources=expect_sources,
+                    answer_llm_label=mode.model_id if hasattr(mode, "model_id") else "",
+                    console=console,
+                ))
+                if preflight.aborted:
+                    console.print(f"\n[bold red]PREFLIGHT ABORT:[/bold red] {preflight.abort_reason}")
+                    console.print("[dim]Fix the configuration and re-run. Use --no-preflight to bypass.[/dim]")
+                    raise _typer.Exit(1)
+                for w in preflight.warnings:
+                    console.print(f"[yellow]PREFLIGHT WARNING:[/yellow] {w}")
 
         stored_contexts: dict[str, str] = {}
         stored_answers: dict[str, str] = {}

@@ -47,6 +47,8 @@ def run(
     skip_answer: bool = typer.Option(False, "--skip-answer", help="Skip retrieval and answer generation entirely — re-judge cached answers from the previous run"),
     only_failed: bool = typer.Option(False, "--only-failed", help="Restrict queries to those that failed in the previous run"),
     show_raw: bool = typer.Option(False, "--show-raw", help="Print raw provider response after each query"),
+    no_preflight: bool = typer.Option(False, "--no-preflight", help="Skip preflight smoke checks (MemoryHub + skip-ingestion only)"),
+    expect_sources: str = typer.Option(None, "--expect-sources", help="Comma-separated sources required in preflight smoke results (e.g. 'agent,dreaming')"),
     output_dir: Path = typer.Option(Path("outputs"), "--output-dir", "-o"),
     name: str = typer.Option(None, "--name", "-n", help="Run name used as output directory (defaults to memory provider name)"),
     description: str = typer.Option(None, "--description", "-d", help="Optional description for this run (stored in the result JSON)"),
@@ -79,6 +81,8 @@ def run(
         show_raw=show_raw,
         run_name=name,
         description=description,
+        no_preflight=no_preflight,
+        expect_sources=[s.strip() for s in expect_sources.split(",") if s.strip()] if expect_sources else None,
     )
 
     cat_label = f"/{category}" if category else ""
