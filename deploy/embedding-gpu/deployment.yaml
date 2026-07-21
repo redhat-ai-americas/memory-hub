@@ -1,25 +1,29 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: all-minilm-l6-v2
+  name: granite-embedding
   namespace: embedding-model
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: all-minilm-l6-v2
+      app: granite-embedding
   template:
     metadata:
       labels:
-        app: all-minilm-l6-v2
+        app: granite-embedding
     spec:
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: tei
-          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+          image: ghcr.io/huggingface/text-embeddings-inference:1.9
           args:
-            - "--model-id"
-            - "sentence-transformers/all-MiniLM-L6-v2"
-            - "--port"
+            - --model-id
+            - ibm-granite/granite-embedding-small-english-r2
+            - --port
             - "8080"
           env:
             - name: HF_HUB_CACHE
@@ -31,27 +35,29 @@ spec:
           resources:
             requests:
               cpu: "1"
-              memory: 2Gi
-            limits:
-              cpu: "2"
               memory: 4Gi
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 120
-            periodSeconds: 10
-            failureThreshold: 10
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: cache
+              mountPath: /data
           livenessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 120
+            initialDelaySeconds: 300
             periodSeconds: 30
             failureThreshold: 3
-          volumeMounts:
-            - name: cache
-              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 180
+            periodSeconds: 10
+            failureThreshold: 60
       volumes:
         - name: cache
           persistentVolumeClaim:

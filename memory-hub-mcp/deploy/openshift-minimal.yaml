@@ -83,9 +83,9 @@ spec:
         - name: MEMORYHUB_USERS_FILE
           value: /config/users.json
         - name: AUTH_JWKS_URI
-          value: "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/.well-known/jwks.json"
+          value: "__AUTH_JWKS_URI__"
         - name: AUTH_ISSUER
-          value: "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com"
+          value: "__AUTH_ISSUER__"
         - name: AUTH_AUDIENCE
           value: "memoryhub"
         - name: MEMORYHUB_VALKEY_URL

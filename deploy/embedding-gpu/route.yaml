@@ -1,12 +1,14 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: ms-marco-minilm-l12-v2
-  namespace: reranker-model
+  name: granite-embedding
+  namespace: embedding-model
+  annotations:
+    haproxy.router.openshift.io/timeout: 120s
 spec:
   to:
     kind: Service
-    name: ms-marco-minilm-l12-v2
+    name: granite-embedding
   port:
     targetPort: 8080
   tls:

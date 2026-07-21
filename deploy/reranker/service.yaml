@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: granite-reranker
+  name: ms-marco-minilm-l12-v2
   namespace: reranker-model
 spec:
   selector:
-    app: granite-reranker
+    app: ms-marco-minilm-l12-v2
   ports:
     - port: 80
       targetPort: 8080

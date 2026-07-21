@@ -12,6 +12,6 @@ metadata:
 #   -n memoryhub-auth
 secret: PLACEHOLDER-SEE-COMMENTS-ABOVE
 redirectURIs:
-  - https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/oauth/openshift/callback
+  - __REDIRECT_URI__
 grantMethod: prompt
 accessTokenMaxAgeSeconds: 600

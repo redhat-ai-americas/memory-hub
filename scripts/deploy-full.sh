@@ -2,6 +2,7 @@
 # Full MemoryHub stack deployment to OpenShift.
 # Usage: scripts/deploy-full.sh [--skip-prereqs] [--skip-db] [--skip-migrations]
 #                                [--skip-mcp] [--skip-auth] [--skip-ui] [--skip-tile]
+#                                [--skip-models] [--gpu-models]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,6 +15,8 @@ MCP_PROJECT="memory-hub-mcp"
 AUTH_PROJECT="memoryhub-auth"
 UI_NAMESPACE="memoryhub-ui"
 RHOAI_NAMESPACE="redhat-ods-applications"
+EMBEDDING_MODEL_NAMESPACE="embedding-model"
+RERANKER_MODEL_NAMESPACE="reranker-model"
 DB_POD_LABEL="app.kubernetes.io/name=memoryhub-pg"
 
 SKIP_PREREQS=false
@@ -23,6 +26,8 @@ SKIP_MCP=false
 SKIP_AUTH=false
 SKIP_UI=false
 SKIP_TILE=false
+SKIP_MODELS=false
+GPU_MODELS=false
 RESTORE_FROM=""
 
 START_TIME=$(date +%s)
@@ -106,6 +111,8 @@ parse_args() {
             --skip-auth)       SKIP_AUTH=true ;;
             --skip-ui)         SKIP_UI=true ;;
             --skip-tile)       SKIP_TILE=true ;;
+            --skip-models)     SKIP_MODELS=true ;;
+            --gpu-models)      GPU_MODELS=true ;;
             --restore-from)
                 shift
                 RESTORE_FROM="${1:-}"
@@ -126,6 +133,8 @@ parse_args() {
                 echo "  --skip-auth        Skip Auth server deployment"
                 echo "  --skip-ui          Skip UI deployment"
                 echo "  --skip-tile        Skip RHOAI OdhApplication tile"
+                echo "  --skip-models      Skip embedding + reranker model deployment"
+                echo "  --gpu-models       Use GPU model manifests instead of CPU (default: CPU)"
                 echo "  --restore-from F   Restore database from a pg_dump file after DB deploy"
                 exit 0
                 ;;
@@ -191,6 +200,7 @@ preflight() {
     echo "    MCP server:  $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
     echo "    MinIO:       $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
     echo "    Valkey:      $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
+    echo "    Models:      $([ "$SKIP_MODELS" = true ] && echo "skip" || ([ "$GPU_MODELS" = true ] && echo "deploy (GPU)" || echo "deploy (CPU)"))"
     echo "    Auth server: $([ "$SKIP_AUTH" = true ] && echo "skip" || echo "deploy")"
     echo "    UI:          $([ "$SKIP_UI" = true ] && echo "skip" || echo "deploy")"
     echo "    RHOAI tile:  $([ "$SKIP_TILE" = true ] && echo "skip" || echo "apply")"
@@ -357,6 +367,66 @@ deploy_infra() {
 
     echo ""
     echo -e "  ${GREEN}MinIO + Valkey ready${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Section 3d: Embedding + Reranker Models
+# ---------------------------------------------------------------------------
+deploy_models() {
+    banner "3d. Embedding + Reranker Models"
+
+    if [ "$SKIP_MODELS" = true ]; then
+        skipped "Models (--skip-models)"
+        return 0
+    fi
+
+    local embedding_dir="$REPO_ROOT/deploy/embedding"
+    local reranker_dir="$REPO_ROOT/deploy/reranker"
+
+    if [ "$GPU_MODELS" = true ]; then
+        embedding_dir="$REPO_ROOT/deploy/embedding-gpu"
+        reranker_dir="$REPO_ROOT/deploy/reranker-gpu"
+        info "Using GPU model manifests"
+    else
+        info "Using CPU model manifests (default)"
+    fi
+
+    # Create namespaces
+    for ns in "$EMBEDDING_MODEL_NAMESPACE" "$RERANKER_MODEL_NAMESPACE"; do
+        if ! oc get namespace --context "$CONTEXT" "$ns" &>/dev/null; then
+            info "Creating namespace $ns..."
+            oc create namespace --context "$CONTEXT" "$ns"
+        fi
+    done
+
+    info "Deploying embedding model..."
+    oc apply --context "$CONTEXT" -k "$embedding_dir"
+
+    info "Deploying reranker model..."
+    oc apply --context "$CONTEXT" -k "$reranker_dir"
+
+    info "Waiting for embedding model rollout (model download may take 2-3 min)..."
+    local embedding_deploy
+    embedding_deploy=$(oc get deploy --context "$CONTEXT" -n "$EMBEDDING_MODEL_NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -n "$embedding_deploy" ]; then
+        if ! oc rollout status --context "$CONTEXT" "deployment/$embedding_deploy" \
+                -n "$EMBEDDING_MODEL_NAMESPACE" --timeout=300s; then
+            die "Embedding model did not become ready within 300s."
+        fi
+    fi
+
+    info "Waiting for reranker model rollout..."
+    local reranker_deploy
+    reranker_deploy=$(oc get deploy --context "$CONTEXT" -n "$RERANKER_MODEL_NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -n "$reranker_deploy" ]; then
+        if ! oc rollout status --context "$CONTEXT" "deployment/$reranker_deploy" \
+                -n "$RERANKER_MODEL_NAMESPACE" --timeout=300s; then
+            die "Reranker model did not become ready within 300s."
+        fi
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}Models deployed${RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -628,12 +698,13 @@ main() {
     deploy_postgresql
     restore_from_backup
     run_migrations
-    deploy_infra          # MinIO + Valkey before MCP
+    deploy_infra              # MinIO + Valkey before MCP
+    deploy_models             # Embedding + Reranker before MCP
     deploy_retention_cronjob  # Retention sweep after DB
-    deploy_mcp
-    prepare_auth_infra    # Secrets before auth
-    deploy_auth
-    prepare_ui_infra      # SA + Secrets before UI
+    prepare_auth_infra        # Secrets before auth
+    deploy_auth               # Auth BEFORE MCP (so auth route exists)
+    deploy_mcp                # MCP (auth route now available for JWKS URL)
+    prepare_ui_infra          # SA + Secrets before UI
     deploy_ui
     deploy_tile
     print_summary

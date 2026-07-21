@@ -1,12 +1,12 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: ms-marco-minilm-l12-v2
+  name: granite-reranker
   namespace: reranker-model
 spec:
   to:
     kind: Service
-    name: ms-marco-minilm-l12-v2
+    name: granite-reranker
   port:
     targetPort: 8080
   tls:
