@@ -18,24 +18,26 @@ Raw result JSON files are committed alongside this document in `benchmarks/`.
 
 ## Competitive Context
 
-| System | Benchmark | R@5 | R@10 | MRR | Source |
-|--------|-----------|-----|------|-----|--------|
-| **MemoryHub v0.2** | LongMemEval oracle (500q) | **0.999** | **1.000** | **1.000** | This document, 2026-07-10 |
-| MemPalace (hybrid) | LongMemEval | 0.984 | -- | -- | Wu et al., ICLR 2025 |
-| MemPalace (semantic only) | LongMemEval | 0.966 | -- | -- | Wu et al., ICLR 2025 |
-| GPT-4o (no memory layer) | LongMemEval | ~0.30-0.70 | -- | -- | Wu et al., ICLR 2025 |
+| System | Benchmark | R@5 | R@10 | MRR | Embedding Model | Source |
+|--------|-----------|-----|------|-----|-----------------|--------|
+| **MemoryHub v0.2** | LongMemEval oracle (500q) | **0.999** | **1.000** | **1.000** | all-MiniLM-L6-v2 (384d) | This document, 2026-07-10 |
+| MemPalace (hybrid) | LongMemEval | 0.984 | -- | -- | text-embedding-3-large (3072d) | Wu et al., ICLR 2025 |
+| MemPalace (semantic only) | LongMemEval | 0.966 | -- | -- | text-embedding-3-large (3072d) | Wu et al., ICLR 2025 |
+| GPT-4o (no memory layer) | LongMemEval | ~0.30-0.70 | -- | -- | (none) | Wu et al., ICLR 2025 |
 
-| **MemoryHub v0.3 (Granite)** | PersonaMem 32k (589q) | **84.9%** | -- | -- | This document, 2026-07-16 |
-| Hindsight | PersonaMem 32k | 86.6% | -- | -- | AMB leaderboard |
-| hybrid-search | PersonaMem 32k | 84.4% | -- | -- | AMB leaderboard |
-| Cognee | PersonaMem 32k | 81.8% | -- | -- | AMB leaderboard |
-| MemoryHub v0.2 (MiniLM) | PersonaMem 32k (589q) | 81.2% | -- | -- | This document, 2026-07-12 |
-| BM25 baseline | PersonaMem 32k | 67.7% | -- | -- | This document, 2026-07-12 |
+| System | PersonaMem 32k | Answer LLM | Embedding / Retrieval | Source |
+|--------|---------------|------------|----------------------|--------|
+| Hindsight | 86.6% | Gemini 3.1 Pro Preview | LLM fact extraction into semantic graph | AMB leaderboard |
+| **MemoryHub v0.3 (Granite)** | **84.9%** | Gemini 3.1 Pro Preview | granite-embedding-english + granite-reranker-english-r2 (GPU) | This document, 2026-07-16 |
+| hybrid-search | 84.4% | Gemini 3.1 Pro Preview | 512-token chunking, dense+sparse embeddings | AMB leaderboard |
+| Cognee | 81.8% | Gemini 3.1 Pro Preview | chunking + graph entity extraction | AMB leaderboard |
+| MemoryHub v0.2 (MiniLM) | 81.2% | Gemini 3.1 Pro Preview | all-MiniLM-L6-v2 (384d), no reranker | This document, 2026-07-12 |
+| BM25 baseline | 67.7% | Gemini 3.1 Flash Lite | keyword only | This document, 2026-07-12 |
 
-**Source ablation (Flash Lite, not leaderboard-comparable -- same model across all three for relative comparison):**
+**Source ablation (Flash Lite answer LLM, not leaderboard-comparable -- same model across all three for relative comparison):**
 
-| Run | PersonaMem 32k (589q) | Accuracy | Delta vs library |
-|-----|----------------------|----------|-----------------|
+| Run | Source filter | Accuracy | Delta vs library |
+|-----|-------------|----------|-----------------|
 | MemoryHub (Combined) | agent + dreaming | 72.8% | +0.1pp |
 | MemoryHub (Library-only) | agent only | 72.7% | baseline |
 | MemoryHub (Dreaming-only) | dreaming only | 50.9% | -21.8pp |
@@ -44,8 +46,9 @@ Notes:
 - MemPalace numbers are from the LongMemEval paper's reported "session decomposition + fact-augmented key expansion + time-aware query expansion" pipeline.
 - Our run uses the oracle variant (evidence sessions only, not the full 115K-token haystack). The oracle variant isolates retrieval quality from the haystack-filtering step. Running LongMemEval_S (full haystack) is the next comparison point.
 - MemoryHub v0.3 uses granite-embedding-english + granite-reranker-english-r2 (GPU). MemoryHub v0.2 used all-MiniLM-L6-v2 (384-dim). MemPalace uses text-embedding-3-large (3072-dim).
-- PersonaMem accuracy column shows MCQ exact-match accuracy (not R@k). Leaderboard runs use Gemini 3.1 Pro Preview as the answer LLM. The ablation table uses Flash Lite (not comparable to leaderboard numbers, but valid for relative comparison across source configurations).
+- All PersonaMem leaderboard runs use Gemini 3.1 Pro Preview as the answer LLM. The ablation table uses Gemini 3.1 Flash Lite (not comparable to leaderboard numbers, but valid for relative comparison across source configurations).
 - The v0.3 Combined row (84.9%, 2026-07-19) was removed from the main table -- it was invalidated by a tenant mismatch bug (dreaming memories were never searched). See the detailed run section below.
+- Retrieval-unit routing (#447) is the planned architecture change to make dreaming facts contribute to combined search results.
 
 ## Benchmark Inventory
 
