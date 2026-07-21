@@ -8,6 +8,7 @@ regex = '''mh-(dev|prod)-[a-f0-9]{16}'''
     '''dev-users\.json$''',
     '''tests\/.*\.py$''',
     '''\.claude\/worktrees\/''',
+    '''users-configmap\.example\.yaml$''',
   ]
 
 [allowlist]
