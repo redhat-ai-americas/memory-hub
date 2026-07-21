@@ -24,13 +24,13 @@ data:
     {
       "users": [
         {
-          "user_id": "wjackson",
-          "name": "Wes Jackson",
+          "user_id": "CURRENT_USER",
+          "name": "CURRENT_USER_DISPLAY",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "tenant_id": "default",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
           "project_memberships": [],
-          "_comment": "primary operator"
+          "_comment": "primary operator — user_id auto-set from OS username at install time"
         },
         {
           "user_id": "dev-test",
@@ -42,8 +42,8 @@ data:
           "_comment": "local development and integration testing"
         },
         {
-          "user_id": "rdwj-agent-1",
-          "name": "RDWJ Agent 1",
+          "user_id": "agent-1",
+          "name": "Agent 1",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "tenant_id": "default",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
@@ -51,22 +51,13 @@ data:
           "_comment": "agent automation slot 1"
         },
         {
-          "user_id": "rdwj-agent-2",
-          "name": "RDWJ Agent 2",
+          "user_id": "agent-2",
+          "name": "Agent 2",
           "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
           "tenant_id": "default",
           "scopes": ["user", "project", "role", "organizational", "enterprise"],
           "project_memberships": [],
           "_comment": "agent automation slot 2"
-        },
-        {
-          "user_id": "kagenti-ci",
-          "name": "Kagenti CI",
-          "api_key": "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16",
-          "tenant_id": "default",
-          "scopes": ["user", "project"],
-          "project_memberships": [],
-          "_comment": "kagenti-adk E2E test runner (see docs/SYSTEMS.md)"
         },
         {
           "user_id": "trace-reviewer",
