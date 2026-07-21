@@ -713,11 +713,17 @@ smoke_test() {
     info "Writing test memory..."
     local write_output memory_id
     write_output=$(memoryhub write "MemoryHub smoke test $(date -u +%Y%m%dT%H%M%SZ)" \
-        --scope user --weight 0.5 -o json 2>&1) || {
-        warn "Write failed: $write_output"
+        --scope user --weight 0.5 -o json 2>/dev/null) || {
+        warn "Write failed"
         return 0
     }
-    memory_id=$(echo "$write_output" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+    memory_id=$(echo "$write_output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+# CLI wraps response: {status, data: {memory: {id, ...}}}
+mid = d.get('data',{}).get('memory',{}).get('id','') or d.get('id','')
+print(mid)
+" 2>/dev/null || echo "")
     if [ -z "$memory_id" ]; then
         warn "Could not parse write response"
         return 0
@@ -726,8 +732,13 @@ smoke_test() {
 
     info "Searching..."
     local search_output search_count
-    search_output=$(memoryhub search "smoke test" --max 3 -o json 2>&1) || true
-    search_count=$(echo "$search_output" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('results',[])))" 2>/dev/null || echo "0")
+    search_output=$(memoryhub search "smoke test" --max 3 -o json 2>/dev/null) || true
+    search_count=$(echo "$search_output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+results = d.get('data',{}).get('results',[]) or d.get('results',[])
+print(len(results))
+" 2>/dev/null || echo "0")
     info "  Search returned $search_count results"
 
     info "Reading back..."
