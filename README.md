@@ -56,31 +56,29 @@ MemoryHub installs to any OpenShift cluster with Red Hat OpenShift AI (RHOAI). T
 ### Prerequisites
 
 - `oc` logged in with cluster-admin on a cluster with RHOAI installed
-- `podman` on your PATH
+- `podman` on your PATH (checked but not required for server-side builds)
 - A default StorageClass (most clusters have one)
-- Python 3.11+ with a local `.venv` (needed for Alembic migrations during deploy)
+- Python 3.11+ on your PATH (the deploy script creates `.venv` automatically)
 
-Run `make check-prereqs` to verify all of these non-destructively.
+Run `make check-prereqs` to verify all of these non-destructively. GPUs are not required; the default install uses CPU-based embedding and reranker models.
 
 ### Quick start
 
 ```bash
 git clone https://github.com/redhat-ai-americas/memory-hub.git
 cd memory-hub
+oc login <cluster-api-url>      # cluster-admin required
+make install                    # full stack deploy (~10 min)
+```
 
-# Set up local venv (required for migrations)
-make dev
+That's it. The deploy script auto-creates the Python virtualenv (for Alembic migrations), generates API keys for the users ConfigMap if it doesn't exist, writes the first key to `~/.config/memoryhub/api-key` for CLI/SDK use, and runs a write/search/read smoke test at the end.
 
-# Prepare the users ConfigMap (one-time, per-operator)
+To bring your own API keys instead, copy the template before running install:
+
+```bash
 cp memory-hub-mcp/deploy/users-configmap.example.yaml \
    memory-hub-mcp/deploy/users-configmap.yaml
-# Edit to replace REPLACE-ME placeholders with real API keys:
-#   openssl rand -hex 16   (generates a key)
-
-# Verify cluster prerequisites
-make check-prereqs
-
-# Deploy everything
+# Replace REPLACE-ME placeholders with: openssl rand -hex 16
 make install
 ```
 

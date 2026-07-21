@@ -140,11 +140,18 @@ echo "Applying manifests..."
 # if the copy still contains the placeholder strings.
 USERS_CM="$SCRIPT_DIR/users-configmap.yaml"
 if [[ ! -f "$USERS_CM" ]]; then
-  echo "ERROR: $USERS_CM not found."
-  echo "       Copy the template and replace the placeholder api_keys:"
-  echo "         cp $SCRIPT_DIR/users-configmap.example.yaml $USERS_CM"
-  echo "         \$EDITOR $USERS_CM"
-  exit 1
+  echo "Generating $USERS_CM from template with random API keys..."
+  python3 -c "
+import re, secrets, pathlib
+src = pathlib.Path('$SCRIPT_DIR/users-configmap.example.yaml').read_text()
+out = re.sub(
+    r'REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16',
+    lambda m: secrets.token_hex(16),
+    src,
+)
+pathlib.Path('$USERS_CM').write_text(out)
+print(f'  Generated with {src.count(\"REPLACE-ME\")} unique keys.')
+"
 fi
 if grep -q "REPLACE-ME-" "$USERS_CM"; then
   echo "ERROR: $USERS_CM still contains REPLACE-ME placeholders."
