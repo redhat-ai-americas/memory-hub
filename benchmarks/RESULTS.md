@@ -25,7 +25,6 @@ Raw result JSON files are committed alongside this document in `benchmarks/`.
 | MemPalace (semantic only) | LongMemEval | 0.966 | -- | -- | Wu et al., ICLR 2025 |
 | GPT-4o (no memory layer) | LongMemEval | ~0.30-0.70 | -- | -- | Wu et al., ICLR 2025 |
 
-| **MemoryHub v0.3 (Combined)** | PersonaMem 32k (589q) | **84.9%** | -- | -- | This document, 2026-07-19 |
 | **MemoryHub v0.3 (Granite)** | PersonaMem 32k (589q) | **84.9%** | -- | -- | This document, 2026-07-16 |
 | Hindsight | PersonaMem 32k | 86.6% | -- | -- | AMB leaderboard |
 | hybrid-search | PersonaMem 32k | 84.4% | -- | -- | AMB leaderboard |
@@ -33,11 +32,20 @@ Raw result JSON files are committed alongside this document in `benchmarks/`.
 | MemoryHub v0.2 (MiniLM) | PersonaMem 32k (589q) | 81.2% | -- | -- | This document, 2026-07-12 |
 | BM25 baseline | PersonaMem 32k | 67.7% | -- | -- | This document, 2026-07-12 |
 
+**Source ablation (Flash Lite, not leaderboard-comparable -- same model across all three for relative comparison):**
+
+| Run | PersonaMem 32k (589q) | Accuracy | Delta vs library |
+|-----|----------------------|----------|-----------------|
+| MemoryHub (Combined) | agent + dreaming | 72.8% | +0.1pp |
+| MemoryHub (Library-only) | agent only | 72.7% | baseline |
+| MemoryHub (Dreaming-only) | dreaming only | 50.9% | -21.8pp |
+
 Notes:
 - MemPalace numbers are from the LongMemEval paper's reported "session decomposition + fact-augmented key expansion + time-aware query expansion" pipeline.
 - Our run uses the oracle variant (evidence sessions only, not the full 115K-token haystack). The oracle variant isolates retrieval quality from the haystack-filtering step. Running LongMemEval_S (full haystack) is the next comparison point.
 - MemoryHub v0.3 uses granite-embedding-english + granite-reranker-english-r2 (GPU). MemoryHub v0.2 used all-MiniLM-L6-v2 (384-dim). MemPalace uses text-embedding-3-large (3072-dim).
-- PersonaMem accuracy column shows MCQ exact-match accuracy (not R@k). All MemoryHub and leaderboard runs use Gemini 3.1 Pro Preview as the answer LLM. BM25 number shown is the Flash Lite run (67.7%).
+- PersonaMem accuracy column shows MCQ exact-match accuracy (not R@k). Leaderboard runs use Gemini 3.1 Pro Preview as the answer LLM. The ablation table uses Flash Lite (not comparable to leaderboard numbers, but valid for relative comparison across source configurations).
+- The v0.3 Combined row (84.9%, 2026-07-19) was removed from the main table -- it was invalidated by a tenant mismatch bug (dreaming memories were never searched). See the detailed run section below.
 
 ## Benchmark Inventory
 
@@ -96,63 +104,50 @@ Result files: `amb-outputs/personamem/_archive/memoryhub-pro-unchunked-20260712/
 
 Result file: `outputs/personamem/granite-pro/rag/32k.json`
 
-#### Run: 2026-07-19 (v0.3, Combined library + dreaming, Gemini 3.1 Pro Preview)
+#### Run: 2026-07-19 (v0.3, Combined library + dreaming, Gemini 3.1 Pro Preview) -- INVALIDATED
 
-**Pipeline state:** Combined ingestion mode: library ingest (195 sessions as memory nodes with chunks) then dreaming extraction (985 facts extracted via gemini-3.1-flash-lite from conversation threads). Both coexist in a single project (`amb-combined-pro`): 3,468 agent-written memories (`source=agent`) + 985 extracted facts (`source=dreaming`). Search uses the full pool with Granite embeddings, reranker, and hybrid RRF blend.
+**Status: INVALIDATED.** Tenant mismatch meant dreaming memories were never searched. See root cause analysis below. Superseded by the 2026-07-20 Flash Lite ablation runs.
 
-**Answer LLM:** Gemini 3.1 Pro Preview (leaderboard-comparable).
-
-| Provider | Model | Queries | Correct | Accuracy |
-|----------|-------|---------|---------|----------|
-| **MemoryHub (Combined)** | **Gemini 3.1 Pro Preview** | **589** | **500** | **84.9%** |
-
-**AMB Leaderboard comparison (all using Gemini 3.1 Pro Preview):**
-
-| System | Approach | Accuracy |
-|--------|----------|----------|
-| Hindsight | LLM fact extraction into semantic graph | 86.6% |
-| **MemoryHub (Combined)** | **Granite embed + reranker, hybrid search + dreaming extraction** | **84.9%** |
-| MemoryHub (Granite) | Granite embed + reranker, hybrid search, no extraction | 84.9% |
-| hybrid-search | 512-token chunking, dense+sparse embeddings | 84.4% |
-| Cognee | Chunking + graph entity extraction | 81.8% |
-
-**Per-category comparison (library-only vs combined):**
-
-| Category | Library | Combined | Delta |
-|----------|---------|----------|-------|
-| recall_user_shared_facts | 104/129 (80.6%) | 109/129 (84.5%) | +3.9pp |
-| track_full_preference_evolution | 131/139 (94.2%) | 128/139 (92.1%) | -2.2pp |
-| recalling_the_reasons_behind_previous_updates | 91/99 (91.9%) | 91/99 (91.9%) | 0.0pp |
-| generalizing_to_new_scenarios | 53/57 (93.0%) | 52/57 (91.2%) | -1.8pp |
-| provide_preference_aligned_recommendations | 50/55 (90.9%) | 50/55 (90.9%) | 0.0pp |
-| recalling_facts_mentioned_by_the_user | 15/17 (88.2%) | 15/17 (88.2%) | 0.0pp |
-| suggest_new_ideas | 56/93 (60.2%) | 55/93 (59.1%) | -1.1pp |
-| **Overall** | **500/589 (84.9%)** | **500/589 (84.9%)** | **0.0pp** |
-
-**Key finding: tenant mismatch invalidates this run.** Post-hoc analysis (2026-07-20) revealed that the dreaming memories were ingested under `tenant_id='default'` while searches used `tenant_id='amb-benchmark'`. The two memory populations were never visible to the same search. This run is effectively a duplicate of the library-only baseline, not a combined test.
-
-**Evidence:** All 589 queries return byte-identical retrieved context between the library-only and combined runs. The 12 queries that flipped (6 gained, 6 lost) are pure Gemini Pro answering non-determinism. A direct DB query confirms: `SELECT source, tenant_id, COUNT(*) FROM memory_nodes WHERE scope_id = 'amb-combined-pro' GROUP BY source, tenant_id` returns `agent/amb-benchmark: 3,468` and `dreaming/default: 985`.
-
-**Root cause:** The harness `_run_dreaming_ingest()` creates threads and extracts facts via the MCP server, but never passes `tenant_id` to the thread/extraction pipeline. The library path explicitly passes `tenant_id` on each `write()` call; the dreaming path uses the session default tenant (`default`).
-
-**Per-category deltas (not meaningful given the above, but recorded for completeness):**
-
-| Category | Library | Combined | Delta |
-|----------|---------|----------|-------|
-| recall_user_shared_facts | 104/129 (80.6%) | 109/129 (84.5%) | +3.9pp |
-| track_full_preference_evolution | 131/139 (94.2%) | 128/139 (92.1%) | -2.2pp |
-| recalling_the_reasons_behind_previous_updates | 91/99 (91.9%) | 91/99 (91.9%) | 0.0pp |
-| generalizing_to_new_scenarios | 53/57 (93.0%) | 52/57 (91.2%) | -1.8pp |
-| provide_preference_aligned_recommendations | 50/55 (90.9%) | 50/55 (90.9%) | 0.0pp |
-| recalling_facts_mentioned_by_the_user | 15/17 (88.2%) | 15/17 (88.2%) | 0.0pp |
-| suggest_new_ideas | 56/93 (60.2%) | 55/93 (59.1%) | -1.1pp |
-| **Overall** | **500/589 (84.9%)** | **500/589 (84.9%)** | **0.0pp** |
-
-**Status:** This run must be re-done after fixing the tenant mismatch in the dreaming ingestion path. A preflight smoke-check system was added to `omb run` (2026-07-20) to prevent this class of bug from reaching full runs.
-
-**Source tagging validated:** The `source` column (migration 026) correctly tags library memories as `agent` and extracted facts as `dreaming`. The `exclude_source` search filter enables ablation testing without re-ingestion.
+**Root cause:** The harness `_run_dreaming_ingest()` created threads and extracted facts via the MCP server without passing `tenant_id`. Dreaming memories landed under `tenant_id='default'` while searches used `tenant_id='amb-benchmark'`. All 589 queries returned byte-identical context between library-only and combined runs. Fix: PR #441 adds per-call `tenant_id` to thread create/extract (server, SDK, harness).
 
 Result file: `outputs/personamem/combined-pro/rag/32k.json`
+
+#### Run: 2026-07-20 (v0.3, Source ablation -- combined/library/dreaming, Flash Lite)
+
+**Pipeline state:** Same `amb-combined-pro` project: 3,468 agent-written memories (`source=agent`) + 985 extracted facts (`source=dreaming`). Tenant mismatch fixed (PR #441) and verified via preflight (`--expect-sources agent,dreaming`). Granite embeddings, reranker, hybrid RRF blend. Three runs with source filters isolate each population's contribution.
+
+**Answer LLM:** Gemini 3.1 Flash Lite. Not leaderboard-comparable (leaderboard uses Pro), but valid for measuring dreaming's retrieval contribution since the same model is used across all three runs.
+
+| Run | Source filter | Queries | Correct | Accuracy |
+|-----|--------------|---------|---------|----------|
+| **Combined** | (none) | 589 | 429 | **72.8%** |
+| **Library-only** | exclude_source=dreaming | 589 | 428 | **72.7%** |
+| **Dreaming-only** | source=dreaming | 589 | 300 | **50.9%** |
+
+**Per-category ablation (library-only vs combined vs dreaming-only):**
+
+| Category | Library | Combined | Dreaming | Delta |
+|----------|---------|----------|----------|-------|
+| recalling_the_reasons_behind_previous_updates | 94/99 (94.9%) | 94/99 (94.9%) | 66/99 (66.7%) | 0.0pp |
+| generalizing_to_new_scenarios | 54/57 (94.7%) | 54/57 (94.7%) | 38/57 (66.7%) | 0.0pp |
+| track_full_preference_evolution | 115/139 (82.7%) | 115/139 (82.7%) | 78/139 (56.1%) | 0.0pp |
+| recall_user_shared_facts | 102/129 (79.1%) | 102/129 (79.1%) | 78/129 (60.5%) | 0.0pp |
+| provide_preference_aligned_recommendations | 40/55 (72.7%) | 40/55 (72.7%) | 24/55 (43.6%) | 0.0pp |
+| recalling_facts_mentioned_by_the_user | 10/17 (58.8%) | 10/17 (58.8%) | 5/17 (29.4%) | 0.0pp |
+| suggest_new_ideas | 13/93 (14.0%) | 14/93 (15.1%) | 11/93 (11.8%) | +1.1pp |
+| **Overall** | **428/589 (72.7%)** | **429/589 (72.8%)** | **300/589 (50.9%)** | **+0.1pp** |
+
+**Key finding: dreaming facts do not improve retrieval in the current architecture.** The combined run gains only +0.1pp over library-only (1 additional correct answer out of 589). Six of seven categories show zero delta. The single flipped query (suggest_new_ideas) is within LLM answering noise.
+
+**Root cause analysis:** Raw SQL vector search confirms dreaming memories ARE findable (they appear at cosine rank ~13-15 for a typical persona), but full conversation transcripts dominate the top-k. With k=70 and ~100 agent memories per persona, agent memories fill the retrieval window before dreaming facts rank high enough. The extracted facts are semantically different from the query+transcript embedding space and get pushed below the cutoff.
+
+**Implications for the dreaming pipeline:**
+
+1. **Fact extraction quality is not the bottleneck.** Dreaming-only achieves 50.9%, which means the extracted facts DO contain the right information for half the questions. The problem is retrieval ranking, not extraction.
+2. **Naive pooling doesn't work.** Simply adding facts to the same vector index as transcripts produces near-zero lift because the transcripts crowd them out.
+3. **Architecture changes needed to realize value:** retrieval-unit routing (search facts and transcripts separately, merge results), fact-aware scoring (boost extracted facts in RRF), or a two-stage pipeline (retrieve transcripts, then enrich with related facts).
+
+Result files: `outputs/personamem/combined-flash-lite/rag/32k.json`, `outputs/personamem/ablation-library-only/rag/32k.json`, `outputs/personamem/ablation-dreaming-only/rag/32k.json`
 
 #### Run: 2026-07-12 (v0.2, SDK provider with chunking, Flash Lite)
 
