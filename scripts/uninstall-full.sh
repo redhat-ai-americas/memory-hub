@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
 
 DB_NAMESPACE="memoryhub-db"
 MCP_PROJECT="memory-hub-mcp"

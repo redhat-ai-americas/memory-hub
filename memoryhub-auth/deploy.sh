@@ -7,7 +7,7 @@
 set -euo pipefail
 
 PROJECT="${1:-memoryhub-auth}"
-CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
 
 # Manifest is rewritten through sed to embed cluster-specific URLs.
 # The image reference stays as the short imagestream tag (auth-server:latest)

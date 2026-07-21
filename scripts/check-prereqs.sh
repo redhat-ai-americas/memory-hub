@@ -6,7 +6,7 @@
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 QUIET=false
 
-CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
 TARGET_NAMESPACES=(memory-hub-mcp memoryhub-auth memoryhub-db memoryhub-ui)
 
 # ---------------------------------------------------------------------------

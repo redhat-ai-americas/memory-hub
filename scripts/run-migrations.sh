@@ -13,7 +13,7 @@
 set -euo pipefail
 
 DB_NAMESPACE="${1:-memoryhub-db}"
-CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
 LOCAL_PORT=15432
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${REPO_ROOT}/.venv"

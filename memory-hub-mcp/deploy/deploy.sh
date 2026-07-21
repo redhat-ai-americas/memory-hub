@@ -23,7 +23,7 @@ set -euo pipefail
 
 NAMESPACE="memory-hub-mcp"
 DEPLOYMENT="memory-hub-mcp"
-CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
