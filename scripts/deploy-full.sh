@@ -28,6 +28,7 @@ SKIP_UI=false
 SKIP_TILE=false
 SKIP_MODELS=false
 GPU_MODELS=false
+SKIP_SMOKE_TEST=false
 RESTORE_FROM=""
 
 START_TIME=$(date +%s)
@@ -113,6 +114,7 @@ parse_args() {
             --skip-tile)       SKIP_TILE=true ;;
             --skip-models)     SKIP_MODELS=true ;;
             --gpu-models)      GPU_MODELS=true ;;
+            --skip-smoke-test) SKIP_SMOKE_TEST=true ;;
             --restore-from)
                 shift
                 RESTORE_FROM="${1:-}"
@@ -135,6 +137,7 @@ parse_args() {
                 echo "  --skip-tile        Skip RHOAI OdhApplication tile"
                 echo "  --skip-models      Skip embedding + reranker model deployment"
                 echo "  --gpu-models       Use GPU model manifests instead of CPU (default: CPU)"
+                echo "  --skip-smoke-test  Skip post-deploy write/search/read verification"
                 echo "  --restore-from F   Restore database from a pg_dump file after DB deploy"
                 exit 0
                 ;;
@@ -183,11 +186,11 @@ preflight() {
     echo "     Server:       $(oc whoami --context "$CONTEXT" --show-server)"
 
     info "Verifying .venv and alembic..."
-    if [ ! -d "$REPO_ROOT/.venv" ]; then
-        die ".venv not found at $REPO_ROOT/.venv — run 'make install' or set up your virtualenv first."
-    fi
-    if ! "$REPO_ROOT/.venv/bin/alembic" --version &>/dev/null; then
-        die "alembic not found in .venv — run 'pip install alembic' in your virtualenv."
+    if [ ! -d "$REPO_ROOT/.venv" ] || ! "$REPO_ROOT/.venv/bin/alembic" --version &>/dev/null; then
+        info "Creating .venv (required for migrations)..."
+        python3 -m venv "$REPO_ROOT/.venv"
+        "$REPO_ROOT/.venv/bin/pip" install --upgrade pip -q
+        "$REPO_ROOT/.venv/bin/pip" install -e "$REPO_ROOT" -q
     fi
     echo "     $("$REPO_ROOT/.venv/bin/alembic" --version)"
 
@@ -628,6 +631,112 @@ deploy_tile() {
 }
 
 # ---------------------------------------------------------------------------
+# Section 7b: Configure local client (API key for CLI/SDK)
+# ---------------------------------------------------------------------------
+configure_local_client() {
+    local api_key_file="$HOME/.config/memoryhub/api-key"
+    if [ -f "$api_key_file" ]; then
+        info "API key already exists at $api_key_file"
+        return 0
+    fi
+
+    local users_cm="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.yaml"
+    if [ ! -f "$users_cm" ]; then return 0; fi
+
+    local key user_id
+    key=$("$REPO_ROOT/.venv/bin/python" -c "
+import json, sys, yaml
+with open(sys.argv[1]) as f:
+    cm = yaml.safe_load(f)
+users = json.loads(cm['data']['users.json'])
+print(users['users'][0]['api_key'])
+" "$users_cm" 2>/dev/null || echo "")
+
+    if [ -n "$key" ] && [[ "$key" != REPLACE-ME* ]]; then
+        user_id=$("$REPO_ROOT/.venv/bin/python" -c "
+import json, sys, yaml
+with open(sys.argv[1]) as f:
+    cm = yaml.safe_load(f)
+users = json.loads(cm['data']['users.json'])
+print(users['users'][0]['user_id'])
+" "$users_cm" 2>/dev/null || echo "unknown")
+        mkdir -p "$HOME/.config/memoryhub"
+        echo -n "$key" > "$api_key_file"
+        chmod 600 "$api_key_file"
+        info "Wrote API key to $api_key_file (user: $user_id)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Section 8: Smoke Test
+# ---------------------------------------------------------------------------
+smoke_test() {
+    banner "8. Smoke Test"
+
+    if [ "$SKIP_SMOKE_TEST" = true ]; then
+        skipped "Smoke test (--skip-smoke-test)"
+        return 0
+    fi
+
+    local mcp_route
+    mcp_route=$(oc get route --context "$CONTEXT" memory-hub-mcp -n "$MCP_PROJECT" \
+        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    if [ -z "$mcp_route" ]; then
+        warn "MCP route not found -- skipping smoke test"
+        return 0
+    fi
+    local mcp_url="https://${mcp_route}/mcp/"
+
+    local api_key_file="$HOME/.config/memoryhub/api-key"
+    if [ ! -f "$api_key_file" ]; then
+        warn "No API key at $api_key_file -- skipping smoke test"
+        return 0
+    fi
+    local api_key
+    api_key=$(cat "$api_key_file")
+
+    if ! command -v memoryhub &>/dev/null; then
+        warn "memoryhub CLI not installed -- skipping smoke test"
+        warn "Install with: pip install memoryhub-cli"
+        return 0
+    fi
+
+    export MEMORYHUB_URL="$mcp_url"
+    export MEMORYHUB_API_KEY="$api_key"
+
+    info "Writing test memory..."
+    local write_output memory_id
+    write_output=$(memoryhub write "MemoryHub smoke test $(date -u +%Y%m%dT%H%M%SZ)" \
+        --scope user --weight 0.5 -o json 2>&1) || {
+        warn "Write failed: $write_output"
+        return 0
+    }
+    memory_id=$(echo "$write_output" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+    if [ -z "$memory_id" ]; then
+        warn "Could not parse write response"
+        return 0
+    fi
+    info "  Written: $memory_id"
+
+    info "Searching..."
+    local search_output search_count
+    search_output=$(memoryhub search "smoke test" --max-results 3 -o json 2>&1) || true
+    search_count=$(echo "$search_output" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('results',[])))" 2>/dev/null || echo "0")
+    info "  Search returned $search_count results"
+
+    info "Reading back..."
+    memoryhub read "$memory_id" -o quiet 2>/dev/null || warn "Read failed"
+    info "  Read OK"
+
+    info "Cleaning up..."
+    memoryhub delete "$memory_id" -o quiet 2>/dev/null || true
+    info "  Deleted test memory"
+
+    echo ""
+    echo -e "  ${GREEN}Smoke test passed${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # Summary banner
 # ---------------------------------------------------------------------------
 print_summary() {
@@ -704,10 +813,12 @@ main() {
     prepare_auth_infra        # Secrets before auth
     deploy_auth               # Auth BEFORE MCP (so auth route exists)
     deploy_mcp                # MCP (auth route now available for JWKS URL)
+    configure_local_client    # Write API key for CLI/SDK
     prepare_ui_infra          # SA + Secrets before UI
     deploy_ui
     deploy_tile
     print_summary
+    smoke_test
 
     local secs
     secs=$(elapsed)
