@@ -51,28 +51,103 @@ The full argument, including when *not* to use MemoryHub: [What Agent Memory Rea
 
 ## Install in your cluster
 
-MemoryHub installs to an OpenShift cluster with Red Hat OpenShift AI (RHOAI) already running. A single `make install` brings up PostgreSQL + pgvector, runs migrations, builds and deploys the MCP server, the OAuth 2.1 auth service, the dashboard UI, and the RHOAI Applications tile.
+MemoryHub installs to any OpenShift cluster with Red Hat OpenShift AI (RHOAI). The full stack is seven services across six namespaces, all deployed by a single `make install`.
+
+### Prerequisites
+
+- `oc` logged in with cluster-admin on a cluster with RHOAI installed
+- `podman` on your PATH
+- A default StorageClass (most clusters have one)
+- Python 3.11+ with a local `.venv` (needed for Alembic migrations during deploy)
+
+Run `make check-prereqs` to verify all of these non-destructively.
+
+### Quick start
 
 ```bash
 git clone https://github.com/redhat-ai-americas/memory-hub.git
 cd memory-hub
-make check-prereqs    # verify cluster state (non-destructive)
-make install          # full stack deploy
+
+# Set up local venv (required for migrations)
+make dev
+
+# Prepare the users ConfigMap (one-time, per-operator)
+cp memory-hub-mcp/deploy/users-configmap.example.yaml \
+   memory-hub-mcp/deploy/users-configmap.yaml
+# Edit to replace REPLACE-ME placeholders with real API keys:
+#   openssl rand -hex 16   (generates a key)
+
+# Verify cluster prerequisites
+make check-prereqs
+
+# Deploy everything
+make install
 ```
 
-At the end of `make install`, the summary banner prints the UI Route, MCP endpoint, auth endpoint, and pointers to the API-key setup. Expect 10–15 minutes on a first install — the MCP server, auth service, and UI each go through an OpenShift BuildConfig.
+### What gets deployed
 
-To remove everything:
+| Service | Namespace | What |
+|---------|-----------|------|
+| PostgreSQL + pgvector | `memoryhub-db` | Database (memories, threads, graph, auth tables) |
+| MinIO | `memory-hub-mcp` | S3-compatible object storage for oversized content |
+| Valkey | `memory-hub-mcp` | Session focus state and compilation epoch cache |
+| Embedding model | `embedding-model` | all-MiniLM-L6-v2 via HuggingFace TEI (CPU, 384-dim) |
+| Reranker model | `reranker-model` | ms-marco-MiniLM-L12-v2 cross-encoder via TEI (CPU) |
+| Auth service | `memoryhub-auth` | OAuth 2.1 authorization server (JWT, PKCE, API keys) |
+| MCP server | `memory-hub-mcp` | FastMCP 3 server exposing memory operations |
+| Dashboard UI | `memoryhub-ui` | React + PatternFly 6 frontend with FastAPI BFF |
+
+All service URLs (auth JWKS, embedding, reranker) are resolved dynamically from cluster state at deploy time. No hardcoded cluster domains.
+
+Expect 8-15 minutes on a first install. The MCP server, auth service, and UI each go through an OpenShift BuildConfig, and the embedding/reranker models need to download weights on first run.
+
+### Targeting a specific cluster
+
+If you have multiple clusters configured in your kubeconfig, set `MEMORYHUB_CONTEXT` to target a specific one without switching your active context:
 
 ```bash
-make uninstall        # prompts for confirmation; use --yes for CI
+MEMORYHUB_CONTEXT=my-cluster make install
+MEMORYHUB_CONTEXT=my-cluster make uninstall
 ```
 
-Use `make uninstall --skip-db` to preserve the database across a reinstall (useful when testing config changes without losing memories).
+This passes `--context` on every `oc` command and never mutates your kubeconfig.
 
-**Prerequisites:** `oc` and `podman` on your PATH, cluster-admin on a cluster with RHOAI installed, a default StorageClass. `make check-prereqs` verifies all of these — run it first. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the "new contributor no-deploy" rule: if you're onboarding to this codebase, work against a local SQLite or Podman PostgreSQL instead of deploying to a cluster.
+### Deploy options
 
-**Partial installs** (advanced): `make deploy-db`, `make deploy-mcp`, `make deploy-auth`, `make deploy-ui`, `make deploy-tile` — each skips the others. `make help` lists everything.
+```bash
+make install                           # full stack (CPU models, default)
+make install -- --gpu-models           # use GPU embedding/reranker models instead
+make install -- --skip-models          # skip embedding/reranker (mock search)
+make install -- --skip-ui --skip-tile  # headless (no dashboard)
+```
+
+### Uninstall
+
+```bash
+make uninstall                         # prompts for confirmation
+make uninstall -- --yes                # non-interactive (CI)
+make uninstall -- --skip-db            # preserve database across reinstall
+make uninstall -- --skip-models        # keep embedding/reranker models running
+```
+
+### Partial deploys (advanced)
+
+`make deploy-db`, `make deploy-mcp`, `make deploy-auth`, `make deploy-ui`, `make deploy-tile` each deploy a single service and skip the others. `make help` lists everything.
+
+### Post-install verification
+
+The deploy script prints a summary banner with all Route URLs. Verify the MCP endpoint with:
+
+```bash
+# Health check (406 = correct for streamable-HTTP MCP)
+curl -s -o /dev/null -w "%{http_code}" \
+  https://memory-hub-mcp-memory-hub-mcp.apps.<cluster>/mcp/
+
+# Auth health
+curl -s https://auth-server-memoryhub-auth.apps.<cluster>/healthz
+```
+
+For full tool verification, use `mcp-test-mcp` to connect to the deployed MCP server and list its tools.
 
 ## Three ways to use it
 
@@ -209,7 +284,7 @@ memory-hub/
 ├── research/                   # Investigations and explorations
 ├── demos/                      # Conference demo scripts and dashboard demo material
 ├── retrospectives/             # Session retros — read for design context
-├── deploy/                     # Top-level deploy assets (PostgreSQL manifests)
+├── deploy/                     # K8s manifests (PostgreSQL, MinIO, Valkey, embedding, reranker)
 └── benchmarks/                 # Empirical benchmark results (e.g. two-vector-retrieval/)
 ```
 

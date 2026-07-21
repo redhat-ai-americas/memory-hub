@@ -53,10 +53,10 @@ deploy-all: install
 # ---------------------------------------------------------------------------
 
 deploy-db:
-	scripts/deploy-full.sh --skip-migrations --skip-mcp --skip-auth --skip-ui --skip-tile
+	scripts/deploy-full.sh --skip-migrations --skip-models --skip-mcp --skip-auth --skip-ui --skip-tile
 
 deploy-mcp:
-	scripts/deploy-full.sh --skip-db --skip-migrations --skip-auth --skip-ui --skip-tile
+	scripts/deploy-full.sh --skip-db --skip-migrations --skip-models --skip-auth --skip-ui --skip-tile
 
 deploy-auth:
 	cd memoryhub-auth && make deploy PROJECT=memoryhub-auth
