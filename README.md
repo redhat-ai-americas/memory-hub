@@ -99,6 +99,8 @@ All service URLs (auth JWKS, embedding, reranker) are resolved dynamically from 
 
 Expect 8-15 minutes on a first install. The MCP server, auth service, and UI each go through an OpenShift BuildConfig, and the embedding/reranker models need to download weights on first run.
 
+**Prerequisites:** `oc` and `podman` on your PATH, cluster-admin on a cluster with RHOAI installed, a default StorageClass. `make check-prereqs` verifies all of these -- run it first. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the "new contributor no-deploy" rule: if you're onboarding to this codebase, work against a local SQLite or Podman PostgreSQL instead of deploying to a cluster.
+
 ### Targeting a specific cluster
 
 If you have multiple clusters configured in your kubeconfig, set `MEMORYHUB_CONTEXT` to target a specific one without switching your active context:
@@ -147,20 +149,87 @@ curl -s https://auth-server-memoryhub-auth.apps.<cluster>/healthz
 
 For full tool verification, use `mcp-test-mcp` to connect to the deployed MCP server and list its tools.
 
+### After install
+
+The install summary banner prints the routes for each service. Follow these steps to verify the deployment and connect your first agent.
+
+**1. Get an API key.** The install creates a `memoryhub-users` ConfigMap in the `memory-hub-mcp` namespace with pre-seeded users and API keys. To view the available keys:
+
+```bash
+oc get configmap memoryhub-users -n memory-hub-mcp \
+  -o jsonpath='{.data.users\.json}' | python3 -m json.tool
+```
+
+Copy a key (format: `mh-dev-<hex>`) and store it locally:
+
+```bash
+mkdir -p ~/.config/memoryhub
+echo "mh-dev-<your-key>" > ~/.config/memoryhub/api-key
+```
+
+To add new users or rotate keys, see the [API key provisioning runbook](docs/runbooks/add-mcp-api-user.md).
+
+**2. Install the CLI and SDK.**
+
+```bash
+pip install memoryhub-cli    # terminal client
+pip install memoryhub        # Python SDK (optional, for scripting)
+```
+
+**3. Verify the deployment.** Use the CLI to test the connection:
+
+```bash
+memoryhub login              # configures endpoint + API key
+memoryhub search "test"      # should return empty results on a fresh install
+```
+
+Or use the SDK directly:
+
+```bash
+python scripts/seed-sample-data.py \
+  --url https://<your-mcp-route>/mcp/
+```
+
+This writes sample memories across multiple scopes so the dashboard has content to display.
+
+**4. Connect Claude Code.** Add the MCP server to Claude Code (the server name `memoryhub` is required as the first positional argument):
+
+```bash
+claude mcp add memoryhub \
+  --transport http \
+  -s user \
+  https://<your-mcp-route>/mcp/
+```
+
+Then set up the agent rule file so Claude Code knows how to use the tools:
+
+```bash
+memoryhub config init        # interactive wizard — generates .memoryhub.yaml + .claude/rules/
+```
+
+**5. Open the dashboard from RHOAI.** The install adds a MemoryHub tile to the Red Hat OpenShift AI application catalog:
+
+1. Open the RHOAI dashboard (the URL printed in the install summary, or find it at `https://rhods-dashboard-redhat-ods-applications.apps.<your-cluster>/`)
+2. Click **Applications** in the left sidebar, then **Explore**
+3. Find the **MemoryHub** tile and click it
+4. Click **Open application** to launch the admin dashboard
+
+The dashboard has six panels: Memory Graph (visual node/edge view of memories and relationships), Status Overview (system health), Users & Agents (active sessions), Client Management (OAuth clients), Curation Rules (content filtering), and Contradiction Log (conflicting memories). If you ran `seed-sample-data.py` in step 3, the Memory Graph will show the seeded memories and their relationships.
+
 ## Three ways to use it
 
 ### 1. From an agent via MCP (Claude Code, or anything that speaks MCP)
 
-The deployed server exposes a streamable-HTTP MCP endpoint. Add it to your agent's MCP configuration:
+The deployed server exposes a streamable-HTTP MCP endpoint. Add it to your agent's MCP configuration (note: the server name `memoryhub` is a required positional argument):
 
 ```bash
-claude mcp add --transport http \
-  -s project \
-  memoryhub \
+claude mcp add memoryhub \
+  --transport http \
+  -s user \
   https://memory-hub-mcp-memory-hub-mcp.apps.<your-cluster>.com/mcp/
 ```
 
-Then run `memoryhub config init` (from the CLI, see below) to generate a `.claude/rules/memoryhub-loading.md` that tells the agent when and how to call the tools. The generated rule covers session start, working-set loading, pivot detection, memory hygiene, and contradiction handling — all parameterized by your project's session shape (focused / broad / adaptive).
+Then run `memoryhub config init` (from the CLI, see below) to generate a `.claude/rules/memoryhub-loading.md` that tells the agent when and how to call the tools. The generated rule covers session start, working-set loading, pivot detection, memory hygiene, and contradiction handling -- all parameterized by your project's session shape (focused / broad / adaptive).
 
 For zero-overhead startup, add a [SessionStart hook](docs/guides/hooks-integration.md) that pre-loads memories into the conversation context before the first prompt — no MCP calls, no token overhead from structural metadata. The MCP server remains available for mid-session searches and writes.
 
