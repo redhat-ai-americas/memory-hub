@@ -22,7 +22,7 @@ _VALID_ACTIONS = frozenset({
 
 _CREATE_OPTS = frozenset({
     "title", "participant_ids", "participant_access",
-    "a2a_context_id", "scope_id", "owner_id", "metadata",
+    "a2a_context_id", "scope_id", "owner_id", "metadata", "tenant_id",
 })
 _APPEND_OPTS = frozenset({"actor_id", "tool_call_id", "metadata", "a2a_context_id"})
 _GET_OPTS = frozenset({"limit", "before_sequence", "include_messages"})
@@ -30,7 +30,7 @@ _LIST_OPTS = frozenset({
     "scope_id", "status", "participant_id", "limit", "offset",
 })
 _ARCHIVE_OPTS = frozenset({"reason"})
-_EXTRACT_OPTS = frozenset({"turn_range", "model", "model_url"})
+_EXTRACT_OPTS = frozenset({"turn_range", "model", "model_url", "tenant_id"})
 _FORK_OPTS = frozenset({"from_sequence", "title"})
 _SHARE_OPTS = frozenset({"grantee_id", "access_level", "authorized_by"})
 _DELETE_OPTS = frozenset({"cascade"})
@@ -156,7 +156,7 @@ async def _dispatch_create(scope, opts, ctx):
         AuthenticationError,
         authorize_write,
         get_claims_from_context,
-        get_tenant_filter,
+        resolve_tenant,
     )
     from src.tools._deps import get_db_session, release_db_session
 
@@ -167,7 +167,7 @@ async def _dispatch_create(scope, opts, ctx):
     except AuthenticationError as exc:
         raise ToolError(str(exc)) from exc
 
-    tenant = get_tenant_filter(claims)
+    tenant = resolve_tenant(claims, opts.get("tenant_id"))
     caller_id = claims["sub"]
 
     project_ids: set[str] | None = None
@@ -471,7 +471,7 @@ async def _dispatch_extract(thread_id_str, opts, ctx):
         AuthenticationError,
         authorize_thread_read,
         get_claims_from_context,
-        get_tenant_filter,
+        resolve_tenant,
     )
     from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session
 
@@ -487,7 +487,7 @@ async def _dispatch_extract(thread_id_str, opts, ctx):
     except AuthenticationError as exc:
         raise ToolError(str(exc)) from exc
 
-    tenant = get_tenant_filter(claims)
+    tenant = resolve_tenant(claims, opts.get("tenant_id"))
     caller_id = claims["sub"]
     s3_adapter = get_s3_adapter()
     embedding_service = get_embedding_service()

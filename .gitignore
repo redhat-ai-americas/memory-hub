@@ -32,7 +32,7 @@ seed-clients.json
 .cache_ggshield
 .mcp.json
 
-NEXT_SESSION*.md
+# NEXT_SESSION*.md -- now tracked per global CLAUDE.md convention
 ISSUE-postsession-*.md
 planning/rfe_draft.md
 

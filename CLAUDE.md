@@ -3,15 +3,29 @@
 ## Project Overview
 MemoryHub is a Kubernetes-native agent memory component for OpenShift AI. See docs/ARCHITECTURE.md for the full architecture and docs/SYSTEMS.md for subsystem inventory.
 
-## Branch Protection
+## Branch Strategy
 
-Main is protected. Never push directly to main. All changes go through pull requests:
-- Create a feature branch (`git checkout -b feat/description`)
-- Commit to the branch
-- Push the branch and open a PR via `gh pr create`
-- Merge after review
+Main is protected. Never push directly to main.
 
-This applies to all changes including docs, config, and demo code. No exceptions.
+Most work targets **feature branches**, not main. PRs to main happen only when a feature branch is ready to land as a cohesive unit.
+
+**Branch hierarchy:**
+- `feat/<topic>` -- long-lived feature branches forked from main
+- `feat/<topic>/<subtask>` -- short-lived branches forked from a feature branch for incremental work
+- `fix/<description>` -- bugfix branches (target main or a feature branch, depending on scope)
+
+**Workflow:**
+1. Create or check out the feature branch (`git checkout -b feat/topic`)
+2. For sub-work, branch off the feature branch (`git checkout -b feat/topic/subtask`)
+3. PR sub-branches into the parent feature branch, not main
+4. When the feature is complete, PR the feature branch into main
+
+**PR targeting rules:**
+- Sub-branches PR into their parent feature branch
+- Feature branches PR into main only when the work is ready to ship
+- Hotfixes (`fix/`) may target main directly when urgency warrants it
+
+This applies to all changes including docs, config, and demo code.
 
 ## Issue Management
 Use the `/issue-tracker` skill for ALL issue operations. Never create issues manually without using the skill -- it enforces our conventions:

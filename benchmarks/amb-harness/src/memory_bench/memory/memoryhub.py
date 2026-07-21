@@ -222,7 +222,7 @@ class MemoryHubProvider(MemoryProvider):
                 sorted(persona_sessions.items()), 1
             ):
                 owner = f"amb-{persona_id}" if persona_id else "amb-default"
-                thread = await client.create_thread(
+                create_kwargs: dict[str, Any] = dict(
                     scope="project",
                     scope_id=self._project_id,
                     owner_id=owner,
@@ -233,6 +233,9 @@ class MemoryHubProvider(MemoryProvider):
                         "session_count": len(sessions),
                     },
                 )
+                if self._tenant_id:
+                    create_kwargs["tenant_id"] = self._tenant_id
+                thread = await client.create_thread(**create_kwargs)
                 logger.info(
                     "Persona %d/%d (%s): thread %s, %d sessions",
                     p_idx, total_personas, persona_id, thread.id, len(sessions),
@@ -258,6 +261,8 @@ class MemoryHubProvider(MemoryProvider):
                         extract_kwargs["model"] = self._extraction_model
                     if self._extraction_model_url:
                         extract_kwargs["model_url"] = self._extraction_model_url
+                    if self._tenant_id:
+                        extract_kwargs["tenant_id"] = self._tenant_id
 
                     result = await client.extract_thread(thread.id, **extract_kwargs)
                     total_extractions += result.extracted_count
