@@ -65,5 +65,21 @@ echo "Reading DB password from K8s Secret in ${DB_NAMESPACE}..."
 export MEMORYHUB_DB_PASSWORD=$(oc get secret --context "$CONTEXT" memoryhub-pg-credentials -n "$DB_NAMESPACE" \
   -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
 
+# Auto-generate seed-clients.json from template if it doesn't exist
+SEED_FILE="$REPO_ROOT/scripts/seed-clients.json"
+SEED_EXAMPLE="$REPO_ROOT/scripts/seed-clients.example.json"
+if [[ ! -f "$SEED_FILE" ]] && [[ -f "$SEED_EXAMPLE" ]]; then
+  echo "Generating $SEED_FILE from template with random secrets..."
+  "$VENV/bin/python" -c "
+import json, secrets, pathlib
+clients = json.loads(pathlib.Path('$SEED_EXAMPLE').read_text())
+for c in clients:
+    if 'secret' in c.get('client_secret', '').lower() or 'here' in c.get('client_secret', '').lower():
+        c['client_secret'] = f'mh-dev-{secrets.token_hex(16)}'
+pathlib.Path('$SEED_FILE').write_text(json.dumps(clients, indent=2))
+print(f'  Generated {len(clients)} client(s) with random secrets.')
+"
+fi
+
 echo "Running seed script..."
 "$VENV/bin/python" "$REPO_ROOT/scripts/seed-oauth-clients.py"

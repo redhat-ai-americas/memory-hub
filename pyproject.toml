@@ -21,6 +21,7 @@ dependencies = [
     "httpx",
     "psycopg2-binary",
     "pyyaml",
+    "bcrypt>=4.0",
 ]
 
 [project.optional-dependencies]

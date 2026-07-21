@@ -113,19 +113,19 @@ This passes `--context` on every `oc` command and never mutates your kubeconfig.
 ### Deploy options
 
 ```bash
-make install                           # full stack (CPU models, default)
-make install -- --gpu-models           # use GPU embedding/reranker models instead
-make install -- --skip-models          # skip embedding/reranker (mock search)
-make install -- --skip-ui --skip-tile  # headless (no dashboard)
+make install                                          # full stack (CPU models)
+make install INSTALL_ARGS="--gpu-models"              # GPU embedding/reranker
+make install INSTALL_ARGS="--skip-models"             # skip models (mock search)
+make install INSTALL_ARGS="--skip-ui --skip-tile"     # headless (no dashboard)
 ```
 
 ### Uninstall
 
 ```bash
-make uninstall                         # prompts for confirmation
-make uninstall -- --yes                # non-interactive (CI)
-make uninstall -- --skip-db            # preserve database across reinstall
-make uninstall -- --skip-models        # keep embedding/reranker models running
+make uninstall                                        # prompts for confirmation
+make uninstall UNINSTALL_ARGS="--yes"                 # non-interactive (CI)
+make uninstall UNINSTALL_ARGS="--skip-db"             # preserve database
+make uninstall UNINSTALL_ARGS="--skip-models"         # keep models running
 ```
 
 ### Partial deploys (advanced)

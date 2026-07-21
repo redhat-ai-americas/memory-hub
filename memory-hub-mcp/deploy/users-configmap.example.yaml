@@ -1,16 +1,21 @@
 ---
-# WARNING: This is an EXAMPLE template. Copy this file to
-# `users-configmap.yaml` (which is gitignored) and replace the placeholder
-# api_keys with strong, randomly generated values BEFORE running deploy.sh.
+# API KEY AUTH — ConfigMap-based user/agent registration for the MCP server.
 #
+# This is the simpler of two auth paths. Each entry maps an api_key (bearer
+# token) to a user_id with memory-level scopes (user, project, organizational,
+# etc.). Used by: Claude Code, the memoryhub CLI, the Python SDK, and scripts.
+#
+# The other auth path (OAuth 2.1) uses scripts/seed-clients.json for
+# client_credentials grants with token-based scopes (memory:read, etc.).
+# Most users only need this ConfigMap; OAuth is for production token flows.
+#
+# On first install, deploy.sh auto-generates this file with random keys if
+# it doesn't exist. To bring your own keys:
 #     cp users-configmap.example.yaml users-configmap.yaml
-#     # edit users-configmap.yaml with real api_keys
+#     # replace REPLACE-ME placeholders (e.g. openssl rand -hex 16)
 #     ./deploy.sh
 #
-# The api_key is a bearer token for the MemoryHub `register_session` tool.
-# Anyone who has the key can authenticate as the corresponding user and
-# read/write memories with the listed scopes. Generate them with e.g.
-# `openssl rand -hex 16` and treat them like database passwords.
+# The api_key format is: mh-dev-<hex> (e.g. mh-dev-a76811f5d871abcd1234).
 apiVersion: v1
 kind: ConfigMap
 metadata:

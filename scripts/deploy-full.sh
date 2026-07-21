@@ -635,11 +635,6 @@ deploy_tile() {
 # ---------------------------------------------------------------------------
 configure_local_client() {
     local api_key_file="$HOME/.config/memoryhub/api-key"
-    if [ -f "$api_key_file" ]; then
-        info "API key already exists at $api_key_file"
-        return 0
-    fi
-
     local users_cm="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.yaml"
     if [ ! -f "$users_cm" ]; then return 0; fi
 
@@ -652,19 +647,30 @@ users = json.loads(cm['data']['users.json'])
 print(users['users'][0]['api_key'])
 " "$users_cm" 2>/dev/null || echo "")
 
-    if [ -n "$key" ] && [[ "$key" != REPLACE-ME* ]]; then
-        user_id=$("$REPO_ROOT/.venv/bin/python" -c "
+    if [ -z "$key" ] || [[ "$key" == REPLACE-ME* ]]; then return 0; fi
+
+    user_id=$("$REPO_ROOT/.venv/bin/python" -c "
 import json, sys, yaml
 with open(sys.argv[1]) as f:
     cm = yaml.safe_load(f)
 users = json.loads(cm['data']['users.json'])
 print(users['users'][0]['user_id'])
 " "$users_cm" 2>/dev/null || echo "unknown")
-        mkdir -p "$HOME/.config/memoryhub"
-        echo -n "$key" > "$api_key_file"
-        chmod 600 "$api_key_file"
-        info "Wrote API key to $api_key_file (user: $user_id)"
+
+    if [ -f "$api_key_file" ]; then
+        local existing
+        existing=$(cat "$api_key_file")
+        if [ "$existing" = "$key" ]; then
+            info "API key at $api_key_file matches this cluster (user: $user_id)"
+            return 0
+        fi
+        warn "Overwriting $api_key_file (was for a different cluster)"
     fi
+
+    mkdir -p "$HOME/.config/memoryhub"
+    echo -n "$key" > "$api_key_file"
+    chmod 600 "$api_key_file"
+    info "Wrote API key to $api_key_file (user: $user_id)"
 }
 
 # ---------------------------------------------------------------------------
@@ -720,7 +726,7 @@ smoke_test() {
 
     info "Searching..."
     local search_output search_count
-    search_output=$(memoryhub search "smoke test" --max-results 3 -o json 2>&1) || true
+    search_output=$(memoryhub search "smoke test" --max 3 -o json 2>&1) || true
     search_count=$(echo "$search_output" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('results',[])))" 2>/dev/null || echo "0")
     info "  Search returned $search_count results"
 

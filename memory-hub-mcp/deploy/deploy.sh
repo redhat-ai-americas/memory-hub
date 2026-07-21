@@ -146,7 +146,7 @@ import re, secrets, pathlib
 src = pathlib.Path('$SCRIPT_DIR/users-configmap.example.yaml').read_text()
 out = re.sub(
     r'REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16',
-    lambda m: secrets.token_hex(16),
+    lambda m: f'mh-dev-{secrets.token_hex(16)}',
     src,
 )
 pathlib.Path('$USERS_CM').write_text(out)

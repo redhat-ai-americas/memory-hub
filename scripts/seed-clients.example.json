@@ -1,18 +1,20 @@
 [
   {
-    "client_id": "your-username",
-    "client_secret": "your-api-key-here",
-    "client_name": "Your Name",
+    "_comment": "Admin/operator — full access for cluster administration",
+    "client_id": "admin",
+    "client_secret": "your-secret-here",
+    "client_name": "Cluster Admin",
     "identity_type": "user",
     "tenant_id": "default",
-    "default_scopes": ["memory:read", "memory:write:user"]
+    "default_scopes": ["memory:read", "memory:write:user", "memory:write:organizational", "memory:admin"]
   },
   {
-    "client_id": "my-service-agent",
-    "client_secret": "service-api-key-here",
-    "client_name": "My Service Agent",
+    "_comment": "Regular agent — read + user-scope write",
+    "client_id": "my-agent",
+    "client_secret": "your-secret-here",
+    "client_name": "My Agent",
     "identity_type": "service",
     "tenant_id": "default",
-    "default_scopes": ["memory:read", "memory:write:organizational"]
+    "default_scopes": ["memory:read", "memory:write:user"]
   }
 ]

@@ -37,10 +37,10 @@ help:
 # ---------------------------------------------------------------------------
 
 install:
-	scripts/deploy-full.sh
+	scripts/deploy-full.sh $(INSTALL_ARGS)
 
 uninstall:
-	scripts/uninstall-full.sh
+	scripts/uninstall-full.sh $(UNINSTALL_ARGS)
 
 check-prereqs:
 	scripts/check-prereqs.sh

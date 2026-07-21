@@ -150,8 +150,23 @@ else
     echo "    oc apply -f openshift.yaml  (for ServiceAccount, ClusterRole, ClusterRoleBindings)"
 fi
 
-# Run Alembic migrations before deploying new code
+# Run Alembic migrations before deploying new code.
+# Use the auth service's own .venv if it exists, otherwise fall back to the
+# root repo .venv (created by deploy-full.sh preflight). The root venv has
+# all memoryhub_core deps which is sufficient for running alembic.
 echo "→ Running database migrations..."
+ALEMBIC_BIN=""
+if [ -f .venv/bin/alembic ]; then
+    ALEMBIC_BIN=".venv/bin/alembic"
+elif [ -f ../. ] && [ -f ../.venv/bin/alembic ]; then
+    ALEMBIC_BIN="../.venv/bin/alembic"
+else
+    echo "  Creating .venv for auth migrations..."
+    python3 -m venv .venv
+    .venv/bin/pip install --upgrade pip -q
+    .venv/bin/pip install -e ".[dev]" -q
+    ALEMBIC_BIN=".venv/bin/alembic"
+fi
 DB_NAMESPACE="memoryhub-db"
 oc port-forward --context "$CONTEXT" -n "$DB_NAMESPACE" svc/memoryhub-pg 15432:5432 &
 MIGRATE_PF_PID=$!
@@ -172,7 +187,7 @@ AUTH_DB_PORT=15432 \
 AUTH_DB_USER=memoryhub \
 AUTH_DB_PASSWORD="$DB_PASS" \
 AUTH_DB_NAME=memoryhub \
-    .venv/bin/alembic upgrade head 2>&1
+    "$ALEMBIC_BIN" upgrade head 2>&1
 kill "$MIGRATE_PF_PID" 2>/dev/null || true
 echo "  Migrations complete."
 

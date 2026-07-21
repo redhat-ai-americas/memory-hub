@@ -128,8 +128,7 @@ info "Checking for Red Hat OpenShift AI (namespace redhat-ods-applications)..."
 if oc get namespace --context "$CONTEXT" redhat-ods-applications &>/dev/null; then
     pass "redhat-ods-applications namespace found — RHOAI is installed"
 else
-    fail "Namespace 'redhat-ods-applications' not found. MemoryHub expects Red Hat OpenShift AI to be installed. See https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed for installation."
-    (( FAILURES++ ))
+    warn "RHOAI not found. Core services (DB, MCP, Auth, models) will deploy without it, but the dashboard UI tile requires RHOAI. Install RHOAI first if you need the admin panel: https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed"
 fi
 
 # 7. Default storage class exists
