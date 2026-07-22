@@ -37,13 +37,13 @@ help:
 # ---------------------------------------------------------------------------
 
 install:
-	scripts/deploy-full.sh
+	scripts/deploy-full.sh $(ARGS)
 
 uninstall:
-	scripts/uninstall-full.sh
+	scripts/uninstall-full.sh $(ARGS)
 
 check-prereqs:
-	scripts/check-prereqs.sh
+	scripts/check-prereqs.sh $(ARGS)
 
 # Backward compat
 deploy-all: install
