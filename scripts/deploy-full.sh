@@ -505,10 +505,33 @@ deploy_auth() {
     fi
 
     info "Seeding OAuth clients..."
+    # Ensure users-configmap.yaml exists (normally generated during MCP deploy,
+    # but auth runs first and needs it for seed-clients.json).
+    local users_cm="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.yaml"
+    if [ ! -f "$users_cm" ]; then
+        local users_example="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.example.yaml"
+        if [ -f "$users_example" ]; then
+            info "Generating users-configmap.yaml from template..."
+            export CURRENT_USER="${USER:-$(whoami)}"
+            "$REPO_ROOT/.venv/bin/python" -c "
+import os, re, secrets, pathlib
+src = pathlib.Path('$users_example').read_text()
+user = os.environ.get('CURRENT_USER', 'admin')
+out = src.replace('CURRENT_USER_DISPLAY', user.replace('-', ' ').title())
+out = out.replace('CURRENT_USER', user)
+out = re.sub(
+    r'REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16',
+    lambda m: 'mh-dev-' + secrets.token_hex(8),
+    out,
+)
+pathlib.Path('$users_cm').write_text(out)
+print(f'  Generated for user \"{user}\"')
+"
+        fi
+    fi
     # Auto-generate seed-clients.json from the users ConfigMap if it doesn't exist.
     local seed_json="$REPO_ROOT/scripts/seed-clients.json"
     if [ ! -f "$seed_json" ]; then
-        local users_cm="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.yaml"
         if [ -f "$users_cm" ]; then
             info "Generating $seed_json from users ConfigMap..."
             "$REPO_ROOT/.venv/bin/python" -c "
