@@ -694,10 +694,6 @@ deploy_tile() {
 # ---------------------------------------------------------------------------
 configure_local_client() {
     local api_key_file="$HOME/.config/memoryhub/api-key"
-    if [ -f "$api_key_file" ]; then
-        info "API key already exists at $api_key_file"
-        return 0
-    fi
 
     local users_cm="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.yaml"
     if [ ! -f "$users_cm" ]; then return 0; fi
