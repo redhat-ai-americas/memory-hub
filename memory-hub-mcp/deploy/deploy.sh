@@ -141,7 +141,7 @@ echo "Applying manifests..."
 USERS_CM="$SCRIPT_DIR/users-configmap.yaml"
 if [[ ! -f "$USERS_CM" ]]; then
   echo "Generating $USERS_CM from template with random API keys..."
-  CURRENT_USER="${USER:-$(whoami)}"
+  export CURRENT_USER="${USER:-$(whoami)}"
   python3 -c "
 import os, re, secrets, pathlib
 src = pathlib.Path('$SCRIPT_DIR/users-configmap.example.yaml').read_text()
@@ -150,7 +150,7 @@ out = src.replace('CURRENT_USER_DISPLAY', user.replace('-', ' ').title())
 out = out.replace('CURRENT_USER', user)
 out = re.sub(
     r'REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16',
-    lambda m: secrets.token_hex(16),
+    lambda m: 'mh-dev-' + secrets.token_hex(8),
     out,
 )
 pathlib.Path('$USERS_CM').write_text(out)
