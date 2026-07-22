@@ -505,6 +505,38 @@ deploy_auth() {
     fi
 
     info "Seeding OAuth clients..."
+    # Auto-generate seed-clients.json from the users ConfigMap if it doesn't exist.
+    local seed_json="$REPO_ROOT/scripts/seed-clients.json"
+    if [ ! -f "$seed_json" ]; then
+        local users_cm="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.yaml"
+        if [ -f "$users_cm" ]; then
+            info "Generating $seed_json from users ConfigMap..."
+            "$REPO_ROOT/.venv/bin/python" -c "
+import json, sys, yaml, pathlib
+with open(sys.argv[1]) as f:
+    cm = yaml.safe_load(f)
+users = json.loads(cm['data']['users.json'])['users']
+clients = []
+for u in users:
+    identity_type = u.get('identity_type', 'user')
+    scopes = ['memory:read', 'memory:write:user']
+    if 'organizational' in u.get('scopes', []):
+        scopes.append('memory:write:organizational')
+    if 'enterprise' in u.get('scopes', []):
+        scopes.append('memory:write:enterprise')
+    clients.append({
+        'client_id': u['user_id'],
+        'client_secret': u['api_key'],
+        'client_name': u.get('name', u['user_id']),
+        'identity_type': identity_type,
+        'tenant_id': u.get('tenant_id', 'default'),
+        'default_scopes': scopes,
+    })
+pathlib.Path(sys.argv[2]).write_text(json.dumps(clients, indent=2))
+print(f'  Generated {len(clients)} OAuth clients from users ConfigMap.')
+" "$users_cm" "$seed_json"
+        fi
+    fi
     "$REPO_ROOT/scripts/run-seed-oauth-clients.sh"
 
     info "Building and deploying Auth server (project: $AUTH_PROJECT)..."
