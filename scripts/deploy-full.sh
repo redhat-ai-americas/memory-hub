@@ -564,6 +564,10 @@ print(f'  Generated {len(clients)} OAuth clients from users ConfigMap.')
 
     info "Building and deploying Auth server (project: $AUTH_PROJECT)..."
     pushd "$REPO_ROOT/memoryhub-auth" > /dev/null
+    if [ ! -d .venv ] || ! .venv/bin/alembic --version &>/dev/null; then
+        info "Creating memoryhub-auth .venv..."
+        make install 2>&1 | tail -1
+    fi
     make deploy PROJECT="$AUTH_PROJECT"
     popd > /dev/null
 
