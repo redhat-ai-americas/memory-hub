@@ -16,7 +16,9 @@ its contents as initial context. Do NOT call `register_session` or
 
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow: read your API key from
-`~/.config/memoryhub/api-key` (trim whitespace) and call
+`~/.config/memoryhub/credentials` (INI file, section matching
+`MEMORYHUB_CONTEXT` or `[default]`, falling back to
+`~/.config/memoryhub/api-key`) and call
 `register_session(api_key="<key>")`. Do NOT call `search_memory` --
 there is no working set in this pattern.
 

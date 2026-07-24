@@ -5,7 +5,6 @@ Tests all major SDK features against the deployed MCP server.
 """
 import asyncio
 import sys
-from pathlib import Path
 
 # Import SDK components
 from memoryhub import MemoryHubClient
@@ -22,7 +21,6 @@ from memoryhub.extraction import (
 
 # Test configuration
 MCP_URL = "https://memory-hub-mcp-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/"
-API_KEY_PATH = Path.home() / ".config/memoryhub/api-key"
 PROJECT_ID = "memory-hub"
 
 # Track test IDs for cleanup
@@ -30,11 +28,14 @@ test_memory_ids = []
 
 
 def load_api_key() -> str:
-    """Load API key from ~/.config/memoryhub/api-key"""
-    if not API_KEY_PATH.exists():
-        print(f"❌ API key not found at {API_KEY_PATH}")  # noqa: T201
+    """Load API key via memoryhub-cli config resolution."""
+    from memoryhub_cli.config import get_api_key
+
+    key = get_api_key()
+    if not key:
+        print("No API key found. Set MEMORYHUB_API_KEY or configure ~/.config/memoryhub/credentials")  # noqa: T201
         sys.exit(1)
-    return API_KEY_PATH.read_text().strip()
+    return key
 
 
 async def run_tests():

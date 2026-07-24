@@ -245,7 +245,13 @@ else
 
     # Generate provider spec with MemoryHub connection env vars
     MEMORYHUB_MCP_URL="http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/"
-    MEMORYHUB_KEY=$(bash -c 'cat ~/.config/memoryhub/api-key 2>/dev/null' | tr -d '[:space:]')
+    MEMORYHUB_KEY=$("$REPO_ROOT/.venv/bin/python" -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/memoryhub-cli/src')
+from memoryhub_cli.config import get_api_key
+k = get_api_key()
+if k: print(k, end='')
+" 2>/dev/null || cat ~/.config/memoryhub/api-key 2>/dev/null | tr -d '[:space:]')
     MEMORYHUB_DB_PASSWORD=$(oc get secret memoryhub-db-credentials --context "$CONTEXT" -n memory-hub-mcp \
         -o jsonpath='{.data.MEMORYHUB_DB_PASSWORD}' 2>/dev/null | base64 -d || true)
 

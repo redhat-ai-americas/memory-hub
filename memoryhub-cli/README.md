@@ -18,11 +18,16 @@ The CLI supports two authentication modes:
 # Via environment variable
 export MEMORYHUB_API_KEY=mh-dev-abc123
 
-# Or place your key at ~/.config/memoryhub/api-key (mode 0600)
-echo "mh-dev-abc123" > ~/.config/memoryhub/api-key
+# Or store in the credentials file (INI-style, mode 0600)
+mkdir -p ~/.config/memoryhub
+cat > ~/.config/memoryhub/credentials << 'EOF'
+[default]
+api_key = mh-dev-abc123
+EOF
+chmod 600 ~/.config/memoryhub/credentials
 ```
 
-API key resolution order: `MEMORYHUB_API_KEY` env var > `~/.config/memoryhub/api-key` file > `api_key` in config.json.
+API key resolution order: `MEMORYHUB_API_KEY` env var > `~/.config/memoryhub/credentials` (section from `MEMORYHUB_CONTEXT` or `[default]`) > `~/.config/memoryhub/api-key` (legacy flat file) > `api_key` in config.json.
 
 **Server URL:**
 

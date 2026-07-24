@@ -1157,12 +1157,18 @@ def config_init(
         console.print(f"  Project: {project}")  # noqa: T201
 
     # ── #153: API key check ──
-    api_key_path = Path.home() / ".config" / "memoryhub" / "api-key"
-    if api_key_path.exists():
-        console.print(f"\n[green]API key found at {api_key_path}[/green]")  # noqa: T201
+    from memoryhub_cli.config import CREDENTIALS_FILE
+
+    if CREDENTIALS_FILE.exists():
+        console.print(f"\n[green]Credentials found at {CREDENTIALS_FILE}[/green]")  # noqa: T201
+    elif (Path.home() / ".config" / "memoryhub" / "api-key").exists():
+        console.print(  # noqa: T201
+            "\n[yellow]Warning:[/yellow] Using legacy ~/.config/memoryhub/api-key\n"
+            f"  The next deploy will migrate it to {CREDENTIALS_FILE} automatically."
+        )
     else:
         console.print(  # noqa: T201
-            f"\n[yellow]Warning:[/yellow] No API key at {api_key_path}\n"
+            f"\n[yellow]Warning:[/yellow] No credentials at {CREDENTIALS_FILE}\n"
             "  Create this file with your MemoryHub API key before using\n"
             "  the agent. Ask your administrator for a key."
         )

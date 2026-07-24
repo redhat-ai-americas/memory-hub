@@ -37,18 +37,16 @@ The CLI resolves credentials from environment variables first, then config files
 # Create the config directory
 mkdir -p ~/.config/memoryhub
 
-# Store your API key (mode 0600 -- never commit this)
-echo "mh-dev-your-key-here" > ~/.config/memoryhub/api-key
-chmod 600 ~/.config/memoryhub/api-key
-
-# Store the server URL
-cat > ~/.config/memoryhub/config.json << 'EOF'
-{"url": "https://your-memoryhub-server.example.com/mcp/"}
+# Store your API key and server URL (mode 0600 -- never commit this)
+cat > ~/.config/memoryhub/credentials << 'EOF'
+[default]
+api_key = mh-dev-your-key-here
+url = https://your-memoryhub-server.example.com/mcp/
 EOF
-chmod 600 ~/.config/memoryhub/config.json
+chmod 600 ~/.config/memoryhub/credentials
 ```
 
-Alternatively, set `MEMORYHUB_API_KEY` and `MEMORYHUB_URL` environment variables in your shell profile.
+Alternatively, set `MEMORYHUB_API_KEY` and `MEMORYHUB_URL` environment variables in your shell profile. The legacy flat file `~/.config/memoryhub/api-key` is still supported as a fallback.
 
 ### 2. Initialize project configuration
 
@@ -166,7 +164,8 @@ or `search_memory` yet.
 
 If no `<memoryhub-context>` block is present (hook not configured or
 failed silently), fall back to the manual flow: read your API key from
-`~/.config/memoryhub/api-key` (trim whitespace), call
+`~/.config/memoryhub/credentials` (INI file, section matching
+`MEMORYHUB_CONTEXT` or `[default]`), call
 `register_session(api_key="<key>")`, then after the first user turn
 derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
 ```
@@ -182,7 +181,6 @@ If nothing appears, check:
 1. **Is the script executable?** `ls -la .claude/hooks/load-memories.sh`
 2. **Does the CLI work standalone?** Run the search command manually:
    ```bash
-   MEMORYHUB_API_KEY=$(cat ~/.config/memoryhub/api-key) \
    memoryhub search "project context" --project-id my-project --output compact --max 5
    ```
 3. **Is the hook configured?** Check `.claude/settings.json` has the `SessionStart` block.
@@ -199,8 +197,8 @@ Commit these files to your repository:
 
 Do NOT commit:
 
-- `~/.config/memoryhub/api-key` -- per-operator credential
-- `~/.config/memoryhub/config.json` -- per-operator server URL
+- `~/.config/memoryhub/credentials` -- per-operator API keys and server URLs
+- `~/.config/memoryhub/config.json` -- per-operator OAuth/connection config
 
 ## Design rationale
 
@@ -223,7 +221,7 @@ The hook and MCP server serve complementary roles:
 | Update/delete | No | Yes |
 | Contradiction reporting | No | Yes |
 | Token cost | Zero (plain text) | Per-call (tool I/O) |
-| Authentication | API key via file | API key via `register_session` |
+| Authentication | API key via credentials file | API key via `register_session` |
 
 The agent should defer `register_session` until the first time it needs to search (topic pivot) or write. If the hook succeeded, no MCP calls are needed until then.
 

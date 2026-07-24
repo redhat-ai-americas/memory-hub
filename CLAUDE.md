@@ -101,14 +101,14 @@ Example: `memory-tree: Add versioning with isCurrent flag`
 
 ## Credential Hygiene
 
-Credentials, API keys, and tokens must never appear in session summaries, plans, issues, or any committed documentation. Reference the secret's storage location instead (e.g., "stored in memoryhub-auth cluster secret" or "see ~/.config/memoryhub/api-key"). This applies to all key formats including hex-format keys (`mh-dev-<hex>`), OAuth client secrets, and database passwords. Incident: a hex-format API key committed in a session summary (2026-07-14) required rotation and git history scrubbing.
+Credentials, API keys, and tokens must never appear in session summaries, plans, issues, or any committed documentation. Reference the secret's storage location instead (e.g., "stored in memoryhub-auth cluster secret" or "see ~/.config/memoryhub/credentials"). This applies to all key formats including hex-format keys (`mh-dev-<hex>`), OAuth client secrets, and database passwords. Incident: a hex-format API key committed in a session summary (2026-07-14) required rotation and git history scrubbing.
 
 ## Secrets and Env Var Reference
 
 Where credentials live and how to use them. This eliminates "secrets archaeology" at session start.
 
 **Local developer machine:**
-- `~/.config/memoryhub/api-key` -- MemoryHub API key for SDK/MCP client auth
+- `~/.config/memoryhub/credentials` -- MemoryHub API keys and URLs per cluster context (INI-style, keyed by MEMORYHUB_CONTEXT)
 - `~/.secrets` -- shell-sourceable file with `GEMINI_API_KEY`, `GOOGLE_API_KEY`, etc.
 
 **Cluster Secrets (mcp-rhoai context):**
@@ -131,7 +131,7 @@ The MCP server calls an OpenAI-compatible `/chat/completions` endpoint for fact 
 
 **EvalHub adapter env vars (injected by `deploy-evalhub.sh` provider registration):**
 - `MEMORYHUB_URL` -- internal MCP service: `http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/`
-- `MEMORYHUB_API_KEY` -- from `~/.config/memoryhub/api-key` at registration time
+- `MEMORYHUB_API_KEY` -- from `~/.config/memoryhub/credentials` at registration time
 - `MEMORYHUB_DB_HOST` -- internal DB service: `memoryhub-pg.memoryhub-db.svc.cluster.local`
 - `MEMORYHUB_DB_PORT` -- `5432` (internal, not the port-forward 25432)
 - `MEMORYHUB_DB_USER` -- `memoryhub`

@@ -2,7 +2,7 @@
 """Seed MemoryHub with sample data so the admin UI has content to display.
 
 Usage:
-    # Uses MCP_URL env var or prompts; reads API key from ~/.config/memoryhub/api-key
+    # Uses MCP_URL env var or prompts; reads API key from ~/.config/memoryhub/credentials
     python scripts/seed-sample-data.py
 
     # Explicit URL and key
@@ -16,7 +16,6 @@ Requires: pip install memoryhub
 import argparse
 import asyncio
 import sys
-from pathlib import Path
 
 try:
     from memoryhub import MemoryHubClient
@@ -97,7 +96,7 @@ MEMORIES = [
 async def main():
     parser = argparse.ArgumentParser(description="Seed MemoryHub with sample data")
     parser.add_argument("--url", help="MCP server URL (or set MCP_URL env var)")
-    parser.add_argument("--api-key", help="API key (or store at ~/.config/memoryhub/api-key)")
+    parser.add_argument("--api-key", help="API key (or configure ~/.config/memoryhub/credentials)")
     parser.add_argument("--skip-if-exists", action="store_true",
                         help="Skip seeding if memories already exist")
     args = parser.parse_args()
@@ -112,11 +111,11 @@ async def main():
 
     api_key = args.api_key
     if not api_key:
-        key_path = Path.home() / ".config/memoryhub/api-key"
-        if key_path.exists():
-            api_key = key_path.read_text().strip()
-        else:
-            print(f"Error: provide --api-key or store key at {key_path}")
+        from memoryhub_cli.config import get_api_key
+
+        api_key = get_api_key()
+        if not api_key:
+            print("Error: provide --api-key, set MEMORYHUB_API_KEY, or configure ~/.config/memoryhub/credentials")
             sys.exit(1)
 
     client = MemoryHubClient(url=url, api_key=api_key)
