@@ -156,7 +156,7 @@ its contents as your working set. Do NOT call `register_session` or
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow:
 
-1. Read your API key from `~/.config/memoryhub/api-key` (trim whitespace).
+1. Read your API key from `~/.config/memoryhub/credentials` (INI file, section matching `MEMORYHUB_CONTEXT` or `[default]`; falls back to `~/.config/memoryhub/api-key`).
 2. Call `register_session(api_key="<key>")` to authenticate.
 3. Immediately call `search_memory(query="", mode="index", max_results=50)`
    to load the full working set as lightweight stubs. The empty query plus
@@ -695,12 +695,56 @@ HOOK_SCRIPT_TEMPLATE = """\
 
 set -euo pipefail
 
-API_KEY_FILE="$HOME/.config/memoryhub/api-key"
-[ -f "$API_KEY_FILE" ] || exit 0
+# --- Credential resolution ---
+# 1. MEMORYHUB_API_KEY env var (already set)
+# 2. ~/.config/memoryhub/credentials (INI, MEMORYHUB_CONTEXT or [default])
+# 3. ~/.config/memoryhub/api-key (flat file, backwards compat)
 
-API_KEY=$(tr -d '\\n' < "$API_KEY_FILE")
-[ -n "$API_KEY" ] || exit 0
-export MEMORYHUB_API_KEY="$API_KEY"
+CREDS_FILE="$HOME/.config/memoryhub/credentials"
+API_KEY_FILE="$HOME/.config/memoryhub/api-key"
+
+if [ -z "${MEMORYHUB_API_KEY:-}" ]; then
+  if [ -f "$CREDS_FILE" ]; then
+    SECTION="${MEMORYHUB_CONTEXT:-default}"
+    MEMORYHUB_API_KEY=$(awk -v section="$SECTION" '
+      /^\\[/ { in_section = ($0 == "[" section "]") }
+      in_section && /^api_key[[:space:]]*=/ {
+        sub(/^api_key[[:space:]]*=[[:space:]]*/, ""); print; exit
+      }
+    ' "$CREDS_FILE")
+    if [ -z "${MEMORYHUB_API_KEY:-}" ] && [ "$SECTION" != "default" ]; then
+      MEMORYHUB_API_KEY=$(awk '
+        /^\\[/ { in_section = ($0 == "[default]") }
+        in_section && /^api_key[[:space:]]*=/ {
+          sub(/^api_key[[:space:]]*=[[:space:]]*/, ""); print; exit
+        }
+      ' "$CREDS_FILE")
+    fi
+  elif [ -f "$API_KEY_FILE" ]; then
+    MEMORYHUB_API_KEY=$(grep -v '^#' "$API_KEY_FILE" | tr -d '\\n')
+  fi
+fi
+[ -n "${MEMORYHUB_API_KEY:-}" ] || exit 0
+export MEMORYHUB_API_KEY
+
+# --- URL resolution ---
+if [ -z "${MEMORYHUB_URL:-}" ] && [ -f "$CREDS_FILE" ]; then
+  SECTION="${MEMORYHUB_CONTEXT:-default}"
+  MEMORYHUB_URL=$(awk -v section="$SECTION" '
+    /^\\[/ { in_section = ($0 == "[" section "]") }
+    in_section && /^url[[:space:]]*=/ {
+      sub(/^url[[:space:]]*=[[:space:]]*/, ""); print; exit
+    }
+  ' "$CREDS_FILE")
+  if [ -z "${MEMORYHUB_URL:-}" ] && [ "$SECTION" != "default" ]; then
+    MEMORYHUB_URL=$(awk '
+      /^\\[/ { in_section = ($0 == "[default]") }
+      in_section && /^url[[:space:]]*=/ {
+        sub(/^url[[:space:]]*=[[:space:]]*/, ""); print; exit
+      }
+    ' "$CREDS_FILE")
+  fi
+fi
 
 if [ -z "${MEMORYHUB_URL:-}" ]; then
   CONFIG_FILE="$HOME/.config/memoryhub/config.json"
