@@ -9,7 +9,7 @@ import httpx
 import typer
 from rich.table import Table
 
-from memoryhub_cli.config import CONFIG_DIR, load_config
+from memoryhub_cli.config import CREDENTIALS_FILE, load_config, write_credentials_section
 from memoryhub_cli.output import (
     EXIT_AUTH_ERROR,
     EXIT_CLIENT_ERROR,
@@ -100,7 +100,12 @@ def create_agent(
     write_config: bool = typer.Option(
         False,
         "--write-config",
-        help="Write the client_secret to ~/.config/memoryhub/api-key",
+        help="Write the client_secret to ~/.config/memoryhub/credentials",
+    ),
+    context: str = typer.Option(
+        "",
+        "--context",
+        help="Credentials section name (default: MEMORYHUB_CONTEXT or 'default')",
     ),
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
@@ -159,11 +164,9 @@ def create_agent(
     )
 
     if write_config:
-        api_key_path = CONFIG_DIR / "api-key"
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        api_key_path.write_text(data["client_secret"])
-        api_key_path.chmod(0o600)
-        console.print(f"\n  [green]Secret written to {api_key_path}[/green]")
+        section = context or os.environ.get("MEMORYHUB_CONTEXT", "").strip() or "default"
+        write_credentials_section(section, data["client_secret"])
+        console.print(f"\n  [green]Secret written to {CREDENTIALS_FILE} [{section}][/green]")
 
 
 @admin_app.command("list-agents")

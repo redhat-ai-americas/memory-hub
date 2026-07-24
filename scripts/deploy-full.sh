@@ -693,8 +693,6 @@ deploy_tile() {
 # Section 7b: Configure local client (API key for CLI/SDK)
 # ---------------------------------------------------------------------------
 configure_local_client() {
-    local api_key_file="$HOME/.config/memoryhub/api-key"
-
     local users_cm="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.yaml"
     if [ ! -f "$users_cm" ]; then return 0; fi
 
@@ -707,19 +705,32 @@ users = json.loads(cm['data']['users.json'])
 print(users['users'][0]['api_key'])
 " "$users_cm" 2>/dev/null || echo "")
 
-    if [ -n "$key" ] && [[ "$key" != REPLACE-ME* ]]; then
-        user_id=$("$REPO_ROOT/.venv/bin/python" -c "
+    if [ -z "$key" ] || [[ "$key" == REPLACE-ME* ]]; then return 0; fi
+
+    user_id=$("$REPO_ROOT/.venv/bin/python" -c "
 import json, sys, yaml
 with open(sys.argv[1]) as f:
     cm = yaml.safe_load(f)
 users = json.loads(cm['data']['users.json'])
 print(users['users'][0]['user_id'])
 " "$users_cm" 2>/dev/null || echo "unknown")
-        mkdir -p "$HOME/.config/memoryhub"
-        echo -n "$key" > "$api_key_file"
-        chmod 600 "$api_key_file"
-        info "Wrote API key to $api_key_file (user: $user_id)"
+
+    local mcp_route mcp_url=""
+    mcp_route=$(oc get route --context "$CONTEXT" memory-hub-mcp -n "$MCP_PROJECT" \
+        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    if [ -n "$mcp_route" ]; then
+        mcp_url="https://${mcp_route}/mcp/"
     fi
+
+    "$REPO_ROOT/.venv/bin/python" -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/memoryhub-cli/src')
+from memoryhub_cli.config import migrate_flat_to_credentials, write_credentials_section
+migrate_flat_to_credentials()
+write_credentials_section(sys.argv[1], sys.argv[2], sys.argv[3] or None)
+" "$CONTEXT" "$key" "$mcp_url"
+
+    info "Wrote credentials for context '$CONTEXT' (user: $user_id)"
 }
 
 # ---------------------------------------------------------------------------
@@ -742,13 +753,18 @@ smoke_test() {
     fi
     local mcp_url="https://${mcp_route}/mcp/"
 
-    local api_key_file="$HOME/.config/memoryhub/api-key"
-    if [ ! -f "$api_key_file" ]; then
-        warn "No API key at $api_key_file -- skipping smoke test"
-        return 0
-    fi
     local api_key
-    api_key=$(cat "$api_key_file")
+    api_key=$("$REPO_ROOT/.venv/bin/python" -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/memoryhub-cli/src')
+from memoryhub_cli.config import get_api_key
+k = get_api_key()
+if k: print(k, end='')
+else: sys.exit(1)
+" 2>/dev/null) || {
+        warn "No API key found -- skipping smoke test"
+        return 0
+    }
 
     if ! command -v memoryhub &>/dev/null; then
         warn "memoryhub CLI not installed -- skipping smoke test"
@@ -844,7 +860,7 @@ print_summary() {
     if [ -n "$mcp_route" ]; then
         printf "    %-24s %s\n" "MCP endpoint (agents):" "https://${mcp_route}/mcp/"
     fi
-    printf "    %-24s %s\n" "Dev API key:" "~/.config/memoryhub/api-key"
+    printf "    %-24s %s\n" "Credentials:" "~/.config/memoryhub/credentials [$CONTEXT]"
 }
 
 # ---------------------------------------------------------------------------
