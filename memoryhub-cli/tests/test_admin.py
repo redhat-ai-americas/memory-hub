@@ -101,51 +101,44 @@ class TestCreateAgent:
         assert parsed["data"]["client_id"] == "test-agent"
         assert parsed["data"]["client_secret"] == "super-secret-value"
 
-    def test_write_config(self, tmp_path):
+    def _run_write_config(self, tmp_path, extra_args=None):
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=_mock_response(SAMPLE_CREATED, 201))
+        mock_client.post = AsyncMock(
+            return_value=_mock_response(SAMPLE_CREATED, 201),
+        )
+        creds = tmp_path / "credentials"
+        cmd = ["admin", "create-agent", "test-agent", "--write-config"]
+        cmd.extend(extra_args or [])
 
-        with patch.dict("os.environ", _env_with_admin_key(), clear=False):
-            with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
-                with patch("memoryhub_cli.config.CONFIG_DIR", tmp_path):
-                    with patch("memoryhub_cli.config.CREDENTIALS_FILE", tmp_path / "credentials"):
-                        with patch("memoryhub_cli.admin.CREDENTIALS_FILE", tmp_path / "credentials"):
-                            result = runner.invoke(
-                                app,
-                                ["admin", "create-agent", "test-agent", "--write-config"],
-                            )
+        with (
+            patch.dict("os.environ", _env_with_admin_key(), clear=False),
+            patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client),
+            patch("memoryhub_cli.config.CONFIG_DIR", tmp_path),
+            patch("memoryhub_cli.config.CREDENTIALS_FILE", creds),
+            patch("memoryhub_cli.admin.CREDENTIALS_FILE", creds),
+        ):
+            result = runner.invoke(app, cmd)
+        return result, creds
 
+    def test_write_config(self, tmp_path):
+        result, creds = self._run_write_config(tmp_path)
         assert result.exit_code == 0
-        creds_file = tmp_path / "credentials"
-        assert creds_file.exists()
+        assert creds.exists()
         import configparser
         cp = configparser.ConfigParser(interpolation=None)
-        cp.read(creds_file)
+        cp.read(creds)
         assert cp.get("default", "api_key") == "super-secret-value"
 
     def test_write_config_with_context(self, tmp_path):
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=_mock_response(SAMPLE_CREATED, 201))
-
-        with patch.dict("os.environ", _env_with_admin_key(), clear=False):
-            with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
-                with patch("memoryhub_cli.config.CONFIG_DIR", tmp_path):
-                    with patch("memoryhub_cli.config.CREDENTIALS_FILE", tmp_path / "credentials"):
-                        with patch("memoryhub_cli.admin.CREDENTIALS_FILE", tmp_path / "credentials"):
-                            result = runner.invoke(
-                                app,
-                                ["admin", "create-agent", "test-agent",
-                                 "--write-config", "--context", "my-cluster"],
-                            )
-
+        result, creds = self._run_write_config(
+            tmp_path, ["--context", "my-cluster"],
+        )
         assert result.exit_code == 0
         import configparser
         cp = configparser.ConfigParser(interpolation=None)
-        cp.read(tmp_path / "credentials")
+        cp.read(creds)
         assert cp.get("my-cluster", "api_key") == "super-secret-value"
 
     def test_conflict_409(self):
