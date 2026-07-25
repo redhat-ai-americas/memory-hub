@@ -156,7 +156,9 @@ its contents as your working set. Do NOT call `register_session` or
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow:
 
-1. Read your API key from `~/.config/memoryhub/credentials` (INI file, section matching `MEMORYHUB_CONTEXT` or `[default]`; falls back to `~/.config/memoryhub/api-key`).
+1. Read your API key from `~/.config/memoryhub/credentials`
+   (INI file, section matching `MEMORYHUB_CONTEXT` or `[default]`;
+   falls back to `~/.config/memoryhub/api-key`).
 2. Call `register_session(api_key="<key>")` to authenticate.
 3. Immediately call `search_memory(query="", mode="index", max_results=50)`
    to load the full working set as lightweight stubs. The empty query plus

@@ -689,7 +689,7 @@ def test_render_instructions_ogx_includes_run_yaml_snippet():
     cfg = build_project_config(_choices(pattern="jit"))
     out = render_instructions(cfg, "ogx")
     assert "run.yaml" in out
-    assert "provider_id: memoryhub" in out
+    assert "provider_id: model-context-protocol" in out
     assert "MEMORYHUB_MCP_URL" in out
     assert "no working set" in out.lower()
 
