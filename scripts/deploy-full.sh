@@ -402,15 +402,29 @@ deploy_models() {
         fi
     done
 
+    # Scale down CPU models before deploying GPU variants (shared PVC)
+    if [ "$GPU_MODELS" = true ]; then
+        for dep_ns in "all-minilm-l6-v2:$EMBEDDING_MODEL_NAMESPACE" \
+                      "ms-marco-minilm-l12-v2:$RERANKER_MODEL_NAMESPACE"; do
+            local dep="${dep_ns%%:*}" ns="${dep_ns##*:}"
+            if oc get deployment --context "$CONTEXT" "$dep" -n "$ns" &>/dev/null; then
+                info "Scaling down CPU model $dep to release PVC..."
+                oc scale deployment --context "$CONTEXT" "$dep" -n "$ns" --replicas=0
+            fi
+        done
+    fi
+
     info "Deploying embedding model..."
     oc apply --context "$CONTEXT" -k "$embedding_dir"
 
     info "Deploying reranker model..."
     oc apply --context "$CONTEXT" -k "$reranker_dir"
 
+    local embedding_deploy reranker_deploy
+    embedding_deploy=$(grep '^  name:' "$embedding_dir/deployment.yaml" | head -1 | awk '{print $2}')
+    reranker_deploy=$(grep '^  name:' "$reranker_dir/deployment.yaml" | head -1 | awk '{print $2}')
+
     info "Waiting for embedding model rollout (model download may take 2-3 min)..."
-    local embedding_deploy
-    embedding_deploy=$(oc get deploy --context "$CONTEXT" -n "$EMBEDDING_MODEL_NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     if [ -n "$embedding_deploy" ]; then
         if ! oc rollout status --context "$CONTEXT" "deployment/$embedding_deploy" \
                 -n "$EMBEDDING_MODEL_NAMESPACE" --timeout=300s; then
@@ -419,8 +433,6 @@ deploy_models() {
     fi
 
     info "Waiting for reranker model rollout..."
-    local reranker_deploy
-    reranker_deploy=$(oc get deploy --context "$CONTEXT" -n "$RERANKER_MODEL_NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     if [ -n "$reranker_deploy" ]; then
         if ! oc rollout status --context "$CONTEXT" "deployment/$reranker_deploy" \
                 -n "$RERANKER_MODEL_NAMESPACE" --timeout=300s; then
