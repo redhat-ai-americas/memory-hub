@@ -716,6 +716,8 @@ def test_write_init_files_non_claude_format_skips_rule_and_hooks(tmp_path: Path)
 
 def test_config_init_format_flag_recognized():
     """--format is recognized by the config init command."""
+    import re
+
     from typer.testing import CliRunner
 
     from memoryhub_cli.main import app
@@ -723,7 +725,8 @@ def test_config_init_format_flag_recognized():
     runner = CliRunner()
     result = runner.invoke(app, ["config", "init", "--help"])
     assert result.exit_code == 0
-    assert "--format" in result.stdout
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    assert "--format" in plain
 
 
 def test_rule_file_presents_hook_as_expected_path():
