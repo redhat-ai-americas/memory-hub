@@ -8,8 +8,6 @@ import warnings
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 
-_MAX_TESTED_PYTHON = (3, 13)
-
 import typer
 from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
 from memoryhub.exceptions import (
@@ -47,7 +45,6 @@ from memoryhub_cli.output import (
 from memoryhub_cli.project_config import (
     FocusSource,
     InitChoices,
-    InstructionFormat,
     LoadingPattern,
     SessionShape,
     build_project_config,
@@ -56,6 +53,8 @@ from memoryhub_cli.project_config import (
     suggest_pattern,
     write_init_files,
 )
+
+_MAX_TESTED_PYTHON = (3, 13)
 
 
 def _version_callback(value: bool) -> None:

@@ -14,7 +14,7 @@ import json
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import yaml
 from memoryhub import (
@@ -550,7 +550,7 @@ class WriteResult:
     """Outcome of writing the project config + rule file to disk."""
 
     yaml_path: Path
-    rule_path: Optional[Path]
+    rule_path: Path | None
     legacy_backup: Path | None  # set when an old memoryhub-integration.md was moved
     hook_path: Path | None = None
     settings_path: Path | None = None
