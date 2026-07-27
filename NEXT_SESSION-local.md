@@ -1,83 +1,68 @@
 # Next Session -- Local
 
-## Next: RecallBackend protocol + SQLiteBackend (Phase 1, session 1 of 2)
+## Next: PostgresBackend extraction + parameterized tests (Phase 1, session 2 of 2)
 
-Bootstrap the `memoryhub-local` package, define the RecallBackend
-protocol, port the SQLAlchemy models to be dialect-portable, implement
-the SQLiteBackend, and prove it with a parameterized cheese test.
+Extract the PostgresBackend from existing memoryhub_core service code,
+implement graph_neighbors for both backends, replace the frozen conftest
+patches with the production dialect abstraction, and run the full
+parameterized test suite across BOTH backends.
 
-1. **Package scaffold** -- create `memoryhub-local/` with `pyproject.toml`
-   (`memoryhub-local` package name, deps: sqlalchemy, aiosqlite,
-   sqlite-vec, pydantic, pydantic-settings, alembic, fastmcp),
-   `src/memoryhub_local/` directory structure (storage/, models/,
-   services/, embeddings/). Verify `pip install -e .` works.
+1. **PostgresBackend** -- extract from existing memoryhub_core services
+   into `memoryhub_local/storage/postgres.py`. Wrap the 7 vector + 2
+   keyword + 1 similarity call sites from `src/memoryhub_core/services/`
+   into the RecallBackend protocol methods. Zero behavior change.
 
-2. **RecallBackend protocol** -- define in
-   `memoryhub_local/storage/recall.py`. Four methods: `vector_recall`,
-   `keyword_recall`, `similarity_check`, `graph_neighbors`. See
-   `planning/personal-edition.md` Section 3.3 for the protocol spec.
+2. **graph_neighbors for both backends** -- port the recursive CTE from
+   `services/graph.py:103` into PostgresBackend. Write the SQLite
+   equivalent using VALUES clause for seed initialization instead of
+   `unnest(CAST(... AS uuid[]))`.
 
-3. **`configure_for_dialect()`** -- create
-   `memoryhub_local/models/dialect.py`. Handles UUID->TEXT,
-   ARRAY(Text)->JSON, Vector(384)->BLOB/JsonEncodedVector,
-   TSVECTOR+Computed->dropped (FTS5 is a separate virtual table),
-   Interval->INTEGER, partial index portability, server_default cleanup.
-   The `_JsonEncodedVector` TypeDecorator from
-   `tests/test_services/conftest.py:37-50` migrates into production code.
+3. **Replace frozen conftest patches** -- the monkey-patching in
+   `tests/test_services/conftest.py` (lines 37-147) should be replaced
+   by importing `memoryhub_local.models` with the portable types. This
+   eliminates the FREEZE NOTICE pattern and makes the test infra
+   maintainable.
 
-4. **Port the models** -- dialect-portable versions of the models from
-   `src/memoryhub_core/models/` (memory.py, conversation.py, campaign.py,
-   contradiction.py, curation.py, project.py, role.py, reconciliation.py).
-   These live in `memoryhub_local/models/`. Fix the stale model comment
-   at `models/memory.py:109` (references all-MiniLM-L6-v2, should be
-   Granite).
-
-5. **SQLiteBackend** -- implement in `memoryhub_local/storage/sqlite.py`:
-   - `vector_recall`: sqlite-vec `vec_distance_cosine()`
-   - `keyword_recall`: FTS5 virtual table with `MATCH` and `bm25()`
-   - `similarity_check`: sqlite-vec distance with max_distance filter
-   - `graph_neighbors`: deferred to session 2 (PostgresBackend + graph
-     CTE port)
-
-6. **Cheese test** -- parameterized pytest fixture across SQLite backend:
-   write a memory, update it, read version chain, search by vector,
-   search by keyword, check curation similarity gate. All green on
-   SQLite. PostgreSQL backend parameterization is session 2.
-
-**Sequencing.** Items 1-3 are scaffolding (do first, in order). Items 4-5
-are the bulk work (can interleave). Item 6 validates everything.
-
-**Constraints for the session:**
-- All work on `feat/personal-edition` branch
-- Do not modify `src/memoryhub_core/` in this session -- the portable
-  code is extracted INTO `memoryhub_local`, not refactored in place.
-  Core stays untouched so the cluster edition isn't affected.
-- Commit incrementally (not batched at end)
-- `graph_neighbors` deferred to session 2 -- focus on the three recall
-  methods that cover the hot search path
+4. **Parameterized test suite** -- extend the cheese test to run across
+   BOTH SQLite and PostgreSQL backends via pytest parameterize. Verify
+   existing 627 unit tests still pass with no regressions.
 
 **Session start protocol:**
-- Premise checks: `git log --oneline feat/personal-edition` shows 2
-  commits (architecture doc + session summary); working tree clean;
-  `planning/personal-edition.md` Section 3 has the grounded protocol
-  spec; `tests/test_services/conftest.py` has the frozen patches to
-  reference (not modify yet -- that's session 2 when PostgresBackend
-  is also ready)
+- Premise checks: `git log --oneline feat/personal-edition` shows 8
+  commits (3 from architecture session + 5 from session 1); working tree
+  clean; `memoryhub-local/` exists and `pip install -e .` works; cheese
+  test (13 tests) green on SQLite
+- What landed in session 1:
+  - Package scaffold (pyproject.toml, directory structure)
+  - RecallBackend protocol (4 methods in storage/recall.py)
+  - Dialect type decorators (PortableUUID, JsonEncodedList,
+    JsonEncodedVector, IntervalSeconds in models/dialect.py)
+  - 8 model files ported with PG-specific types swapped
+  - SQLiteBackend (3 of 4 methods: vector_recall with brute-force
+    cosine, keyword_recall with FTS5, similarity_check)
+  - 13 cheese tests green on SQLite
+- Design notes from session 1 review:
+  - FTS5 external content table does a full rebuild before every
+    keyword search (O(n)); replace with triggers or contentless FTS
+  - String-interpolated SQL in keyword_recall is safe (self-generated
+    values) but parameterized queries are better practice
+  - sqlite-vec requires Python built with --enable-loadable-sqlite-extensions;
+    brute-force cosine works fine at personal scale as fallback
+  - pysqlite3 package provides extension support on macOS
 - Rules with history: all pushes through PRs; commit incrementally;
-  don't modify memoryhub-core
+  don't modify memoryhub-core (except replacing conftest patches)
 - Stop-and-ask before: any changes to existing published packages
-  (sdk/, memoryhub-cli/); any changes to src/memoryhub_core/
-- Close ritual: session summary + NEXT_SESSION update; record which
-  models ported and which cheese tests pass
+  (sdk/, memoryhub-cli/)
+- Close ritual: session summary + NEXT_SESSION update; verify 627+
+  existing tests + parameterized cheese tests all green
 
 **Exit predicate:**
-- `memoryhub-local/` installable via `pip install -e .`
-- RecallBackend protocol defined with 4 methods
-- `configure_for_dialect("sqlite")` exists and handles all 8 model files'
-  PostgreSQL-specific types
-- SQLiteBackend implements vector_recall, keyword_recall, similarity_check
-- Cheese test (write/update/version/vector-search/keyword-search/similarity)
-  green on SQLite
+- PostgresBackend in `memoryhub_local/storage/postgres.py` implements
+  all 4 RecallBackend methods
+- graph_neighbors works on both SQLite and PostgreSQL backends
+- Frozen conftest patches replaced by production dialect abstraction
+- Cheese test parameterized across both backends, all green
+- Existing 627 unit tests pass with no regressions
 
 ## Remaining epic phases
 
@@ -95,10 +80,11 @@ Extract the recall protocol, implement both backends, create the
 `memoryhub-local` package scaffold, and replace the frozen test conftest
 patches with a production-quality dialect abstraction.
 
-**Session 1 (next):** Package scaffold, protocol, dialect config, model
-port, SQLiteBackend (3 recall methods), cheese test on SQLite.
+**Session 1 (done):** Package scaffold, protocol, dialect config, model
+port, SQLiteBackend (3 recall methods), cheese test on SQLite. All 6
+items complete, 13 tests green.
 
-**Session 2:** PostgresBackend extraction from existing code (7 vector +
+**Session 2 (next):** PostgresBackend extraction from existing code (7 vector +
 2 keyword + 1 similarity call sites), graph_neighbors for both backends
 (CTE port), replace frozen conftest patches, parameterized test suite
 across BOTH backends, verify existing 627 unit tests still pass.
@@ -216,29 +202,48 @@ README quickstart, parity matrix, reproducible 10-minute story.
 - Curator agent + reflection -- `NEXT_SESSION-curation.md`
 - Full benchmark re-validation -- `NEXT_SESSION-dreaming.md` Phase 8
 
-## What landed last session (2026-07-27)
+## What landed last session (2026-07-27, session 1)
 
-Architecture grounding session. Competitive research (MemoryPalace, Mem0,
-Letta), codebase audit (10 PG-specific call sites, 8 model files), package
-layout decision (memoryhub-local), two-command install design.
+Phase 1, session 1 complete. All 6 plan items shipped:
 
-**Shipped:** `4130f45` (architecture doc), `593710d` (session summary)
+1. Package scaffold: `memoryhub-local/` with pyproject.toml, directory
+   structure, verified `pip install -e .`
+2. RecallBackend protocol: 4 methods (vector_recall, keyword_recall,
+   similarity_check, graph_neighbors) in `storage/recall.py`
+3. Dialect type decorators: PortableUUID, JsonEncodedList,
+   JsonEncodedVector, IntervalSeconds in `models/dialect.py`
+4. 8 model files ported from memoryhub_core with all PG-specific types
+   replaced. Fixed stale embedding comment (all-MiniLM-L6-v2 -> Granite).
+5. SQLiteBackend: 3 of 4 methods implemented (brute-force cosine for
+   vector, FTS5 for keyword, brute-force for similarity). graph_neighbors
+   deferred.
+6. Cheese test: 13 tests green on SQLite (write, update, version chain,
+   vector search, keyword search, similarity check, graph edges).
+
+**Shipped commits:** `907602f` through `3296772` (5 commits on
+feat/personal-edition). 627 existing core tests pass with no regressions.
+
+**Review findings (fixed):** IntervalSeconds.impl was String(20) instead
+of Integer, sqlalchemy missing [asyncio] extra, dead code in
+keyword_recall.
 
 ## Watch out for
 
-- **Code duplication risk:** memoryhub-local extracts portable service code
-  from memoryhub-core under its own namespace. Establish the extraction
-  pattern early in P1 to minimize drift.
-- **Stale model comment:** `models/memory.py:109` references all-MiniLM-L6-v2
-  instead of Granite. Fix during P1.
-- **ONNX model provenance (P3):** RedHatAI internal ask pending for attested
-  INT8 ONNX export of granite-embedding-small-english-r2. Fallback: export
-  and publish under the project org.
+- **FTS rebuild cost:** current FTS5 external content table does a full
+  rebuild before every keyword search. Replace with triggers or
+  contentless FTS in session 2 or Phase 2.
+- **sqlite-vec extension loading:** macOS Python doesn't ship with
+  --enable-loadable-sqlite-extensions. pysqlite3 is the workaround.
+  Brute-force cosine works at personal scale as fallback.
+- **ONNX model provenance (P3):** RedHatAI internal ask pending for
+  attested INT8 ONNX export of granite-embedding-small-english-r2.
+  Fallback: export and publish under the project org.
 
 ## If blocked
 
+- If PostgreSQL test infra isn't available (session 2): parameterize
+  cheese test with SQLite-only and defer PG to a follow-up.
 - If ONNX model isn't available (P3): use MockEmbeddingService and
   defer P3. P2 is fully functional without real embeddings.
-- If sqlite-vec has compatibility issues: the `sqlite_exact` brute-force
-  approach (compute cosine in Python) works at personal scale (<100K
-  memories) as a fallback.
+- If sqlite-vec has compatibility issues: brute-force approach already
+  works (proven in session 1).
