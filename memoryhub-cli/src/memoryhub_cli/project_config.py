@@ -184,16 +184,16 @@ its contents as your working set. Do NOT call `register_session` or
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow: read your API key from
 `~/.config/memoryhub/api-key` (trim whitespace), call
-`register_session(api_key="<key>")`, then after the first user turn
-derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
+`register_session(api_key="<key>")`, then wait until the user states a
+task or question with enough detail to form a meaningful search query.
+Derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
+If the opening turn is low-signal ("hi", "can you help me?"), do not
+search yet -- wait for a follow-up that reveals the topic.
 
 ## During the session
 
 - Trust your working set. Re-search only when the user explicitly
   references a concept you don't have loaded.
-- If the opening turn was vague ("can you take a look at this?"), your
-  working set may miss relevant memories. Watch for it and re-search with
-  a more specific query as soon as the topic firms up.
 """,
     "lazy_with_rebias": """\
 ## At session start
@@ -206,8 +206,11 @@ its contents as your working set. Do NOT call `register_session` or
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow: read your API key from
 `~/.config/memoryhub/api-key` (trim whitespace), call
-`register_session(api_key="<key>")`, then after the first user turn
-derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
+`register_session(api_key="<key>")`, then wait until the user states a
+task or question with enough detail to form a meaningful search query.
+Derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
+If the opening turn is low-signal ("hi", "can you help me?"), do not
+search yet -- wait for a follow-up that reveals the topic.
 
 ## During the session -- watch for pivots
 
@@ -283,17 +286,17 @@ your working set. Otherwise, follow the manual flow below.
 If your agent framework pre-loads memory context at startup, use it as
 your working set. Otherwise, follow the manual flow below.
 
-Authenticate with `register_session(api_key=<your_key>)`, then after the
-first user turn derive a 1-2 sentence summary and call
-`search_memory(query=<summary>)`.
+Authenticate with `register_session(api_key=<your_key>)`, then wait until
+the user states a task or question with enough detail to form a meaningful
+search query. Derive a 1-2 sentence summary and call
+`search_memory(query=<summary>)`. If the opening turn is low-signal
+("hi", "can you help me?"), do not search yet -- wait for a follow-up
+that reveals the topic.
 
 ## During the session
 
 - Trust your working set. Re-search only when the user explicitly
   references a concept you don't have loaded.
-- If the opening turn was vague ("can you take a look at this?"), your
-  working set may miss relevant memories. Watch for it and re-search with
-  a more specific query as soon as the topic firms up.
 """,
     "lazy_with_rebias": """\
 ## At session start
@@ -301,9 +304,12 @@ first user turn derive a 1-2 sentence summary and call
 If your agent framework pre-loads memory context at startup, use it as
 your working set. Otherwise, follow the manual flow below.
 
-Authenticate with `register_session(api_key=<your_key>)`, then after the
-first user turn derive a 1-2 sentence summary and call
-`search_memory(query=<summary>)`.
+Authenticate with `register_session(api_key=<your_key>)`, then wait until
+the user states a task or question with enough detail to form a meaningful
+search query. Derive a 1-2 sentence summary and call
+`search_memory(query=<summary>)`. If the opening turn is low-signal
+("hi", "can you help me?"), do not search yet -- wait for a follow-up
+that reveals the topic.
 
 ## During the session -- watch for pivots
 

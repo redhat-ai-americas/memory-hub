@@ -163,10 +163,10 @@ def test_rule_file_lazy_required_phrases():
     assert "Lazy" in out
     # Critical: do NOT call search at session start.
     assert "Do NOT" in out
-    # Drives the agent to derive intent from the first turn.
-    assert "first user turn" in out.lower() or "first user message" in out.lower()
-    # Calls out the vague-opening failure mode honestly.
-    assert "vague" in out.lower()
+    # Defers search until user provides actionable signal.
+    assert "enough detail" in out.lower() or "meaningful search query" in out.lower()
+    # Calls out low-signal openers explicitly.
+    assert "low-signal" in out.lower()
 
 
 def test_rule_file_lazy_with_rebias_specifies_three_pivot_triggers():
