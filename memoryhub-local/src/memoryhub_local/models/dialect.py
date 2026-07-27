@@ -15,7 +15,7 @@ import json
 import uuid
 from typing import Any
 
-from sqlalchemy import String, Text
+from sqlalchemy import Integer, String, Text
 from sqlalchemy.types import TypeDecorator
 
 
@@ -80,7 +80,7 @@ class JsonEncodedVector(TypeDecorator):
 class IntervalSeconds(TypeDecorator):
     """PostgreSQL Interval stored as INTEGER (seconds) on SQLite."""
 
-    impl = String(20)
+    impl = Integer
     cache_ok = True
 
     def process_bind_param(self, value: Any, dialect: Any) -> int | None:

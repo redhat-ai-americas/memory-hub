@@ -119,16 +119,6 @@ class SQLiteBackend:
         rowid_to_rank = {row.rowid: row.rank for row in fts_rows}
         rowids = list(rowid_to_rank.keys())
 
-        # Fetch matching MemoryNodes by rowid, applying additional filters.
-        # SQLite rowid is auto-generated; we select from ORM with a raw
-        # rowid filter.
-        node_stmt = (
-            select(MemoryNode)
-            .where(and_(*filters))
-            .where(text("memory_nodes.rowid IN :rowids"))
-        )
-
-        # SQLAlchemy text() doesn't handle list binding well; use expanding
         in_clause = text(
             "memory_nodes.rowid IN ("
             + ",".join(str(r) for r in rowids)

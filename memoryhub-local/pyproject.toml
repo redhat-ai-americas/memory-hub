@@ -25,7 +25,7 @@ classifiers = [
 ]
 keywords = ["ai", "agents", "memory", "sqlite", "local"]
 dependencies = [
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
     "aiosqlite>=0.20",
     "sqlite-vec>=0.1.6",
     "pydantic>=2.0",
