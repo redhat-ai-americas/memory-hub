@@ -1,0 +1,1 @@
+"""RecallBackend protocol definition."""
