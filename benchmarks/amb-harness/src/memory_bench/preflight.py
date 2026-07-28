@@ -13,6 +13,7 @@ import logging
 from collections import Counter
 from dataclasses import dataclass, field
 
+import httpx
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -40,6 +41,32 @@ class PreflightResult:
     abort_reason: str | None = None
     warnings: list[str] = field(default_factory=list)
     smoke_results: list[SmokeResult] = field(default_factory=list)
+
+
+async def _probe_extraction_model(
+    model_name: str | None,
+    model_url: str | None,
+) -> tuple[bool, str]:
+    if model_name is None and model_url is None:
+        return (True, "using server default")
+
+    if model_url is None or "googleapis.com" in model_url:
+        try:
+            from google import genai
+            client = genai.Client()
+            client.models.get(model=f"models/{model_name}")
+            return (True, f"model '{model_name}' verified")
+        except Exception as err:
+            return (False, f"model '{model_name}' not found or deprecated: {err}")
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            resp = await http.get(model_url)
+        if resp.status_code < 500:
+            return (True, f"endpoint reachable at {model_url}")
+        return (False, f"endpoint returned {resp.status_code}: {model_url}")
+    except Exception as err:
+        return (False, f"endpoint unreachable: {model_url}: {err}")
 
 
 async def run_preflight(
@@ -73,7 +100,31 @@ async def run_preflight(
     lines.append(f"  exclude_source: {memory._exclude_source or '(none)'}\n")
     if answer_llm_label:
         lines.append(f"  answer LLM:     {answer_llm_label}\n")
+    if getattr(memory, '_ingestion_mode', 'library') in ("dreaming", "combined"):
+        lines.append(f"  ingestion:      {memory._ingestion_mode}\n")
+        lines.append(f"  extract model:  {memory._extraction_model or '(server default)'}\n")
+        if memory._extraction_model_url:
+            lines.append(f"  extract URL:    {memory._extraction_model_url}\n")
     lines.append("\n")
+
+    if getattr(memory, '_ingestion_mode', 'library') in ("dreaming", "combined"):
+        model_ok, model_detail = await _probe_extraction_model(
+            getattr(memory, '_extraction_model', None),
+            getattr(memory, '_extraction_model_url', None),
+        )
+        if model_ok:
+            lines.append(f"  extract probe:  PASS  {model_detail}\n")
+        else:
+            result = PreflightResult(
+                passed=False,
+                aborted=True,
+                abort_reason=f"Extraction model probe failed: {model_detail}",
+            )
+            lines.append(f"\n  ")
+            lines.append("ABORT", style="bold red")
+            lines.append(f"  {result.abort_reason}\n")
+            console.print(Panel(lines, title="Preflight Check", border_style="red"))
+            return result
 
     smoke_results: list[SmokeResult] = []
     all_source_counts: Counter[str] = Counter()
