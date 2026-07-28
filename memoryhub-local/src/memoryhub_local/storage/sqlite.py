@@ -39,10 +39,44 @@ FTS_REBUILD_SQL = f"""
 INSERT INTO {FTS_TABLE_NAME}({FTS_TABLE_NAME}) VALUES('rebuild')
 """
 
+# Triggers keep FTS in sync without full rebuilds on every search.
+# SQLite FTS5 external content tables require explicit insert/delete
+# commands when the source table changes.
+FTS_TRIGGER_INSERT = f"""
+CREATE TRIGGER IF NOT EXISTS memory_nodes_ai AFTER INSERT ON memory_nodes BEGIN
+    INSERT INTO {FTS_TABLE_NAME}(rowid, stub, content)
+    VALUES (new.rowid, new.stub, new.content);
+END
+"""
+
+FTS_TRIGGER_DELETE = f"""
+CREATE TRIGGER IF NOT EXISTS memory_nodes_ad AFTER DELETE ON memory_nodes BEGIN
+    INSERT INTO {FTS_TABLE_NAME}({FTS_TABLE_NAME}, rowid, stub, content)
+    VALUES ('delete', old.rowid, old.stub, old.content);
+END
+"""
+
+FTS_TRIGGER_UPDATE = f"""
+CREATE TRIGGER IF NOT EXISTS memory_nodes_au AFTER UPDATE ON memory_nodes BEGIN
+    INSERT INTO {FTS_TABLE_NAME}({FTS_TABLE_NAME}, rowid, stub, content)
+    VALUES ('delete', old.rowid, old.stub, old.content);
+    INSERT INTO {FTS_TABLE_NAME}(rowid, stub, content)
+    VALUES (new.rowid, new.stub, new.content);
+END
+"""
+
 
 async def ensure_fts_table(session: AsyncSession) -> None:
-    """Create the FTS5 virtual table if it doesn't exist and rebuild its index."""
+    """Create FTS5 virtual table, install sync triggers, and do initial rebuild.
+
+    Safe to call multiple times -- CREATE IF NOT EXISTS on the table and
+    triggers, then a one-time rebuild to catch any rows inserted before
+    triggers were in place.
+    """
     await session.execute(text(FTS_CREATE_SQL))
+    await session.execute(text(FTS_TRIGGER_INSERT))
+    await session.execute(text(FTS_TRIGGER_DELETE))
+    await session.execute(text(FTS_TRIGGER_UPDATE))
     await session.execute(text(FTS_REBUILD_SQL))
 
 

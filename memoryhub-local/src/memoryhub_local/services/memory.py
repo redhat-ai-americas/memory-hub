@@ -156,9 +156,9 @@ async def delete_memory(
     parsed_id = uuid.UUID(memory_id)
     now = datetime.now(timezone.utc)
 
-    # Find all versions in the chain
-    version_ids = []
-    current_id = parsed_id
+    # Walk backward through version chain (target -> oldest)
+    version_ids: list[uuid.UUID] = []
+    current_id: uuid.UUID | None = parsed_id
     while current_id:
         result = await session.execute(
             select(MemoryNode.id, MemoryNode.previous_version_id).where(
@@ -172,15 +172,20 @@ async def delete_memory(
         version_ids.append(row.id)
         current_id = row.previous_version_id
 
-    # Also find newer versions pointing to this one
-    result = await session.execute(
-        select(MemoryNode.id).where(
-            MemoryNode.previous_version_id == parsed_id,
-            MemoryNode.tenant_id == TENANT_ID,
+    # Walk forward through version chain (target -> newest)
+    forward_frontier = {parsed_id}
+    while forward_frontier:
+        result = await session.execute(
+            select(MemoryNode.id).where(
+                MemoryNode.previous_version_id.in_(forward_frontier),
+                MemoryNode.tenant_id == TENANT_ID,
+            )
         )
-    )
-    for row in result:
-        version_ids.append(row.id)
+        new_ids = {row.id for row in result if row.id not in set(version_ids)}
+        if not new_ids:
+            break
+        version_ids.extend(new_ids)
+        forward_frontier = new_ids
 
     if not version_ids:
         return {"total_deleted": 0, "versions_deleted": 0, "branches_deleted": 0}
@@ -282,11 +287,7 @@ async def search_memories(
         query_embedding, filters, max_results * 2, session,
     )
 
-    # Rebuild FTS index before keyword search (external content table)
-    from memoryhub_local.storage.sqlite import ensure_fts_table
-    await ensure_fts_table(session)
-
-    # Keyword recall
+    # Keyword recall (FTS kept in sync by triggers installed at startup)
     keyword_results = await recall_backend.keyword_recall(
         query, filters, max_results, session,
     )

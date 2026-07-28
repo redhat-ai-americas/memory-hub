@@ -197,6 +197,8 @@ async def delete_thread(
     cascade: str = "delete",
 ) -> dict:
     """Soft-delete a thread and optionally its messages."""
+    from sqlalchemy import delete as sql_delete
+
     parsed_id = uuid.UUID(thread_id)
     now = datetime.now(timezone.utc)
 
@@ -207,6 +209,15 @@ async def delete_thread(
         )
     )
     msg_count = count_result.scalar() or 0
+
+    messages_deleted = 0
+    if cascade == "delete" and msg_count > 0:
+        await session.execute(
+            sql_delete(ConversationMessage).where(
+                ConversationMessage.thread_id == parsed_id,
+            )
+        )
+        messages_deleted = msg_count
 
     # Mark thread as deleted
     await session.execute(
@@ -223,7 +234,7 @@ async def delete_thread(
     return {
         "id": thread_id,
         "status": "deleted",
-        "messages_deleted": msg_count if cascade == "delete" else 0,
+        "messages_deleted": messages_deleted,
         "cascade_mode": cascade,
     }
 
