@@ -1,59 +1,53 @@
 # Next Session -- Local
 
-## Next: ONNX embeddings + Alembic cleanup (Phase 3)
+## Next: Extraction + maintenance (Phase 4)
 
-Make search semantically meaningful by replacing MockEmbeddingService with
-a real ONNX embedding model, add `memoryhub doctor` for diagnostics, and
-backfill the Alembic batch-mode setup deferred from Phase 2.
+MCP sampling extraction, on-connect dreaming queue, `memoryhub dream` CLI.
+Builds on the dreaming epic's stable extraction design (PRs #407, #412).
 
-1. **Alembic batch mode for SQLite** -- create `memoryhub-local/alembic.ini`,
-   `migrations/env.py` with `render_as_batch=True`, and an initial squashed
-   migration. Wire `alembic upgrade head` into server startup so future pip
-   upgrades migrate the local DB automatically.
+1. **MCP sampling extraction path** -- implement the extraction pipeline
+   from `planning/eager-fact-extraction.md` for the personal edition.
+   The server issues MCP sampling requests to extract facts from
+   conversation threads.
 
-2. **OnnxEmbeddingService** -- implement `OnnxEmbeddingService(EmbeddingService)`
-   using onnxruntime CPU. Model: granite-embedding-small-english-r2 ONNX int8,
-   384-dim (same as cluster). First-run download to
-   `~/.local/share/memoryhub/models/` with progress bar.
+2. **On-connect dreaming mode** -- pending extraction drains via sampling
+   while an agent session is active. Threads with unextracted messages
+   queue for processing on the next session start.
 
-3. **Wire into server startup** -- replace MockEmbeddingService with
-   OnnxEmbeddingService at startup. Fall back to MockEmbeddingService if model
-   not yet downloaded (with a warning directing the user to `memoryhub doctor`).
+3. **`memoryhub dream` CLI command** -- add to memoryhub-cli with optional
+   `--model ollama/...` for local LLM models. Runs extraction explicitly
+   rather than waiting for on-connect mode.
 
-4. **`memoryhub doctor` subcommand** -- add to memoryhub-cli. Reports: edition
-   (personal/cluster), DB path and size, model present/absent and path,
-   embedding dim, WAL mode status.
+4. **Deferred queue for no-sampling-support fallback** -- when the MCP
+   client doesn't support sampling (e.g., non-Claude agents), queue
+   threads for manual extraction via `memoryhub dream`.
 
-5. **Smoke test** -- verify fresh `pip install "memoryhub[local]"` produces
-   working semantic search in under 2 minutes (including model download).
-
-**Sequencing.** Alembic first (small, mechanical), then ONNX embedding service,
-then wire into server, then doctor CLI, then smoke test.
+**Sequencing.** MCP sampling extraction first (core), then on-connect mode,
+then dream CLI, then deferred queue fallback.
 
 **Session start protocol:**
-- Premise checks: `git log --oneline feat/personal-edition` shows 23
-  commits; Phase 2 complete (round-trip green); 24 local tests pass;
-  627 service tests green; working tree clean
+- Premise checks: `git log --oneline feat/personal-edition` shows 27+
+  commits; Phase 3 complete (ONNX green, 30 tests); working tree clean
+- What landed in Phase 3:
+  - Alembic batch-mode setup with auto-migrate at startup
+  - OnnxEmbeddingService with granite-embedding-small-english-r2 INT8
+  - Auto-download from HuggingFace Hub on first startup
+  - `memoryhub doctor` subcommand
+  - 6 ONNX embedding tests (semantic similarity verified)
 - What landed in Phase 2:
-  - EmbeddingService ABC + MockEmbeddingService + identity module
-  - Database module (SQLite WAL at XDG path)
-  - Memory + thread service layer (self-contained, no memoryhub_core imports)
-  - 4-tool compact profile: register_session, memory, thread, admin_memory
-  - FastMCP stdio server with personal-edition instructions
-  - `memoryhub mcp` CLI subcommand + SDK `[local]` extra
-  - FTS5 sync triggers, transitive chain walk, message cascade fix
+  - Full local MCP server vertical slice (tools, services, server, CLI)
 - Rules with history: all pushes through PRs; commit incrementally;
   stop-and-ask before modifying existing published packages (sdk/, memoryhub-cli/)
-- Close ritual: session summary + NEXT_SESSION update; verify semantic
-  search returns meaningfully different results than mock embeddings
+- Read `planning/eager-fact-extraction.md` before starting -- that's the
+  extraction design this phase implements for the personal edition
+- Close ritual: session summary + NEXT_SESSION update
 
 **Exit predicate:**
-- Fresh `pip install "memoryhub[local]"` produces working semantic search
-  in under 2 minutes (including model download)
-- `memoryhub doctor` reports edition, DB, model status
-- Search results are semantically meaningful, not hash-based
-- Alembic migration runs at startup without errors
-- `pip install "memoryhub[local]"` still resolves from a clean venv
+- Live sampling round-trip: Claude Code writes a thread, extraction runs
+  via sampling, extracted facts appear as searchable memories
+- `memoryhub dream` works with local models (Ollama)
+- On-connect mode drains pending work during active sessions
+- 30+ tests pass (existing + new extraction tests)
 
 ## Remaining epic phases
 
@@ -85,28 +79,18 @@ Review fixes: FTS triggers, chain walk, message cascade.
 
 **Commits:** `4006fc1`..`1149890` (9 commits on feat/personal-edition)
 
-### Phase 3: Local ONNX embeddings (1 session) -- NEXT
+### Phase 3: Local ONNX embeddings (1 session) -- DONE
 
-Implement OnnxEmbeddingService, first-run model download, `memoryhub doctor`.
+**Session 1:** Alembic batch-mode migration setup (async bridge env.py,
+auto-generated initial migration, pre-existing DB detection),
+OnnxEmbeddingService with granite-embedding-small-english-r2 INT8,
+auto-download from HuggingFace Hub, fallback to MockEmbeddingService,
+`memoryhub doctor` subcommand, 6 ONNX tests.
+Semantic similarity verified: cat-kitten 0.83 vs cat-database 0.70.
 
-**Work:**
-1. Implement `OnnxEmbeddingService(EmbeddingService)` via onnxruntime CPU
-2. Model: granite-embedding-small-english-r2 ONNX int8, 384-dim (same as cluster)
-3. First-run download to `~/.local/share/memoryhub/models/` with progress bar
-4. Wire into `memoryhub mcp` startup (replace MockEmbeddingService)
-5. Add `memoryhub doctor` subcommand (edition, DB path/size, model present/absent)
-6. Add Alembic batch mode setup (deferred from Phase 2)
+**Commits:** `2b8f5fc`..`450064b` (4 commits on feat/personal-edition)
 
-**Definition of done:**
-- Fresh `pip install "memoryhub[local]"` -> working semantic search in under 2 minutes (including model download)
-- `memoryhub doctor` reports edition, DB, model status
-- Search results are semantically meaningful, not hash-based
-
-**Dependencies:** Gated on Phase 2.
-
-**Parallel-ok:** No.
-
-### Phase 4: Extraction + maintenance (1 session)
+### Phase 4: Extraction + maintenance (1 session) -- NEXT
 
 MCP sampling extraction, on-connect dreaming queue, `memoryhub dream` CLI.
 Builds on the dreaming epic's stable extraction design (PRs #407, #412).
@@ -122,7 +106,7 @@ Builds on the dreaming epic's stable extraction design (PRs #407, #412).
 - `memoryhub dream` works with local models (Ollama)
 - On-connect mode drains pending work during active sessions
 
-**Dependencies:** Gated on Phase 3 (needs real embeddings). Depends on dreaming epic's extraction design (stable, confirmed 2026-07-27).
+**Dependencies:** Gated on Phase 3. Depends on dreaming epic's extraction design (stable, confirmed 2026-07-27).
 
 **Parallel-ok:** Yes -- Phase 5 can run concurrently.
 
@@ -163,44 +147,39 @@ README quickstart, parity matrix, reproducible 10-minute story.
 - Curator agent + reflection -- `NEXT_SESSION-curation.md`
 - Full benchmark re-validation -- `NEXT_SESSION-dreaming.md` Phase 8
 
-## What landed last session (2026-07-27, P2S1)
+## What landed last session (2026-07-28, P3S1)
 
-Phase 2 complete. 9 commits shipped the full local MCP server vertical slice:
+Phase 3 complete. 4 commits shipped ONNX embeddings and Alembic:
 
-1. EmbeddingService ABC + MockEmbeddingService + shared identity module
-2. Database module: async SQLite engine at XDG path with WAL mode
-3. Memory + thread service layer (self-contained, no memoryhub_core imports)
-4. Personal-edition tool wrappers: register_session, memory (25+ actions),
-   thread, admin_memory -- same interface as cluster edition
-5. FastMCP stdio server with personal-edition instructions
-6. `memoryhub mcp` CLI subcommand + SDK `[local]` extra
-7. Round-trip integration test
-8. Review fixes: FTS5 sync triggers, transitive forward chain walk in
-   delete_memory, message cascade in thread soft-delete
+1. Alembic batch-mode setup with async bridge, auto-generated initial
+   migration, pre-existing DB detection, `auto_migrate()` replaces `create_tables()`
+2. OnnxEmbeddingService with granite-embedding-small-english-r2 INT8,
+   auto-download from HuggingFace Hub, fallback to MockEmbeddingService
+3. `memoryhub doctor` subcommand (edition, DB, model, WAL, migration status)
+4. 6 ONNX embedding tests including semantic similarity and search ranking
 
-**Session summary:** `session-summaries/2026-07-27-personal-edition-p2s1.md`
+**Session summary:** `session-summaries/2026-07-28-personal-edition-p3s1.md`
 
-**Shipped commits:** `4006fc1` through `1149890` (9 commits on
-feat/personal-edition). 24 local tests pass, 627 core tests pass.
+**Shipped commits:** `2b8f5fc` through `450064b` (4 commits on
+feat/personal-edition). 30 local tests pass.
 
 ## Watch out for
 
-- **ONNX model provenance (P3):** RedHatAI internal ask pending for
-  attested INT8 ONNX export of granite-embedding-small-english-r2.
-  Fallback: export and publish under the project org.
-- **sqlite-vec extension loading:** macOS Python doesn't ship with
-  --enable-loadable-sqlite-extensions. pysqlite3 is the workaround.
-  Brute-force cosine works at personal scale as fallback.
-- **onnxruntime wheel size:** ~50MB for CPU-only. The `[local]` extra
-  should document this so users aren't surprised by the download.
+- **MCP sampling support:** not all MCP clients support sampling. Claude
+  Code does, but other agents may not. The deferred queue fallback
+  (Phase 4, item 4) handles this.
+- **eager-fact-extraction.md:** the extraction design doc must be read
+  before starting Phase 4. It defines the extraction pipeline, prompt
+  format, and reconciliation flow.
+- **transformers dependency size:** ~200MB+. If install size becomes a
+  concern, consider switching to `tokenizers` library directly.
 - **os.getlogin() in non-TTY:** can fail in cron/CI. Fallback to $USER
   is in place but not guaranteed on all platforms.
 
 ## If blocked
 
-- If ONNX model isn't available: implement OnnxEmbeddingService with a
-  smaller public model (all-MiniLM-L6-v2 ONNX is widely available, 384-dim)
-  and swap to Granite when available.
-- If onnxruntime has compatibility issues on the target platform: keep
-  MockEmbeddingService as default and make ONNX opt-in via
-  `pip install "memoryhub[local,embeddings]"`.
+- If MCP sampling isn't supported by the target agent: implement
+  `memoryhub dream` as the primary extraction path (direct LLM call)
+  and make sampling the optimization, not the requirement.
+- If the dreaming epic's extraction design changes: check
+  `planning/eager-fact-extraction.md` and PRs #407, #412 for the latest.
