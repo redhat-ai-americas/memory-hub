@@ -54,14 +54,14 @@ async def test_round_trip():
 
     # 7. thread create
     thread_result = await thread(
-        action="create", scope="user", options={"title": "Test thread"}
+        action="create", ctx=None, scope="user", options={"title": "Test thread"}
     )
     tid = thread_result["id"]
     print("7. thread create:", tid[:12])
 
     # 8. thread append + get
-    await thread(action="append", thread_id=tid, role="user", content="Hello world")
-    get_result = await thread(action="get", thread_id=tid)
+    await thread(action="append", ctx=None, thread_id=tid, role="user", content="Hello world")
+    get_result = await thread(action="get", ctx=None, thread_id=tid)
     print("8. thread get:", get_result["total_messages"], "messages")
 
     # 9. delete
