@@ -28,8 +28,8 @@ parameterized test suite across BOTH backends.
    existing 627 unit tests still pass with no regressions.
 
 **Session start protocol:**
-- Premise checks: `git log --oneline feat/personal-edition` shows 8
-  commits (3 from architecture session + 5 from session 1); working tree
+- Premise checks: `git log --oneline feat/personal-edition` shows 9
+  commits (3 from architecture session + 6 from session 1); working tree
   clean; `memoryhub-local/` exists and `pip install -e .` works; cheese
   test (13 tests) green on SQLite
 - What landed in session 1:
@@ -220,7 +220,7 @@ Phase 1, session 1 complete. All 6 plan items shipped:
 6. Cheese test: 13 tests green on SQLite (write, update, version chain,
    vector search, keyword search, similarity check, graph edges).
 
-**Shipped commits:** `907602f` through `3296772` (5 commits on
+**Shipped commits:** `907602f` through `1aae645` (6 commits on
 feat/personal-edition). 627 existing core tests pass with no regressions.
 
 **Review findings (fixed):** IntervalSeconds.impl was String(20) instead
