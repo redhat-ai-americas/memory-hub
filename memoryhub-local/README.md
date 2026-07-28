@@ -15,6 +15,17 @@ That's it. Start a new Claude Code session and your agent has persistent memory.
 
 On first run, the embedding model downloads automatically (~200MB one-time download). Subsequent starts are fast.
 
+### Install from source
+
+If the packages aren't on PyPI yet (e.g. you're working from a feature branch):
+
+```bash
+git clone https://github.com/redhat-ai-americas/memory-hub.git
+cd memory-hub
+pip install -e memoryhub-local -e memoryhub-cli -e sdk
+claude mcp add memoryhub -- memoryhub mcp
+```
+
 ## Verify it works
 
 ```bash
@@ -78,6 +89,11 @@ memoryhub dream --dry-run --model llama3.2                # preview pending thre
 - **Extraction**: via MCP sampling (agent's own LLM) or `memoryhub dream` with a local LLM
 
 All data lives under `~/.local/share/memoryhub/` (or `$XDG_DATA_HOME/memoryhub/`).
+
+## Notes
+
+- A `[transformers] PyTorch was not found` warning may appear on startup. This is harmless -- only the tokenizer is used, not PyTorch models.
+- The embedding model (~200MB) downloads once on first start. Subsequent starts use the cached model.
 
 ## Requirements
 
