@@ -1,68 +1,52 @@
 # Next Session -- Local
 
-## Next: PostgresBackend extraction + parameterized tests (Phase 1, session 2 of 2)
+## Next: Local MCP server + `memoryhub mcp` CLI (Phase 2, session 1 of 2)
 
-Extract the PostgresBackend from existing memoryhub_core service code,
-implement graph_neighbors for both backends, replace the frozen conftest
-patches with the production dialect abstraction, and run the full
-parameterized test suite across BOTH backends.
+Add the `memoryhub mcp` subcommand, create personal-edition tool
+wrappers, wire SQLite at XDG path, and make `pip install "memoryhub[local]"`
+resolve. This is the session that makes the personal edition usable from
+Claude Code.
 
-1. **PostgresBackend** -- extract from existing memoryhub_core services
-   into `memoryhub_local/storage/postgres.py`. Wrap the 7 vector + 2
-   keyword + 1 similarity call sites from `src/memoryhub_core/services/`
-   into the RecallBackend protocol methods. Zero behavior change.
+1. **`memoryhub mcp` subcommand** -- add to `memoryhub-cli/src/memoryhub_cli/main.py`.
+   Starts a stdio FastMCP server pointing at the SQLite backend.
 
-2. **graph_neighbors for both backends** -- port the recursive CTE from
-   `services/graph.py:103` into PostgresBackend. Write the SQLite
-   equivalent using VALUES clause for seed initialization instead of
-   `unnest(CAST(... AS uuid[]))`.
+2. **Personal-edition tool wrappers** -- bypass auth/authz, hardcode
+   tenant_id="local", auto-register session. Same 4-tool compact
+   profile: register_session, memory, admin_memory, thread.
 
-3. **Replace frozen conftest patches** -- the monkey-patching in
-   `tests/test_services/conftest.py` (lines 37-147) should be replaced
-   by importing `memoryhub_local.models` with the portable types. This
-   eliminates the FREEZE NOTICE pattern and makes the test infra
-   maintainable.
+3. **SQLite engine at XDG path** -- `~/.local/share/memoryhub/memoryhub.db`
+   with WAL mode. Create DB directory on first run.
 
-4. **Parameterized test suite** -- extend the cheese test to run across
-   BOTH SQLite and PostgreSQL backends via pytest parameterize. Verify
-   existing 627 unit tests still pass with no regressions.
+4. **Alembic batch mode** -- SQLite migrations via Alembic batch mode,
+   run at startup.
+
+5. **FastMCP instructions** -- personal-edition system prompt (no API
+   key mention, no cluster references).
+
+6. **`[local]` extra** -- add to `sdk/pyproject.toml` pulling in
+   `memoryhub-local` + `memoryhub-cli`.
 
 **Session start protocol:**
-- Premise checks: `git log --oneline feat/personal-edition` shows 9
-  commits (3 from architecture session + 6 from session 1); working tree
-  clean; `memoryhub-local/` exists and `pip install -e .` works; cheese
-  test (13 tests) green on SQLite
-- What landed in session 1:
-  - Package scaffold (pyproject.toml, directory structure)
-  - RecallBackend protocol (4 methods in storage/recall.py)
-  - Dialect type decorators (PortableUUID, JsonEncodedList,
-    JsonEncodedVector, IntervalSeconds in models/dialect.py)
-  - 8 model files ported with PG-specific types swapped
-  - SQLiteBackend (3 of 4 methods: vector_recall with brute-force
-    cosine, keyword_recall with FTS5, similarity_check)
-  - 13 cheese tests green on SQLite
-- Design notes from session 1 review:
-  - FTS5 external content table does a full rebuild before every
-    keyword search (O(n)); replace with triggers or contentless FTS
-  - String-interpolated SQL in keyword_recall is safe (self-generated
-    values) but parameterized queries are better practice
-  - sqlite-vec requires Python built with --enable-loadable-sqlite-extensions;
-    brute-force cosine works fine at personal scale as fallback
-  - pysqlite3 package provides extension support on macOS
+- Premise checks: `git log --oneline feat/personal-edition` shows 14
+  commits (3 arch + 6 s1 + 5 s2); Phase 1 complete; cheese test (23
+  tests) green; 627 service tests green; working tree clean
+- What landed in Phase 1:
+  - memoryhub-local package scaffold, RecallBackend protocol, dialect types
+  - 8 portable model files
+  - SQLiteBackend (all 4 methods) + PostgresBackend (all 4 methods)
+  - Frozen conftest replaced with production dialect types
+  - 23 cheese tests parameterized across backends
 - Rules with history: all pushes through PRs; commit incrementally;
-  don't modify memoryhub-core (except replacing conftest patches)
-- Stop-and-ask before: any changes to existing published packages
-  (sdk/, memoryhub-cli/)
-- Close ritual: session summary + NEXT_SESSION update; verify 627+
-  existing tests + parameterized cheese tests all green
+  stop-and-ask before modifying existing published packages (sdk/, memoryhub-cli/)
+- Close ritual: session summary + NEXT_SESSION update; verify new MCP
+  server starts and responds to tool calls
 
 **Exit predicate:**
-- PostgresBackend in `memoryhub_local/storage/postgres.py` implements
-  all 4 RecallBackend methods
-- graph_neighbors works on both SQLite and PostgreSQL backends
-- Frozen conftest patches replaced by production dialect abstraction
-- Cheese test parameterized across both backends, all green
-- Existing 627 unit tests pass with no regressions
+- `memoryhub mcp` starts a stdio FastMCP server
+- Round-trip via Claude Code: register, write, search, read works
+- Uses MockEmbeddingService (real embeddings are Phase 3)
+- DB file at XDG path with WAL mode
+- `pip install "memoryhub[local]"` resolves from a clean venv
 
 ## Remaining epic phases
 
@@ -74,30 +58,16 @@ cluster edition. No database server, no API keys, no background services.
 Architecture doc: `planning/personal-edition.md` (grounded 2026-07-27).
 Branch: `feat/personal-edition`.
 
-### Phase 1: RecallBackend protocol + SQLiteBackend (2 sessions)
+### Phase 1: RecallBackend protocol + SQLiteBackend (2 sessions) -- DONE
 
-Extract the recall protocol, implement both backends, create the
-`memoryhub-local` package scaffold, and replace the frozen test conftest
-patches with a production-quality dialect abstraction.
+**Session 1:** Package scaffold, protocol, dialect config, model port,
+SQLiteBackend (3 recall methods), cheese test on SQLite. 13 tests green.
 
-**Session 1 (done):** Package scaffold, protocol, dialect config, model
-port, SQLiteBackend (3 recall methods), cheese test on SQLite. All 6
-items complete, 13 tests green.
+**Session 2:** PostgresBackend extraction, graph_neighbors for both
+backends, frozen conftest replaced with production dialect types,
+parameterized cheese test. 23 tests green, 627 service tests green.
 
-**Session 2 (next):** PostgresBackend extraction from existing code (7 vector +
-2 keyword + 1 similarity call sites), graph_neighbors for both backends
-(CTE port), replace frozen conftest patches, parameterized test suite
-across BOTH backends, verify existing 627 unit tests still pass.
-
-**Definition of done (full phase):**
-- `memoryhub-local/` exists as a package, passes `pip install -e .`
-- "Cheese test" green on both SQLite and PostgreSQL backends
-- Frozen conftest patches replaced by `configure_for_dialect("sqlite")`
-- Existing 627 unit tests pass with no regressions
-
-**Dependencies:** None -- entry point.
-
-**Parallel-ok:** No. Everything depends on this.
+**Commits:** `907602f`..`d88a86a` (14 commits on feat/personal-edition)
 
 ### Phase 2: Local MCP server + `memoryhub mcp` CLI (2 sessions)
 
@@ -202,30 +172,27 @@ README quickstart, parity matrix, reproducible 10-minute story.
 - Curator agent + reflection -- `NEXT_SESSION-curation.md`
 - Full benchmark re-validation -- `NEXT_SESSION-dreaming.md` Phase 8
 
-## What landed last session (2026-07-27, session 1)
+## What landed last session (2026-07-27, session 2)
 
-Phase 1, session 1 complete. All 6 plan items shipped:
+Phase 1 complete. All 4 plan items shipped + review fixes:
 
-1. Package scaffold: `memoryhub-local/` with pyproject.toml, directory
-   structure, verified `pip install -e .`
-2. RecallBackend protocol: 4 methods (vector_recall, keyword_recall,
-   similarity_check, graph_neighbors) in `storage/recall.py`
-3. Dialect type decorators: PortableUUID, JsonEncodedList,
-   JsonEncodedVector, IntervalSeconds in `models/dialect.py`
-4. 8 model files ported from memoryhub_core with all PG-specific types
-   replaced. Fixed stale embedding comment (all-MiniLM-L6-v2 -> Granite).
-5. SQLiteBackend: 3 of 4 methods implemented (brute-force cosine for
-   vector, FTS5 for keyword, brute-force for similarity). graph_neighbors
-   deferred.
-6. Cheese test: 13 tests green on SQLite (write, update, version chain,
-   vector search, keyword search, similarity check, graph edges).
+1. PostgresBackend: vector_recall (pgvector <=> via literal_column),
+   keyword_recall (plainto_tsquery + ts_rank), similarity_check, graph_neighbors
+2. graph_neighbors for both backends: SQLite uses VALUES CTE, PostgreSQL
+   uses unnest(uuid[]) CTE. Bidirectional traversal, depth cap, edge/node
+   filtering.
+3. Frozen conftest replaced: production dialect types (JsonEncodedVector,
+   JsonEncodedList) from memoryhub_local. _sqlite_schema_patches() context
+   manager replaces 147 lines of inline monkey-patching.
+4. Parameterized cheese test: 23 tests on SQLite, PostgreSQL activates
+   via MEMORYHUB_TEST_PG_URL env var.
 
-**Shipped commits:** `907602f` through `1aae645` (6 commits on
+**Shipped commits:** `9a6b5f7` through `d88a86a` (5 commits on
 feat/personal-edition). 627 existing core tests pass with no regressions.
 
-**Review findings (fixed):** IntervalSeconds.impl was String(20) instead
-of Integer, sqlalchemy missing [asyncio] extra, dead code in
-keyword_recall.
+**Review findings (fixed):** Conftest index restoration guard, UUID
+interpolation safety comment, stale docstring, added multi-seed/depth-cap/
+disconnected-node tests.
 
 ## Watch out for
 
