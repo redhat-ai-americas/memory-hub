@@ -73,7 +73,10 @@ async def initialize_backend(*, quiet: bool = False) -> ServerState:
     if not quiet:
         from memoryhub_local.database import get_default_db_path
         db_path = get_default_db_path()
-        logger.info("MemoryHub personal edition ready (db: %s, embeddings: %s)", db_path, embed_label)
+        logger.info(
+            "MemoryHub personal edition ready (db: %s, embeddings: %s)",
+            db_path, embed_label,
+        )
         print(f"MemoryHub personal edition ready (db: {db_path}, embeddings: {embed_label})", file=sys.stderr)  # noqa: T201, E501
 
     return state
