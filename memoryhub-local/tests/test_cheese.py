@@ -1,8 +1,9 @@
-"""Cheese test: end-to-end validation of the SQLite backend.
+"""Cheese test: end-to-end validation of RecallBackend implementations.
 
 Exercises the full lifecycle -- write, update, version chain, vector search,
-keyword search, and similarity check -- proving the portable models and
-SQLiteBackend work correctly on SQLite.
+keyword search, similarity check, and graph neighbors -- proving the portable
+models and backends work correctly. Parameterized across all available
+backends (SQLite always; PostgreSQL when MEMORYHUB_TEST_PG_URL is set).
 
 Named after Wes's favorite cheese (parmesan), because why not.
 """
@@ -155,7 +156,7 @@ class TestVectorSearch:
     """vector_recall: find memories by embedding similarity."""
 
     async def test_finds_similar_embeddings(
-        self, async_session: AsyncSession, backend: SQLiteBackend,
+        self, async_session: AsyncSession, backend,
     ):
         await _create_memory(async_session, "Parmesan is delicious", EMB_CHEESE)
         await _create_memory(async_session, "A nice Barolo pairs well", EMB_WINE)
@@ -185,7 +186,7 @@ class TestVectorSearch:
         assert results[2][1] > 0.9
 
     async def test_respects_limit(
-        self, async_session: AsyncSession, backend: SQLiteBackend,
+        self, async_session: AsyncSession, backend,
     ):
         for i in range(5):
             emb = [0.0] * 384
@@ -202,7 +203,7 @@ class TestVectorSearch:
         assert len(results) == 2
 
     async def test_filters_applied(
-        self, async_session: AsyncSession, backend: SQLiteBackend,
+        self, async_session: AsyncSession, backend,
     ):
         await _create_memory(
             async_session, "My cheese", EMB_CHEESE, owner_id="alice",
@@ -226,15 +227,16 @@ class TestKeywordSearch:
     """keyword_recall: FTS5 full-text search."""
 
     async def test_finds_by_keyword(
-        self, async_session: AsyncSession, backend: SQLiteBackend,
+        self, async_session: AsyncSession, backend,
     ):
         await _create_memory(async_session, "Parmesan is the king of cheeses", EMB_CHEESE)
         await _create_memory(async_session, "Red wine pairs with steak", EMB_WINE)
         await _create_memory(async_session, "Aged parmigiano has a nutty flavor", EMB_PARM)
         await async_session.commit()
 
-        await ensure_fts_table(async_session)
-        await async_session.commit()
+        if isinstance(backend, SQLiteBackend):
+            await ensure_fts_table(async_session)
+            await async_session.commit()
 
         results = await backend.keyword_recall(
             query_text="parmesan",
@@ -252,13 +254,14 @@ class TestKeywordSearch:
         assert "Parmesan is the king of cheeses" in contents
 
     async def test_no_results_for_unrelated_query(
-        self, async_session: AsyncSession, backend: SQLiteBackend,
+        self, async_session: AsyncSession, backend,
     ):
         await _create_memory(async_session, "Parmesan is delicious", EMB_CHEESE)
         await async_session.commit()
 
-        await ensure_fts_table(async_session)
-        await async_session.commit()
+        if isinstance(backend, SQLiteBackend):
+            await ensure_fts_table(async_session)
+            await async_session.commit()
 
         results = await backend.keyword_recall(
             query_text="python programming",
@@ -273,7 +276,7 @@ class TestSimilarityCheck:
     """similarity_check: curation gate for near-duplicates."""
 
     async def test_finds_similar_within_threshold(
-        self, async_session: AsyncSession, backend: SQLiteBackend,
+        self, async_session: AsyncSession, backend,
     ):
         await _create_memory(async_session, "Parmesan is great", EMB_CHEESE)
         await _create_memory(async_session, "Wine is great", EMB_WINE)
@@ -298,7 +301,7 @@ class TestSimilarityCheck:
         assert distance < 0.2
 
     async def test_empty_when_nothing_similar(
-        self, async_session: AsyncSession, backend: SQLiteBackend,
+        self, async_session: AsyncSession, backend,
     ):
         await _create_memory(async_session, "Wine facts", EMB_WINE)
         await async_session.flush()
@@ -313,7 +316,7 @@ class TestSimilarityCheck:
         assert len(results) == 0
 
     async def test_respects_limit(
-        self, async_session: AsyncSession, backend: SQLiteBackend,
+        self, async_session: AsyncSession, backend,
     ):
         # Create multiple similar memories
         for i in range(5):
