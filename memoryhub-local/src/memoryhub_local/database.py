@@ -10,8 +10,6 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from memoryhub_local.models.base import Base
-
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SUBDIR = "memoryhub"
@@ -56,14 +54,30 @@ async def create_local_engine(db_path: Path | None = None) -> AsyncEngine:
     return engine
 
 
-async def create_tables(engine: AsyncEngine) -> None:
-    """Create all tables and FTS5 virtual table (first-run bootstrap)."""
+async def auto_migrate(engine: AsyncEngine) -> None:
+    """Run Alembic migrations to latest version, then ensure FTS tables.
+
+    On a pre-existing database (created before Alembic was added), the
+    initial migration detects existing tables and stamps the version
+    without recreating them.
+    """
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+
     from memoryhub_local.storage.sqlite import ensure_fts_table
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    alembic_dir = Path(__file__).parent / "alembic"
+    cfg = AlembicConfig()
+    cfg.set_main_option("script_location", str(alembic_dir))
 
-    # FTS5 virtual tables aren't managed by SQLAlchemy metadata
+    def _run_upgrade(sync_conn):
+        cfg.attributes["connection"] = sync_conn
+        command.upgrade(cfg, "head")
+
+    async with engine.begin() as conn:
+        await conn.run_sync(_run_upgrade)
+
+    # FTS5 virtual tables are outside Alembic (can't manage virtual tables)
     session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with session_factory() as session:
         await ensure_fts_table(session)

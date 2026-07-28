@@ -10,13 +10,13 @@ async def test_round_trip():
     tmpdir = tempfile.mkdtemp()
     os.environ["XDG_DATA_HOME"] = tmpdir
 
-    from memoryhub_local.database import create_local_engine, create_tables, make_session_factory
+    from memoryhub_local.database import auto_migrate, create_local_engine, make_session_factory
     from memoryhub_local.embeddings.base import MockEmbeddingService
     from memoryhub_local.storage.sqlite import SQLiteBackend
     from memoryhub_local.tools._state import init_state
 
     engine = await create_local_engine()
-    await create_tables(engine)
+    await auto_migrate(engine)
     session_factory = make_session_factory(engine)
     init_state(session_factory, MockEmbeddingService(), SQLiteBackend())
 
