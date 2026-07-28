@@ -2,9 +2,9 @@
 
 MemoryHub is a Kubernetes-native agent memory system for OpenShift AI. It provides centralized, governed memory behind a single service core -- an MCP server backed by PostgreSQL with pgvector and protected by an OAuth 2.1 authorization server with service-layer RBAC. Consumers reach that core through multiple interchangeable **surfaces**; today those are agents over MCP, a typed Python SDK, a CLI, a dashboard UI, and agent-harness hooks, and the set is expected to grow (e.g., agent plugins, platform connectors).
 
-This document covers the big picture. Subsystem details live in their own docs (see [SYSTEMS.md](SYSTEMS.md)). For the conceptual case — what agent memory is, when local files suffice, and when you need a governed platform — read [What Agent Memory Really Is](guides/what-is-agent-memory.md) first.
+This document covers the big picture. Subsystem details live in their own docs (see [SYSTEMS.md](SYSTEMS.md)). For the conceptual case -- what agent memory is, when local files suffice, and when you need a governed platform -- read [What Agent Memory Really Is](guides/what-is-agent-memory.md) first.
 
-One boundary worth stating up front: **MemoryHub is memory, not retrieval.** It stores what agents learned from experience — decisions, preferences, outcomes — not document corpora. "What does the data say?" is the job of whatever RAG stack the organization runs; the division of labor is spelled out in [strategy/platform-architecture.md](../strategy/platform-architecture.md).
+One boundary worth stating up front: **MemoryHub is memory, not retrieval.** It stores what agents learned from experience -- decisions, preferences, outcomes -- not document corpora. "What does the data say?" is the job of whatever RAG stack the organization runs; the division of labor is spelled out in [strategy/platform-architecture.md](../strategy/platform-architecture.md).
 
 ## Consumer surfaces
 
@@ -20,10 +20,10 @@ A *surface* is any way a human or agent reaches MemoryHub. Surfaces are delibera
 
 Rules for adding a new surface (a plugin, a platform connector, an editor extension, ...):
 
-1. **Go through the MCP server** — either speak MCP directly or build on the SDK. Never bypass the service layer; RBAC and curation live there.
-2. **Authenticate like everyone else** — OAuth 2.1 `client_credentials` (or the dev-path API key shim until it's retired). No new auth mechanisms per surface.
-3. **Stay stateless where possible** — server-side session state is the exception, not the rule (see the stateless-focus discussion below).
-4. **Register as a consumer** — add the surface to the same-commit consumer audit list in [CONTRIBUTING.md](../CONTRIBUTING.md) if it parses MCP response shapes.
+1. **Go through the MCP server** -- either speak MCP directly or build on the SDK. Never bypass the service layer; RBAC and curation live there.
+2. **Authenticate like everyone else** -- OAuth 2.1 `client_credentials` (or the dev-path API key shim until it's retired). No new auth mechanisms per surface.
+3. **Stay stateless where possible** -- server-side session state is the exception, not the rule (see the stateless-focus discussion below).
+4. **Register as a consumer** -- add the surface to the same-commit consumer audit list in [CONTRIBUTING.md](../CONTRIBUTING.md) if it parses MCP response shapes.
 
 ## Conceptual overview
 
@@ -88,9 +88,13 @@ graph TB
         PG[(PostgreSQL<br/>pgvector + graph)]
     end
 
-    subgraph "RHOAI vLLM serving"
-        EMB[all-MiniLM-L6-v2<br/>384-dim embeddings]
-        RR[ms-marco-MiniLM-L12-v2<br/>cross-encoder reranker<br/>optional, falls back to cosine]
+    subgraph "memory-hub-mcp namespace (cont.)"
+        MINIO[MinIO<br/>S3 object storage]
+    end
+
+    subgraph "HuggingFace TEI"
+        EMB[all-MiniLM-L6-v2<br/>embedding-model namespace<br/>384-dim embeddings]
+        RR[ms-marco-MiniLM-L12-v2<br/>reranker-model namespace<br/>cross-encoder reranker<br/>optional, falls back to cosine]
     end
 
     AGENT --> MCP
@@ -112,6 +116,7 @@ graph TB
     AUTHZ --> SVC
     SVC --> MOD
     MOD --> PG
+    SVC --> MINIO
 
     SVC --> EMB
     SVC --> RR
@@ -122,7 +127,7 @@ Every memory operation flows through the MCP server. The server applies authoriz
 
 The OAuth 2.1 authorization server runs in a separate namespace and never touches PostgreSQL. The MCP server validates incoming JWTs against the auth server's JWKS endpoint; the dashboard BFF brokers admin client management calls. SDK consumers fetch tokens via `client_credentials` and refresh transparently. Token rotation, JWKS caching, and signature validation are all handled by FastMCP 3's built-in `JWTVerifier`.
 
-PostgreSQL with pgvector handles relational data, vector similarity search, and graph relationships in a single database — no separate vector store, no separate graph database. The `all-MiniLM-L6-v2` embedding model and the optional `ms-marco-MiniLM-L12-v2` cross-encoder reranker run on RHOAI's vLLM serving and are reached over the cluster network. The reranker is only invoked on the focus path of `search_memory` and gracefully degrades to plain cosine recall when unreachable, so the system stays usable if the reranker pod is unhealthy.
+PostgreSQL with pgvector handles relational data, vector similarity search, and graph relationships in a single database -- no separate vector store, no separate graph database. The `all-MiniLM-L6-v2` embedding model and the optional `ms-marco-MiniLM-L12-v2` cross-encoder reranker run on HuggingFace Text Embeddings Inference (TEI) in their own namespaces (`embedding-model` and `reranker-model`) and are reached over the cluster network. The reranker is only invoked on the focus path of `search_memory` and gracefully degrades to plain cosine recall when unreachable, so the system stays usable if the reranker pod is unhealthy. MinIO provides S3-compatible object storage in the `memory-hub-mcp` namespace for oversized memory content (>100KB); the service layer stores a prefix in PostgreSQL and spills the full content to S3, hydrating on demand at read time.
 
 ## Data flow
 
@@ -177,13 +182,13 @@ sequenceDiagram
 
 > **Note:** The diagram uses legacy tool names (`write_memory`, `search_memory`) which remain as deprecated aliases. The compact profile (default) consolidates these into a single `memory` tool with an `action` parameter. See [agent-integration-guide.md](guides/agent-integration-guide.md) for the current tool surface.
 
-The session-focus path (#58) is the most architecturally interesting addition. It is **stateless** by design — the focus string is passed per call rather than stored on a session — which avoided every coordination question that a stateful focus would have raised. The cost is one re-embed of the focus string per call (~50ms with a warm vLLM), which is negligible relative to the cross-encoder rerank latency. When the user has not set a focus, the entire path short-circuits and the server falls through to the plain Layer 1 cosine retrieval — there is no rerank latency on the no-focus hot path.
+The session-focus path (#58) is the most architecturally interesting addition. It is **stateless** by design -- the focus string is passed per call rather than stored on a session -- which avoided every coordination question that a stateful focus would have raised. The cost is one re-embed of the focus string per call (~50ms with a warm TEI instance), which is negligible relative to the cross-encoder rerank latency. When the user has not set a focus, the entire path short-circuits and the server falls through to the plain Layer 1 cosine retrieval -- there is no rerank latency on the no-focus hot path.
 
-The cross-encoder reranker (`ms-marco-MiniLM-L12-v2`) was deployed mid-session during the #58 implementation. Empirical benchmarking on a 200-memory synthetic corpus showed that **NEW-1** (RRF blend over cross-encoder rerank with focus cosine ranks) strictly dominated three alternatives at `session_focus_weight ∈ [0.2, 0.4]`. The cross-encoder alone is roughly neutral on this synthetic corpus — memory-hub's memories are short and topic-coherent, which is the regime where pure cosine works well — but the architecture is correct for noisier production data and the reranker stays optional via `MEMORYHUB_RERANKER_URL`. Full benchmark methodology and results live in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../research/agent-memory-ergonomics/two-vector-retrieval.md).
+The cross-encoder reranker (`ms-marco-MiniLM-L12-v2`) was deployed mid-session during the #58 implementation. Empirical benchmarking on a 200-memory synthetic corpus showed that **NEW-1** (RRF blend over cross-encoder rerank with focus cosine ranks) strictly dominated three alternatives at `session_focus_weight ∈ [0.2, 0.4]`. The cross-encoder alone is roughly neutral on this synthetic corpus -- memory-hub's memories are short and topic-coherent, which is the regime where pure cosine works well -- but the architecture is correct for noisier production data and the reranker stays optional via `MEMORYHUB_RERANKER_URL`. Full benchmark methodology and results live in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../research/agent-memory-ergonomics/two-vector-retrieval.md).
 
 ## The tree-based memory model
 
-Memories are organized as a tree, not a flat list or a layered stack. Each memory is a node that can have child branches — some required (like scope metadata), some optional (like rationale or provenance). This is explained in detail in [memory-tree.md](design/memory-tree.md), but here is the structural concept:
+Memories are organized as a tree, not a flat list or a layered stack. Each memory is a node that can have child branches -- some required (like scope metadata), some optional (like rationale or provenance). This is explained in detail in [memory-tree.md](design/memory-tree.md), but here is the structural concept:
 
 ```mermaid
 graph TD
@@ -215,9 +220,9 @@ Authentication and authorization are handled by two cooperating layers.
 
 **Authentication** is OAuth 2.1 (`memoryhub-auth`). Three grant types are supported:
 
-- `client_credentials` for agents and SDK consumers — the standard machine-to-machine flow.
+- `client_credentials` for agents and SDK consumers -- the standard machine-to-machine flow.
 - `authorization_code + PKCE` for browser-based human users (currently used by the dashboard via the OpenShift OAuth proxy).
-- `token_exchange` (RFC 8693) for platform-integrated agents (RHOAI) — designed but not yet wired.
+- `token_exchange` (RFC 8693) for platform-integrated agents (RHOAI).
 
 JWTs are RSA-2048-signed, short-lived (5-15 min), and refreshed via DB-backed refresh tokens. The auth server publishes a JWKS endpoint that the MCP server's `JWTVerifier` polls. Token claims include `sub`, `client_id`, operational scopes (`memory:read`, `memory:write`, `memory:admin`), access-tier scopes (`user`, `project`, `campaign`, `role`, `organizational`, `enterprise`), and a `tenant_id` for future multi-tenant isolation (#46).
 
@@ -241,6 +246,7 @@ graph TB
             MCP_POD[memory-hub-mcp pod<br/>FastMCP 3]
             UI_POD[memoryhub-ui pod<br/>BFF + oauth-proxy sidecar]
             VK_POD[memoryhub-valkey pod<br/>Valkey 8.0]
+            MINIO_POD[memoryhub-minio pod<br/>S3 object storage]
             FC_JOB[fact-checker CronJob<br/>daily 01:00 UTC]
         end
 
@@ -256,9 +262,9 @@ graph TB
             PG_POD[(memoryhub-pg-0<br/>PostgreSQL + pgvector)]
         end
 
-        subgraph "RHOAI model serving"
-            EMB[all-MiniLM-L6-v2 vLLM]
-            RR[ms-marco-MiniLM-L12-v2 vLLM]
+        subgraph "HuggingFace TEI"
+            EMB[all-MiniLM-L6-v2<br/>embedding-model namespace]
+            RR[ms-marco-MiniLM-L12-v2<br/>reranker-model namespace]
         end
 
         subgraph "openshift-monitoring (planned)"
@@ -268,6 +274,7 @@ graph TB
     end
 
     MCP_POD --> PG_POD
+    MCP_POD --> MINIO_POD
     MCP_POD --> EMB
     MCP_POD --> RR
     MCP_POD -. JWKS .-> AUTH_POD
@@ -284,31 +291,33 @@ graph TB
     PROM -. future .-> MCP_POD & UI_POD & AUTH_POD
 ```
 
-The MCP server pod, dashboard, Valkey, and the Fact Checker CronJob share the `memory-hub-mcp` namespace so they can communicate over the cluster network without crossing namespace boundaries. The Trace Reviewer runs in a separate `memoryhub-agents` namespace because it has a different scaling profile (HPA-eligible, continuous) and accesses Valkey cross-namespace via DNS (`memoryhub-valkey.memory-hub-mcp.svc:6379`). The auth server lives in its own namespace because it has a different release cadence and a smaller blast radius for security incidents. PostgreSQL lives in its own namespace because the OOTB PostgreSQL operator that ships with OpenShift expects it there and because future replica scaling does not need to touch the application namespaces.
+The MCP server pod, dashboard, Valkey, MinIO, and the Fact Checker CronJob share the `memory-hub-mcp` namespace so they can communicate over the cluster network without crossing namespace boundaries. The Trace Reviewer runs in a separate `memoryhub-agents` namespace because it has a different scaling profile (HPA-eligible, continuous) and accesses Valkey cross-namespace via DNS (`memoryhub-valkey.memory-hub-mcp.svc:6379`). The auth server lives in its own namespace because it has a different release cadence and a smaller blast radius for security incidents. PostgreSQL lives in its own namespace because the OOTB PostgreSQL operator that ships with OpenShift expects it there and because future replica scaling does not need to touch the application namespaces. The embedding and reranker models each run in their own namespace (`embedding-model`, `reranker-model`) on HuggingFace TEI containers.
 
-All containers use Red Hat UBI9 base images. FIPS compliance is inherited from the cluster's FIPS mode — PostgreSQL delegates crypto to OS-level OpenSSL, the auth server's RSA signing uses the OS crypto provider, and end-to-end FIPS validation is on the roadmap but not yet completed.
+All containers use Red Hat UBI9 base images. FIPS compliance is inherited from the cluster's FIPS mode -- PostgreSQL delegates crypto to OS-level OpenSSL, the auth server's RSA signing uses the OS crypto provider, and end-to-end FIPS validation is on the roadmap but not yet completed.
 
 The MCP server pods are designed to be horizontally scalable behind a Service. Today the deployment runs a single pod because the workload does not yet justify replicas; the codebase is stateless except for the dev-path session shim, which writes to in-pod memory and would need to move to Valkey before scaling out.
 
 External cluster routes:
 
-- `memory-hub-mcp-memory-hub-mcp.apps.<cluster>` — the MCP server's streamable-HTTP endpoint that agents and the SDK connect to.
-- `auth-server-memoryhub-auth.apps.<cluster>` — the OAuth 2.1 token endpoint, JWKS, and admin client management API.
-- `memoryhub-ui-memory-hub-mcp.apps.<cluster>` — the dashboard, behind the OpenShift OAuth login wall via the oauth-proxy sidecar.
+- `memory-hub-mcp-memory-hub-mcp.apps.<cluster>` -- the MCP server's streamable-HTTP endpoint that agents and the SDK connect to.
+- `auth-server-memoryhub-auth.apps.<cluster>` -- the OAuth 2.1 token endpoint, JWKS, and admin client management API.
+- `memoryhub-ui-memory-hub-mcp.apps.<cluster>` -- the dashboard, behind the OpenShift OAuth login wall via the oauth-proxy sidecar.
 
 ## What's decided and what's open
 
-**Decided and shipped.** The architectural decisions that are settled and running in production, by theme. (Feature-level detail and issue numbers live in [SYSTEMS.md](SYSTEMS.md) and [CHANGELOG.md](../CHANGELOG.md) — this list is deliberately about *decisions*, not features.)
+**Decided and shipped.** The architectural decisions that are settled and running in production, by theme. (Feature-level detail and issue numbers live in [SYSTEMS.md](SYSTEMS.md) and [CHANGELOG.md](../CHANGELOG.md) -- this list is deliberately about *decisions*, not features.)
 
 - *Core model.* Tree-based memory model with typed relationships; `content_type` (experiential/knowledge/behavioral, #237); write-time entity extraction with content-addressed dedup (#170/#247); scope promotion with provenance (#235); durable workflow checkpoints (#238).
-- *Retrieval.* Stateless per-call session focus with cross-encoder reranking and graceful cosine fallback (#58); campaign scoping and domain-tag boosting (#154); temporal awareness — `relevant_until` expiry and `temporal_status` filtering (#282), pattern surfacing (#292).
-- *Governance and identity.* OAuth 2.1 + short-lived JWTs with service-layer RBAC enforced at the SQL level; owner/actor/driver identity with on-behalf-of authorization (#66/#284); project auto-enrollment and membership enforcement (#188/#64); write-time curation with PII blocking (#234); admin content moderation with sanitized audit mode (#45); structured audit logging on every tool call site (#67, stub — persistence pending).
+- *Retrieval.* Stateless per-call session focus with cross-encoder reranking and graceful cosine fallback (#58); campaign scoping and domain-tag boosting (#154); temporal awareness -- `relevant_until` expiry and `temporal_status` filtering (#282), pattern surfacing (#292).
+- *Governance and identity.* OAuth 2.1 + short-lived JWTs with service-layer RBAC enforced at the SQL level; three grant types (`client_credentials`, `authorization_code + PKCE`, `token_exchange` RFC 8693); owner/actor/driver identity with on-behalf-of authorization (#66/#284); project auto-enrollment and membership enforcement (#188/#64); write-time curation with PII blocking (#234); admin content moderation with sanitized audit mode (#45); structured audit logging on every tool call site (#67).
 - *Conversation persistence.* First-class governed threads with extraction pipeline, fork/handoff (A2A-compatible), a 4-level deletion hierarchy, legal hold, and retention sweeps (#168/#193).
 - *Surfaces.* MCP as the primary interface with action-dispatch tool profiles (#201/#202); published SDK and CLI at feature parity (#199/#200), including trace-driven extraction (#240) and Obsidian export (#245); dashboard behind oauth-proxy.
 - *Background agents.* Shared curation-agent framework on Valkey queues with leader election (#286); Fact Checker (#287) and Trace Reviewer (#288) deployed.
-- *Deployment.* Four-namespace OpenShift topology, reproducible from `deploy-full.sh`, with backup/restore tooling (#191).
+- *Storage.* S3-compatible object storage (MinIO) for oversized memory content with prefix-in-PostgreSQL / full-in-S3 split and on-demand hydration; Valkey-backed session focus vectors for cross-encoder reranking.
+- *Deployment.* Six-namespace OpenShift topology (`memory-hub-mcp`, `memoryhub-agents`, `memoryhub-auth`, `memoryhub-db`, `embedding-model`, `reranker-model`), reproducible from `deploy-full.sh`, with backup/restore tooling (#191).
+- *Personal edition.* Zero-infrastructure local variant (`memoryhub-local`) backed by SQLite + sqlite-vec + FTS5 with local ONNX embeddings (IBM Granite), exposing the same 4-tool MCP surface as the cluster edition.
 
-**Decided, not yet implemented.** Kubernetes Operator with CRDs (skeleton only). Valkey-backed session vector store (deferred until #61 or #62 lands). FIPS end-to-end validation. `token_exchange` grant for platform-integrated agents. Campaign promotion pipeline (Phase 3+) — curator-driven cross-project knowledge promotion with HITL approval queue. Emergent domain ontology — automatic synonym detection and normalization of domain tags. Curator agent (#285) — deep dedup, staleness, conflict detection. Statistician agent (#289) — population-level pattern aggregation with SDC safeguards.
+**Decided, not yet implemented.** Kubernetes Operator with CRDs (skeleton only). FIPS end-to-end validation. Campaign promotion pipeline (Phase 3+) -- curator-driven cross-project knowledge promotion with HITL approval queue (the promote/graduate service-layer primitives shipped, but the automated curator-driven pipeline with approval queue has not). Emergent domain ontology -- automatic synonym detection and normalization of domain tags. Curator agent (#285) -- deep dedup, staleness, conflict detection. Statistician agent (#289) -- population-level pattern aggregation with SDC safeguards.
 
 **Open.** Multi-cluster federation. CRD naming and structure for the operator. Grafana dashboard layouts. HIPAA / PHI detection patterns in the curation pipeline (#68).
 
@@ -316,14 +325,14 @@ The architecture is designed to let these open questions be resolved incremental
 
 ## See also
 
-- [`guides/what-is-agent-memory.md`](guides/what-is-agent-memory.md) — the conceptual case: context assembly, harness locality, when you need a platform
-- [`guides/agent-integration-guide.md`](guides/agent-integration-guide.md) — how agents use MemoryHub, plus the integration reference
-- [`SYSTEMS.md`](SYSTEMS.md) — per-subsystem inventory with status, doc links, and dependency graph
-- [`../strategy/platform-architecture.md`](../strategy/platform-architecture.md) — how MemoryHub composes with RAG/retrieval and enterprise system tools
-- [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) — the design cluster covering search response shape, session focus retrieval, and project configuration (Layers 1-3 shipped 2026-04-07)
-- [`mcp-server.md`](design/mcp-server.md) — current MCP tool surface and parameter reference
-- [`memory-tree.md`](design/memory-tree.md) — the tree memory model in detail
-- [`storage-layer.md`](design/storage-layer.md) — pgvector usage and schema
-- [`governance.md`](design/governance.md) — RBAC, JWT verification, audit (planned)
-- [`package-layout.md`](../planning/archive/package-layout.md) — historical record of the #55 server/SDK naming collision and rename (shipped; see CONTRIBUTING.md for current layout)
-- [`planning/llamastack-integration/`](../planning/llamastack-integration/) — LlamaStack platform integration design
+- [`guides/what-is-agent-memory.md`](guides/what-is-agent-memory.md) -- the conceptual case: context assembly, harness locality, when you need a platform
+- [`guides/agent-integration-guide.md`](guides/agent-integration-guide.md) -- how agents use MemoryHub, plus the integration reference
+- [`SYSTEMS.md`](SYSTEMS.md) -- per-subsystem inventory with status, doc links, and dependency graph
+- [`../strategy/platform-architecture.md`](../strategy/platform-architecture.md) -- how MemoryHub composes with RAG/retrieval and enterprise system tools
+- [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) -- the design cluster covering search response shape, session focus retrieval, and project configuration (Layers 1-3 shipped 2026-04-07)
+- [`mcp-server.md`](design/mcp-server.md) -- current MCP tool surface and parameter reference
+- [`memory-tree.md`](design/memory-tree.md) -- the tree memory model in detail
+- [`storage-layer.md`](design/storage-layer.md) -- pgvector usage and schema
+- [`governance.md`](design/governance.md) -- RBAC, JWT verification, audit (planned)
+- [`package-layout.md`](../planning/archive/package-layout.md) -- historical record of the #55 server/SDK naming collision and rename (shipped; see CONTRIBUTING.md for current layout)
+- [`planning/llamastack-integration/`](../planning/llamastack-integration/) -- LlamaStack platform integration design
