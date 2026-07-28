@@ -35,6 +35,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+local = [
+    "memoryhub-cli>=0.12.0",
+    "memoryhub-local>=0.1.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
