@@ -79,6 +79,11 @@ class MemoryHubProvider(MemoryProvider):
         self._retrieval_unit: str | None = None
         self._source_filter: str | None = None
         self._exclude_source: str | None = None
+        self._routing_mode: str = "pooled"
+        self._transcript_k: int = 100
+        self._fact_k: int = 50
+        self._max_context_tokens: int | None = None
+        self._merge_strategy: str = "round_robin"
 
     def prepare(self, store_dir: Path, unit_ids: set[str] | None = None, reset: bool = True) -> None:
         self._url = os.environ.get("MEMORYHUB_URL")
@@ -129,6 +134,13 @@ class MemoryHubProvider(MemoryProvider):
         self._retrieval_unit = raw_ru if raw_ru in ("facts", "chunks", "parents", "auto") else None
         self._source_filter = os.environ.get("MEMORYHUB_SOURCE", "").strip() or None
         self._exclude_source = os.environ.get("MEMORYHUB_EXCLUDE_SOURCE", "").strip() or None
+
+        self._routing_mode = os.environ.get("MEMORYHUB_ROUTING_MODE", "pooled").strip().lower()
+        self._transcript_k = int(os.environ.get("MEMORYHUB_TRANSCRIPT_K", "100"))
+        self._fact_k = int(os.environ.get("MEMORYHUB_FACT_K", "50"))
+        raw_budget = os.environ.get("MEMORYHUB_MAX_CONTEXT_TOKENS", "").strip()
+        self._max_context_tokens = int(raw_budget) if raw_budget else None
+        self._merge_strategy = os.environ.get("MEMORYHUB_MERGE_STRATEGY", "round_robin").strip().lower()
 
         self._doc_to_memory_id.clear()
         self._memory_to_doc_id.clear()
@@ -351,41 +363,92 @@ class MemoryHubProvider(MemoryProvider):
             return query.split("\n", 1)[0].removeprefix("User: ").strip() or None
         return None
 
+    def _build_search_kwargs(self, query: str, k: int, owner: str) -> dict[str, Any]:
+        kwargs: dict[str, Any] = dict(
+            query=query,
+            max_results=k,
+            owner_id=owner,
+            project_id=self._project_id,
+            weight_threshold=0.0,
+            mode="full_only",
+            max_response_tokens=0,
+            disabled_signals=self._disabled_signals,
+        )
+        if self._tenant_id:
+            kwargs["tenant_id"] = self._tenant_id
+        if self._focus_mode == "persona":
+            name = self._extract_persona_name(query)
+            if name:
+                kwargs["focus"] = name
+        if self._return_chunks:
+            kwargs["return_chunks"] = True
+            kwargs["raw_results"] = True
+        if self._retrieval_unit:
+            kwargs["retrieval_unit"] = self._retrieval_unit
+        return kwargs
+
+    async def _search_split(self, client, query: str, owner: str):
+        base = self._build_search_kwargs(query, self._transcript_k, owner)
+
+        transcript_kw = {**base, "max_results": self._transcript_k, "exclude_source": "dreaming"}
+        if self._source_filter:
+            transcript_kw["source"] = self._source_filter
+
+        fact_kw = {**base, "max_results": self._fact_k, "source": "dreaming"}
+
+        transcripts = await client.search(**transcript_kw)
+        facts = await client.search(**fact_kw)
+        return transcripts.results, facts.results
+
+    @staticmethod
+    def _merge_results(transcripts, facts):
+        merged = []
+        ti, fi = 0, 0
+        while ti < len(transcripts) or fi < len(facts):
+            if ti < len(transcripts):
+                merged.append(transcripts[ti])
+                ti += 1
+            if fi < len(facts):
+                merged.append(facts[fi])
+                fi += 1
+        return merged
+
+    @staticmethod
+    def _apply_token_budget(memories, max_tokens):
+        if max_tokens is None:
+            return memories
+        from .utils import count_tokens
+        result, used = [], 0
+        for m in memories:
+            tokens = count_tokens(m.content or "")
+            if used + tokens > max_tokens:
+                continue
+            result.append(m)
+            used += tokens
+        return result
+
     async def _run_retrieve(
         self, query: str, k: int, user_id: str | None, query_timestamp: str | None,
     ) -> tuple[list[Document], dict | None]:
         owner = f"amb-{user_id}" if user_id else "amb-default"
 
         async with MemoryHubClient(url=self._url, api_key=self._api_key) as client:
-            search_kwargs: dict[str, Any] = dict(
-                query=query,
-                max_results=k,
-                owner_id=owner,
-                project_id=self._project_id,
-                weight_threshold=0.0,
-                mode="full_only",
-                max_response_tokens=0,
-                disabled_signals=self._disabled_signals,
-            )
-            if self._tenant_id:
-                search_kwargs["tenant_id"] = self._tenant_id
-            if self._focus_mode == "persona":
-                name = self._extract_persona_name(query)
-                if name:
-                    search_kwargs["focus"] = name
-            if self._return_chunks:
-                search_kwargs["return_chunks"] = True
-                search_kwargs["raw_results"] = True
-            if self._retrieval_unit:
-                search_kwargs["retrieval_unit"] = self._retrieval_unit
-            if self._source_filter:
-                search_kwargs["source"] = self._source_filter
-            if self._exclude_source:
-                search_kwargs["exclude_source"] = self._exclude_source
-            results = await client.search(**search_kwargs)
+            if self._routing_mode == "split":
+                transcripts, facts = await self._search_split(client, query, owner)
+                memories = self._merge_results(transcripts, facts)
+            else:
+                kwargs = self._build_search_kwargs(query, self._resolve_k(k), owner)
+                if self._source_filter:
+                    kwargs["source"] = self._source_filter
+                if self._exclude_source:
+                    kwargs["exclude_source"] = self._exclude_source
+                results = await client.search(**kwargs)
+                memories = results.results
+
+        memories = self._apply_token_budget(memories, self._max_context_tokens)
 
         documents = []
-        for memory in results.results:
+        for memory in memories:
             doc_id = self._memory_to_doc_id.get(memory.id, memory.id)
             documents.append(Document(
                 id=doc_id,
