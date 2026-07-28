@@ -37,6 +37,18 @@ packages = ["src/memory_bench"]
 [tool.uv.sources]
 memoryhub = { path = "../../sdk", editable = true }
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
