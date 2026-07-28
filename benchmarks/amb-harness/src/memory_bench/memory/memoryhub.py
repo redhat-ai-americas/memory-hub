@@ -24,6 +24,12 @@ Optional env vars:
     MEMORYHUB_INGESTION_MODE       -- "library" (default) or "dreaming"
     MEMORYHUB_EXTRACTION_MODEL     -- extraction model name (dreaming mode only)
     MEMORYHUB_EXTRACTION_MODEL_URL -- extraction model endpoint (dreaming mode only)
+    MEMORYHUB_ROUTING_MODE         -- "pooled" (default, single search) or "split"
+                                     (separate transcript + fact searches)
+    MEMORYHUB_TRANSCRIPT_K         -- over-fetch k for transcripts in split mode (default: 100)
+    MEMORYHUB_FACT_K               -- over-fetch k for facts in split mode (default: 50)
+    MEMORYHUB_MAX_CONTEXT_TOKENS   -- cap total returned context tokens (default: unlimited)
+    MEMORYHUB_MERGE_STRATEGY       -- "round_robin" (default) for split mode interleaving
 
 Reset-only env vars (raw SQL DELETE for test scaffolding):
     MEMORYHUB_DB_HOST    -- default localhost
@@ -417,7 +423,7 @@ class MemoryHubProvider(MemoryProvider):
     def _apply_token_budget(memories, max_tokens):
         if max_tokens is None:
             return memories
-        from .utils import count_tokens
+        from ..utils import count_tokens
         result, used = [], 0
         for m in memories:
             tokens = count_tokens(m.content or "")
