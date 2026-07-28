@@ -80,7 +80,7 @@ class MemoryNode(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True, default=None,
     )
 
-    # Embedding (384 dims for ibm-granite/granite-embedding-30m-english)
+    # Embedding (384 dims for ibm-granite/granite-embedding-small-english-r2)
     embedding: Mapped[list[float] | None] = mapped_column(
         JsonEncodedVector(), nullable=True,
     )
