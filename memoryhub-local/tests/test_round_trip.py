@@ -25,7 +25,7 @@ async def test_round_trip():
     from memoryhub_local.tools.thread import thread
 
     # 1. register_session
-    reg = await register_session()
+    reg = await register_session(ctx=None)
     print("1. register_session:", reg["message"])
 
     # 2. write

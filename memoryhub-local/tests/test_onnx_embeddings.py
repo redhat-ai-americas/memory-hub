@@ -95,7 +95,7 @@ class TestSemanticSearch:
             svc = OnnxEmbeddingService(_model_dir)
             init_state(sf, svc, SQLiteBackend())
 
-            await register_session()
+            await register_session(ctx=None)
             await memory(action="write", content="Parmesan is an aged Italian hard cheese")
             await memory(action="write", content="PostgreSQL supports JSONB columns")
             await memory(action="write", content="Gouda is a Dutch cheese with creamy texture")
