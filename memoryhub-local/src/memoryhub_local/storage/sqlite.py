@@ -199,8 +199,53 @@ class SQLiteBackend:
         max_neighbors: int,
         session: AsyncSession,
     ) -> list[uuid.UUID]:
-        """Deferred to session 2 -- returns empty list."""
-        return []
+        """Recursive CTE graph traversal using VALUES clause for seeds."""
+        if not seed_ids:
+            return []
+
+        max_depth = min(max_depth, 3)
+
+        values = ", ".join(f"('{sid}', 0)" for sid in seed_ids)
+        sql = text(f"""
+            WITH RECURSIVE neighbors(node_id, depth) AS (
+                VALUES {values}
+
+                UNION ALL
+
+                SELECT
+                    CASE
+                        WHEN mr.source_id = n.node_id THEN mr.target_id
+                        ELSE mr.source_id
+                    END,
+                    n.depth + 1
+                FROM neighbors n
+                JOIN memory_relationships mr
+                    ON (mr.source_id = n.node_id OR mr.target_id = n.node_id)
+                JOIN memory_nodes mn
+                    ON mn.id = CASE
+                        WHEN mr.source_id = n.node_id THEN mr.target_id
+                        ELSE mr.source_id
+                    END
+                WHERE n.depth < :max_depth
+                  AND mr.valid_until IS NULL
+                  AND mn.deleted_at IS NULL
+            )
+            SELECT DISTINCT node_id
+            FROM neighbors
+            WHERE depth > 0
+            LIMIT 500
+        """)
+
+        result = await session.execute(sql, {"max_depth": max_depth})
+        rows = result.all()
+
+        seed_set = {str(sid) for sid in seed_ids}
+        neighbors = [
+            uuid.UUID(str(row.node_id))
+            for row in rows
+            if str(row.node_id) not in seed_set
+        ]
+        return neighbors[:max_neighbors]
 
 
 def _sanitize_fts_query(query: str) -> str:

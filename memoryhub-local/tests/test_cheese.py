@@ -359,3 +359,144 @@ class TestGraphRelationships:
         loaded = result.scalar_one()
         assert loaded.target_id == node_b.id
         assert loaded.relationship_type == "derived_from"
+
+
+async def _link(session, source, target, rel_type="related_to"):
+    """Helper to create a relationship edge."""
+    rel = MemoryRelationship(
+        id=uuid.uuid4(),
+        source_id=source.id,
+        target_id=target.id,
+        relationship_type=rel_type,
+        created_by="test-user",
+        tenant_id="default",
+    )
+    session.add(rel)
+    await session.flush()
+    return rel
+
+
+class TestGraphNeighbors:
+    """graph_neighbors: recursive CTE traversal on both backends."""
+
+    async def test_direct_neighbors(
+        self, async_session: AsyncSession, backend,
+    ):
+        a = await _create_memory(async_session, "Node A", EMB_CHEESE)
+        b = await _create_memory(async_session, "Node B", EMB_WINE)
+        c = await _create_memory(async_session, "Node C", EMB_PARM)
+        await _link(async_session, a, b)
+        await _link(async_session, a, c)
+        await async_session.commit()
+
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[a.id], max_depth=1, max_neighbors=10,
+            session=async_session,
+        )
+        neighbor_ids = set(neighbors)
+        assert b.id in neighbor_ids
+        assert c.id in neighbor_ids
+        assert a.id not in neighbor_ids
+
+    async def test_bidirectional_traversal(
+        self, async_session: AsyncSession, backend,
+    ):
+        a = await _create_memory(async_session, "Node A", EMB_CHEESE)
+        b = await _create_memory(async_session, "Node B", EMB_WINE)
+        await _link(async_session, a, b)
+        await async_session.commit()
+
+        # Traverse from B should find A (reverse direction)
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[b.id], max_depth=1, max_neighbors=10,
+            session=async_session,
+        )
+        assert a.id in neighbors
+
+    async def test_multi_hop(
+        self, async_session: AsyncSession, backend,
+    ):
+        a = await _create_memory(async_session, "Node A", EMB_CHEESE)
+        b = await _create_memory(async_session, "Node B", EMB_WINE)
+        c = await _create_memory(async_session, "Node C", EMB_PARM)
+        await _link(async_session, a, b)
+        await _link(async_session, b, c)
+        await async_session.commit()
+
+        # depth=1: only b
+        depth1 = await backend.graph_neighbors(
+            seed_ids=[a.id], max_depth=1, max_neighbors=10,
+            session=async_session,
+        )
+        assert b.id in depth1
+        assert c.id not in depth1
+
+        # depth=2: b and c
+        depth2 = await backend.graph_neighbors(
+            seed_ids=[a.id], max_depth=2, max_neighbors=10,
+            session=async_session,
+        )
+        assert b.id in depth2
+        assert c.id in depth2
+
+    async def test_excludes_deleted_nodes(
+        self, async_session: AsyncSession, backend,
+    ):
+        from datetime import UTC, datetime
+
+        a = await _create_memory(async_session, "Node A", EMB_CHEESE)
+        b = await _create_memory(async_session, "Node B", EMB_WINE)
+        await _link(async_session, a, b)
+        b.deleted_at = datetime.now(UTC)
+        await async_session.commit()
+
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[a.id], max_depth=1, max_neighbors=10,
+            session=async_session,
+        )
+        assert b.id not in neighbors
+
+    async def test_excludes_expired_edges(
+        self, async_session: AsyncSession, backend,
+    ):
+        from datetime import UTC, datetime
+
+        a = await _create_memory(async_session, "Node A", EMB_CHEESE)
+        b = await _create_memory(async_session, "Node B", EMB_WINE)
+        rel = await _link(async_session, a, b)
+        rel.valid_until = datetime.now(UTC)
+        await async_session.commit()
+
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[a.id], max_depth=1, max_neighbors=10,
+            session=async_session,
+        )
+        assert b.id not in neighbors
+
+    async def test_empty_seeds_returns_empty(
+        self, async_session: AsyncSession, backend,
+    ):
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[], max_depth=1, max_neighbors=10,
+            session=async_session,
+        )
+        assert neighbors == []
+
+    async def test_respects_max_neighbors(
+        self, async_session: AsyncSession, backend,
+    ):
+        hub = await _create_memory(async_session, "Hub", EMB_CHEESE)
+        spokes = []
+        for i in range(5):
+            emb = [0.0] * 384
+            emb[i] = 1.0
+            spoke = await _create_memory(async_session, f"Spoke {i}", emb)
+            await _link(async_session, hub, spoke)
+            spokes.append(spoke)
+        await async_session.commit()
+
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[hub.id], max_depth=1, max_neighbors=2,
+            session=async_session,
+        )
+        assert len(neighbors) == 2
