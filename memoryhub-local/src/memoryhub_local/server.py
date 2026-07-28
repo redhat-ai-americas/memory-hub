@@ -12,16 +12,6 @@ import sys
 
 from fastmcp import FastMCP
 
-from memoryhub_local.database import auto_migrate, create_local_engine, make_session_factory
-from memoryhub_local.embeddings import (
-    MockEmbeddingService,
-    OnnxEmbeddingService,
-    download_model,
-    get_default_model_dir,
-    is_model_downloaded,
-)
-from memoryhub_local.storage.sqlite import SQLiteBackend
-from memoryhub_local.tools._state import init_state
 from memoryhub_local.tools.admin_memory import admin_memory
 from memoryhub_local.tools.memory import memory
 from memoryhub_local.tools.register_session import register_session
@@ -37,7 +27,7 @@ Use memory(action=...) for all memory operations:
 - search, read, list, write, update, delete, similar, relationships, relate, report
 
 Use thread(action=...) for conversation persistence:
-- create, append, get, list, archive, delete
+- create, append, get, list, archive, extract, delete
 
 Use admin_memory(action=...) for content moderation:
 - search, quarantine, restore, hard_delete
@@ -50,6 +40,7 @@ Key behaviors:
 - search returns compact results by default
 - update creates a new version (old version preserved in history)
 - delete is a soft-delete (reversible via admin_memory restore)
+- extract runs fact extraction from thread messages via MCP sampling
 """
 
 
@@ -63,44 +54,6 @@ def create_server() -> FastMCP:
     return mcp
 
 
-async def _startup() -> None:
-    """Initialize database and server state."""
-    engine = await create_local_engine()
-    await auto_migrate(engine)
-    session_factory = make_session_factory(engine)
-    model_dir = get_default_model_dir()
-    if not is_model_downloaded(model_dir):
-        try:
-            download_model(model_dir)
-        except Exception:
-            logger.warning(
-                "Model download failed. Falling back to mock embeddings. "
-                "Run 'memoryhub doctor' for diagnostics.",
-                exc_info=True,
-            )
-
-    if is_model_downloaded(model_dir):
-        embedding_service = OnnxEmbeddingService(model_dir)
-        embed_label = "onnx"
-    else:
-        embedding_service = MockEmbeddingService()
-        embed_label = "mock (run 'memoryhub doctor' to check model status)"
-        print(  # noqa: T201
-            "WARNING: Using mock embeddings. Search results will not be "
-            "semantically meaningful. Run 'memoryhub doctor' for details.",
-            file=sys.stderr,
-        )
-
-    recall_backend = SQLiteBackend()
-    init_state(session_factory, embedding_service, recall_backend)
-
-    from memoryhub_local.database import get_default_db_path
-
-    db_path = get_default_db_path()
-    logger.info("MemoryHub personal edition ready (db: %s, embeddings: %s)", db_path, embed_label)
-    print(f"MemoryHub personal edition ready (db: {db_path}, embeddings: {embed_label})", file=sys.stderr)  # noqa: T201, E501
-
-
 async def run_server() -> None:
     """Start the personal-edition MCP server on stdio."""
     logging.basicConfig(
@@ -108,6 +61,8 @@ async def run_server() -> None:
         format="%(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
-    await _startup()
+    from memoryhub_local.startup import initialize_backend
+
+    await initialize_backend()
     mcp = create_server()
     await mcp.run_async(transport="stdio")
