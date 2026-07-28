@@ -37,7 +37,7 @@ fast on deprecated model names.
 
 **Parallel-ok:** Yes -- independent of Phase 2.
 
-### Phase 2: Retrieval-unit routing (#447)
+### Phase 2: Retrieval-unit routing (#447) -- CODE COMPLETE (benchmark pending)
 
 Extracted dreaming facts don't contribute to search results when pooled
 with full conversation transcripts (source ablation showed +0.1pp without
@@ -103,17 +103,25 @@ including fallback triggering.
 
 ## What landed last session (2026-07-28)
 
-Phase 1 complete. PR #470 targeting main.
+Phase 1 + Phase 2 code complete. PR #470 targeting main.
 
+**Phase 1 (test + harden):**
 - Bootstrapped pytest infrastructure for amb-harness (dev deps, conftest,
   asyncio_mode=auto)
 - 16 unit tests for `_run_dreaming_ingest` covering all 7 bug-prone paths
-  (thread auth, API key, URL, model forwarding, failures, ownership, append)
-- Extraction model preflight probe: Gemini model verification via
-  `google.genai`, custom endpoint reachability via `httpx`, abort-on-failure
-  before smoke queries
-- 11 tests for the probe + integration + regression
+- Extraction model preflight probe (Gemini + custom endpoint verification)
+- 11 preflight tests
 - Closes #429, #430
+
+**Phase 2 (retrieval-unit routing):**
+- Design doc fleshed out at `planning/retrieval-unit-routing.md`
+- Split routing: two searches (transcripts + facts), round-robin merge
+- Token budget: `MEMORYHUB_MAX_CONTEXT_TOKENS` for small-model deployments
+- All env vars optional, backward compatible
+- 12 routing tests (split, merge, budget, backward compat, integration)
+- Refs #447 (benchmark validation still needed on cluster)
+
+39 tests total, zero network calls.
 
 Prior work tracked in `archive/next-session/NEXT_SESSION-dreaming-2026-07-20.md`.
 
