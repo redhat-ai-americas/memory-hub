@@ -99,8 +99,9 @@ def _sqlite_schema_patches():
             elif kind == "default":
                 col.server_default = original
         thread_table.constraints |= removed_constraints
-        if sv_col is not None and original_sv_computed is not None:
-            sv_col.computed = original_sv_computed
+        if sv_col is not None:
+            if original_sv_computed is not None:
+                sv_col.computed = original_sv_computed
             memory_table.indexes |= removed_sv_indexes
 
 

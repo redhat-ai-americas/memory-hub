@@ -503,3 +503,63 @@ class TestGraphNeighbors:
             session=async_session,
         )
         assert len(neighbors) == 2
+
+    async def test_multiple_seeds(
+        self, async_session: AsyncSession, backend,
+    ):
+        a = await _create_memory(async_session, "Node A", EMB_CHEESE)
+        b = await _create_memory(async_session, "Node B", EMB_WINE)
+        c = await _create_memory(async_session, "Node C", EMB_PARM)
+        emb_d = [0.5, 0.5, 0.0] + [0.0] * 381
+        d = await _create_memory(async_session, "Node D", emb_d)
+        await _link(async_session, a, c)
+        await _link(async_session, b, d)
+        await async_session.commit()
+
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[a.id, b.id], max_depth=1, max_neighbors=10,
+            session=async_session,
+        )
+        neighbor_ids = set(neighbors)
+        assert c.id in neighbor_ids
+        assert d.id in neighbor_ids
+        assert a.id not in neighbor_ids
+        assert b.id not in neighbor_ids
+
+    async def test_depth_cap_enforced(
+        self, async_session: AsyncSession, backend,
+    ):
+        nodes = []
+        for i in range(6):
+            emb = [0.0] * 384
+            emb[i % 384] = 1.0
+            n = await _create_memory(async_session, f"Chain {i}", emb)
+            if nodes:
+                await _link(async_session, nodes[-1], n)
+            nodes.append(n)
+        await async_session.commit()
+
+        # max_depth=100 should be clamped to 3
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[nodes[0].id], max_depth=100, max_neighbors=100,
+            session=async_session,
+        )
+        # Should reach nodes 1-3 (depth 1-3) but NOT nodes 4-5 (depth 4-5)
+        neighbor_ids = set(neighbors)
+        assert nodes[1].id in neighbor_ids
+        assert nodes[2].id in neighbor_ids
+        assert nodes[3].id in neighbor_ids
+        assert nodes[4].id not in neighbor_ids
+        assert nodes[5].id not in neighbor_ids
+
+    async def test_disconnected_node_returns_empty(
+        self, async_session: AsyncSession, backend,
+    ):
+        loner = await _create_memory(async_session, "Lonely node", EMB_CHEESE)
+        await async_session.commit()
+
+        neighbors = await backend.graph_neighbors(
+            seed_ids=[loner.id], max_depth=2, max_neighbors=10,
+            session=async_session,
+        )
+        assert neighbors == []

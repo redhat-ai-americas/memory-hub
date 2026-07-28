@@ -53,7 +53,7 @@ class SQLiteBackend:
       - vector_recall: brute-force cosine distance in Python
       - keyword_recall: FTS5 MATCH with bm25() ranking
       - similarity_check: brute-force cosine distance with max_distance filter
-      - graph_neighbors: deferred to session 2
+      - graph_neighbors: recursive CTE with VALUES clause for seeds
     """
 
     async def vector_recall(
@@ -205,6 +205,7 @@ class SQLiteBackend:
 
         max_depth = min(max_depth, 3)
 
+        # Safe: uuid.UUID.__str__() produces only hex-dash characters
         values = ", ".join(f"('{sid}', 0)" for sid in seed_ids)
         sql = text(f"""
             WITH RECURSIVE neighbors(node_id, depth) AS (
