@@ -2306,5 +2306,28 @@ def thread_delete(
         console.print(f"  Cascade mode: {result.cascade_mode}")  # noqa: T201
 
 
+@app.command()
+def mcp():
+    """Start a local MCP server (personal edition).
+
+    Launches a stdio MCP server backed by SQLite at
+    ~/.local/share/memoryhub/memoryhub.db. No API key or cluster
+    connection required.
+
+    Install with: pip install "memoryhub[local]"
+    Register with Claude Code: claude mcp add memoryhub -- memoryhub mcp
+    """
+    try:
+        from memoryhub_local.server import run_server
+    except ImportError:
+        err_console.print(
+            "[red]memoryhub-local is not installed.[/red]\n"
+            "Install with: pip install 'memoryhub[local]'"
+        )
+        raise typer.Exit(1)
+
+    asyncio.run(run_server())
+
+
 if __name__ == "__main__":
     app()
