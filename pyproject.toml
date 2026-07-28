@@ -37,6 +37,7 @@ dev = [
     "aiosqlite",
     "greenlet",
     "fakeredis>=2.20",
+    "memoryhub-local>=0.1.0",
 ]
 
 [tool.setuptools.packages.find]
