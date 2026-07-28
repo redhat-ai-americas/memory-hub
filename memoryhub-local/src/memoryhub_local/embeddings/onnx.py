@@ -73,7 +73,6 @@ def download_model(model_dir: Path | None = None) -> Path:
             repo_id=REPO_ID,
             filename=repo_path,
             local_dir=str(model_dir),
-            local_dir_use_symlinks=False,
         )
 
     print("Model downloaded successfully.", file=sys.stderr)  # noqa: T201
