@@ -1,37 +1,10 @@
 # Next Session -- Local
 
-## Next: Onboarding + docs (Phase 5)
+## Epic complete
 
-Final phase of the personal-edition epic. All code is shipped (Phases 1-4,
-41 tests green). This session is pure documentation and verification.
+All 5 phases shipped. 37 commits on `feat/personal-edition`. 41 tests green.
 
-1. **#460 -- README quickstart with two-command install path**
-   Rewrite the 5-line stub README with a full quickstart covering install,
-   Claude Code integration, tool surface, and CLI commands (doctor, dream, mcp).
-
-2. **#461 -- Parity matrix (personal vs cluster features)**
-   Feature comparison table: storage, embeddings, extraction, auth, multi-tenancy,
-   curation, governance.
-
-3. **#462 -- Clean-venv quickstart verification** (depends on #460)
-   Test the quickstart on a fresh venv + fresh user directory. This IS the
-   exit predicate: "an outsider follows the README and has working memory
-   in 10 minutes."
-
-**Sequencing.** #460 first (write the docs), #461 in parallel or after,
-#462 last (verify #460 works end-to-end).
-
-**Session start protocol:**
-- Premise checks: `git log --oneline feat/personal-edition` shows 33+
-  commits; Phase 4 complete (extraction pipeline, 41 tests); working tree clean
-- Rules with history: all pushes through PRs; stop-and-ask before modifying
-  existing published packages (sdk/, memoryhub-cli/)
-- Close ritual: session summary + NEXT_SESSION update
-
-**Exit predicate:**
-- README quickstart covers install, setup, and tool surface
-- Parity matrix published
-- Quickstart tested on clean venv -- an outsider can follow it in 10 minutes
+Next step: PR `feat/personal-edition` into `main`.
 
 ## Remaining epic phases
 
@@ -63,33 +36,27 @@ Extraction service with LLM-agnostic pipeline, thread extract action via
 MCP sampling, on-connect dreaming in register_session, shared startup
 helper, `memoryhub dream` CLI with Ollama support. 11 extraction tests.
 
-### Phase 5: Onboarding + docs (1 session) -- NEXT
+### Phase 5: Onboarding + docs (1 session) -- DONE
 
-See "Next" section above. Issues: #460, #461, #462.
+**Commits:** `260c6ec`..`dc40694` (feat/personal-edition)
+
+README quickstart with two-command install + from-source path, edition
+parity matrix (PARITY.md), clean-venv verification of full round-trip.
+Closed #460, #461, #462.
 
 ---
 
-## What landed last session (2026-07-28, P4S1)
+## What landed last session (2026-07-28, P5S1)
 
-Phase 4 complete. 6 commits shipped the extraction pipeline.
+Phase 5 complete. README quickstart, parity matrix, clean-venv verification.
 
-**Session summary:** `session-summaries/2026-07-28-personal-edition-p4s1.md`
+**Session summary:** `session-summaries/2026-07-28-personal-edition-p5s1.md`
 
-## Watch out for
+## Open watch-fors (carry to PR review)
 
-- **MCP sampling verification:** the sampling round-trip (Claude Code writes
-  a thread, extraction runs, facts appear) needs manual testing with a live
-  agent session. Can't be automated without Claude Code running.
+- **MCP sampling verification:** the sampling round-trip (agent writes thread,
+  extraction runs, facts appear) needs manual testing with a live agent session.
 - **Ollama verification:** `memoryhub dream --model llama3.2` needs a running
-  Ollama instance. Not all models support `response_format: {"type": "json_object"}`.
-- **httpx dependency:** `memoryhub dream` requires httpx which is an optional
-  `[dream]` extra, not in the core deps. The quickstart should mention this.
-- **transformers dependency size:** ~200MB+. Quickstart should set expectations
-  about first-run download time.
-
-## If blocked
-
-- If quickstart verification hits a bug in the local server, fix the bug
-  first (that's a higher-priority finding than finishing the docs).
-- If ONNX model download is unreliable, document the fallback
-  (`memoryhub doctor` shows mock-embedding status).
+  Ollama instance.
+- **PyPI publishing:** two-command install path requires publishing memoryhub,
+  memoryhub-cli, and memoryhub-local to PyPI. From-source path documented as interim.
