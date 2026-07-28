@@ -5,6 +5,7 @@ on:
     paths:
       - 'sdk/**'
       - 'memoryhub-cli/**'
+      - 'memoryhub-local/**'
 
 jobs:
   version-check:
@@ -25,6 +26,7 @@ jobs:
 
           SDK_CHANGED=false
           CLI_CHANGED=false
+          LOCAL_CHANGED=false
 
           if echo "$CHANGED_FILES" | grep -q '^sdk/'; then
             SDK_CHANGED=true
@@ -32,6 +34,10 @@ jobs:
 
           if echo "$CHANGED_FILES" | grep -q '^memoryhub-cli/'; then
             CLI_CHANGED=true
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q '^memoryhub-local/'; then
+            LOCAL_CHANGED=true
           fi
 
           EXIT_CODE=0
@@ -80,8 +86,12 @@ jobs:
             check_component "CLI" "memoryhub-cli" "memoryhub_cli" || EXIT_CODE=1
           fi
 
-          if [ "$SDK_CHANGED" = "false" ] && [ "$CLI_CHANGED" = "false" ]; then
-            echo "No SDK or CLI files changed, skipping version check."
+          if [ "$LOCAL_CHANGED" = "true" ]; then
+            check_component "Local" "memoryhub-local" "memoryhub_local" || EXIT_CODE=1
+          fi
+
+          if [ "$SDK_CHANGED" = "false" ] && [ "$CLI_CHANGED" = "false" ] && [ "$LOCAL_CHANGED" = "false" ]; then
+            echo "No SDK, CLI, or Local files changed, skipping version check."
           fi
 
           exit $EXIT_CODE

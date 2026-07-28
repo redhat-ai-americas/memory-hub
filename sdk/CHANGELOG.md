@@ -2,6 +2,11 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.15.0] -- 2026-07-28
+
+- **`[local]` extra**: `pip install "memoryhub[local]"` pulls in memoryhub-cli
+  and memoryhub-local for zero-infrastructure personal edition.
+
 ## [0.14.0] — 2026-06-12
 
 - **`reconstruct()` method**: Convenience wrapper for behavioral memory

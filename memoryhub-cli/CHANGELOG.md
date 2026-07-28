@@ -2,6 +2,14 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [0.12.0] -- 2026-07-28
+
+- **`memoryhub mcp`**: Start a local MCP server (personal edition, stdio).
+- **`memoryhub doctor`**: Health check for personal edition -- database,
+  model, migrations, memory count.
+- **`memoryhub dream`**: Extract facts from conversation threads using a
+  local LLM (Ollama or any OpenAI-compatible endpoint).
+
 ## [0.11.0] — 2026-06-12
 
 - **Hook scaffolding**: `memoryhub config init` now generates the full
