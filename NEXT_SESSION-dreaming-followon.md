@@ -13,7 +13,7 @@ actually contribute to search results. The dreaming pipeline shipped and
 benchmarked (84.9% AMB PersonaMem); this epic hardens it and unlocks the
 value of extracted facts in retrieval.
 
-### Phase 1: Test + harden (#429, #430)
+### Phase 1: Test + harden (#429, #430) -- DONE
 
 Unit tests for `_run_dreaming_ingest` and extraction model identity in
 the preflight manifest. The dreaming code path has zero unit coverage
@@ -101,10 +101,21 @@ including fallback triggering.
 - #370 Ablation Matrix B (backlog, unblocked by #349 closure)
 - Retrieval polish issues (#306, #389, #397, #404, #453, #454) -- future `NEXT_SESSION-retrieval-polish.md`
 
-## What landed last session
+## What landed last session (2026-07-28)
 
-(No sessions yet for this epic. Prior work tracked in
-`archive/next-session/NEXT_SESSION-dreaming-2026-07-20.md`.)
+Phase 1 complete. PR #470 targeting main.
+
+- Bootstrapped pytest infrastructure for amb-harness (dev deps, conftest,
+  asyncio_mode=auto)
+- 16 unit tests for `_run_dreaming_ingest` covering all 7 bug-prone paths
+  (thread auth, API key, URL, model forwarding, failures, ownership, append)
+- Extraction model preflight probe: Gemini model verification via
+  `google.genai`, custom endpoint reachability via `httpx`, abort-on-failure
+  before smoke queries
+- 11 tests for the probe + integration + regression
+- Closes #429, #430
+
+Prior work tracked in `archive/next-session/NEXT_SESSION-dreaming-2026-07-20.md`.
 
 ## Watch out for
 
