@@ -2,6 +2,10 @@
 
 All notable changes to the `memoryhub-local` package.
 
+## [0.2.1] -- 2026-07-29
+
+- Fix: include `logical_id` in read, write, and update tool responses
+
 ## [0.2.0] -- 2026-07-29
 
 - Fix: graph edges now follow version chain on memory update (#472)
