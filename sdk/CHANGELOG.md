@@ -2,6 +2,10 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.15.2] -- 2026-07-29
+
+- Add `logical_id` as a proper field on `Memory` model (was only accessible via Pydantic extra fields)
+
 ## [0.15.1] -- 2026-07-29
 
 - Document that `update()` produces a new UUID; old version preserved with is_current=false (#475)
