@@ -36,8 +36,9 @@ async def test_count_candidates_finds_unextracted(async_session):
     now = datetime.now(UTC)
 
     # Create memory with no metadata
+    _id = uuid.uuid4()
     async_session.add(MemoryNode(
-        id=uuid.uuid4(),
+        id=_id, logical_id=_id,
         content="No metadata memory",
         stub="No metadata...",
         scope="user",
@@ -52,8 +53,9 @@ async def test_count_candidates_finds_unextracted(async_session):
     ))
 
     # Create memory with extraction_status="complete"
+    _id = uuid.uuid4()
     async_session.add(MemoryNode(
-        id=uuid.uuid4(),
+        id=_id, logical_id=_id,
         content="Completed extraction memory",
         stub="Completed...",
         scope="user",
@@ -69,8 +71,9 @@ async def test_count_candidates_finds_unextracted(async_session):
     ))
 
     # Create memory with extraction_status="failed"
+    _id = uuid.uuid4()
     async_session.add(MemoryNode(
-        id=uuid.uuid4(),
+        id=_id, logical_id=_id,
         content="Failed extraction memory",
         stub="Failed...",
         scope="user",
@@ -102,8 +105,9 @@ async def test_count_candidates_excludes_entities_and_deleted(async_session):
     now = datetime.now(UTC)
 
     # Create entity-scoped memory
+    _id = uuid.uuid4()
     async_session.add(MemoryNode(
-        id=uuid.uuid4(),
+        id=_id, logical_id=_id,
         content="Entity memory",
         stub="Entity...",
         scope="entity",
@@ -119,8 +123,9 @@ async def test_count_candidates_excludes_entities_and_deleted(async_session):
     ))
 
     # Create soft-deleted memory
+    _id = uuid.uuid4()
     async_session.add(MemoryNode(
-        id=uuid.uuid4(),
+        id=_id, logical_id=_id,
         content="Deleted memory",
         stub="Deleted...",
         scope="user",
@@ -136,8 +141,9 @@ async def test_count_candidates_excludes_entities_and_deleted(async_session):
     ))
 
     # Create valid candidate
+    _id = uuid.uuid4()
     async_session.add(MemoryNode(
-        id=uuid.uuid4(),
+        id=_id, logical_id=_id,
         content="Valid memory",
         stub="Valid...",
         scope="user",
@@ -168,7 +174,7 @@ async def test_scan_returns_oldest_first(async_session):
         memory_id = uuid.uuid4()
         ids.append(memory_id)
         async_session.add(MemoryNode(
-            id=memory_id,
+            id=memory_id, logical_id=memory_id,
             content=f"Memory {i}",
             stub=f"Memory {i}...",
             scope="user",
@@ -200,8 +206,9 @@ async def test_scan_respects_limit(async_session):
 
     # Create 5 candidate memories
     for i in range(5):
+        _id = uuid.uuid4()
         async_session.add(MemoryNode(
-            id=uuid.uuid4(),
+            id=_id, logical_id=_id,
             content=f"Memory {i}",
             stub=f"Memory {i}...",
             scope="user",
@@ -230,7 +237,7 @@ async def test_update_extraction_status_sets_metadata(async_session):
     memory_id = uuid.uuid4()
 
     async_session.add(MemoryNode(
-        id=memory_id,
+        id=memory_id, logical_id=memory_id,
         content="Test memory",
         stub="Test...",
         scope="user",
@@ -270,7 +277,7 @@ async def test_update_extraction_status_preserves_existing_metadata(async_sessio
     memory_id = uuid.uuid4()
 
     async_session.add(MemoryNode(
-        id=memory_id,
+        id=memory_id, logical_id=memory_id,
         content="Test memory",
         stub="Test...",
         scope="user",

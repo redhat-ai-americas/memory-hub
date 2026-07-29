@@ -788,8 +788,9 @@ async def test_memory_domains_server_default_is_empty_array(
     from memoryhub_core.models.memory import MemoryNode
 
     embedding = await embedding_service.embed("memory for array default test")
+    _nid = _uuid.uuid4()
     node = MemoryNode(
-        id=_uuid.uuid4(),
+        id=_nid, logical_id=_nid,
         content="memory for array default test",
         stub="memory for array default test",
         scope="user",
@@ -845,7 +846,7 @@ async def test_transaction_rollback_preserves_prior_commit(
 
     # Step 2: Attempt a raw ORM insert with a duplicate primary key.
     duplicate = MemoryNode(
-        id=good_memory.id,  # intentional duplicate
+        id=good_memory.id, logical_id=good_memory.id,  # intentional duplicate
         content="this should fail",
         stub="this should fail",
         scope="user",
@@ -895,7 +896,7 @@ async def test_session_usable_after_rollback(
     await async_session.commit()
 
     bad_node = MemoryNode(
-        id=first.id,
+        id=first.id, logical_id=first.id,
         content="duplicate pk",
         stub="duplicate pk",
         scope="user",
