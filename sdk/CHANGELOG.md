@@ -2,6 +2,10 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.15.3] -- 2026-07-29
+
+- Add `get_history(memory_id)` method -- fixes `memoryhub history` CLI crash (#485)
+
 ## [0.15.2] -- 2026-07-29
 
 - Add `logical_id` as a proper field on `Memory` model (was only accessible via Pydantic extra fields)

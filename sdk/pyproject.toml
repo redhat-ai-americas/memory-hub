@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memoryhub"
-version = "0.15.2"
+version = "0.15.3"
 description = "Centralized, governed memory for AI agents"
 readme = "README.md"
 license = "Apache-2.0"
