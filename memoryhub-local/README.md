@@ -26,6 +26,30 @@ pip install -e memoryhub-local -e memoryhub-cli -e sdk
 claude mcp add memoryhub -- memoryhub mcp
 ```
 
+## Scope: one project vs all projects
+
+The Quickstart command registers the MCP server for the current project only (`--scope local`, the default). Other projects are unaffected.
+
+To enable MemoryHub in **all** your projects, register it at user scope instead:
+
+```bash
+claude mcp add --scope user memoryhub -- memoryhub mcp
+```
+
+To remove it from a single project (or globally, if registered at user scope):
+
+```bash
+claude mcp remove memoryhub
+```
+
+The three scopes, in priority order:
+
+| Scope | Where it's stored | Shared with team? |
+|-------|-------------------|-------------------|
+| `local` (default) | `.claude/settings.local.json` | No (gitignored) |
+| `project` | `.mcp.json` | Yes (committed) |
+| `user` | `~/.claude/settings.json` | No (global) |
+
 ## Verify it works
 
 ```bash
@@ -89,6 +113,21 @@ memoryhub dream --dry-run --model llama3.2                # preview pending thre
 - **Extraction**: via MCP sampling (agent's own LLM) or `memoryhub dream` with a local LLM
 
 All data lives under `~/.local/share/memoryhub/` (or `$XDG_DATA_HOME/memoryhub/`).
+
+## Troubleshooting
+
+### NumPy / scipy crash on Anaconda
+
+If `memoryhub doctor` or `memoryhub mcp` crashes with `A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x`, the Anaconda base environment has a NumPy version conflict with scipy/sklearn. The fix is to install memoryhub-local in its own venv:
+
+```bash
+python3 -m venv ~/.memoryhub-venv
+~/.memoryhub-venv/bin/pip install "memoryhub[local]"
+claude mcp add memoryhub -- ~/.memoryhub-venv/bin/memoryhub mcp
+~/.memoryhub-venv/bin/memoryhub doctor   # verify
+```
+
+The venv doesn't need to be activated -- `claude mcp add` takes the full path to the binary.
 
 ## Notes
 
