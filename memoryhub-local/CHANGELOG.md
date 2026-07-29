@@ -2,6 +2,14 @@
 
 All notable changes to the `memoryhub-local` package.
 
+## [0.2.0] -- 2026-07-29
+
+- Fix: graph edges now follow version chain on memory update (#472)
+- Add `logical_id` column -- stable identity across all versions of a memory
+- Pre-generate UUID in `update_memory` for reliable edge re-pointing
+- Pre-generate UUID in `create_memory` for `logical_id = id` consistency
+- New Alembic migration `002_add_logical_id` (auto-applied on server start)
+
 ## [0.1.0] -- 2026-07-28
 
 Initial release. Personal edition of MemoryHub -- agent memory without infrastructure.
