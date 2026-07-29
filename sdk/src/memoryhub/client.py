@@ -864,7 +864,11 @@ class MemoryHubClient:
         domains: list[str] | None = None,
         tenant_id: str | None = None,
     ) -> Memory:
-        """Update an existing memory (creates a new version).
+        """Update an existing memory (creates a new version with a new UUID).
+
+        The old version is preserved with is_current=false. Graph edges are
+        automatically re-pointed to the new version. The stable logical_id
+        is inherited across all versions.
 
         At least one of content, weight, or metadata must be provided.
 
@@ -1284,7 +1288,9 @@ class MemoryHubClient:
         Args:
             source_id: ID of the source memory node.
             target_id: ID of the target memory node.
-            relationship_type: Relationship label (e.g., "related", "supersedes").
+            relationship_type: One of: derived_from, supersedes, conflicts_with,
+                related_to. The mentions type is system-managed by entity
+                extraction and cannot be created manually.
             metadata: Arbitrary metadata for the relationship edge.
             project_id: Project identifier for campaign enrollment verification.
         """

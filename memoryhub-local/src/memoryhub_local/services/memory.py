@@ -38,6 +38,7 @@ async def create_memory(
     domains: list[str] | None = None,
     content_type: str = "declarative",
     driver_id: str | None = None,
+    scope_id: str | None = None,
 ) -> MemoryNode:
     """Create a new memory node with embedding."""
     embedding = await embedding_service.embed(content)
@@ -52,6 +53,7 @@ async def create_memory(
         storage_type="inline",
         weight=weight,
         scope=scope,
+        scope_id=scope_id,
         branch_type=branch_type,
         owner_id=owner,
         actor_id=owner,

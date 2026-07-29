@@ -31,7 +31,7 @@ _STUB_ACTIONS = frozenset({
     "set_focus", "resolve", "set_rule",
     "create_project", "add_member", "remove_member",
     "promote", "graduate", "checkpoint",
-    "focus_history", "list_projects", "describe_project",
+    "focus_history", "describe_project",
     "list_entities", "merge_entities", "rename_entity",
     "backfill_entities",
 })
@@ -80,8 +80,9 @@ async def memory(
         Semantic search. Returns cache-optimized stable ordering by default.
       list([scope, project_id, options: max_results, cursor, include_branches])
         Enumerate memories without semantic ranking. Ordered by creation time.
-      read(memory_id, [project_id, options: include_versions, hydrate])
+      read(memory_id, [project_id, options: include_versions, hydrate, resolve_current])
         Retrieve memory by UUID with optional version history.
+        Set resolve_current=true to follow a superseded version to its current head.
       similar(memory_id, [project_id, options: threshold, max_results])
         Near-duplicate detection by cosine similarity.
       relationships(memory_id, [project_id, options: direction, include_provenance])
@@ -102,13 +103,18 @@ async def memory(
       write(content, [scope, project_id, options: weight, parent_id, branch_type, ...])
         Create memory node or branch. scope defaults to "user" if omitted.
       update(memory_id, [content, options: weight, metadata, domains])
-        New version; old preserved for history.
+        New version with a **new UUID**; old version preserved with is_current=false.
+        Graph edges are automatically re-pointed to the new version.
+        The stable logical_id is inherited across all versions.
       delete(memory_id, [project_id])
         Soft-delete with cascade.
       set_focus(project_id, options: {focus})
         Declare session focus for retrieval bias.
       relate(options: {source_id, target_id, relationship_type})
         Create directed graph edge between memories.
+        Valid types: derived_from, supersedes, conflicts_with, related_to.
+        (mentions is system-managed by entity extraction, not user-creatable.)
+        derived_from is used by trace_provenance; conflicts_with feeds contradiction detection.
       report(memory_id, options: {observed_behavior})
         Flag contradiction against a stored memory.
       resolve(options: {contradiction_id, resolution_action})
@@ -158,7 +164,7 @@ async def memory(
     if action == "status":
         return await _do_status()
     if action == "write":
-        return await _do_write(content, scope, opts)
+        return await _do_write(content, scope, project_id, opts)
     if action == "update":
         return await _do_update(memory_id, content, opts)
     if action == "delete":
@@ -167,6 +173,8 @@ async def memory(
         return await _do_relate(opts)
     if action == "report":
         return await _do_report(memory_id, opts)
+    if action == "list_projects":
+        return await _do_list_projects()
 
     return _stub_response(action)
 
@@ -207,6 +215,28 @@ def _stub_response(action: str) -> dict[str, Any]:
     }
 
 
+async def _do_list_projects():
+    """Return distinct project_ids seen in stored memories (#474)."""
+    from sqlalchemy import distinct, select
+
+    from memoryhub_local.identity import TENANT_ID
+    from memoryhub_local.models.memory import MemoryNode
+
+    state = get_state()
+    async with state.session_factory() as session:
+        result = await session.execute(
+            select(distinct(MemoryNode.scope_id))
+            .where(
+                MemoryNode.scope == "project",
+                MemoryNode.tenant_id == TENANT_ID,
+                MemoryNode.status == "active",
+                MemoryNode.is_current.is_(True),
+            )
+        )
+        project_ids = [row[0] for row in result if row[0] is not None]
+        return {"projects": project_ids, "count": len(project_ids)}
+
+
 async def _do_search(query, scope, opts):
     from memoryhub_local.services.memory import search_memories
 
@@ -236,6 +266,9 @@ async def _do_list(scope, opts):
 
 
 async def _do_read(memory_id, opts):
+    from sqlalchemy import select
+
+    from memoryhub_local.models.memory import MemoryNode
     from memoryhub_local.services.memory import get_memory_history, read_memory
 
     _require("read", "memory_id", memory_id)
@@ -245,6 +278,16 @@ async def _do_read(memory_id, opts):
         node = await read_memory(session, memory_id)
         if node is None:
             raise ToolError(f"Memory {memory_id} not found.")
+
+        if opts.get("resolve_current") and not node.is_current and node.logical_id:
+            current = (await session.execute(
+                select(MemoryNode).where(
+                    MemoryNode.logical_id == node.logical_id,
+                    MemoryNode.is_current.is_(True),
+                )
+            )).scalar_one_or_none()
+            if current is not None:
+                node = current
 
         result = {
             "id": str(node.id),
@@ -331,7 +374,7 @@ async def _do_status():
     }
 
 
-async def _do_write(content, scope, opts):
+async def _do_write(content, scope, project_id, opts):
     from memoryhub_local.services.memory import create_memory
 
     _require("write", "content", content)
@@ -341,6 +384,7 @@ async def _do_write(content, scope, opts):
         node = await create_memory(
             session, content, state.embedding_service,
             scope=scope,
+            scope_id=project_id if scope == "project" else None,
             weight=opts.get("weight", 0.7),
             parent_id=opts.get("parent_id"),
             branch_type=opts.get("branch_type"),

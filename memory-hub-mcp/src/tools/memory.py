@@ -50,7 +50,7 @@ _LIST_OPTS = frozenset({
 })
 _READ_OPTS = frozenset({
     "include_versions", "history_offset", "history_max_versions", "hydrate",
-    "tenant_id",
+    "tenant_id", "resolve_current",
 })
 _SIMILAR_OPTS = frozenset({"threshold", "max_results", "offset"})
 _RELATIONSHIPS_OPTS = frozenset({
@@ -166,8 +166,9 @@ async def memory(
         Semantic search. Returns cache-optimized stable ordering by default.
       list([scope, project_id, options: max_results, cursor, include_branches])
         Enumerate memories without semantic ranking. Ordered by creation time.
-      read(memory_id, [project_id, options: include_versions, hydrate])
+      read(memory_id, [project_id, options: include_versions, hydrate, resolve_current])
         Retrieve memory by UUID with optional version history.
+        Set resolve_current=true to follow a superseded version to its current head.
       similar(memory_id, [project_id, options: threshold, max_results])
         Near-duplicate detection by cosine similarity.
       relationships(memory_id, [project_id, options: direction, include_provenance])
@@ -188,13 +189,18 @@ async def memory(
       write(content, [scope, project_id, options: weight, parent_id, branch_type, ...])
         Create memory node or branch. scope defaults to "user" if omitted.
       update(memory_id, [content, options: weight, metadata, domains])
-        New version; old preserved for history.
+        New version with a **new UUID**; old version preserved with is_current=false.
+        Graph edges are automatically re-pointed to the new version.
+        The stable logical_id is inherited across all versions.
       delete(memory_id, [project_id])
         Soft-delete with cascade.
       set_focus(project_id, options: {focus})
         Declare session focus for retrieval bias.
       relate(options: {source_id, target_id, relationship_type})
         Create directed graph edge between memories.
+        Valid types: derived_from, supersedes, conflicts_with, related_to.
+        (mentions is system-managed by entity extraction, not user-creatable.)
+        derived_from is used by trace_provenance; conflicts_with feeds contradiction detection.
       report(memory_id, options: {observed_behavior})
         Flag contradiction against a stored memory.
       resolve(options: {contradiction_id, resolution_action})

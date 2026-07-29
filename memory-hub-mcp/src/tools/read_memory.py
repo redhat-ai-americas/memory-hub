@@ -91,6 +91,16 @@ async def read_memory(
             ),
         ),
     ] = None,
+    resolve_current: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true and the requested memory is a superseded version "
+                "(is_current=false), automatically resolve to the current "
+                "version via logical_id and return that instead."
+            ),
+        ),
+    ] = False,
     tenant_id: Annotated[
         str | None,
         Field(
@@ -138,6 +148,25 @@ async def read_memory(
         session, gen = await get_db_session()
 
         node = await _read_memory(parsed_id, session, tenant_id=tenant)
+
+        if resolve_current and not node.is_current:
+            logical = getattr(node, "logical_id", None)
+            if logical:
+                from sqlalchemy import select
+
+                from memoryhub_core.models.memory import MemoryNode
+
+                current = (await session.execute(
+                    select(MemoryNode).where(
+                        MemoryNode.logical_id == logical,
+                        MemoryNode.is_current.is_(True),
+                        MemoryNode.tenant_id == tenant,
+                    )
+                )).scalar_one_or_none()
+                if current is not None:
+                    from memoryhub_core.services.memory import node_to_read
+                    node = node_to_read(current, has_children=False, has_rationale=False)
+                    parsed_id = current.id
 
         # Resolve campaign membership when accessing a campaign-scoped memory.
         campaign_ids: set[str] | None = None
