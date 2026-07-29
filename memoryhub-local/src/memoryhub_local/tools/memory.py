@@ -248,6 +248,7 @@ async def _do_read(memory_id, opts):
 
         result = {
             "id": str(node.id),
+            "logical_id": str(node.logical_id) if node.logical_id else None,
             "content": node.content,
             "scope": node.scope,
             "weight": node.weight,
@@ -351,6 +352,7 @@ async def _do_write(content, scope, opts):
         return {
             "memory": {
                 "id": str(node.id),
+                "logical_id": str(node.logical_id) if node.logical_id else None,
                 "scope": node.scope,
                 "weight": node.weight,
                 "version": node.version,
@@ -385,6 +387,7 @@ async def _do_update(memory_id, content, opts):
             raise ToolError(f"Memory {memory_id} not found or not active.")
         return {
             "id": str(node.id),
+            "logical_id": str(node.logical_id) if node.logical_id else None,
             "content": node.content,
             "scope": node.scope,
             "weight": node.weight,
