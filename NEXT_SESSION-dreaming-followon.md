@@ -37,7 +37,7 @@ fast on deprecated model names.
 
 **Parallel-ok:** Yes -- independent of Phase 2.
 
-### Phase 2: Retrieval-unit routing (#447) -- CODE COMPLETE (benchmark pending)
+### Phase 2: Retrieval-unit routing (#447) -- DONE (+3.1pp validated)
 
 Extracted dreaming facts don't contribute to search results when pooled
 with full conversation transcripts (source ablation showed +0.1pp without
@@ -119,7 +119,9 @@ Phase 1 + Phase 2 code complete. PR #470 targeting main.
 - Token budget: `MEMORYHUB_MAX_CONTEXT_TOKENS` for small-model deployments
 - All env vars optional, backward compatible
 - 12 routing tests (split, merge, budget, backward compat, integration)
-- Refs #447 (benchmark validation still needed on cluster)
+- Benchmark validated on memoryhub-install-gold cluster:
+  pooled 72.3% vs split 75.4% (+3.1pp, exceeds +2pp target)
+- Closed #455 (Stage 3 LLM fallback already implemented in extraction.py)
 
 39 tests total, zero network calls.
 
