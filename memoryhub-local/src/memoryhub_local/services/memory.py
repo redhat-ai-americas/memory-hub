@@ -43,7 +43,10 @@ async def create_memory(
     embedding = await embedding_service.embed(content)
     owner = get_owner_id()
 
+    node_id = uuid.uuid4()
     node = MemoryNode(
+        id=node_id,
+        logical_id=node_id,
         content=content,
         stub=generate_stub(content, scope, weight, 0, False),
         storage_type="inline",
@@ -122,6 +125,7 @@ async def update_memory(
     new_id = uuid.uuid4()
     new_node = MemoryNode(
         id=new_id,
+        logical_id=old.logical_id or old.id,
         content=new_content,
         stub=generate_stub(new_content, old.scope, new_weight, 0, False),
         storage_type="inline",

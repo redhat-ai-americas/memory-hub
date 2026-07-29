@@ -449,6 +449,35 @@ async def test_update_memory_preserves_invalidated_edges(async_session, embeddin
     assert unchanged.source_id == old_a_id, "invalidated edge should not be re-pointed"
 
 
+# -- logical_id propagation (#472) --
+
+
+async def test_create_memory_sets_logical_id(async_session, embedding_service):
+    """New v1 memories have logical_id == id."""
+    node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
+    assert node.logical_id is not None
+    assert node.logical_id == node.id
+
+
+async def test_update_memory_propagates_logical_id(async_session, embedding_service):
+    """Updated memory inherits logical_id from the previous version."""
+    v1, _ = await create_memory(_make_create_data(), async_session, embedding_service)
+    v2 = await update_memory(v1.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service)
+
+    assert v2.logical_id == v1.logical_id
+    assert v2.id != v1.id
+
+
+async def test_update_chain_shares_logical_id(async_session, embedding_service):
+    """All versions in a chain share the same logical_id."""
+    v1, _ = await create_memory(_make_create_data(content="v1"), async_session, embedding_service)
+    v2 = await update_memory(v1.id, MemoryNodeUpdate(content="v2"), async_session, embedding_service)
+    v3 = await update_memory(v2.id, MemoryNodeUpdate(content="v3"), async_session, embedding_service)
+
+    assert v1.logical_id == v2.logical_id == v3.logical_id
+    assert len({v1.id, v2.id, v3.id}) == 3
+
+
 # -- get_memory_history --
 
 

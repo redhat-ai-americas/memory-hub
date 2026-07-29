@@ -122,6 +122,7 @@ class MemoryNodeRead(BaseModel):
     model_config = {"from_attributes": True, "populate_by_name": True}
 
     id: uuid.UUID
+    logical_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None
     content: str
     stub: str
@@ -232,6 +233,7 @@ class MemoryVersionInfo(BaseModel):
     model_config = {"from_attributes": True}
 
     id: uuid.UUID
+    logical_id: uuid.UUID | None = None
     version: int = Field(ge=1)
     is_current: bool
     created_at: datetime

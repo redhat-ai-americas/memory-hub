@@ -173,6 +173,7 @@ async def create_memory(
 
     node = MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content=db_content,
         stub=stub,
         scope=data.scope,
@@ -573,6 +574,7 @@ async def update_memory(
 
     new_node = MemoryNode(
         id=new_id,
+        logical_id=old_node.logical_id or old_node.id,
         content=db_content,
         stub=stub,
         scope=old_node.scope,
@@ -2237,6 +2239,7 @@ def node_to_read(
 
     return MemoryNodeRead(
         id=node.id,
+        logical_id=getattr(node, "logical_id", None),
         parent_id=node.parent_id,
         content=node.content,
         stub=node.stub,
