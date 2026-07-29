@@ -119,7 +119,9 @@ async def update_memory(
 
     embedding = await embedding_service.embed(new_content)
 
+    new_id = uuid.uuid4()
     new_node = MemoryNode(
+        id=new_id,
         content=new_content,
         stub=generate_stub(new_content, old.scope, new_weight, 0, False),
         storage_type="inline",
@@ -143,6 +145,25 @@ async def update_memory(
     )
 
     session.add(new_node)
+
+    # Re-point active graph edges from old version to new version (#472).
+    await session.execute(
+        update(MemoryRelationship)
+        .where(
+            MemoryRelationship.source_id == old.id,
+            MemoryRelationship.valid_until.is_(None),
+        )
+        .values(source_id=new_node.id)
+    )
+    await session.execute(
+        update(MemoryRelationship)
+        .where(
+            MemoryRelationship.target_id == old.id,
+            MemoryRelationship.valid_until.is_(None),
+        )
+        .values(target_id=new_node.id)
+    )
+
     await session.commit()
     await session.refresh(new_node)
     return new_node
