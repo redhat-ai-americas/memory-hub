@@ -1,6 +1,6 @@
 # Retrieval-Unit Routing
 
-Status: design-complete
+Status: validated
 Issue: #447
 Epic: dreaming-followon
 
@@ -167,15 +167,28 @@ WHERE clause, end-to-end through MCP tool and SDK).
 
 ## Benchmark validation
 
-Baseline: 72.7% library-only, 72.8% combined naive (Flash Lite).
 Target: measurable lift from split routing (>= +2pp on combined).
 Method: same ablation protocol, same dataset (PersonaMem 32k).
 
-Benchmark runs:
-1. `pooled` mode (current) -- reproduce 72.8% baseline
-2. `split` + `round_robin` -- measure delta
-3. `split` + `round_robin` + `max_context_tokens=20000` -- verify
-   budget-constrained retrieval still produces useful results
+### Results (2026-07-28, memoryhub-install-gold cluster)
+
+| Mode | Correct | Accuracy | Delta |
+|------|---------|----------|-------|
+| Pooled (baseline) | 426/589 | 72.3% | -- |
+| Split + round_robin | 444/589 | 75.4% | **+3.1pp** |
+
+- Answer/judge LLM: gemini-3.1-flash-lite
+- Extraction model: gemini-3.1-flash-lite (via server-side dreaming)
+- Combined ingestion: library + dreaming (195 docs, 0 extraction failures)
+- Split config: transcript_k=100, fact_k=50, round_robin merge
+
+The +3.1pp lift exceeds the +2pp target. Facts that were crowded out at
+cosine rank ~13-15 now get guaranteed context window presence via the
+separate search pool.
+
+### Future runs
+- `split` + `round_robin` + `max_context_tokens=20000` -- verify
+  budget-constrained retrieval still produces useful results
 
 ## Alternatives considered
 
