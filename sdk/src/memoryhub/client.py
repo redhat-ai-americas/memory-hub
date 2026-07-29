@@ -33,6 +33,7 @@ from memoryhub.models import (
     CurationRuleResult,
     DeleteResult,
     ExtractionResult,
+    HistoryResult,
     ListEntitiesResult,
     Memory,
     MergeEntitiesResult,
@@ -693,6 +694,41 @@ class MemoryHubClient:
             options=opts,
         )
         return Memory.model_validate(data)
+
+    async def get_history(
+        self,
+        memory_id: str,
+        *,
+        max_versions: int = 20,
+        offset: int = 0,
+        project_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> HistoryResult:
+        """Get version history for a memory.
+
+        Args:
+            memory_id: ID of the memory (any version in the chain).
+            max_versions: Maximum versions to return (1-100).
+            offset: Versions to skip from newest.
+            project_id: Project identifier for campaign enrollment verification.
+            tenant_id: Optional tenant identifier.
+        """
+        mem = await self.read(
+            memory_id,
+            include_versions=True,
+            history_max_versions=max_versions,
+            history_offset=offset,
+            project_id=project_id,
+            tenant_id=tenant_id,
+        )
+        vh = getattr(mem, "version_history", None) or {}
+        return HistoryResult(
+            memory_id=memory_id,
+            versions=vh.get("versions", []),
+            total_versions=vh.get("total_versions", 0),
+            has_more=vh.get("has_more", False),
+            offset=vh.get("offset", 0),
+        )
 
     async def list(
         self,
