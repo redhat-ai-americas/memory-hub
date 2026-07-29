@@ -2,6 +2,11 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.15.1] -- 2026-07-29
+
+- Document that `update()` produces a new UUID; old version preserved with is_current=false (#475)
+- Document valid relationship types in `create_relationship()` docstring (#476)
+
 ## [0.15.0] -- 2026-07-28
 
 - **`[local]` extra**: `pip install "memoryhub[local]"` pulls in memoryhub-cli

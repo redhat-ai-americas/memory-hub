@@ -2,6 +2,10 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [0.12.1] -- 2026-07-29
+
+- Defer topic search until user provides actionable signal (#471)
+
 ## [0.12.0] -- 2026-07-28
 
 - **`memoryhub mcp`**: Start a local MCP server (personal edition, stdio).
