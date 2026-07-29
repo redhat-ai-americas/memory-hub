@@ -14,6 +14,7 @@ class Memory(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str
+    logical_id: str | None = None
     content: str = ""
     stub: str | None = None
     weight: float = 0.7
