@@ -135,6 +135,21 @@ network_policies:
       - path: /sandbox/**
       - path: /home/**
 
+  gemma4_vllm:
+    name: Gemma 4 vLLM (on-cluster)
+    endpoints:
+      - host: gemma4.gemma-model.svc.cluster.local
+        port: 80
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**
+
   memoryhub_auth:
     name: MemoryHub Auth Server
     endpoints:
