@@ -1,0 +1,40 @@
+{
+  "quantum_computing": [
+    {
+      "title": "Introduction to Quantum Computing",
+      "snippet": "Quantum computing harnesses quantum-mechanical phenomena such as superposition and entanglement to process information. Unlike classical bits, quantum bits (qubits) can represent 0 and 1 simultaneously, enabling massive parallelism for certain problem classes.",
+      "url": "https://example.com/research/quantum-computing"
+    },
+    {
+      "title": "Quantum Advantage and Current Hardware",
+      "snippet": "Recent experiments have demonstrated quantum advantage on specific tasks using superconducting qubit processors. Error correction remains the primary engineering challenge before fault-tolerant quantum computing becomes practical.",
+      "url": "https://example.com/analysis/quantum-hardware"
+    }
+  ],
+  "container_orchestration_kubernetes": [
+    {
+      "title": "Kubernetes Architecture Deep Dive",
+      "snippet": "Kubernetes provides declarative container orchestration with built-in service discovery, load balancing, and self-healing. Its control plane manages scheduling across a cluster of worker nodes.",
+      "url": "https://kubernetes.io/docs/concepts/overview/"
+    },
+    {
+      "title": "Kubernetes vs Nomad: A Practitioner's Comparison",
+      "snippet": "While Kubernetes dominates the container orchestration market, HashiCorp Nomad offers a simpler operational model for mixed workloads including containers, VMs, and standalone binaries.",
+      "url": "https://example.com/analysis/k8s-vs-nomad"
+    }
+  ],
+  "container_orchestration_nomad": [
+    {
+      "title": "HashiCorp Nomad: Flexible Workload Orchestration",
+      "snippet": "Nomad is a single-binary orchestrator that schedules containers, Java apps, and batch jobs. It integrates with Consul for service discovery and Vault for secrets management.",
+      "url": "https://example.com/overview/nomad"
+    }
+  ],
+  "container_orchestration_swarm": [
+    {
+      "title": "Docker Swarm Mode Overview",
+      "snippet": "Docker Swarm mode provides native clustering for Docker engines. While simpler to set up than Kubernetes, its feature set is narrower and the project receives minimal active development.",
+      "url": "https://example.com/overview/docker-swarm"
+    }
+  ]
+}

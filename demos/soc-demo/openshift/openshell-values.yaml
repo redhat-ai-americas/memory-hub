@@ -1,0 +1,33 @@
+# OpenShell Helm chart values for the SOC demo on OpenShift (mcp-rhoai cluster)
+#
+# Prerequisites:
+#   1. Agent Sandbox CRDs installed:
+#      oc apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/sandbox.yaml --context mcp-rhoai
+#   2. Namespace created:
+#      oc create namespace openshell --context mcp-rhoai
+#   3. Privileged SCC granted to sandbox SA:
+#      oc adm policy add-scc-to-user privileged -z openshell-sandbox -n openshell --context mcp-rhoai
+#
+# Deploy:
+#   helm install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+#     --version 0.0.97 -n openshell --kube-context mcp-rhoai \
+#     -f demos/soc-demo/openshift/openshell-values.yaml
+#
+# CLI setup (requires active port-forward):
+#   oc port-forward svc/openshell 18080:8080 -n openshell --context mcp-rhoai &
+#   openshell gateway add http://localhost:18080 --name openshell-cluster
+
+# OpenShift manages TLS at the Route level
+server:
+  disableTls: true
+  auth:
+    # Dev/demo mode -- no auth required for CLI access.
+    # For production, configure OIDC instead.
+    allowUnauthenticatedUsers: true
+
+# OpenShift SCC handles security contexts
+podSecurityContext:
+  fsGroup: null
+
+securityContext:
+  runAsUser: null

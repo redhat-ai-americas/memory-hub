@@ -1,0 +1,6 @@
+apiVersion: v2
+name: soc-forensics
+description: Helm chart for deploying a BaseAgent to OpenShift
+version: 0.9.0
+appVersion: 0.9.0
+type: application

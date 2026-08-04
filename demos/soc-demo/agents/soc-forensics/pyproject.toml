@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soc-forensics"
+version = "0.6.0"
+description = "BaseAgent framework — production-ready AI agent for OpenShift"
+requires-python = ">=3.11"
+dependencies = [
+    "fipsagents[server]",
+]
+
+[project.optional-dependencies]
+feedback = [
+    "fipsagents[feedback]",
+]
+files = [
+    # Pulls in docling (text extraction) + python-magic (content-based
+    # MIME sniffing). Adds ~500MB to the container image because of
+    # docling's torch/transformers — leave opt-in unless the agent
+    # actively ingests files.
+    "fipsagents[files]",
+]
+memory = [
+    "fipsagents[memory]",
+]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

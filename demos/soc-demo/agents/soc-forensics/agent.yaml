@@ -1,0 +1,821 @@
+# agent.yaml -- My Agent
+#
+# Framework: fipsagents (BaseAgent)
+#   Monorepo: packages/fipsagents/   |  PyPI: pip install fipsagents
+#   Docs:     see packages/fipsagents/README.md for the full API reference
+#
+# Configuration for a research-assistant agent built on BaseAgent.
+# Every value supports ${VAR:-default} env-var substitution so the same
+# file works unchanged for local development and OpenShift deployment.
+#
+# Local dev:  sensible defaults work out of the box -- just run the agent.
+# Production: set env vars via ConfigMap / Secrets.  Override only what
+#             differs from the defaults below.
+
+# -- Agent identity ------------------------------------------------------------
+#
+# Name, description, and version for logging and the /v1/agent-info endpoint.
+# Populated by /create-agent from AGENT_PLAN.md.
+#
+# Production env vars:
+#   AGENT_NAME -- override the agent name per deployment
+agent:
+  name: ${AGENT_NAME:-my-agent}
+  description: "A brief description of what this agent does"
+  version: 0.1.0
+
+# -- LLM provider and generation settings ------------------------------------
+#
+# `provider` selects the LLM backend.  Defaults to "openai" (any OpenAI-
+# compatible endpoint: vLLM, LlamaStack, llm-d).  Set to "anthropic",
+# "bedrock", or "azure" to route traffic through the adapter sidecar at
+# localhost:8081/v1.  The adapter sidecar must be enabled in
+# chart/values.yaml (llm_adapter.enabled: true).
+#
+# When provider is non-openai, MODEL_ENDPOINT is ignored -- the framework
+# routes traffic to the sidecar automatically.
+#
+# `name` is the model identifier passed to the endpoint (or adapter).
+# `endpoint` points at vLLM, LlamaStack, llm-d, or any OpenAI-compatible API.
+#
+# Production env vars:
+#   MODEL_PROVIDER  -- openai | anthropic | bedrock | azure
+#   MODEL_ENDPOINT  -- vLLM / LlamaStack URL (ignored for non-openai providers)
+#   MODEL_NAME      -- deployed model identifier
+#   OPENAI_API_KEY  -- required by the openai SDK even for unauthenticated vLLM
+#                      endpoints; set to any non-empty string (e.g. "not-required")
+model:
+  provider: ${MODEL_PROVIDER:-openai}
+  endpoint: ${MODEL_ENDPOINT:-http://llamastack:8321/v1}
+  name: ${MODEL_NAME:-meta-llama/Llama-3.3-70B-Instruct}
+  temperature: 0.7
+  max_tokens: 4096
+
+  # -- Per-turn resource limits (optional) --------------------------------------
+  #
+  # Hard ceilings checked after each model call in astep_stream(). When a limit
+  # is reached, the turn completes with finish_reason="limit" and an audit log
+  # event is emitted. All limits are optional; omit or set to null to disable.
+  #
+  # Production env vars:
+  #   LIMITS_MAX_TOKENS_PER_TURN      -- token cap per turn
+  #   LIMITS_MAX_ITERATIONS_PER_TURN  -- iteration cap per turn
+  #   LIMITS_MAX_COST_PER_TURN_USD    -- cost cap per turn (USD)
+  # limits:
+  #   max_tokens_per_turn: ${LIMITS_MAX_TOKENS_PER_TURN:-}
+  #   max_iterations_per_turn: ${LIMITS_MAX_ITERATIONS_PER_TURN:-}
+  #   max_cost_per_turn_usd: ${LIMITS_MAX_COST_PER_TURN_USD:-}
+
+# -- Platform mode (optional, OGX / LlamaStack delegation) -------------------
+#
+# Opt in to OGX's /v1/responses endpoint instead of /v1/chat/completions.
+# OGX (the rebrand of LlamaStack) orchestrates MCP tool calls, shield
+# enforcement, and the inference loop server-side; the agent makes a
+# single call_model_responses() per turn and skips its own tool-call loop.
+#
+# Default is off. Set PLATFORM_MODE=true and point OGX_ENDPOINT at your
+# OGX base URL to enable. To pass MCP servers, guardrails, or moderation
+# config, expand this block — see CLAUDE.md ("Platform Mode") and
+# docs/architecture.md for the full schema.
+#
+# Production env vars:
+#   PLATFORM_MODE  -- "true" to opt in
+#   OGX_ENDPOINT   -- OGX base URL (typically ending in /v1)
+platform:
+  enabled: ${PLATFORM_MODE:-false}
+  endpoint: ${OGX_ENDPOINT:-}
+
+# -- MCP servers --------------------------------------------------------------
+#
+# Client-side MCP servers (used when platform.enabled=false).  In platform
+# mode, OGX orchestrates MCP server-side via platform.mcp -- this block is
+# ignored.
+#
+# Remote tool servers the agent connects to at startup.  BaseAgent discovers
+# three capability types from each server:
+#
+#   Tools:     Auto-registered with llm_only visibility.  The LLM decides
+#              when to call them, just like local tools.
+#
+#   Prompts:   Available via self.get_mcp_prompt(name, arguments).
+#              Use self.list_mcp_prompts() to see what a server provides.
+#
+#   Resources: Available via self.read_resource(uri).
+#              Use self.list_mcp_resources() for discovery.
+#              Resource templates: self.list_mcp_resource_templates().
+#
+# Each entry needs either a `url` (HTTP transport) or a `command` (stdio):
+#
+#   - url: http://search-mcp:8080/mcp              # HTTP
+#   - command: /path/to/mcp-server                  # stdio
+#     args: [--verbose]
+#     env: {API_KEY: "${SEARCH_API_KEY}"}
+#
+# For MCP servers behind an auth gateway, add `headers`:
+#
+#   - url: ${MCP_SERVER_URL:-}
+#     headers:
+#       Authorization: "Bearer ${MCP_AUTH_TOKEN}"
+#
+# Production env vars (example):
+#   MCP_SEARCH_URL  -- URL for a web-search MCP server
+#
+mcp_servers:
+  - url: ${MEMORYHUB_MCP_URL:-http://memory-hub-mcp.memory-hub-mcp.svc.cluster.local:8080/mcp/}
+
+# -- Local tools ---------------------------------------------------------------
+#
+# Tools are auto-discovered from `local_dir` at startup.
+# `visibility_default` controls the default plane for tools that don't
+# declare their own visibility via the @tool decorator:
+#   agent_only  -- callable from agent code only (plane 1)
+#   llm_only    -- surfaced to the LLM for tool calling (plane 2)
+#   both        -- accessible from either plane
+tools:
+  local_dir: ./tools
+  visibility_default: agent_only
+
+# -- Prompt templates ----------------------------------------------------------
+#
+# Markdown files with YAML frontmatter, one per file.
+# Loaded via self.load_prompt(name, **variables).
+# `system` designates which prompt becomes the system prompt.  Defaults to
+# "system" (i.e. prompts/system.md).  Supports env-var substitution.
+prompts:
+  dir: ./prompts
+  system: system          # prompt file to load as the system prompt (prompts/system.md)
+
+# -- Prompt assembly (optional, layered mode) ----------------------------------
+#
+# When present, replaces the flat system-prompt concatenation with named
+# layers: identity (who the agent IS), personality (HOW it behaves),
+# governance (rules/), and capabilities (skills/).  Each layer has
+# explicit precedence and is tracked in an audit log.
+#
+# When absent, the current behavior is preserved:
+#   1. prompts/system.md as the system prompt
+#   2. rules/*.md concatenated
+#   3. skill manifests appended
+#
+prompt_assembly:
+  identity:
+    source: identity.md
+    # inline: |                     # or provide identity inline (takes precedence)
+    #   You are DocBot, a document processing agent.
+    enabled: true
+  personality:
+    source: personality.md
+    enabled: false                  # enable to activate personality layer
+  governance_enabled: true          # layer 2 (rules/ directory)
+  capabilities_enabled: true        # layer 3 (skills/ directory)
+
+# -- Agent loop ----------------------------------------------------------------
+#
+# max_iterations: hard ceiling on step() calls per run() invocation.
+#                 Prevents runaway loops.  100 is generous for most agents;
+#                 lower it for tightly scoped tasks.
+#
+# backoff: exponential backoff applied when step() raises a retryable error.
+#   initial    -- first delay in seconds
+#   max        -- ceiling on delay (seconds)
+#   multiplier -- factor applied after each retry (must be > 1.0)
+#
+# Production env vars:
+#   MAX_ITERATIONS -- override the iteration cap per deployment
+loop:
+  max_iterations: ${MAX_ITERATIONS:-100}
+  backoff:
+    initial: 1.0
+    max: 30.0
+    multiplier: 2.0
+
+# -- Logging -------------------------------------------------------------------
+#
+# Standard Python log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL.
+# Set to DEBUG locally for verbose output; keep INFO or WARNING in production.
+#
+# Production env vars:
+#   LOG_LEVEL -- e.g. WARNING
+logging:
+  level: ${LOG_LEVEL:-INFO}
+
+# -- Server --------------------------------------------------------------------
+#
+# HTTP server binding for the OpenAI-compatible API.  The Helm chart's
+# service.port should match `port` here.
+#
+# Production env vars:
+#   HOST -- bind address (useful for local-only testing with 127.0.0.1)
+#   PORT -- bind port (some platforms inject this automatically)
+server:
+  host: ${HOST:-0.0.0.0}
+  port: ${PORT:-8080}
+
+  # -- Storage backend (optional) -----------------------------------------------
+  #
+  # Shared storage for session persistence and trace collection.
+  # When backend is null (default), both features degrade to no-ops --
+  # fully backward-compatible.
+  #
+  # Production env vars:
+  #   STORAGE_BACKEND -- "sqlite" or "postgres"
+  #   SQLITE_PATH     -- path to SQLite file (default: ./agent.db)
+  #   DATABASE_URL    -- PostgreSQL connection string (for postgres backend)
+  storage:
+    backend: ${STORAGE_BACKEND:-}
+    sqlite_path: ${SQLITE_PATH:-./agent.db}
+  #   database_url: ${DATABASE_URL:-}
+
+  # -- Session persistence (optional) -------------------------------------------
+  #
+  # Enables conversation continuity across requests.  Requires a storage
+  # backend (sqlite or postgres) to persist session state.
+  #
+  # REST endpoints:  POST /v1/sessions, GET /v1/sessions/{id},
+  #                  DELETE /v1/sessions/{id}
+  # Per-request:     pass session_id on ChatCompletionRequest to reuse context
+  # Auto-create:     sessions are created on first use (explicit POST optional)
+  sessions:
+    enabled: ${SESSIONS_ENABLED:-false}
+    max_age_hours: 168           # sessions expire after 7 days
+
+  # -- Trace collection (optional) ----------------------------------------------
+  #
+  # TraceCollector observes astep_stream() and builds span trees from
+  # StreamEvents.  Traces are queryable via GET /v1/traces.
+  #
+  # exporter:
+  #   store  -- persist to the storage backend (default when enabled)
+  #   otel   -- export to OpenTelemetry Collector via OTLP (requires [otel] extra)
+  #
+  # Production env vars:
+  #   TRACES_ENABLED  -- "true" to enable
+  #   OTEL_ENDPOINT   -- OTLP gRPC endpoint (e.g. http://otel-collector:4317)
+  traces:
+    enabled: ${TRACES_ENABLED:-false}
+    sampling_rate: 1.0
+  #   exporter: store            # or: otel
+  #   otel_endpoint: ${OTEL_ENDPOINT:-}
+  #   service_name: ${OTEL_SERVICE_NAME:-fipsagents}
+
+  # -- Prometheus metrics (optional) --------------------------------------------
+  #
+  # Records request/tool/token counters and duration histograms.
+  # Exposed at GET /metrics in Prometheus text format.
+  # Requires the [metrics] extra:  pip install fipsagents[metrics]
+  #
+  # Available metrics:
+  #   agent_requests_total, agent_request_duration_seconds,
+  #   agent_model_call_duration_seconds, agent_tool_call_total,
+  #   agent_tokens_total
+  metrics:
+    enabled: ${METRICS_ENABLED:-false}
+
+  # -- Message compaction (#166) -----------------------------------------------
+  # compaction:
+  #   enabled: ${COMPACTION_ENABLED:-false}
+  #   backend: null          # null (no-op) | llm (model-driven summarisation)
+  #   threshold_messages: 50
+
+  # -- Permission policy (#164) ------------------------------------------------
+  # permissions:
+  #   source: null           # null (allow-all) | static (config-driven rules)
+  #   default_action: allow
+  #   rules: []
+
+  # -- User feedback collection (optional) --------------------------------------
+  #
+  # Persists thumbs-up / thumbs-down ratings, comments, and corrections
+  # submitted via the UI.  Records are joined to traces (when tracing is
+  # enabled) so feedback can be correlated with the conversation that
+  # produced it.
+  #
+  # Requires a storage backend (sqlite or postgres) for persistence —
+  # without one, feedback POSTs are accepted and discarded.
+  #
+  # REST endpoints:
+  #   POST /v1/feedback            -- submit a rating
+  #   GET  /v1/feedback            -- query records (filter by trace/session)
+  #   GET  /v1/feedback/stats      -- aggregated counts grouped by window
+  #
+  # Production env vars:
+  #   FEEDBACK_ENABLED  -- "true" to enable
+  feedback:
+    enabled: ${FEEDBACK_ENABLED:-false}
+    max_age_hours: 720           # feedback expires after 30 days
+
+  # -- File uploads (optional) --------------------------------------------------
+  #
+  # Accepts user-attached files via POST /v1/files (multipart). The endpoint
+  # persists each upload, optionally extracts text via Docling, and lets
+  # subsequent /v1/chat/completions requests reference uploads by file_id.
+  #
+  # Requires the [files] extra:  pip install fipsagents[files]
+  # Optional virus scan: deploy a ClamAV sidecar (chart/values.yaml ->
+  # files.virusScanner.enabled=true) and set scanner.url to point at it.
+  #
+  # Defense-in-depth: the gateway also enforces size + MIME caps before
+  # bytes reach the agent.  Keep allowed_mime_types in sync between the
+  # two so a request the gateway would reject doesn't surprise the agent.
+  #
+  # backend: persistence backend for metadata + bytes.
+  #   sqlite   -- local SQLite + sharded local FS (dev / single-replica)
+  #   postgres -- Postgres metadata (S3-compatible bytes backend pending)
+  #   null     -- accepted-then-discarded (no persistence; for smoke testing)
+  #
+  # max_file_size_bytes: hard cap enforced at the agent layer. Must be set
+  # to at least the gateway's cap so honest uploads aren't double-rejected.
+  #
+  # allowed_mime_types: empty list means allow-all (gateway is the gate).
+  # Populate with explicit types to belt-and-braces the gateway allowlist.
+  #
+  # scanner.url: HTTP URL of a ClamAV-fronting sidecar. Empty disables
+  # scanning (NullScanner). When set, every upload is POSTed to the
+  # sidecar before persistence.
+  # scanner.fail_mode:
+  #   open   -- accept uploads when the scanner is unreachable (dev default)
+  #   closed -- 503 the upload when the scanner errors (production-recommended)
+  #
+  # Production env vars:
+  #   FILES_ENABLED          -- "true" to accept uploads
+  #   FILES_BACKEND          -- "sqlite" | "postgres" | "" (Null)
+  #   FILES_MAX_SIZE_BYTES   -- override the size cap (default 50 MiB)
+  #   FILES_SCANNER_URL      -- ClamAV sidecar URL (empty disables scanning)
+  #   FILES_SCANNER_FAIL_MODE -- "open" or "closed"
+  files:
+    enabled: ${FILES_ENABLED:-false}
+    backend: ${FILES_BACKEND:-}
+    max_file_size_bytes: ${FILES_MAX_SIZE_BYTES:-52428800}  # 50 MiB
+    max_injection_tokens: ${FILES_MAX_INJECTION_TOKENS:-100000}
+    # bytes_dir is the local-FS path SqliteFileStore / PostgresFileStore
+    # write bytes to. Mount a PVC at this path in production (the Helm
+    # chart sets FILES_BYTES_DIR via files.persistence.mountPath);
+    # without a PVC, uploads are wiped on every pod restart.
+    bytes_dir: ${FILES_BYTES_DIR:-./files}
+    # Override storage.sqlite_path for the SqliteFileStore metadata DB
+    # only. When bytes_dir is on a PVC, point this at the same volume so
+    # both bytes and metadata survive pod restarts (the chart sets
+    # FILES_SQLITE_DB_PATH=${mountPath}/.metadata/agent.db when
+    # files.persistence.enabled and backend is sqlite). Empty defers to
+    # storage.sqlite_path.
+    # Quoted so empty ${VAR:-} yields "" (string), not null —
+    # Pydantic rejects None for str fields. Same caveat applies to
+    # every str-field substitution with an empty default below.
+    sqlite_path: "${FILES_SQLITE_DB_PATH:-}"
+    # Bytes-storage backend (per ADR-0001). Composes with the metadata
+    # ``backend`` so eg "postgres metadata + S3 bytes" is one config
+    # block, not a separate FileStore class.
+    #
+    #   type: local_fs   — sharded local filesystem at bytes_dir
+    #                      (single-replica only; backward-compatible
+    #                      with 0.16.0 deployments)
+    #   type: s3         — S3-compatible object storage (AWS S3, MinIO,
+    #                      GCS S3-mode, Cloudflare R2, Backblaze B2).
+    #                      Requires ``pip install fipsagents[s3]``.
+    #                      Multi-replica safe.
+    #   type: null       — accept-and-discard (tests)
+    #
+    # For S3, set bucket + endpoint (omit for AWS) + region. Auth
+    # falls through boto3's default chain when access_key/secret_key
+    # are empty (IAM role, env vars, EC2 metadata).
+    bytes_backend:
+      # String fields are quoted so empty ${VAR:-} substitutions yield
+      # "" (string), not null — Pydantic rejects None for str fields.
+      type: "${FILES_BYTES_BACKEND:-local_fs}"
+      bucket: "${FILES_S3_BUCKET:-}"
+      endpoint: "${FILES_S3_ENDPOINT:-}"
+      region: "${FILES_S3_REGION:-us-east-1}"
+      access_key: "${FILES_S3_ACCESS_KEY:-}"
+      secret_key: "${FILES_S3_SECRET_KEY:-}"
+      prefix: "${FILES_S3_PREFIX:-}"
+      path_style: ${FILES_S3_PATH_STYLE:-false}
+    max_age_hours: 720                                       # files expire after 30 days
+    allowed_mime_types: []
+    # Uncomment entries above to restrict at the agent layer:
+    #   - application/pdf
+    #   - text/plain
+    #   - text/markdown
+    #   - text/csv
+    #   - application/json
+    #   - image/png
+    #   - image/jpeg
+    scanner:
+      url: "${FILES_SCANNER_URL:-}"
+      timeout_seconds: 30.0
+      fail_mode: ${FILES_SCANNER_FAIL_MODE:-open}
+
+    # -- Docling parser pipeline knobs --------------------------------------
+    #
+    # Tunes the Docling DocumentConverter used by `[files]`-extra builds.
+    # Currently only PDF has knobs surfaced; other formats use Docling's
+    # converter defaults.
+    #
+    # `parser.pdf.do_ocr` defaults to `false` in 0.19.0+. Most modern PDFs
+    # ship a selectable text layer; OCR adds 1-2 seconds per page on a
+    # 2-CPU pod with no quality benefit. Set `FILES_PARSER_PDF_DO_OCR=true`
+    # for scanned PDFs.
+    #
+    # `parser.pdf.do_table_structure` keeps Docling's default (`true`) so
+    # tabular content survives the markdown export. Disable only if you
+    # see table extraction errors on a particular corpus.
+    parser:
+      pdf:
+        do_ocr: ${FILES_PARSER_PDF_DO_OCR:-false}
+        do_table_structure: ${FILES_PARSER_PDF_DO_TABLE_STRUCTURE:-true}
+
+    # -- Large-file chunking + retrieval (optional, per ADR-0002) ------------
+    #
+    # When enabled, files whose extracted text exceeds
+    # `small_file_threshold_tokens` are split into chunks, embedded via the
+    # configured OpenAI-compatible embedding endpoint, and stored in
+    # pgvector. At chat-completion time the chunked file's content is
+    # retrieved per-query (top-K nearest chunks scoped to the user's
+    # `file_ids`) instead of dumping the full text into the prompt.
+    #
+    # Disabled by default — flip `enabled: true` and provide a pgvector URL
+    # + embedding endpoint to opt in. Files smaller than the threshold and
+    # files uploaded while chunking is disabled fall back to full-text
+    # injection (the 0.17.0 behaviour).
+    #
+    # `backend: pgvector` requires the [chunking] extra in the container
+    # build (`pip install fipsagents[chunking]`).
+    #
+    # Budget presets parallel `memory.budget` so a deployment using
+    # `${MEMORY_BUDGET}` for memory naturally gets matching chunking
+    # defaults — set `${CHUNKING_BUDGET}` to the same value:
+    #   small   -- chunk_size_tokens=400, retrieval_top_k=3,
+    #              small_file_threshold_tokens=2000
+    #   medium  -- 600 / 5  / 4000     (default sizing)
+    #   large   -- 800 / 8  / 8000
+    #   custom  -- no preset; set the per-tier knobs explicitly
+    #
+    # Production env vars:
+    #   CHUNKING_ENABLED          -- "true" to enable
+    #   CHUNKING_BACKEND          -- "pgvector" (default "null" = disabled)
+    #   PGVECTOR_URL              -- Postgres+pgvector connection string
+    #                                (postgresql://user:pass@host:5432/db)
+    #   EMBEDDING_URL             -- OpenAI-compatible embeddings endpoint
+    #   EMBEDDING_MODEL           -- model identifier passed to the endpoint
+    #   EMBEDDING_DIMENSION       -- vector dim (must match the model)
+    #   CHUNKING_TABLE            -- pgvector table name (default file_chunks)
+    #   CHUNKING_BUDGET           -- "small" | "medium" | "large" | "custom"
+    chunking:
+      enabled: ${CHUNKING_ENABLED:-false}
+      # Quoted so the default stays the literal string "null" — Pydantic's
+      # Literal["null", "pgvector"] rejects YAML's bare null (None).
+      backend: "${CHUNKING_BACKEND:-null}"
+      database_url: "${PGVECTOR_URL:-}"
+      embedding_url: "${EMBEDDING_URL:-}"
+      embedding_model: "${EMBEDDING_MODEL:-all-MiniLM-L6-v2}"
+      embedding_dimension: ${EMBEDDING_DIMENSION:-768}
+      table_name: "${CHUNKING_TABLE:-file_chunks}"
+      # budget: ${CHUNKING_BUDGET:-medium}
+      # Per-tier knobs (override the budget preset):
+      # chunk_size_tokens: 600
+      # chunk_overlap_tokens: 100
+      # small_file_threshold_tokens: 4000
+      # retrieval_top_k: 5
+      # retrieval_min_score: 0.0
+
+  # -- Work-item pool (multi-agent coordination) ---------------------------------
+  #
+  # Enables lease-based work-item coordination between agents. Agents can
+  # check out, complete, and release work items from a shared pool.
+  #
+  # When enabled, five stock LLM tools are auto-registered:
+  #   check_available_work, checkout_work_item, complete_work_item,
+  #   release_work_item, update_work_progress
+  #
+  # work_items:
+  #   enabled: ${WORK_ITEMS_ENABLED:-false}
+  #   # backend: ${WORK_ITEMS_BACKEND:-}  # inherits storage.backend
+  #   lease_duration_seconds: 300
+  #   budget_headroom_pct: 10.0
+  #   expire_check_interval_seconds: 60
+  #   capabilities: []
+  #     # - name: "mcp:web_search"
+  #     # - name: "skill:code_review"
+  #     # - name: "trust"
+  #     #   value: 3
+
+  # -- Event sources (optional) ------------------------------------------------
+  #
+  # Inbound event sources that trigger agent processing via event_handler().
+  # Supported types: webhook, cron, kafka, redis.
+  #
+  # event_sources:
+  #   - type: cron
+  #     source_id: daily-health-check
+  #     schedule: "0 6 * * *"          # 6 AM UTC daily
+  #     event_type: scheduled_health_check
+  #
+  #   - type: webhook
+  #     source_id: github-events
+  #     path: /webhooks/github
+  #     secret: ${WEBHOOK_SECRET}
+  #
+  # event_sink:
+  #   type: log
+  #   level: INFO
+
+# -- Memory backend (optional) -----------------------------------------------
+#
+# Controls which memory backend the agent uses.
+#
+# backend: which backend to use.  When omitted, auto-detects by looking
+#          for .memoryhub.yaml (backward compatible).
+#   memoryhub -- MemoryHub SDK (default when .memoryhub.yaml exists)
+#   markdown  -- Human-readable markdown file(s) (zero dependencies)
+#   sqlite    -- Local SQLite with FTS5 search (zero dependencies)
+#   pgvector  -- PostgreSQL + pgvector for semantic search
+#   custom    -- Bring your own MemoryClientBase subclass
+#   null      -- Explicitly disable memory
+#
+# config_path: path to the backend-specific config file.
+#   For memoryhub: .memoryhub.yaml (generated by `memoryhub config init`)
+#   For sqlite:    .memory-sqlite.yaml
+#   For pgvector:  .memory-pgvector.yaml
+#
+# backend_class: dotted import path, only used when backend: custom
+#   Example: myproject.memory.RedisMemoryClient
+#
+# Budget presets (set one and forget individual tuning):
+#   budget: small   -- 500 chars, 5 results, min_weight 0.7  (8K-16K models)
+#   budget: medium  -- 4K chars, 20 results, min_weight 0.5  (32K-128K models)
+#   budget: large   -- 8K chars, 50 results, min_weight 0.3  (128K+ models)
+#   Explicit values for max_prefix_chars/max_results/min_weight override presets.
+#
+# Injection mode (how memories reach the model):
+#   injection_mode: prefix     -- (default) separate message before user turn
+#   injection_mode: user_turn  -- append to user message inside XML tags;
+#                                 required for small models (8K-16K) that
+#                                 ignore system-level memory
+#   injection_tag: user_memories  -- XML tag name (only with user_turn mode)
+#
+# Loading pattern (when to retrieve memories):
+#   loading_pattern: eager           -- at setup time (default, best for prefix caching)
+#   loading_pattern: lazy            -- after first user message arrives
+#   loading_pattern: lazy_with_rebias -- lazy + re-retrieve after topic shift
+#   loading_pattern: jit             -- just-in-time, every turn
+#   For MemoryHub backends, .memoryhub.yaml pattern takes precedence unless
+#   loading_pattern is set explicitly here.
+#
+# Production env vars:
+#   MEMORY_BACKEND -- override the backend choice per deployment
+memory:
+  backend: ${MEMORY_BACKEND:-}
+  config_path: .memoryhub.yaml
+  # backend_class: null
+  # budget: medium             # or: small, large, custom
+  # injection_mode: prefix     # or: user_turn
+  # injection_tag: user_memories
+  # loading_pattern: eager     # or: lazy, lazy_with_rebias, jit
+  # max_prefix_chars: 8000     # 0 disables limit
+  # max_results: 50
+  # min_weight: 0.0            # 0.0 = no filtering
+
+# -- Lifecycle hooks (optional) ------------------------------------------------
+#
+# Shell commands fired at specific points in the agent lifecycle.
+# Hooks run as subprocesses with stdout captured.
+#
+# Built-in events:
+#   setup_complete   -- after setup() completes (stdout injected as context)
+#   shutdown         -- before shutdown() cleanup (informational)
+#   pre_tool_use     -- before a tool executes (non-zero exit blocks the call)
+#   post_tool_use    -- after a tool executes (informational)
+#   pre_mcp_connect  -- before each MCP server connection (token acquisition)
+#   post_mcp_connect -- after MCP server connected + tools discovered (audit)
+#   mcp_auth_refresh -- on 401/403 from MCP tool call (stdout KEY=VALUE → env)
+#
+# Custom events: call self.hooks.fire("my_event") from agent code.
+#
+# Hooks are also auto-discovered from hooks/*.yaml files. Each YAML file
+# declares event, command, and optional timeout/matcher/name. Config-defined
+# hooks fire first, then file-discovered hooks.
+#
+# Environment variables available to all hooks:
+#   AGENT_NAME, AGENT_PROJECT_DIR, HOOK_EVENT
+# Tool events additionally provide:
+#   TOOL_NAME, TOOL_ARGS (JSON), TOOL_RESULT (post only, max 4096 chars)
+# MCP events additionally provide:
+#   MCP_SERVER_URL, MCP_TOOLS_COUNT (post only), MCP_PROMPTS_COUNT (post only)
+#
+# hooks:
+#   - event: setup_complete
+#     command: ./hooks/fetch-memory.sh
+#     timeout: 10
+#   - event: pre_tool_use
+#     command: ./hooks/check-safety.sh
+#     timeout: 3
+#     matcher: "execute_*"
+hooks: []
+
+# -- Security ------------------------------------------------------------------
+#
+# Controls security inspection, audit logging, and enforcement behavior.
+# Global mode sets the default; per-layer mode overrides it.
+#
+#   mode: enforce      -- block on findings (production default)
+#   mode: observe      -- log findings but allow execution (for tuning)
+#
+security:
+  mode: ${SECURITY_MODE:-enforce}
+  tool_inspection:
+    enabled: ${TOOL_INSPECTION_ENABLED:-true}
+#    mode: observe     # override global mode for this layer
+#  guardrails:
+#    mode: observe     # override global mode for guardrails
+
+# -- Self-healing (optional) --------------------------------------------------
+#
+# Enables agent self-improvement via learned skills. When enabled, three
+# stock LLM tools are auto-registered: learn_skill, suggest_skill,
+# rollback_skill.
+#
+# suggest_skill creates review_pending work items in the work-item pool
+# (when work_items is also enabled) so proposals can be reviewed via
+# POST /v1/work-items/{id}/accept or /reject.
+#
+# Trust levels gate skill creation:
+#   0 -- suggest_skill only (no disk writes)
+#   1+ -- learn_skill (creates versioned SKILL.md in learned_skills/)
+#   3+ -- rollback_skill (restore archived versions)
+#   4+ -- bypass domain restrictions
+#
+# Production env vars:
+#   SELF_HEALING_ENABLED    -- "true" to enable
+#   SELF_HEALING_TRUST_LEVEL -- numeric trust level (0-4)
+#
+# self_healing:
+#   enabled: ${SELF_HEALING_ENABLED:-false}
+#   trust_level: ${SELF_HEALING_TRUST_LEVEL:-0}
+#   trust_domains:
+#     - document_processing
+#   review_policy: human_review     # audit_only | peer_review | human_review
+#   learned_skills_dir: ./learned_skills
+#   max_skills: 50
+
+# -- Subagents (optional, per #165) ------------------------------------------
+#
+# Register other agents the LLM can delegate to via the stock
+# `delegate_to_agent` tool.  When this block is non-empty, BaseAgent
+# auto-registers the tool at startup.  The LLM picks a subagent by name
+# and passes a self-contained task; the framework handles transport,
+# trace propagation, identity forwarding, and depth bounds.
+#
+# Two transport types are supported:
+#
+#   transport.type: remote
+#     HTTP call to another agent's /v1/chat/completions endpoint.
+#     `url` is the OpenAI-compatible endpoint base.  Standard
+#     ${VAR:-default} substitution applies.
+#
+#   transport.type: inprocess
+#     Same-process call to a BaseAgent subclass.  `class_path` is a
+#     dotted import path; `config_path` (optional) points at the
+#     subagent's own agent.yaml.
+#
+# `permission_scope` references a named rule set in PermissionConfig.scopes
+# (#164).  v1 parses this field but does NOT enforce it — enforcement
+# lands once #164 is merged.  A WARNING is logged each time a subagent
+# with permission_scope set is invoked under the v1 scaffold.
+#
+# `identity: inherit` (default) forwards the parent's incoming
+# Authorization header to the subagent.  `identity: service_account: <name>`
+# is reserved for kagenti-issued credentials and is incompatible with
+# inprocess transport (no HTTP boundary at which to override identity).
+#
+# `max_depth` caps delegation chains.  v1 enforces depth on the
+# inprocess path; remote-chain enforcement is a follow-up.
+#
+# Production env vars (example):
+#   RESEARCH_HELPER_URL  -- URL of a research-helper subagent
+#
+# subagents:
+#   - name: research_helper
+#     description: "Searches internal knowledge base; returns synthesised brief."
+#     when_to_use: "Use when the user asks an open-ended policy question."
+#     transport:
+#       type: remote
+#       url: ${RESEARCH_HELPER_URL:-http://research-helper:8080/v1}
+#       timeout_seconds: 60
+#     permission_scope: research-readonly   # parsed; not enforced until #164
+#     identity: inherit
+#     max_depth: 3
+subagents: []
+
+# -- Node deployment topology (optional) -------------------------------------
+#
+# Maps workflow node names to their deployment topology.  Nodes default to
+# local (in-process).  Set type: remote to delegate processing to an
+# already-deployed agent via HTTP POST.
+#
+# The runner auto-wraps remote nodes -- the graph definition stays
+# topology-agnostic.  Same graph works for local dev and production.
+#
+# Remote contract:
+#   POST {endpoint}{path}
+#   Body:  {"state": {...}, "state_type": "fully.qualified.ClassName"}
+#   Reply: {"state": {...}}
+#
+# Production env vars (example):
+#   RESEARCH_AGENT_URL -- URL of a separately deployed research agent
+#
+# nodes:
+#   classify:
+#     type: local
+#   research:
+#     type: remote
+#     endpoint: ${RESEARCH_AGENT_URL:-http://research-agent:8080}
+#     path: /process        # default
+#     timeout: 30.0         # seconds, default
+#     retries: 2            # HTTP-level retries (runner also retries via node_retries)
+nodes: {}
+
+# -- Code execution sandbox (optional) ----------------------------------------
+#
+# The code_executor tool sends LLM-generated Python code to a sandbox sidecar
+# for safe execution.  The sidecar runs in the same pod and is reachable at
+# localhost:8000.  Enable it in your Helm values:
+#
+#   sandbox:
+#     enabled: true
+#     image:
+#       repository: quay.io/yourorg/code-sandbox
+#       tag: latest
+#
+# The tool reads SANDBOX_URL from the environment (set automatically by the
+# Helm chart when sandbox.enabled=true).  For local development, run the
+# sandbox manually from https://github.com/fips-agents/code-sandbox or
+# scaffold a standalone instance with `fips-agents create sandbox <name>`.
+#
+# Available modules in the sandbox:
+#   math, statistics, itertools, functools, re, datetime, collections,
+#   json, csv, string, textwrap, decimal, fractions, random, operator, typing
+#
+# Production env vars:
+#   SANDBOX_URL -- override the sidecar URL (default: http://localhost:8000)
+
+# -- Pricing (optional) --------------------------------------------------------
+#
+# Token cost lookup table.  Defaults to zero for all models (self-hosted vLLM).
+# Set non-zero rates when billing is metered (hosted providers, usage chargebacks).
+#
+# `default` applies to any model not listed in `models`. `models` keys must
+# match the model identifier exactly as it appears on completion requests
+# (typically `model.name` from this file). All rates are USD per 1,000 tokens.
+#
+# `cached_input_per_1k` is the reduced rate for prompt-cache hits when the
+# provider returns `prompt_tokens_details.cached_tokens` (OpenAI semantics).
+# Omit or set to `null` to charge the full `input_per_1k` rate for cached tokens.
+#
+# Production env vars:
+#   PRICING_INPUT_PER_1K          -- default input rate
+#   PRICING_OUTPUT_PER_1K         -- default output rate
+#   PRICING_CACHED_INPUT_PER_1K   -- default cached input rate
+#   PRICING_PER_REQUEST           -- default per-request fee
+# pricing:
+#   default:
+#     input_per_1k: ${PRICING_INPUT_PER_1K:-0.0}
+#     output_per_1k: ${PRICING_OUTPUT_PER_1K:-0.0}
+#     cached_input_per_1k: ${PRICING_CACHED_INPUT_PER_1K:-}
+#     per_request: ${PRICING_PER_REQUEST:-0.0}
+#   # Example model-specific override:
+#   # models:
+#   #   meta-llama/Llama-3.3-70B-Instruct:
+#   #     input_per_1k: 0.0005
+#   #     output_per_1k: 0.002
+#   #     cached_input_per_1k: 0.0001
+
+# -- Budget (optional) ---------------------------------------------------------
+#
+# Per-session and per-tenant cost limits. Session limits read cumulative cost
+# from the session store; tenant limits aggregate in-process (accurate for
+# single-replica deployments; multi-replica tenant totals require external
+# aggregation).
+#
+# mode:
+#   observe -- log warnings + limit crossings, never raise
+#   enforce -- raise HTTP 402 when hard limit is reached (default)
+#
+# For each limit tier (per_session, per_tenant):
+#   warn_usd  -- log when running total crosses this threshold
+#   limit_usd -- raise BudgetExceededError (when mode: enforce) at this threshold
+#
+# Setting a limit to 0 disables that threshold.
+#
+# Production env vars:
+#   BUDGET_MODE                   -- observe | enforce
+#   BUDGET_SESSION_WARN_USD       -- per-session soft limit
+#   BUDGET_SESSION_LIMIT_USD      -- per-session hard limit
+#   BUDGET_TENANT_WARN_USD        -- per-tenant soft limit
+#   BUDGET_TENANT_LIMIT_USD       -- per-tenant hard limit
+# budget:
+#   mode: ${BUDGET_MODE:-enforce}
+#   per_session:
+#     warn_usd: ${BUDGET_SESSION_WARN_USD:-0.0}
+#     limit_usd: ${BUDGET_SESSION_LIMIT_USD:-0.0}
+#   per_tenant:
+#     warn_usd: ${BUDGET_TENANT_WARN_USD:-0.0}
+#     limit_usd: ${BUDGET_TENANT_LIMIT_USD:-0.0}

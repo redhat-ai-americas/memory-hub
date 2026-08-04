@@ -1,0 +1,116 @@
+# OpenShell sandbox policy for the SOC demo agents.
+# Allows MCP access to the MemoryHub server and LLM API egress.
+#
+# Apply with: openshell sandbox create --policy demos/soc-demo/openshift/memoryhub-sandbox-policy.yaml ...
+# Hot-reload:  openshell policy set <sandbox> demos/soc-demo/openshift/memoryhub-sandbox-policy.yaml
+
+version: 1
+
+network_policies:
+  memoryhub_mcp:
+    name: MemoryHub MCP Server
+    endpoints:
+      - host: memory-hub-mcp.memory-hub-mcp.svc.cluster.local
+        port: 8080
+        protocol: mcp
+        enforcement: enforce
+        mcp:
+          allow_all_known_mcp_methods: false
+        rules:
+          - allow:
+              method: initialize
+          - allow:
+              method: tools/list
+          - allow:
+              method: tools/call
+          - allow:
+              method: resources/list
+          - allow:
+              method: resources/read
+          - allow:
+              method: prompts/list
+          - allow:
+              method: prompts/get
+          - allow:
+              method: notifications/initialized
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**
+
+  anthropic_api:
+    name: Anthropic API
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**
+
+  openai_api:
+    name: OpenAI API
+    endpoints:
+      - host: api.openai.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**
+
+  openrouter_api:
+    name: OpenRouter API
+    endpoints:
+      - host: openrouter.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**
+
+  google_gemini_api:
+    name: Google Gemini API
+    endpoints:
+      - host: generativelanguage.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**
+
+  memoryhub_auth:
+    name: MemoryHub Auth Server
+    endpoints:
+      - host: auth-server.memoryhub-auth.svc.cluster.local
+        port: 8081
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**

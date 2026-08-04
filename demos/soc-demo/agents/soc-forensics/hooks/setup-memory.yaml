@@ -1,0 +1,4 @@
+event: setup_complete
+command: ./hooks/fetch-memory.sh
+timeout: 10
+name: memory-loader

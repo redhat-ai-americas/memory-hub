@@ -1,0 +1,17 @@
+{{- if and .Values.files.enabled .Values.files.virusScanner.enabled .Values.files.virusScanner.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-template.fullname" . }}-clamav-db
+  labels:
+    {{- include "agent-template.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.files.virusScanner.persistence.size | quote }}
+  {{- with .Values.files.virusScanner.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

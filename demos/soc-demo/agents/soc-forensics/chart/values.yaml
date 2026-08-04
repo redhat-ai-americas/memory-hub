@@ -1,0 +1,291 @@
+# Default values for soc-forensics.
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: soc-forensics
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Resource requests and limits.
+# Agents are typically CPU-light and memory-moderate (LLM calls are remote).
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# agent.yaml overrides injected via ConfigMap.
+# These environment variables are substituted into agent.yaml at runtime
+# using the ${VAR:-default} pattern.  Only set values that differ from
+# the defaults baked into the image.
+config:
+  # MODEL_ENDPOINT: https://vllm.apps.cluster.example.com/v1
+  # MODEL_NAME: meta-llama/Llama-3.3-70B-Instruct
+  # MAX_ITERATIONS: "50"
+  # LOG_LEVEL: WARNING
+
+# Additional environment variables (name/value pairs).
+# Use this for variables not covered by the config section, or for
+# referencing Secrets.
+#
+# Example:
+#   env:
+#     - name: API_KEY
+#       valueFrom:
+#         secretKeyRef:
+#           name: agent-secrets
+#           key: api-key
+env: []
+
+probes:
+  enabled: false
+
+service:
+  port: 8080
+
+route:
+  enabled: false
+  host: ""
+  # TLS configuration for OpenShift Route.
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+# -- LLM adapter sidecar (optional) ------------------------------------------
+# Enable to route LLM traffic to off-platform providers (Anthropic, AWS
+# Bedrock, Azure OpenAI).  The sidecar shares the pod network namespace and
+# listens on localhost:8081.  The framework routes traffic here automatically
+# when model.provider is non-openai.
+#
+# Prerequisites:
+#   1. Set model.provider in agent.yaml (or MODEL_PROVIDER env var) to the
+#      target provider: "anthropic", "bedrock", or "azure".
+#   2. Create a Kubernetes Secret with provider credentials:
+#        Anthropic: ANTHROPIC_API_KEY
+#        AWS Bedrock: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+#        Azure OpenAI: AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT
+#   3. Build and push the adapter image from packages/llm-adapter/.
+llm_adapter:
+  enabled: false
+  # Provider selects translation mode inside the adapter container.
+  # Must match model.provider in agent.yaml.
+  provider: openai
+  image:
+    repository: llm-adapter
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Secret containing provider credentials.  Injected as env vars into the
+  # adapter sidecar.  Example:
+  #   secretRef:
+  #     name: anthropic-credentials
+  secretRef: {}
+
+# -- Code execution sandbox sidecar (optional) --------------------------------
+# Enable to run LLM-generated Python code safely.  The sidecar shares the pod
+# network namespace, so the code_executor tool reaches it at localhost:8000.
+#
+# Prerequisites:
+#   1. Add tools/code_executor.py to your agent (see /add-tool).
+#   2. Build the sandbox image from https://github.com/fips-agents/code-sandbox
+#      and push it to your registry.
+sandbox:
+  enabled: false
+  # Sandbox profile: minimal, data-science, financial, code-analysis.
+  # Controls which imports are allowed and which scan stages run.
+  # The image tag should match the profile (e.g., "0.5.0-data-science").
+  # Sets SANDBOX_PROFILE env var in the sandbox container.
+  profile: minimal
+  image:
+    repository: code-sandbox
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # Custom seccomp profile for the sandbox container.
+  # Blocks networking syscalls (socket, connect, bind) and dangerous
+  # operations (ptrace, mount, io_uring) at the kernel level.
+  #
+  # Prerequisites:
+  #   1. Security Profiles Operator (SPO) installed on the cluster
+  #      (GA since OCP 4.12 — install from OperatorHub).
+  #   2. A custom SCC or SPO ProfileBinding that permits Localhost
+  #      seccomp profiles (restricted-v2 only allows RuntimeDefault).
+  seccomp:
+    enabled: false
+
+# -- File uploads + ClamAV sidecar (optional) ---------------------------------
+# Enable to accept POST /v1/files uploads. The agent persists each file via
+# the configured FilesConfig backend and (optionally) extracts text via
+# Docling for inline injection into chat completions.
+#
+# Prerequisites:
+#   1. Add the [files] extra to your container build:
+#        pip install -e .[files]
+#      Adds ~500MB for docling's torch/transformers — opt-in only when the
+#      agent actively ingests files.
+#   2. Set files.enabled=true (or FILES_ENABLED=true via config above).
+#   3. Set files.backend (sqlite for dev, postgres for production).
+#
+# When virusScanner.enabled=true a ClamAV sidecar is deployed in the same
+# pod and reachable at localhost:3310 (TCP) plus an HTTP shim on
+# localhost:8088 that exposes the {infected, viruses} JSON contract the
+# agent's HttpScanner expects. The agent's scanner.url is set to
+# http://localhost:8088/scan automatically.
+files:
+  enabled: false
+  # Sub-knobs override agent.yaml defaults via env vars when set.
+  # Leave empty to inherit the in-image defaults.
+  backend: ""               # "" | sqlite | postgres
+  maxSizeBytes: ""          # eg "52428800" or empty for 50 MiB default
+  # Empty defers to agent.yaml's allowed_mime_types (which itself can be
+  # empty, deferring to the gateway's allowlist).
+  allowedMime: ""
+  # Persistent volume for the agent's file bytes (`bytes_dir`). Both
+  # `SqliteFileStore` and `PostgresFileStore` write file content to a
+  # local-filesystem path; without a PVC, every pod restart wipes the
+  # uploaded bytes (metadata in Postgres survives; bytes don't).
+  #
+  # Single-replica deployments: ReadWriteOnce is fine.
+  # Multi-replica deployments: requires ReadWriteMany (NFS / CephFS /
+  # cloud-managed RWX). RWO will fail on the second replica's pod
+  # scheduling. The fundamentally cleaner answer is the S3-compatible
+  # bytes backend (see ADR-0001 in docs/adr/) — track soc-forensics#100.
+  #
+  # When .persistence.enabled, the chart sets FILES_BYTES_DIR on the
+  # agent container so the in-image agent.yaml default of `./files` is
+  # overridden to `mountPath`.
+  #
+  # For SqliteFileStore (backend: sqlite or unset), the chart also sets
+  # FILES_SQLITE_DB_PATH=<mountPath>/.metadata/agent.db so the metadata
+  # DB lives on the same PVC as the bytes — otherwise it stays in
+  # storage.sqlite_path (typically ephemeral) and bytes survive but are
+  # orphaned (404 on GET /v1/files/{id}). Postgres backends are
+  # unaffected; their metadata is in the database.
+  persistence:
+    enabled: false
+    size: 5Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    mountPath: /var/lib/agent/files
+  # S3-compatible bytes backend (per ADR-0001). When type=s3, the chart
+  # sets FILES_BYTES_BACKEND + FILES_S3_* env vars on the agent so the
+  # in-image agent.yaml's bytes_backend block resolves correctly. Bytes
+  # land in the bucket; metadata lives in the configured backend
+  # (sqlite or postgres). Multi-replica safe — replaces the PVC story.
+  #
+  # Credentials: set access_key/secret_key when boto3's default chain
+  # (IAM role, env vars, EC2 metadata) is unavailable. For OpenShift,
+  # prefer mounting a Secret and feeding it via .Values.env or an
+  # external-secrets operator rather than putting raw values here.
+  #
+  # MinIO requires path_style: true. AWS S3 native: leave path_style
+  # off and omit endpoint.
+  bytesBackend:
+    type: ""                  # "" | local_fs | s3 | null  (empty defers to agent.yaml default)
+    bucket: ""
+    endpoint: ""              # eg http://minio.<ns>.svc:9000 — leave empty for AWS S3
+    region: us-east-1
+    accessKey: ""
+    secretKey: ""
+    prefix: ""                # optional key prefix within the bucket
+    pathStyle: false
+  # Docling parser pipeline knobs (resolved against `agent.yaml`'s
+  # files.parser block). Only the PDF pipeline is exposed today; defer
+  # to agent.yaml defaults by leaving these empty.
+  #
+  # The agent.yaml default for `pdf.doOcr` is `false` — text-extractable
+  # PDFs parse in sub-second instead of multiple minutes per page. Set
+  # `pdf.doOcr: "true"` for scanned PDFs only.
+  parser:
+    pdf:
+      doOcr: ""                  # "" | "true" | "false"
+      doTableStructure: ""       # "" | "true" | "false"
+  # Large-file chunking + retrieval (per ADR-0002). When enabled, files
+  # whose extracted text exceeds small_file_threshold_tokens are split,
+  # embedded via the configured OpenAI-compatible embedding endpoint,
+  # and stored in pgvector. At chat-completion time the chunked file's
+  # content is retrieved per-query rather than dumped wholesale into the
+  # prompt — the canonical RAG path scoped to the request's file_ids.
+  #
+  # Disabled by default; smaller files always inject as full text.
+  # Enable to opt this deployment into chunking — requires:
+  #   - the [chunking] extra in the container build
+  #   - a reachable pgvector instance (databaseUrl)
+  #   - a reachable OpenAI-compatible embeddings endpoint (embeddingUrl)
+  #
+  # The chart sets CHUNKING_* env vars on the agent container when
+  # enabled; the in-image agent.yaml's files.chunking block resolves
+  # them. Empty values defer to the agent.yaml defaults.
+  #
+  # budget mirrors memory.budget so a deployment using `budget: small`
+  # for memory naturally gets matching chunking defaults — set the same
+  # value here for parity.
+  chunking:
+    enabled: false
+    backend: pgvector            # "" | pgvector | null
+    databaseUrl: ""              # postgresql://user:pass@host:5432/db
+    embeddingUrl: ""             # eg http://embedding.<ns>.svc/v1
+    embeddingModel: ""           # empty defers to agent.yaml default
+    embeddingDimension: ""       # empty defers to agent.yaml default (768)
+    tableName: ""                # empty defers to agent.yaml default
+    budget: ""                   # "" | small | medium | large | custom
+  # ClamAV sidecar — pre-deployed image with an HTTP shim that the
+  # framework's HttpScanner contract expects.
+  virusScanner:
+    enabled: false
+    failMode: open          # "open" (dev) or "closed" (production-recommended)
+    image:
+      # Reference image: clamav/clamav:stable bundled with a small
+      # FastAPI shim that translates the {infected, viruses} JSON
+      # contract to and from clamd. Replace with your own org build.
+      repository: clamav/clamav
+      tag: stable
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 100m
+        memory: 1Gi          # ClamAV's signature DB is large
+      limits:
+        cpu: 500m
+        memory: 2Gi
+    # Persistent volume for the ClamAV signature database. Without one,
+    # clamd refreshes the full signature set every pod restart (~250 MB).
+    persistence:
+      enabled: false
+      size: 2Gi
+      storageClass: ""
+
+# -- FIPS cluster notes -------------------------------------------------------
+# No FIPS-specific configuration is required. UBI base images ship
+# FIPS-aware OpenSSL and respect the host kernel's fips=1 mode
+# automatically.
+#
+# Validated behavior (OCP 4.20.17, OpenSSL 3.5.1, 2026-04-15):
+#   - Sandbox: python3 -I subprocess inherits FIPS mode. hashlib.md5()
+#     raises UnsupportedDigestmodError; md5(usedforsecurity=False) works.
+#     hashlib.sha1() is NOT blocked by FIPS. Guardrails fire before FIPS
+#     for both md5 and sha1 with actionable error messages.
+#   - TLS: 21 AEAD-only ciphers (AES-GCM/CCM, TLSv1.2/1.3). SHA-1
+#     signed certs from external sources can be verified. Endpoints
+#     requiring non-AEAD cipher suites (CBC, RC4) cannot negotiate.
+#   - Seccomp/Landlock: Kernel mechanisms, unaffected by FIPS.
+#
+# See research/sandbox-hardening-v2.md Finding 5 for full test results.

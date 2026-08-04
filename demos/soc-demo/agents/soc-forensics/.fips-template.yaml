@@ -1,0 +1,94 @@
+# fips-agents-cli template manifest.
+#
+# This file declares which paths in the agent-loop template are managed
+# by the template (and so should be offered as patches by `fips-agents
+# patch`) and which belong to the user. The CLI reads this file from
+# the comparison root after cloning, before computing drift in
+# `fips-agents patch check`.
+#
+# When this file is absent, malformed, or declares an unsupported
+# schema_version, the CLI falls back to its hardcoded category set
+# keyed by template.type. See:
+#   https://github.com/fips-agents/fips-agents-cli/issues/45
+
+schema_version: 1
+
+patch:
+  categories:
+
+    chart:
+      description: Helm chart templates
+      patterns:
+        - chart/templates/**/*
+        - chart/Chart.yaml
+      ask_before_patch: true
+
+    docs:
+      description: Documentation files
+      patterns:
+        - CLAUDE.md
+        - AGENTS.md
+        - docs/**/*
+      ask_before_patch: false
+
+    build:
+      description: Build and deployment files
+      patterns:
+        - Makefile
+        - Containerfile
+        - deploy.sh
+        - redeploy.sh
+        - .containerignore
+        - .gitignore
+      ask_before_patch: true
+
+    claude:
+      description: Claude Code slash commands and rules shipped with the template
+      patterns:
+        - .claude/commands/**/*
+        - .claude/rules/**/*
+      ask_before_patch: false
+
+    evals:
+      description: Evaluation harness (discovery, assertions, runner)
+      patterns:
+        - evals/__init__.py
+        - evals/assertions.py
+        - evals/discovery.py
+        - evals/mock_factory.py
+        - evals/run_evals.py
+        - evals/README.md
+      ask_before_patch: true
+
+  never_patch:
+    # User's agent implementation
+    - src/agent.py
+    # User's agent config (model, prompts, server settings)
+    - agent.yaml
+    # User's deploy values
+    - chart/values.yaml
+    # Vendored runtime — managed by `fips-agents vendor --update`
+    - src/fipsagents/**
+    # User-authored tools (target of `fips-agents add code-executor`)
+    - tools/**
+    # User-authored examples (target of `fips-agents add vision`)
+    - examples/**
+    # User-customized identity and personality (prompt assembly layers 0/1)
+    - identity.md
+    - personality.md
+    # User-customized prompts / rules / skills
+    - prompts/**
+    - rules/**
+    - skills/**
+    # User-authored eval inputs
+    - evals/evals.yaml
+    - evals/fixtures/**
+    # Tests are user code
+    - tests/**/*.py
+    # Environment files
+    - .env*
+    # User-customized memory hub config
+    - .memoryhub.yaml
+    # User's README and pyproject
+    - README.md
+    - pyproject.toml

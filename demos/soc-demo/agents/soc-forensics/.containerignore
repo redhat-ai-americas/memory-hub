@@ -1,0 +1,51 @@
+# =============================================================================
+# .containerignore — exclude from container build context
+# =============================================================================
+
+# Python artifacts
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Development and test
+tests/
+evals/
+.pytest_cache/
+.benchmarks/
+htmlcov/
+.coverage
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Claude / AI assistant config (development-only)
+.claude/
+CLAUDE.md
+
+# Container build files (not needed inside the image)
+Containerfile
+.containerignore
+
+# Deployment tooling (not needed inside the image)
+chart/
+deploy.sh
+Makefile
+
+# Documentation (not needed inside the image)
+docs/
+planning/
+research/
+README.md
+LICENSE

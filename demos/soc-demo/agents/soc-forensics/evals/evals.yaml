@@ -1,0 +1,94 @@
+# Eval cases for this agent.
+#
+# *** STARTER EXAMPLES — replace these when you run /exercise-agent ***
+#
+# /exercise-agent reads your agent's implementation and generates real eval
+# cases tailored to your agent's actual inputs, tools, and output model.
+# The cases below are illustrative placeholders to show the format.
+#
+# Format reference:
+#   name:              Unique identifier (used with --case).
+#   description:       Human-readable purpose of this eval.
+#   input:             The user query/prompt sent to the agent.
+#   expected_behavior: Prose description of what the agent should do.
+#   tags:              Optional list for filtering (e.g. "smoke", "edge", "multi-step").
+#   assertions:        List of checks.  Each has:
+#       type:          One of: contains, not_contains, field_exists,
+#                      field_gte, field_lte, tool_called, custom.
+#       field:         Output model field to inspect (for field_* and contains types).
+#       value:         Expected value or threshold.
+#       tool:          Tool name (for tool_called type).
+#       min_calls:     Minimum invocation count (for tool_called type, optional).
+
+cases:
+  - name: basic_happy_path
+    description: >
+      A typical request that falls squarely within the agent's purpose.
+      Replace this with a real smoke-test input for your agent.
+      Tag: smoke — run on every commit to catch regressions fast.
+    input: "Example input for the agent"
+    expected_behavior: >
+      The agent calls its primary tool, processes the result, and returns
+      a structured output with all required fields populated.
+      Replace this prose with a concrete description of what your agent
+      should do for your specific domain.
+    tags: [smoke]
+    assertions:
+      # Replace 'summary' and 'result' with fields from your output Pydantic model.
+      - type: field_exists
+        field: summary
+      - type: field_exists
+        field: result
+      # Replace 'example_tool' with the LLM-visible tool your agent calls.
+      - type: tool_called
+        tool: example_tool
+      # Replace 'expected keyword' with a term that should appear in the output.
+      - type: contains
+        field: summary
+        value: "expected keyword"
+
+  - name: multi_step_input
+    description: >
+      A request that should cause the agent to call tools more than once
+      before producing a final answer.  Replace with a real multi-step
+      scenario for your agent's domain.
+      Tag: multi-step — tests chained tool use and synthesis.
+    input: "Example input that requires several tool calls to answer fully"
+    expected_behavior: >
+      The agent invokes its primary tool at least twice, gathering
+      information from multiple sources, then synthesizes a coherent
+      response that covers all aspects of the request.
+    tags: [multi-step]
+    assertions:
+      - type: field_exists
+        field: result
+      # min_calls verifies the agent made multiple tool invocations.
+      - type: tool_called
+        tool: example_tool
+        min_calls: 2
+      # Replace 0.7 with the confidence threshold appropriate for your model.
+      - type: field_gte
+        field: confidence
+        value: 0.7
+
+  - name: out_of_scope_input
+    description: >
+      A request outside the agent's intended domain.  The agent should
+      degrade gracefully rather than crash or hallucinate confidently.
+      Replace with an actual out-of-scope or adversarial input for your
+      agent.
+      Tag: edge — validates boundary behavior.
+    input: "Example input that is outside the agent's intended scope"
+    expected_behavior: >
+      The agent completes without raising an unhandled exception.  It may
+      decline, express low confidence, or acknowledge that the request is
+      outside its domain.  The key requirement is a graceful response.
+    tags: [edge]
+    assertions:
+      - type: field_exists
+        field: result
+      # A low ceiling on confidence signals appropriate humility.
+      # Remove this assertion if your output model has no confidence field.
+      - type: field_lte
+        field: confidence
+        value: 0.5

@@ -1,0 +1,220 @@
+{{- if and .Values.sandbox.enabled .Values.sandbox.seccomp.enabled }}
+# Requires the Security Profiles Operator (SPO) to be installed on the
+# cluster.  SPO is GA since OCP 4.12 — install from OperatorHub.
+# The operator syncs this profile to all worker nodes automatically.
+#
+# If SPO is not available, deploy the profile JSON via MachineConfig
+# instead (see research/sandbox-hardening-v2.md for details).
+apiVersion: security-profiles-operator.x-k8s.io/v1beta1
+kind: SeccompProfile
+metadata:
+  name: {{ include "agent-template.fullname" . }}-sandbox
+  labels:
+    {{- include "agent-template.labels" . | nindent 4 }}
+spec:
+  # Deny by default.  This profile covers the entire sandbox container
+  # (uvicorn + executor subprocess).  Uvicorn needs socket/bind/listen for
+  # its HTTP server; the executor subprocess gets additional Landlock LSM
+  # restrictions to block filesystem escape, applied in code at startup.
+  defaultAction: SCMP_ACT_ERRNO
+  syscalls:
+    # -- Process lifecycle ----------------------------------------------------
+    - names:
+        - fork
+        - vfork
+        - clone
+        - clone3
+        - execve
+        - execveat
+        - wait4
+        - waitid
+        - exit
+        - exit_group
+        - kill
+        - tgkill
+      action: SCMP_ACT_ALLOW
+
+    # -- File I/O -------------------------------------------------------------
+    - names:
+        - read
+        - pread64
+        - write
+        - writev
+        - sendfile
+        - sendfile64
+        - splice
+        - close
+        - close_range
+        - openat
+        - open
+        - lseek
+        - dup
+        - dup2
+        - dup3
+        - pipe
+        - pipe2
+        - fcntl
+      action: SCMP_ACT_ALLOW
+
+    # -- Memory management ----------------------------------------------------
+    - names:
+        - mmap
+        - mprotect
+        - munmap
+        - mremap
+        - brk
+        - madvise
+      action: SCMP_ACT_ALLOW
+
+    # -- Filesystem metadata ---------------------------------------------------
+    - names:
+        - stat
+        - fstat
+        - lstat
+        - newfstatat
+        - statx
+        - access
+        - faccessat
+        - faccessat2
+        - readlink
+        - readlinkat
+        - getcwd
+        - getdents64
+        - rename
+        - renameat2
+        - mkdir
+        - mkdirat
+        - rmdir
+        - unlink
+        - unlinkat
+        - chmod
+        - fchmod
+        - fchmodat
+      action: SCMP_ACT_ALLOW
+
+    # -- Signals ---------------------------------------------------------------
+    - names:
+        - rt_sigaction
+        - rt_sigprocmask
+        - rt_sigreturn
+        - sigaltstack
+      action: SCMP_ACT_ALLOW
+
+    # -- Concurrency and timing ------------------------------------------------
+    - names:
+        - futex
+        - set_tid_address
+        - set_robust_list
+        - clock_gettime
+        - clock_getres
+        - clock_nanosleep
+        - nanosleep
+        - gettimeofday
+      action: SCMP_ACT_ALLOW
+
+    # -- Process identity and limits -------------------------------------------
+    - names:
+        - getpid
+        - getppid
+        - getpgrp
+        - gettid
+        - getuid
+        - getgid
+        - geteuid
+        - getegid
+        - getgroups
+        - setresuid
+        - setresgid
+        - prctl
+        - prlimit64
+        - uname
+        - arch_prctl
+        - sysinfo
+        - getrandom
+      action: SCMP_ACT_ALLOW
+
+    # -- Polling and event notification ----------------------------------------
+    - names:
+        - poll
+        - ppoll
+        - select
+        - pselect6
+        - epoll_create1
+        - epoll_ctl
+        - epoll_wait
+        - epoll_pwait
+        - eventfd2
+        - timerfd_create
+        - timerfd_settime
+        - timerfd_gettime
+      action: SCMP_ACT_ALLOW
+
+    # -- Networking (uvicorn HTTP server — not the code executor subprocess) ---
+    # Uvicorn needs these to serve HTTP on localhost:8000.
+    # The code executor subprocess is restricted via Landlock LSM at the app
+    # layer; seccomp networking blocks here would prevent the server from
+    # starting.
+    - names:
+        - socket
+        - bind
+        - listen
+        - accept
+        - accept4
+        - connect
+        - sendto
+        - recvfrom
+        - sendmsg
+        - recvmsg
+        - socketpair
+        - setsockopt
+        - getsockopt
+        - getsockname
+        - getpeername
+      action: SCMP_ACT_ALLOW
+
+    # -- Async I/O (Python asyncio / uvloop use io_uring when available) -------
+    - names:
+        - io_uring_setup
+        - io_uring_enter
+        - io_uring_register
+      action: SCMP_ACT_ALLOW
+
+    # -- Miscellaneous (Python runtime needs) ----------------------------------
+    - names:
+        - ioctl
+        - sched_getaffinity
+        - sched_yield
+        - getrlimit
+        - rseq
+      action: SCMP_ACT_ALLOW
+
+    # -- Explicitly blocked (defense-in-depth) ---------------------------------
+    # These are already denied by SCMP_ACT_ERRNO default, but listing them
+    # makes the policy self-documenting.
+    - names:
+        # Process injection
+        - ptrace
+        - process_vm_readv
+        - process_vm_writev
+        # Kernel modules
+        - init_module
+        - finit_module
+        - delete_module
+        # Filesystem root manipulation
+        - mount
+        - umount2
+        - pivot_root
+        - chroot
+        # eBPF (code executor has no need for kernel programs)
+        - bpf
+        # Namespace manipulation
+        - unshare
+        - setns
+        # System administration
+        - reboot
+        - kexec_load
+        - kexec_file_load
+        - swapon
+        - swapoff
+      action: SCMP_ACT_ERRNO
+{{- end }}

@@ -1,0 +1,17 @@
+{{- if and .Values.files.enabled .Values.files.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-template.fullname" . }}-files-bytes
+  labels:
+    {{- include "agent-template.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.files.persistence.accessMode | default "ReadWriteOnce" | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.files.persistence.size | quote }}
+  {{- with .Values.files.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
