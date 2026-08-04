@@ -1,0 +1,20 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: PLACEHOLDER
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: PLACEHOLDER
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: PLACEHOLDER:latest
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile

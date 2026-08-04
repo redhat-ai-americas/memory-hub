@@ -71,6 +71,14 @@ build: ## Build container image with podman (linux/amd64 for OpenShift)
 		-f Containerfile . \
 		--no-cache
 
+.PHONY: build-openshift
+build-openshift: ## Build on OpenShift via BuildConfig (make build-openshift PROJECT=<ns>)
+	@if ! oc get bc $(IMAGE_NAME) -n $(PROJECT) $(OC_CTX) &>/dev/null; then \
+		echo "Creating BuildConfig and ImageStream $(IMAGE_NAME) in $(PROJECT)..."; \
+		sed 's/PLACEHOLDER/$(IMAGE_NAME)/g' build/buildconfig.yaml | oc apply -n $(PROJECT) $(OC_CTX) -f -; \
+	fi
+	oc start-build $(IMAGE_NAME) --from-dir=. -n $(PROJECT) $(OC_CTX) --follow
+
 # ---------------------------------------------------------------------------
 # Deployment
 # ---------------------------------------------------------------------------

@@ -50,7 +50,9 @@ temp/
 
 # Build artifacts
 dist/
-build/
+# build/ is needed for OpenShift BuildConfig templates
+!build/
+build/*.tmp
 
 # Testing
 .coverage
