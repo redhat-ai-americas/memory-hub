@@ -30,6 +30,11 @@ the project-membership work, and the eventual audit log all build on.
 
 ## Documents in this folder
 
+- **[rbac-guide.md](rbac-guide.md)** — Developer-facing reference for
+  authentication and authorization. Covers API key vs. OAuth, what scopes
+  control, per-tier visibility rules, user record format, and common
+  troubleshooting. Start here if you're setting up users or trying to
+  understand why an agent can or can't see certain memories.
 - **[data-model.md](data-model.md)** — The `owner_id` / `actor_id` /
   `driver_id` triple. Schema additions to `MemoryNode`. Mapping to RFC 8693
   and HL7 FHIR Provenance. Field semantics and defaults.
