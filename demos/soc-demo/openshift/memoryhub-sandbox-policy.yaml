@@ -100,6 +100,41 @@ network_policies:
       - path: /sandbox/**
       - path: /home/**
 
+  pypi_registry:
+    name: PyPI Package Registry
+    endpoints:
+      - host: pypi.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+      - host: files.pythonhosted.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**
+
+  npm_registry:
+    name: NPM Registry
+    endpoints:
+      - host: registry.npmjs.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - path: /usr/bin/**
+      - path: /usr/local/bin/**
+      - path: /opt/**
+      - path: /sandbox/**
+      - path: /home/**
+
   memoryhub_auth:
     name: MemoryHub Auth Server
     endpoints:
