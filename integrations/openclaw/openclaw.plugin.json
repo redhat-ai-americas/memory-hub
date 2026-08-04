@@ -1,0 +1,127 @@
+{
+  "id": "openclaw-memoryhub",
+  "name": "Memory (MemoryHub)",
+  "description": "MemoryHub memory backend for OpenClaw — governed, versioned, graph-aware agent memory with semantic search, focus-aware retrieval, and multi-scope hierarchy.",
+  "kind": "memory",
+  "contracts": {
+    "tools": [
+      "memoryhub_search",
+      "memoryhub_read",
+      "memoryhub_list",
+      "memoryhub_write",
+      "memoryhub_update",
+      "memoryhub_delete"
+    ]
+  },
+  "activation": {
+    "onStartup": false,
+    "onCommands": ["memoryhub"]
+  },
+  "setup": {
+    "providers": [
+      {
+        "id": "memoryhub",
+        "envVars": ["MEMORYHUB_API_KEY", "MEMORYHUB_URL"]
+      }
+    ]
+  },
+  "providerAuthChoices": [
+    {
+      "provider": "memoryhub",
+      "method": "api-key",
+      "choiceId": "memoryhub-api-key",
+      "choiceLabel": "MemoryHub API Key",
+      "choiceHint": "API key for MemoryHub server authentication",
+      "groupId": "memoryhub",
+      "groupLabel": "MemoryHub",
+      "optionKey": "auth.apiKey",
+      "cliFlag": "--memoryhub-api-key",
+      "cliOption": "--memoryhub-api-key <key>",
+      "cliDescription": "MemoryHub API key"
+    }
+  ],
+  "uiHints": {
+    "server.url": {
+      "label": "MemoryHub Server URL",
+      "placeholder": "https://memoryhub.example.com/mcp/",
+      "help": "URL of the MemoryHub MCP server endpoint"
+    },
+    "auth.apiKey": {
+      "label": "API Key",
+      "sensitive": true,
+      "placeholder": "mh-dev-...",
+      "help": "MemoryHub API key. Use ${MEMORYHUB_API_KEY} env var instead of plaintext."
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Automatically inject relevant memories before each agent turn"
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically store important information after each agent turn (not yet implemented)"
+    },
+    "defaults.scope": {
+      "label": "Default Scope",
+      "placeholder": "user",
+      "help": "Default scope for new memories: user, project, campaign, role, organizational, enterprise"
+    },
+    "defaults.projectId": {
+      "label": "Default Project",
+      "placeholder": "(auto-detect)",
+      "help": "MemoryHub project ID. When set, search results include project-scoped memories."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "server": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "transport": { "type": "string", "enum": ["streamable-http", "http-sse"] }
+        },
+        "required": ["url"]
+      },
+      "auth": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["api_key", "oauth"] },
+          "apiKey": { "type": "string", "sensitive": true }
+        }
+      },
+      "autoRecall": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "maxResults": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+          "maxResponseTokens": { "type": "integer", "default": 4000 },
+          "useFocus": { "type": "boolean", "default": true }
+        }
+      },
+      "autoCapture": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "defaultScope": { "type": "string", "default": "user" },
+          "defaultWeight": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7 }
+        }
+      },
+      "defaults": {
+        "type": "object",
+        "properties": {
+          "scope": { "type": "string" },
+          "projectId": { "type": "string" },
+          "domains": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "required": ["server"]
+  },
+  "providerEndpoints": [
+    {
+      "endpointClass": "mcp",
+      "hosts": []
+    }
+  ]
+}
