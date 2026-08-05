@@ -20,6 +20,8 @@ import sys
 import time
 import urllib.request
 
+import httpx
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../sdk/src"))
 
 import logging
@@ -70,6 +72,7 @@ PHASE_PAUSE = float(os.environ.get("HARNESS_PHASE_PAUSE", "2.0"))
 ACTION_PAUSE = float(os.environ.get("HARNESS_ACTION_PAUSE", "1.0"))
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
 FRONTEND_TOKEN = os.environ.get("FRONTEND_TOKEN", "")
+SOC_FORENSICS_URL = os.environ.get("SOC_FORENSICS_URL", "")
 
 _current_phase = 1
 _current_timestamp = "02:14"
@@ -104,6 +107,36 @@ def emit_reset():
         urllib.request.urlopen(req, timeout=5)
     except Exception:
         pass
+
+
+async def call_agent(prompt: str, timeout: float = 90.0) -> str | None:
+    """Call the FIPS-agent's /v1/chat/completions endpoint.
+
+    Returns the assistant's response text, or None on error/timeout.
+    """
+    if not SOC_FORENSICS_URL:
+        return None
+    url = SOC_FORENSICS_URL.rstrip("/")
+    if not url.endswith("/v1/chat/completions"):
+        url = f"{url}/v1/chat/completions"
+    try:
+        async with httpx.AsyncClient(timeout=timeout, verify=False) as http:
+            resp = await http.post(
+                url,
+                json={
+                    "model": "google/gemma-4-E4B-it",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 2048,
+                    "temperature": 0.3,
+                },
+                headers={"Authorization": "Bearer not-required"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"].get("content", "").strip()
+    except Exception as exc:
+        console.print(f"  [dim red]Agent call failed: {exc}[/]")
+        return None
 
 
 FRONTEND_AGENT_KEY = {
@@ -443,53 +476,111 @@ async def run_scenario():
         print_phase(3, "INVESTIGATION", "02:55 — 06:00",
                     "Parallel investigation: Forensics, Threat Intel, IC activated")
 
-        # Forensics: ai.exe filter
-        print_action("forensics", "search_memory",
-                     "query='outlook.exe child processes false positive'")
-        sr3 = await client.search(
-            "outlook.exe ai.exe false positive forensics",
-            scope="project", project_id=PROJECT_ID,
-        )
-        for r in sr3.results:
-            if "ai.exe" in r.content:
-                print_memory_found("forensics", r.content, "Self-authored operational memory",
-                                   memory_id=r.id,
-                                   metadata={"self_authored": True, "author_agent": "forensics"},
-                                   moment=2)
-                break
+        # Forensics investigation — live agent inference or scripted fallback
+        live_forensics = False
+        if SOC_FORENSICS_URL:
+            print_action("forensics", "investigating",
+                         "IR-2024-184 autonomously via Gemma 4 on-cluster")
+            emit({"type": "decision", "agent": fe_agent("forensics"),
+                  "content": "FIPS-Agent calling Gemma 4 for autonomous investigation"})
 
-        print_action("forensics", "apply_filter",
-                     "Filtering ai.exe from outlook.exe child process queries (3 prior incidents)")
+            agent_prompt = (
+                f"IMPORTANT: Before using any memory tools, you must first call the "
+                f"register_session tool with api_key=\"{api_key}\". This authenticates "
+                f"your session with MemoryHub.\n\n"
+                "You are investigating incident IR-2024-184 for MidWest Financial "
+                "Services Group. A CrowdStrike behavioral alert fired at 02:14 AM "
+                "for the svc-reporting service account showing unusual logon from "
+                "WKSTN-FIN-082, followed by SMB enumeration and file server access.\n\n"
+                "Using the shared SOC memory (project: midwest-financial-soc):\n"
+                "1. Search for prior incidents with similar patterns\n"
+                "2. Search for known false positives relevant to forensic analysis\n"
+                "3. Search for attacker staging path patterns from previous campaigns\n"
+                "4. Write a forensic timeline for IR-2024-184 summarizing the "
+                "attacker's activity sequence based on your findings\n\n"
+                "Be specific: cite incident IDs, timestamps, and technique details."
+            )
 
-        # Forensics: staging paths
-        sr4 = await client.search(
-            "staging paths attacker file server directory",
-            scope="project", project_id=PROJECT_ID,
-        )
-        for r in sr4.results:
-            if "staging" in r.content.lower() and "admin$" in r.content:
-                print_memory_found("forensics", r.content, "IR-2024-117 technique pattern")
-                break
+            console.print("  [dim]Waiting for Gemma 4 inference...[/]")
+            agent_response = await call_agent(agent_prompt)
 
-        # Forensics writes timeline
-        timeline_content = (
-            "IR-2024-184 forensic timeline: Attacker first accessed WKSTN-FIN-082 "
-            "at 15:22 on March 4 using svc-reporting credential harvested via "
-            "phishing 11 days prior. Enumeration phase (March 4-14) stayed within "
-            "business hours to blend with normal traffic. Staging began at 20:47 "
-            "on March 14 with 47 GB copied to \\\\FILESVR-CORP-03\\admin$\\TEMP\\reports2024\\. "
-            "CrowdStrike behavioral rule fired at 02:14 March 15 when staging "
-            "volume crossed 30 GB threshold."
-        )
-        fw = await client.write(
-            timeline_content, scope="project", project_id=PROJECT_ID,
-            weight=0.9,
-            metadata={"incident_id": "IR-2024-184", "role": "forensics",
-                       "framework": "fips-agent"},
-            force=True,
-        )
-        fw_id = fw.memory.id if fw.memory else "pending"
-        print_memory_written("forensics", timeline_content, fw_id)
+            if agent_response:
+                live_forensics = True
+                panel = Panel(
+                    agent_response[:2000],
+                    title="FIPS-Agent autonomous investigation (Gemma 4)",
+                    title_align="left",
+                    border_style="bold green",
+                    width=120,
+                    padding=(1, 2),
+                )
+                console.print(panel)
+                emit({"type": "memory_search", "agent": fe_agent("forensics"),
+                      "query": "autonomous investigation via Gemma 4"})
+
+                # Check if the agent wrote any memories
+                sr_check = await client.search(
+                    "IR-2024-184 forensic timeline",
+                    scope="project", project_id=PROJECT_ID,
+                )
+                for r in sr_check.results:
+                    if "IR-2024-184" in r.content and "timeline" in r.content.lower():
+                        print_memory_written("forensics", r.content[:300] + "...",
+                                             r.id, metadata={"live_inference": True})
+                        break
+                else:
+                    console.print("  [dim]Agent responded but did not write a timeline memory[/]")
+            else:
+                console.print("  [dim yellow]Live inference unavailable, using scripted path[/]")
+
+        if not live_forensics:
+            # Scripted fallback: ai.exe filter
+            print_action("forensics", "search_memory",
+                         "query='outlook.exe child processes false positive'")
+            sr3 = await client.search(
+                "outlook.exe ai.exe false positive forensics",
+                scope="project", project_id=PROJECT_ID,
+            )
+            for r in sr3.results:
+                if "ai.exe" in r.content:
+                    print_memory_found("forensics", r.content, "Self-authored operational memory",
+                                       memory_id=r.id,
+                                       metadata={"self_authored": True, "author_agent": "forensics"},
+                                       moment=2)
+                    break
+
+            print_action("forensics", "apply_filter",
+                         "Filtering ai.exe from outlook.exe child process queries (3 prior incidents)")
+
+            # Scripted fallback: staging paths
+            sr4 = await client.search(
+                "staging paths attacker file server directory",
+                scope="project", project_id=PROJECT_ID,
+            )
+            for r in sr4.results:
+                if "staging" in r.content.lower() and "admin$" in r.content:
+                    print_memory_found("forensics", r.content, "IR-2024-117 technique pattern")
+                    break
+
+            # Scripted fallback: write timeline
+            timeline_content = (
+                "IR-2024-184 forensic timeline: Attacker first accessed WKSTN-FIN-082 "
+                "at 15:22 on March 4 using svc-reporting credential harvested via "
+                "phishing 11 days prior. Enumeration phase (March 4-14) stayed within "
+                "business hours to blend with normal traffic. Staging began at 20:47 "
+                "on March 14 with 47 GB copied to \\\\FILESVR-CORP-03\\admin$\\TEMP\\reports2024\\. "
+                "CrowdStrike behavioral rule fired at 02:14 March 15 when staging "
+                "volume crossed 30 GB threshold."
+            )
+            fw = await client.write(
+                timeline_content, scope="project", project_id=PROJECT_ID,
+                weight=0.9,
+                metadata={"incident_id": "IR-2024-184", "role": "forensics",
+                           "framework": "fips-agent"},
+                force=True,
+            )
+            fw_id = fw.memory.id if fw.memory else "pending"
+            print_memory_written("forensics", timeline_content, fw_id)
 
         # Threat Intel: attribution
         attr_content = (

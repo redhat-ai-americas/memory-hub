@@ -25,10 +25,9 @@ resources:
 # using the ${VAR:-default} pattern.  Only set values that differ from
 # the defaults baked into the image.
 config:
-  # MODEL_ENDPOINT: https://vllm.apps.cluster.example.com/v1
-  # MODEL_NAME: meta-llama/Llama-3.3-70B-Instruct
-  # MAX_ITERATIONS: "50"
-  # LOG_LEVEL: WARNING
+  MODEL_ENDPOINT: http://gemma4.gemma-model.svc.cluster.local:80/v1
+  MODEL_NAME: google/gemma-4-E4B-it
+  OPENAI_API_KEY: not-required
 
 # Additional environment variables (name/value pairs).
 # Use this for variables not covered by the config section, or for
@@ -41,7 +40,12 @@ config:
 #         secretKeyRef:
 #           name: agent-secrets
 #           key: api-key
-env: []
+env:
+  - name: MEMORYHUB_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: memoryhub-api-key
+        key: api-key
 
 probes:
   enabled: false
@@ -50,7 +54,7 @@ service:
   port: 8080
 
 route:
-  enabled: false
+  enabled: true
   host: ""
   # TLS configuration for OpenShift Route.
   tls:

@@ -1,4 +1,4 @@
-"""Smoke tests for the scaffolded MyAgent stub.
+"""Smoke tests for the scaffolded SOCForensicsAgent stub.
 
 This file is intentionally coupled to the scaffold's example agent. When
 /create-agent runs (Step 10), it replaces this file entirely with tests
@@ -47,20 +47,20 @@ def _mock_response(content: str | None = None) -> Any:
 
 
 # Import after helpers so the module's top-level imports can resolve.
-from agent import MyAgent  # noqa: E402
+from agent import SOCForensicsAgent  # noqa: E402
 
 
-class TestMyAgentInstantiation:
+class TestSOCForensicsAgentInstantiation:
     def test_is_base_agent_subclass(self):
-        assert issubclass(MyAgent, BaseAgent)
+        assert issubclass(SOCForensicsAgent, BaseAgent)
 
     def test_can_instantiate_with_config(self):
-        agent = MyAgent(config=_make_config())
+        agent = SOCForensicsAgent(config=_make_config())
         # config is only assigned after setup(); pre-setup it is None.
         assert agent.config is None
 
 
-class TestMyAgentStep:
+class TestSOCForensicsAgentStep:
     @pytest.mark.asyncio
     async def test_step_returns_model_content(self, tmp_path: Path):
         """The minimal step() shape: call_model -> run_tool_calls -> done.
@@ -68,7 +68,7 @@ class TestMyAgentStep:
         With no tool calls in the response, run_tool_calls is a no-op and
         the assistant content flows straight through to StepResult.result.
         """
-        agent = MyAgent(
+        agent = SOCForensicsAgent(
             config=_make_config(),
             base_dir=_TEMPLATE_ROOT,
         )
