@@ -174,9 +174,9 @@ footer{border-top:1px solid var(--line);background:var(--panel);padding:8px 14px
 'use strict';
 const AGENTS = {
   tier1:    {role:'Tier 1 SOC Analyst',  fw:'Claude Code', color:'#00BCD4', actor:'soc.tier1',     model:'Claude · cloud API',       pos:{left:'50%',                       top:'max(78px,14%)'},              lx:'50%', ly:'14%'},
-  intel:    {role:'Threat Intel',        fw:'Hermes',      color:'#FFC107', actor:'soc.intel',     model:'Gemma 4 E4B · on-cluster', pos:{left:'max(132px,16%)',            top:'50%'},                        lx:'16%', ly:'50%'},
-  forensics:{role:'Forensics',           fw:'FIPS-Agent',  color:'#4CAF50', actor:'soc.forensics', model:'Gemma 4 E4B · on-cluster', pos:{left:'min(calc(100% - 132px),84%)',top:'50%'},                       lx:'84%', ly:'50%'},
-  ic:       {role:'Incident Commander',  fw:'OpenClaw',    color:'#E040FB', actor:'soc.ic',        model:'Gemma 4 E4B · on-cluster', pos:{left:'50%',                       top:'min(calc(100% - 78px),86%)'}, lx:'50%', ly:'86%'}
+  intel:    {role:'Threat Intel',        fw:'Hermes',      color:'#FFC107', actor:'soc.intel',     model:'GPT-OSS 20B · on-cluster', pos:{left:'max(132px,16%)',            top:'50%'},                        lx:'16%', ly:'50%'},
+  forensics:{role:'Forensics',           fw:'FIPS-Agent',  color:'#4CAF50', actor:'soc.forensics', model:'GPT-OSS 20B · on-cluster', pos:{left:'min(calc(100% - 132px),84%)',top:'50%'},                       lx:'84%', ly:'50%'},
+  ic:       {role:'Incident Commander',  fw:'OpenClaw',    color:'#E040FB', actor:'soc.ic',        model:'GPT-OSS 20B · on-cluster', pos:{left:'50%',                       top:'min(calc(100% - 78px),86%)'}, lx:'50%', ly:'86%'}
 };
 const PHASES = ['Detection & Triage','Forensic Investigation','Attribution','Contradiction','Containment','Shift Change','Recovery & Audit'];
 const STATUS = {memory_search:'SEARCHING', memory_hit:'READING', memory_read:'READING', memory_write:'WRITING', alert:'ALERT', decision:'DECIDING', quarantine:'BLOCKED'};
