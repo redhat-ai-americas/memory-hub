@@ -14,9 +14,11 @@ Usage:
 """
 
 import asyncio
+import json
 import os
 import sys
 import time
+import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../sdk/src"))
 
@@ -66,6 +68,54 @@ AGENTS = {
 
 PHASE_PAUSE = float(os.environ.get("HARNESS_PHASE_PAUSE", "2.0"))
 ACTION_PAUSE = float(os.environ.get("HARNESS_ACTION_PAUSE", "1.0"))
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
+FRONTEND_TOKEN = os.environ.get("FRONTEND_TOKEN", "")
+
+_current_phase = 1
+_current_timestamp = "02:14"
+
+
+def emit(event: dict):
+    """Post an event to the frontend relay server (if configured)."""
+    if not FRONTEND_URL:
+        return
+    event.setdefault("phase", _current_phase)
+    event.setdefault("timestamp", _current_timestamp)
+    data = json.dumps(event).encode()
+    headers = {"Content-Type": "application/json"}
+    if FRONTEND_TOKEN:
+        headers["X-Emit-Token"] = FRONTEND_TOKEN
+    req = urllib.request.Request(f"{FRONTEND_URL}/emit", data, headers)
+    try:
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+
+def emit_reset():
+    """Clear frontend history between runs."""
+    if not FRONTEND_URL:
+        return
+    headers = {"Content-Type": "application/json"}
+    if FRONTEND_TOKEN:
+        headers["X-Emit-Token"] = FRONTEND_TOKEN
+    req = urllib.request.Request(f"{FRONTEND_URL}/reset", b"{}", headers)
+    try:
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+
+FRONTEND_AGENT_KEY = {
+    "tier1": "tier1",
+    "forensics": "forensics",
+    "threatintel": "intel",
+    "ic": "ic",
+}
+
+
+def fe_agent(key: str) -> str:
+    return FRONTEND_AGENT_KEY.get(key, key)
 
 
 def agent_label(agent_key: str) -> Text:
@@ -77,6 +127,9 @@ def agent_label(agent_key: str) -> Text:
 
 
 def print_phase(number: int, title: str, time_str: str, detail: str):
+    global _current_phase, _current_timestamp
+    _current_phase = number
+    _current_timestamp = time_str.replace(" AM", "").replace(" ", "")
     console.print()
     header = Text()
     header.append(f"PHASE {number}", style="bold white on blue")
@@ -85,6 +138,7 @@ def print_phase(number: int, title: str, time_str: str, detail: str):
     console.rule(header, style="blue")
     console.print(f"  {detail}", style="dim")
     console.print()
+    emit({"type": "phase_start", "phase": number, "label": title, "description": detail})
     time.sleep(PHASE_PAUSE)
 
 
@@ -96,9 +150,16 @@ def print_action(agent_key: str, action: str, detail: str = ""):
     if detail:
         action_text.append(f"  {detail}", style="dim")
     console.print(action_text)
+    if "search" in action:
+        query = detail.split("'")[1] if "'" in detail else detail
+        emit({"type": "memory_search", "agent": fe_agent(agent_key), "query": query})
+    elif "escalat" in action or "notify" in action or "coordinate" in action or "apply_filter" in action:
+        emit({"type": "decision", "agent": fe_agent(agent_key), "content": f"{action} {detail}".strip()})
 
 
-def print_memory_found(agent_key: str, content: str, source: str = ""):
+def print_memory_found(agent_key: str, content: str, source: str = "",
+                       memory_id: str = "", metadata: dict | None = None,
+                       moment: int | None = None):
     agent = AGENTS[agent_key]
     title = f"Memory recalled by {agent['name']}"
     if source:
@@ -112,10 +173,22 @@ def print_memory_found(agent_key: str, content: str, source: str = ""):
         padding=(1, 2),
     )
     console.print(panel)
+    fe_event: dict = {
+        "type": "memory_hit",
+        "agent": fe_agent(agent_key),
+        "memory_id": memory_id,
+        "content": content,
+        "metadata": metadata or {},
+    }
+    if moment:
+        fe_event["moment"] = moment
+        fe_event["detail"] = True
+    emit(fe_event)
     time.sleep(ACTION_PAUSE)
 
 
-def print_memory_written(agent_key: str, content: str, memory_id: str):
+def print_memory_written(agent_key: str, content: str, memory_id: str,
+                         metadata: dict | None = None):
     agent = AGENTS[agent_key]
     panel = Panel(
         content,
@@ -128,10 +201,18 @@ def print_memory_written(agent_key: str, content: str, memory_id: str):
         padding=(1, 2),
     )
     console.print(panel)
+    emit({
+        "type": "memory_write",
+        "agent": fe_agent(agent_key),
+        "memory_id": memory_id,
+        "content": content,
+        "metadata": metadata or {},
+    })
     time.sleep(ACTION_PAUSE)
 
 
-def print_contradiction(reporter_key: str, target_content: str, reason: str):
+def print_contradiction(reporter_key: str, target_content: str, reason: str,
+                        memory_id: str = "", contradicts_id: str = ""):
     agent = AGENTS[reporter_key]
     inner = Text()
     inner.append("ORIGINAL ASSESSMENT:\n", style="dim")
@@ -147,6 +228,15 @@ def print_contradiction(reporter_key: str, target_content: str, reason: str):
         padding=(1, 2),
     )
     console.print(panel)
+    emit({
+        "type": "contradiction",
+        "memory_id": memory_id,
+        "contradicts": contradicts_id,
+        "detail": True,
+        "moment": 3,
+        "banner": "MOMENT 3 · Contradiction preserved — both assessments stay in memory",
+        "bcolor": "#F44336",
+    })
     time.sleep(ACTION_PAUSE)
 
 
@@ -166,6 +256,13 @@ def print_quarantine(agent_key: str, rejected: str, rewritten: str):
         padding=(1, 2),
     )
     console.print(panel)
+    emit({
+        "type": "quarantine",
+        "agent": fe_agent(agent_key),
+        "content": f"Write blocked: content matched sensitive data pattern",
+        "banner": "Quarantine — MemoryHub blocked sensitive content from entering shared memory",
+        "bcolor": "#F44336",
+    })
     time.sleep(ACTION_PAUSE)
 
 
@@ -184,6 +281,13 @@ def print_shift_change(role: str, old_driver: str, new_driver: str, actor_id: st
     table.add_row("Human (driver_id)", old_driver, new_driver)
     table.add_row("Shift", "Night shift", "Day shift")
     console.print(table)
+    emit({
+        "type": "shift_change",
+        "changes": {"tier1": new_driver, "forensics": new_driver, "ic": new_driver},
+        "moment": 5,
+        "banner": "MOMENT 5 · Shift change — driver_id changes, the agent and its memory persist",
+        "bcolor": "#FFEB3B",
+    })
     time.sleep(ACTION_PAUSE)
 
 
@@ -202,6 +306,12 @@ def print_audit_query(title: str, rows: list[dict]):
     for row in rows:
         table.add_row(row["time"], row["action"], row["actor"], row["driver"])
     console.print(table)
+    emit({
+        "type": "audit_query",
+        "detail": True,
+        "rows": [{"ts": r["time"], "actor": r["actor"], "driver": r["driver"],
+                  "op": r["action"], "mem": ""} for r in rows],
+    })
     time.sleep(ACTION_PAUSE)
 
 
@@ -222,6 +332,8 @@ async def run_scenario():
     if not url or not api_key:
         console.print("[red]Error: Set MEMORYHUB_URL and MEMORYHUB_API_KEY[/]")
         return 1
+
+    emit_reset()
 
     # Title card
     console.print()
@@ -249,6 +361,8 @@ async def run_scenario():
     reg_table.add_column("Framework", style="dim")
     reg_table.add_column("actor_id", style="cyan")
     reg_table.add_column("driver_id", style="yellow")
+    models = {"tier1": "Claude · cloud API", "forensics": "Gemma 4 E4B · on-cluster",
+              "threatintel": "Gemma 4 E4B · on-cluster", "ic": "Gemma 4 E4B · on-cluster"}
     for key, agent in AGENTS.items():
         reg_table.add_row(
             Text(agent["name"], style=agent["color"]),
@@ -256,6 +370,14 @@ async def run_scenario():
             agent["actor_id"],
             "jason-park (night shift)",
         )
+        emit({
+            "type": "agent_register",
+            "agent": fe_agent(key),
+            "framework": agent["framework"],
+            "actor_id": agent["actor_id"],
+            "driver_id": "jason-park",
+            "model": models.get(key, ""),
+        })
         time.sleep(0.3)
     console.print(reg_table)
     console.print()
@@ -276,7 +398,10 @@ async def run_scenario():
 
         if sr.results:
             top = sr.results[0]
-            print_memory_found("tier1", top.content, "IR-2024-117")
+            print_memory_found("tier1", top.content, "IR-2024-117",
+                               memory_id=top.id,
+                               metadata={"incident_id": "IR-2024-117", "age": "4 months ago"},
+                               moment=1)
 
         # Tier 1 heuristic
         sr2 = await client.search(
@@ -327,7 +452,10 @@ async def run_scenario():
         )
         for r in sr3.results:
             if "ai.exe" in r.content:
-                print_memory_found("forensics", r.content, "Self-authored operational memory")
+                print_memory_found("forensics", r.content, "Self-authored operational memory",
+                                   memory_id=r.id,
+                                   metadata={"self_authored": True, "author_agent": "forensics"},
+                                   moment=2)
                 break
 
         print_action("forensics", "apply_filter",
@@ -408,7 +536,8 @@ async def run_scenario():
             except Exception:
                 pass
 
-        print_contradiction("threatintel", attr_content, contra_reason)
+        print_contradiction("threatintel", attr_content, contra_reason,
+                            memory_id="contra-" + attr_id, contradicts_id=attr_id)
 
         # Sensitive data quarantine: executive identification
         print_quarantine(
@@ -435,7 +564,10 @@ async def run_scenario():
         )
         for r in sr5.results:
             if "breakglass" in r.content.lower():
-                print_memory_found("ic", r.content, "IR-2024-103 operational lesson")
+                print_memory_found("ic", r.content, "IR-2024-103 operational lesson",
+                                   memory_id=r.id,
+                                   metadata={"incident_id": "IR-2024-103", "age": "8 months ago"},
+                                   moment=4)
                 break
 
         print_action("ic", "coordinate_containment",
@@ -562,6 +694,11 @@ async def run_scenario():
     )
     console.print(closing)
     console.print()
+    emit({
+        "type": "session_end",
+        "banner": "IR-2024-184 contained · memories written · cross-framework reads · 1 contradiction preserved",
+        "bcolor": "#2196F3",
+    })
     return 0
 
 
