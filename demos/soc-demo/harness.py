@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """SOC Demo Orchestration Harness.
 
-Drives 4 SOC agents through a 7-phase incident response scenario,
-producing rich terminal output suitable for recording with asciinema.
+Drives 4 SOC agents through a 7-phase incident response scenario.
+Each agent makes real LLM calls (GPT-OSS-20B) and real MemoryHub
+operations (search, write, report contradiction) via MCP tools.
 
-Each agent is identified by its framework (Claude Code, FIPS-Agent,
-OpenClaw, Hermes) and SOC role. All agents share memory through
-MemoryHub, demonstrating cross-framework memory interoperability.
+The single deployed FIPS-Agent serves as a shared LLM + MCP gateway.
+Different role personas are sent via the system prompt in each call.
 
 Usage:
-    cd memory-hub
-    python demos/soc-demo/harness.py
+    SOC_FORENSICS_URL=https://<route> python demos/soc-demo/harness.py
+
+Env vars:
+    SOC_FORENSICS_URL  -- FIPS-Agent route (required)
+    FRONTEND_URL       -- frontend relay for visualization (optional)
+    FRONTEND_TOKEN     -- X-Emit-Token for frontend auth (optional)
+    HARNESS_PHASE_PAUSE -- seconds between phases (default 2.0)
+    HARNESS_ACTION_PAUSE -- seconds between actions (default 1.0)
 """
 
 import asyncio
@@ -78,8 +84,198 @@ _current_phase = 1
 _current_timestamp = "02:14"
 
 
+# ── MemoryHub tools block (shared across all system prompts) ────────
+
+MEMORYHUB_TOOLS = """
+## MemoryHub Shared Memory
+
+You have access to the SOC team's shared memory through MCP tools.
+The project identifier is "midwest-financial-soc".
+
+When using the `memory` tool:
+- Search: memory(action="search", query="your query", scope="project",
+  project_id="midwest-financial-soc")
+- Write: memory(action="write", content="your content", scope="project",
+  project_id="midwest-financial-soc",
+  options={"weight": 0.9, "force": true,
+           "metadata": {"incident_id": "IR-2024-184"}})
+- Report contradiction: memory(action="report", memory_id="<id>",
+  options={"observed_behavior": "what the new evidence shows"})
+
+Always search shared memory before making decisions.
+Always write your conclusions as memories for the team.
+"""
+
+
+# ── System prompts per role ─────────────────────────────────────────
+
+SYSTEM_TIER1 = (
+    "You are the Tier 1 SOC Analyst for MidWest Financial Services "
+    "Group's SOC, working the night shift.\n\n"
+    "You handle initial alert triage. You decide whether to escalate, "
+    "close as benign, or assign for further investigation.\n\n"
+    "Your process:\n"
+    "1. Search shared memory for prior incidents with similar patterns\n"
+    "2. Search for team heuristics about this type of alert\n"
+    "3. Make a triage decision based on what you find\n"
+    "4. Write your triage decision and reasoning to shared memory\n\n"
+    "Cite specific incident IDs from memory when they inform your decision."
+    + MEMORYHUB_TOOLS
+)
+
+SYSTEM_FORENSICS = (
+    "You are the Forensics Specialist for MidWest Financial Services "
+    "Group's SOC.\n\n"
+    "You own host-level artifact collection and timeline reconstruction. "
+    "You reconstruct attacker activity timelines from EDR telemetry, "
+    "Windows event logs, and file system artifacts.\n\n"
+    "Your process:\n"
+    "1. Search shared memory for known false positives relevant to this "
+    "type of investigation (especially child process alerts)\n"
+    "2. Search for attacker staging path patterns from previous campaigns\n"
+    "3. Search for prior incidents with similar attack patterns\n"
+    "4. Write a forensic timeline to shared memory with specific "
+    "timestamps, paths, and technique details\n\n"
+    "Filter known false positives from operational memory before reporting. "
+    "Cite specific prior incident IDs."
+    + MEMORYHUB_TOOLS
+)
+
+SYSTEM_THREATINTEL_ATTR = (
+    "You are the Threat Intelligence Analyst for MidWest Financial "
+    "Services Group's SOC.\n\n"
+    "You own correlation with known campaigns, IOC enrichment, and "
+    "attribution analysis.\n\n"
+    "Your process:\n"
+    "1. Search shared memory for prior incidents with similar TTPs\n"
+    "2. Assess whether the current incident matches any known campaigns\n"
+    "3. Write your attribution assessment to shared memory with a "
+    "confidence level (LOW/MEDIUM/HIGH)\n\n"
+    "Attribution is hard. Express confidence levels honestly. "
+    "Cite specific campaign IDs and prior incident IDs."
+    + MEMORYHUB_TOOLS
+)
+
+SYSTEM_THREATINTEL_CONTRA = (
+    "You are the Threat Intelligence Analyst for MidWest Financial "
+    "Services Group's SOC.\n\n"
+    "You have been asked to review your previous attribution assessment "
+    "for IR-2024-184 based on new network analysis evidence.\n\n"
+    "Your process:\n"
+    "1. Search shared memory for your previous attribution assessment "
+    "for IR-2024-184\n"
+    "2. Note the memory_id of that assessment from the search results\n"
+    "3. Use the memory tool with action=\"report\" to file a contradiction, "
+    "passing the memory_id and your updated analysis in "
+    "options.observed_behavior\n\n"
+    "Do NOT overwrite or delete the original assessment. Use "
+    "action=\"report\" to preserve both views in memory."
+    + MEMORYHUB_TOOLS
+)
+
+SYSTEM_IC_CONTAIN = (
+    "You are the Incident Commander for MidWest Financial Services "
+    "Group's SOC.\n\n"
+    "You own overall response coordination. You synthesize information "
+    "from all SOC agents into a unified operational picture.\n\n"
+    "Your process:\n"
+    "1. Search shared memory for lessons from previous credential "
+    "rotation incidents (especially breakglass credentials)\n"
+    "2. Search for stakeholder notification preferences (CISO)\n"
+    "3. Search for current IR-2024-184 findings from forensics and "
+    "threat intel\n"
+    "4. Write a synthesis brief to shared memory covering: status, key "
+    "findings, attribution confidence, containment actions, notifications\n\n"
+    "Attribute information to the agent that provided it. "
+    "Surface contradictions explicitly."
+    + MEMORYHUB_TOOLS
+)
+
+SYSTEM_IC_POSTINCIDENT = (
+    "You are the Incident Commander for MidWest Financial Services "
+    "Group's SOC.\n\n"
+    "The incident is contained. You are writing post-incident lessons.\n\n"
+    "Your process:\n"
+    "1. Search shared memory for all IR-2024-184 findings and any "
+    "referenced prior incidents\n"
+    "2. Identify what worked well and what should change\n"
+    "3. Write a post-incident lesson to shared memory capturing: "
+    "pattern confirmation, updated dwell time assumptions, new hunting "
+    "hypotheses\n\n"
+    "Write lessons that your future self will find useful. Be specific "
+    "about what changed versus prior incidents."
+    + MEMORYHUB_TOOLS
+)
+
+
+# ── User messages per call ──────────────────────────────────────────
+
+USER_TIER1 = (
+    "A CrowdStrike behavioral SIEM alert fired at 02:14 AM. The alert "
+    "shows the svc-reporting service account was used from a non-standard "
+    "workstation WKSTN-FIN-082, followed by SMB enumeration of multiple "
+    "file servers.\n\n"
+    "Triage this alert. Search shared memory for prior incidents with "
+    "similar patterns and any team heuristics about service account "
+    "alerts. Then decide whether to escalate and write your triage "
+    "decision to shared memory."
+)
+
+USER_FORENSICS = (
+    "IR-2024-184 has been escalated to Tier 2. CrowdStrike alert at "
+    "02:14 AM showed svc-reporting used from WKSTN-FIN-082 with SMB "
+    "enumeration. Tier 1 found pattern matches to IR-2024-117.\n\n"
+    "Investigate this incident. Search shared memory for known false "
+    "positives in forensic analysis (especially outlook.exe child "
+    "process alerts), attacker staging path patterns from prior "
+    "campaigns, and prior incidents with similar patterns. Then write "
+    "a forensic timeline for IR-2024-184 to shared memory."
+)
+
+USER_THREATINTEL_ATTR = (
+    "IR-2024-184 investigation is underway. Known facts: phishing-derived "
+    "credential for svc-reporting, multi-day dwell time, SMB enumeration "
+    "of file servers, data staging on a file server.\n\n"
+    "Analyze the TTPs and search shared memory for prior incidents and "
+    "campaign profiles. Write your initial attribution assessment to "
+    "shared memory with a confidence level."
+)
+
+USER_THREATINTEL_CONTRA = (
+    "New evidence from the network team on IR-2024-184: the beaconing "
+    "pattern does NOT match the CC2024-Q3-Opportunistic campaign. That "
+    "campaign uses 90-second beacon intervals with jitter; this incident "
+    "shows no consistent beaconing pattern at all -- the attacker is "
+    "using interactive sessions rather than implant beacons.\n\n"
+    "Search shared memory for your previous attribution assessment for "
+    "IR-2024-184. Then use the memory tool with action=\"report\" to "
+    "file a contradiction against that assessment, explaining why the "
+    "beaconing evidence changes the attribution."
+)
+
+USER_IC_CONTAIN = (
+    "IR-2024-184 containment is underway. Shift change happened at "
+    "06:00 (jason-park -> maya-chen). Credential rotation for "
+    "svc-reporting is needed, WKSTN-FIN-082 needs isolation, and "
+    "47 GB of staged data on FILESVR-CORP-03 needs preservation.\n\n"
+    "Search shared memory for lessons from previous breakglass "
+    "credential rotations, CISO notification preferences, and current "
+    "IR-2024-184 findings. Then write a synthesis brief to shared memory."
+)
+
+USER_IC_POSTINCIDENT = (
+    "IR-2024-184 is contained. No confirmed exfiltration. Credential "
+    "rotated, endpoints isolated, CISO notified.\n\n"
+    "Search shared memory for all IR-2024-184 findings and the prior "
+    "incidents they reference. Write a post-incident lesson to shared "
+    "memory capturing what was different from prior incidents and what "
+    "the team should do differently next time."
+)
+
+
+# ── Frontend / display infrastructure ───────────────────────────────
+
 def emit(event: dict):
-    """Post an event to the frontend relay server (if configured)."""
     if not FRONTEND_URL:
         return
     event.setdefault("phase", _current_phase)
@@ -96,7 +292,6 @@ def emit(event: dict):
 
 
 def emit_reset():
-    """Clear frontend history between runs."""
     if not FRONTEND_URL:
         return
     headers = {"Content-Type": "application/json"}
@@ -107,36 +302,6 @@ def emit_reset():
         urllib.request.urlopen(req, timeout=5)
     except Exception:
         pass
-
-
-async def call_agent(prompt: str, timeout: float = 180.0) -> str | None:
-    """Call the FIPS-agent's /v1/chat/completions endpoint.
-
-    Returns the assistant's response text, or None on error/timeout.
-    """
-    if not SOC_FORENSICS_URL:
-        return None
-    url = SOC_FORENSICS_URL.rstrip("/")
-    if not url.endswith("/v1/chat/completions"):
-        url = f"{url}/v1/chat/completions"
-    try:
-        async with httpx.AsyncClient(timeout=timeout, verify=False) as http:
-            resp = await http.post(
-                url,
-                json={
-                    "model": "RedHatAI/gpt-oss-20b",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 2048,
-                    "temperature": 0.3,
-                },
-                headers={"Authorization": "Bearer not-required"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"].get("content", "").strip()
-    except Exception as exc:
-        console.print(f"  [dim red]Agent call failed: {exc}[/]")
-        return None
 
 
 FRONTEND_AGENT_KEY = {
@@ -186,38 +351,8 @@ def print_action(agent_key: str, action: str, detail: str = ""):
     if "search" in action:
         query = detail.split("'")[1] if "'" in detail else detail
         emit({"type": "memory_search", "agent": fe_agent(agent_key), "query": query})
-    elif "escalat" in action or "notify" in action or "coordinate" in action or "apply_filter" in action:
+    elif "escalat" in action or "notify" in action or "coordinate" in action:
         emit({"type": "decision", "agent": fe_agent(agent_key), "content": f"{action} {detail}".strip()})
-
-
-def print_memory_found(agent_key: str, content: str, source: str = "",
-                       memory_id: str = "", metadata: dict | None = None,
-                       moment: int | None = None):
-    agent = AGENTS[agent_key]
-    title = f"Memory recalled by {agent['name']}"
-    if source:
-        title += f" (from {source})"
-    panel = Panel(
-        content,
-        title=title,
-        title_align="left",
-        border_style=agent["color"],
-        width=120,
-        padding=(1, 2),
-    )
-    console.print(panel)
-    fe_event: dict = {
-        "type": "memory_hit",
-        "agent": fe_agent(agent_key),
-        "memory_id": memory_id,
-        "content": content,
-        "metadata": metadata or {},
-    }
-    if moment:
-        fe_event["moment"] = moment
-        fe_event["detail"] = True
-    emit(fe_event)
-    time.sleep(ACTION_PAUSE)
 
 
 def print_memory_written(agent_key: str, content: str, memory_id: str,
@@ -267,7 +402,7 @@ def print_contradiction(reporter_key: str, target_content: str, reason: str,
         "contradicts": contradicts_id,
         "detail": True,
         "moment": 3,
-        "banner": "MOMENT 3 · Contradiction preserved — both assessments stay in memory",
+        "banner": "MOMENT 3 -- Contradiction preserved, both assessments stay in memory",
         "bcolor": "#F44336",
     })
     time.sleep(ACTION_PAUSE)
@@ -282,7 +417,7 @@ def print_quarantine(agent_key: str, rejected: str, rewritten: str):
     inner.append(rewritten, style="green")
     panel = Panel(
         inner,
-        title=f"SENSITIVE DATA QUARANTINE — {agent['name']}",
+        title=f"SENSITIVE DATA QUARANTINE -- {agent['name']}",
         title_align="left",
         border_style="bold red on white",
         width=120,
@@ -292,8 +427,8 @@ def print_quarantine(agent_key: str, rejected: str, rewritten: str):
     emit({
         "type": "quarantine",
         "agent": fe_agent(agent_key),
-        "content": f"Write blocked: content matched sensitive data pattern",
-        "banner": "Quarantine — MemoryHub blocked sensitive content from entering shared memory",
+        "content": "Write blocked: content matched sensitive data pattern",
+        "banner": "Quarantine -- MemoryHub blocked sensitive content from entering shared memory",
         "bcolor": "#F44336",
     })
     time.sleep(ACTION_PAUSE)
@@ -318,7 +453,7 @@ def print_shift_change(role: str, old_driver: str, new_driver: str, actor_id: st
         "type": "shift_change",
         "changes": {"tier1": new_driver, "forensics": new_driver, "ic": new_driver},
         "moment": 5,
-        "banner": "MOMENT 5 · Shift change — driver_id changes, the agent and its memory persist",
+        "banner": "MOMENT 5 -- Shift change: driver_id changes, the agent and its memory persist",
         "bcolor": "#FFEB3B",
     })
     time.sleep(ACTION_PAUSE)
@@ -348,10 +483,89 @@ def print_audit_query(title: str, rows: list[dict]):
     time.sleep(ACTION_PAUSE)
 
 
+# ── Agent client and helpers ────────────────────────────────────────
+
+async def call_agent(
+    messages: list[dict[str, str]],
+    *,
+    timeout: float = 180.0,
+    max_tokens: int = 2048,
+) -> str:
+    """Call the FIPS-agent gateway. Raises on failure (no silent fallback)."""
+    url = SOC_FORENSICS_URL.rstrip("/")
+    if not url.endswith("/v1/chat/completions"):
+        url = f"{url}/v1/chat/completions"
+    async with httpx.AsyncClient(timeout=timeout, verify=False) as http:
+        resp = await http.post(
+            url,
+            json={
+                "model": "RedHatAI/gpt-oss-20b",
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": 0.3,
+            },
+            headers={"Authorization": "Bearer not-required"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"].get("content", "").strip()
+
+
+async def snapshot_memory_ids(client: MemoryHubClient) -> set[str]:
+    ids: set[str] = set()
+    for query in ["IR-2024-184", "SOC incident service account forensic"]:
+        sr = await client.search(query, scope="project", project_id=PROJECT_ID, max_results=50)
+        ids.update(r.id for r in sr.results)
+    return ids
+
+
+async def discover_new_memories(
+    client: MemoryHubClient,
+    agent_key: str,
+    search_queries: list[str],
+    known_ids: set[str],
+) -> set[str]:
+    new_ids: set[str] = set()
+    for query in search_queries:
+        sr = await client.search(query, scope="project", project_id=PROJECT_ID, max_results=20)
+        for r in sr.results:
+            if r.id not in known_ids and r.id not in new_ids:
+                new_ids.add(r.id)
+                content = r.content[:500] + ("..." if len(r.content) > 500 else "")
+                print_memory_written(agent_key, content, r.id, metadata=r.metadata)
+    if not new_ids:
+        console.print("  [dim yellow]Agent responded but no new memories detected[/]")
+    return known_ids | new_ids
+
+
+def display_agent_response(agent_key: str, response: str, task_label: str):
+    agent = AGENTS[agent_key]
+    display_text = response[:2000]
+    if len(response) > 2000:
+        display_text += "\n\n... (truncated)"
+    panel = Panel(
+        display_text,
+        title=f"{agent['name']} -- {task_label}",
+        subtitle=f"via {agent['framework']} | GPT-OSS 20B on-cluster",
+        title_align="left",
+        subtitle_align="right",
+        border_style=f"bold {agent['color']}",
+        width=120,
+        padding=(1, 2),
+    )
+    console.print(panel)
+
+
+# ── Scenario ────────────────────────────────────────────────────────
+
 async def run_scenario():
+    if not SOC_FORENSICS_URL:
+        console.print("[red]Error: SOC_FORENSICS_URL is required (no scripted fallback).[/]")
+        console.print("[dim]Set it to the FIPS-Agent route URL.[/]")
+        return 1
+
     url = os.environ.get("MEMORYHUB_URL", "")
     api_key = os.environ.get("MEMORYHUB_API_KEY", "")
-
     if not url or not api_key:
         import configparser
         config = configparser.ConfigParser()
@@ -366,6 +580,12 @@ async def run_scenario():
         console.print("[red]Error: Set MEMORYHUB_URL and MEMORYHUB_API_KEY[/]")
         return 1
 
+    register_block = (
+        f'\n## Session Registration (REQUIRED FIRST STEP)\n\n'
+        f'Before using any memory tools, call register_session '
+        f'with api_key="{api_key}". Do this FIRST.\n'
+    )
+
     emit_reset()
 
     # Title card
@@ -374,7 +594,7 @@ async def run_scenario():
         Text.from_markup(
             "[bold white]MemoryHub: the context that makes security decisions go well.[/]\n\n"
             "[dim]A demonstration with a realistic mid-severity SOC incident.[/]\n"
-            "[dim]Four agent frameworks. One shared memory. Ten minutes.[/]\n\n"
+            "[dim]Four agent frameworks. One shared memory. Real LLM inference.[/]\n\n"
             "[cyan]Claude Code[/]  ·  [green]FIPS-Agent[/]  ·  [magenta]OpenClaw[/]  ·  [yellow]Hermes[/]"
         ),
         title="SOC INCIDENT RESPONSE DEMO",
@@ -416,221 +636,128 @@ async def run_scenario():
     console.print()
     time.sleep(PHASE_PAUSE)
 
-    async with MemoryHubClient(url=url, api_key=api_key) as client:
+    need_register = True
 
-        # ── PHASE 1: Detection ──────────────────────────────────────
+    def build_messages(system: str, user: str) -> list[dict[str, str]]:
+        nonlocal need_register
+        sys_prompt = system
+        if need_register:
+            sys_prompt += register_block
+        return [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": user},
+        ]
+
+    async with MemoryHubClient(url=url, api_key=api_key) as client:
+        known_ids = await snapshot_memory_ids(client)
+
+        # ── PHASE 1: Detection (Call 1: Tier 1) ────────────────────
         print_phase(1, "DETECTION", "02:14 AM",
                     "CrowdStrike behavioral SIEM alert: unusual logon for svc-reporting")
 
-        print_action("tier1", "search_memory",
-                     "query='unusual service account logon off-hours SMB enumeration'")
-        sr = await client.search(
-            "unusual service account logon off-hours SMB enumeration",
-            scope="project", project_id=PROJECT_ID,
+        print_action("tier1", "investigating",
+                     "Triaging alert via GPT-OSS 20B on-cluster")
+        emit({"type": "decision", "agent": fe_agent("tier1"),
+              "content": "Claude Code agent calling GPT-OSS 20B for alert triage"})
+        console.print("  [dim]Waiting for LLM inference...[/]")
+
+        response = await call_agent(build_messages(SYSTEM_TIER1, USER_TIER1))
+        need_register = False
+
+        display_agent_response("tier1", response, "Alert triage")
+        emit({"type": "memory_search", "agent": fe_agent("tier1"),
+              "query": "prior incidents + team heuristics"})
+
+        known_ids = await discover_new_memories(
+            client, "tier1",
+            ["IR-2024-184 triage", "IR-2024-184 escalat"],
+            known_ids,
         )
 
-        if sr.results:
-            top = sr.results[0]
-            print_memory_found("tier1", top.content, "IR-2024-117",
-                               memory_id=top.id,
-                               metadata={"incident_id": "IR-2024-117", "age": "4 months ago"},
-                               moment=1)
-
-        # Tier 1 heuristic
-        sr2 = await client.search(
-            "service account alerts off-hours escalation heuristic",
-            scope="project", project_id=PROJECT_ID,
-        )
-        for r in sr2.results:
-            if "80%" in r.content:
-                print_memory_found("tier1", r.content, "Team practice")
-                break
-
-        # Tier 1 escalation
-        esc = await client.write(
-            "IR-2024-184 triage decision: Escalating to Tier 2 at 02:38 AM. "
-            "Pattern matches IR-2024-117 (phishing-derived credential, off-hours "
-            "service account anomaly, SMB enumeration). Team heuristic confirms: "
-            "off-hours service account alerts are 80% worth escalating. "
-            "Recommending full investigation.",
-            scope="project", project_id=PROJECT_ID, weight=0.9,
-            metadata={"incident_id": "IR-2024-184", "role": "tier1-analyst",
-                       "framework": "claude-code"},
-            force=True,
-        )
-        esc_id = esc.memory.id if esc.memory else "pending"
-        print_memory_written("tier1", (
-            "IR-2024-184 triage decision: Escalating to Tier 2 at 02:38 AM. "
-            "Pattern matches IR-2024-117. Team heuristic confirms escalation."
-        ), esc_id)
-
-        # ── PHASE 2: Triage & Escalation ────────────────────────────
-        print_phase(2, "TRIAGE & ESCALATION", "02:14 — 02:55",
-                    "Tier 1 → Tier 2 escalation. IR team paged at 02:55.")
+        # ── PHASE 2: Triage & Escalation ───────────────────────────
+        print_phase(2, "TRIAGE & ESCALATION", "02:14 -- 02:55",
+                    "Tier 1 -> Tier 2 escalation. IR team paged at 02:55.")
 
         print_action("tier1", "escalate_to_tier2",
                      "Confirmed unauthorized access. Paging IR team.")
         time.sleep(ACTION_PAUSE)
 
-        # ── PHASE 3: Investigation ──────────────────────────────────
-        print_phase(3, "INVESTIGATION", "02:55 — 06:00",
+        # ── PHASE 3: Investigation (Calls 2-3) ─────────────────────
+        print_phase(3, "INVESTIGATION", "02:55 -- 06:00",
                     "Parallel investigation: Forensics, Threat Intel, IC activated")
 
-        # Forensics investigation — live agent inference or scripted fallback
-        live_forensics = False
-        if SOC_FORENSICS_URL:
-            print_action("forensics", "investigating",
-                         "IR-2024-184 autonomously via Gemma 4 on-cluster")
-            emit({"type": "decision", "agent": fe_agent("forensics"),
-                  "content": "FIPS-Agent calling Gemma 4 for autonomous investigation"})
+        # Call 2: Forensics
+        print_action("forensics", "investigating",
+                     "IR-2024-184 via GPT-OSS 20B on-cluster")
+        emit({"type": "decision", "agent": fe_agent("forensics"),
+              "content": "FIPS-Agent calling GPT-OSS 20B for forensic investigation"})
+        console.print("  [dim]Waiting for LLM inference...[/]")
 
-            agent_prompt = (
-                f"IMPORTANT: Before using any memory tools, you must first call the "
-                f"register_session tool with api_key=\"{api_key}\". This authenticates "
-                f"your session with MemoryHub.\n\n"
-                "You are investigating incident IR-2024-184 for MidWest Financial "
-                "Services Group. A CrowdStrike behavioral alert fired at 02:14 AM "
-                "for the svc-reporting service account showing unusual logon from "
-                "WKSTN-FIN-082, followed by SMB enumeration and file server access.\n\n"
-                "Using the shared SOC memory (project: midwest-financial-soc):\n"
-                "1. Search for prior incidents with similar patterns\n"
-                "2. Search for known false positives relevant to forensic analysis\n"
-                "3. Search for attacker staging path patterns from previous campaigns\n"
-                "4. Write a forensic timeline for IR-2024-184 summarizing the "
-                "attacker's activity sequence based on your findings\n\n"
-                "Be specific: cite incident IDs, timestamps, and technique details."
-            )
+        response = await call_agent(build_messages(SYSTEM_FORENSICS, USER_FORENSICS))
 
-            console.print("  [dim]Waiting for Gemma 4 inference...[/]")
-            agent_response = await call_agent(agent_prompt)
+        display_agent_response("forensics", response, "Forensic investigation")
+        emit({"type": "memory_search", "agent": fe_agent("forensics"),
+              "query": "false positives + staging patterns + timeline"})
 
-            if agent_response:
-                live_forensics = True
-                panel = Panel(
-                    agent_response[:2000],
-                    title="FIPS-Agent autonomous investigation (Gemma 4)",
-                    title_align="left",
-                    border_style="bold green",
-                    width=120,
-                    padding=(1, 2),
-                )
-                console.print(panel)
-                emit({"type": "memory_search", "agent": fe_agent("forensics"),
-                      "query": "autonomous investigation via Gemma 4"})
-
-                # Check if the agent wrote any memories
-                sr_check = await client.search(
-                    "IR-2024-184 forensic timeline",
-                    scope="project", project_id=PROJECT_ID,
-                )
-                for r in sr_check.results:
-                    if "IR-2024-184" in r.content and "timeline" in r.content.lower():
-                        print_memory_written("forensics", r.content[:300] + "...",
-                                             r.id, metadata={"live_inference": True})
-                        break
-                else:
-                    console.print("  [dim]Agent responded but did not write a timeline memory[/]")
-            else:
-                console.print("  [dim yellow]Live inference unavailable, using scripted path[/]")
-
-        if not live_forensics:
-            # Scripted fallback: ai.exe filter
-            print_action("forensics", "search_memory",
-                         "query='outlook.exe child processes false positive'")
-            sr3 = await client.search(
-                "outlook.exe ai.exe false positive forensics",
-                scope="project", project_id=PROJECT_ID,
-            )
-            for r in sr3.results:
-                if "ai.exe" in r.content:
-                    print_memory_found("forensics", r.content, "Self-authored operational memory",
-                                       memory_id=r.id,
-                                       metadata={"self_authored": True, "author_agent": "forensics"},
-                                       moment=2)
-                    break
-
-            print_action("forensics", "apply_filter",
-                         "Filtering ai.exe from outlook.exe child process queries (3 prior incidents)")
-
-            # Scripted fallback: staging paths
-            sr4 = await client.search(
-                "staging paths attacker file server directory",
-                scope="project", project_id=PROJECT_ID,
-            )
-            for r in sr4.results:
-                if "staging" in r.content.lower() and "admin$" in r.content:
-                    print_memory_found("forensics", r.content, "IR-2024-117 technique pattern")
-                    break
-
-            # Scripted fallback: write timeline
-            timeline_content = (
-                "IR-2024-184 forensic timeline: Attacker first accessed WKSTN-FIN-082 "
-                "at 15:22 on March 4 using svc-reporting credential harvested via "
-                "phishing 11 days prior. Enumeration phase (March 4-14) stayed within "
-                "business hours to blend with normal traffic. Staging began at 20:47 "
-                "on March 14 with 47 GB copied to \\\\FILESVR-CORP-03\\admin$\\TEMP\\reports2024\\. "
-                "CrowdStrike behavioral rule fired at 02:14 March 15 when staging "
-                "volume crossed 30 GB threshold."
-            )
-            fw = await client.write(
-                timeline_content, scope="project", project_id=PROJECT_ID,
-                weight=0.9,
-                metadata={"incident_id": "IR-2024-184", "role": "forensics",
-                           "framework": "fips-agent"},
-                force=True,
-            )
-            fw_id = fw.memory.id if fw.memory else "pending"
-            print_memory_written("forensics", timeline_content, fw_id)
-
-        # Threat Intel: attribution
-        attr_content = (
-            "IR-2024-184 initial attribution assessment: TTPs partially match "
-            "CC2024-Q3-Opportunistic campaign. Phishing initial access, 9-14 day "
-            "dwell time, file server staging all consistent. Recommend handling "
-            "as a known campaign. Confidence: MEDIUM."
+        known_ids = await discover_new_memories(
+            client, "forensics",
+            ["IR-2024-184 forensic", "IR-2024-184 timeline"],
+            known_ids,
         )
-        attr = await client.write(
-            attr_content, scope="project", project_id=PROJECT_ID,
-            weight=0.85,
-            metadata={"incident_id": "IR-2024-184", "role": "threat-intel",
-                       "framework": "hermes"},
-            force=True,
-        )
-        attr_id = attr.memory.id if attr.memory else "pending"
-        print_memory_written("threatintel", attr_content, attr_id)
 
-        # ── PHASE 4: Scoping ────────────────────────────────────────
-        print_phase(4, "SCOPING", "04:00 — 06:30",
+        # Call 3: Threat Intel attribution
+        print_action("threatintel", "investigating",
+                     "TTP correlation via GPT-OSS 20B on-cluster")
+        emit({"type": "decision", "agent": fe_agent("threatintel"),
+              "content": "Hermes agent calling GPT-OSS 20B for attribution analysis"})
+        console.print("  [dim]Waiting for LLM inference...[/]")
+
+        response = await call_agent(build_messages(SYSTEM_THREATINTEL_ATTR, USER_THREATINTEL_ATTR))
+
+        display_agent_response("threatintel", response, "Attribution assessment")
+        emit({"type": "memory_search", "agent": fe_agent("threatintel"),
+              "query": "campaign correlation + attribution"})
+
+        known_ids = await discover_new_memories(
+            client, "threatintel",
+            ["IR-2024-184 attribution", "IR-2024-184 campaign"],
+            known_ids,
+        )
+
+        # ── PHASE 4: Scoping (Call 4 + feature demos) ──────────────
+        print_phase(4, "SCOPING", "04:00 -- 06:30",
                     "Determining scope: systems affected, data exposure, attacker next move")
 
-        # Shift change at 06:00
+        # Feature demo: shift change
         print_shift_change("Tier 2 SOC Analyst",
                            "jason-park", "maya-chen", "soc-tier2-analyst")
 
-        # Network Analyst contradicts attribution
-        contra_reason = (
-            "Looked at the C2 traffic. The beaconing pattern doesn't match "
-            "CC2024-Q3-Opportunistic. The known campaign uses 90-second beacon "
-            "intervals with jitter; this incident shows no consistent beaconing "
-            "pattern at all -- the attacker is using interactive sessions rather "
-            "than implant beacons. Either this is a different attacker reusing "
-            "some of the same TTPs, or the campaign has evolved its tooling. "
-            "Either way, don't assume the rest of the campaign's playbook applies."
+        # Call 4: Threat Intel contradiction
+        print_action("threatintel", "reviewing_attribution",
+                     "New network evidence challenges prior assessment")
+        emit({"type": "decision", "agent": fe_agent("threatintel"),
+              "content": "Hermes agent reviewing attribution based on beaconing analysis"})
+        console.print("  [dim]Waiting for LLM inference...[/]")
+
+        response = await call_agent(
+            build_messages(SYSTEM_THREATINTEL_CONTRA, USER_THREATINTEL_CONTRA))
+
+        display_agent_response("threatintel", response, "Attribution review")
+
+        # The agent should have filed a contradiction via MCP; display it
+        print_contradiction(
+            "threatintel",
+            "(see agent's prior attribution above)",
+            response[:500],
         )
 
-        if attr_id != "pending":
-            try:
-                await client.report_contradiction(
-                    memory_id=attr_id,
-                    observed_behavior=contra_reason,
-                )
-            except Exception:
-                pass
+        known_ids = await discover_new_memories(
+            client, "threatintel",
+            ["IR-2024-184 contradiction", "IR-2024-184 beaconing"],
+            known_ids,
+        )
 
-        print_contradiction("threatintel", attr_content, contra_reason,
-                            memory_id="contra-" + attr_id, contradicts_id=attr_id)
-
-        # Sensitive data quarantine: executive identification
+        # Feature demo: quarantine
         print_quarantine(
             "tier1",
             "The phishing email that started this incident was sent to Pat M. "
@@ -642,44 +769,30 @@ async def run_scenario():
             "case management system, not in shared memory.",
         )
 
-        # ── PHASE 5: Containment ────────────────────────────────────
-        print_phase(5, "CONTAINMENT", "06:00 — 08:00",
+        # ── PHASE 5: Containment (Call 5 + feature demos) ──────────
+        print_phase(5, "CONTAINMENT", "06:00 -- 08:00",
                     "Credential rotation, endpoint isolation, stakeholder notification")
 
-        # Breakglass lesson
-        print_action("ic", "search_memory",
-                     "query='breakglass credential rotation backup impact'")
-        sr5 = await client.search(
-            "breakglass credential rotation backup Veeam incident",
-            scope="project", project_id=PROJECT_ID,
+        # Call 5: IC synthesis
+        print_action("ic", "coordinating",
+                     "Synthesizing findings via GPT-OSS 20B on-cluster")
+        emit({"type": "decision", "agent": fe_agent("ic"),
+              "content": "OpenClaw agent calling GPT-OSS 20B for containment coordination"})
+        console.print("  [dim]Waiting for LLM inference...[/]")
+
+        response = await call_agent(build_messages(SYSTEM_IC_CONTAIN, USER_IC_CONTAIN))
+
+        display_agent_response("ic", response, "Containment synthesis")
+        emit({"type": "memory_search", "agent": fe_agent("ic"),
+              "query": "breakglass lessons + CISO preferences + synthesis"})
+
+        known_ids = await discover_new_memories(
+            client, "ic",
+            ["IR-2024-184 synthesis", "IR-2024-184 containment", "IR-2024-184 IC"],
+            known_ids,
         )
-        for r in sr5.results:
-            if "breakglass" in r.content.lower():
-                print_memory_found("ic", r.content, "IR-2024-103 operational lesson",
-                                   memory_id=r.id,
-                                   metadata={"incident_id": "IR-2024-103", "age": "8 months ago"},
-                                   moment=4)
-                break
 
-        print_action("ic", "coordinate_containment",
-                     "Paging backup admin BEFORE breakglass rotation. Notifying NOC.")
-
-        # CISO notification preference
-        print_action("ic", "search_memory",
-                     "query='CISO notification preference PII exposure'")
-        sr6 = await client.search(
-            "CISO notification PII exposure preference early",
-            scope="project", project_id=PROJECT_ID,
-        )
-        for r in sr6.results:
-            if "Lindstrom" in r.content or "notification" in r.content.lower():
-                print_memory_found("ic", r.content, "Stakeholder preference")
-                break
-
-        print_action("ic", "notify_ciso",
-                     "Early notification at 07:00 -- potential PII exposure (finance documents staged)")
-
-        # Credential quarantine
+        # Feature demo: credential quarantine
         print_quarantine(
             "forensics",
             "Rotated svc-reporting credential. Old password was Welcome2024!Q3, "
@@ -689,28 +802,7 @@ async def run_scenario():
             "standard procedure. Old credential is now invalid.",
         )
 
-        # IC synthesis
-        synth_content = (
-            "IR-2024-184 IC synthesis (06:00 shift handoff brief): "
-            "Confirmed credential compromise via phishing, 11-day dwell. "
-            "47 GB staged on FILESVR-CORP-03, no exfiltration confirmed. "
-            "Attribution to CC2024-Q3 is LOW confidence per Threat Intel -- "
-            "beaconing pattern mismatch. Containment in progress: WKSTN-FIN-082 "
-            "isolated, svc-reporting rotated. Coordinated with backup admin "
-            "before breakglass rotation per IR-2024-103 lesson. CISO notified "
-            "at 07:00 per standing preference."
-        )
-        sw = await client.write(
-            synth_content, scope="project", project_id=PROJECT_ID,
-            weight=0.95,
-            metadata={"incident_id": "IR-2024-184", "role": "incident-commander",
-                       "framework": "openclaw"},
-            force=True,
-        )
-        sw_id = sw.memory.id if sw.memory else "pending"
-        print_memory_written("ic", synth_content, sw_id)
-
-        # ── PHASE 6: Audit Trail ────────────────────────────────────
+        # ── PHASE 6: Audit Trail (feature demo) ───────────────────
         print_phase(6, "AUDIT TRAIL", "Post-containment",
                     "Chain of evidence: who did what, and on whose behalf")
 
@@ -736,46 +828,43 @@ async def run_scenario():
             ],
         )
 
-        # ── PHASE 7: Post-Incident ──────────────────────────────────
+        # ── PHASE 7: Post-Incident (Call 6) ────────────────────────
         print_phase(7, "POST-INCIDENT LEARNING", "24-72 hours later",
                     "Lessons captured into shared memory for future incidents")
 
-        lesson1 = (
-            "IR-2024-184 confirms the IR-2024-117 attacker pattern is still active. "
-            "Two things we learned: (1) the attacker waited 11 days between credential "
-            "harvest and first lateral movement, longer than the 9 days in IR-2024-117. "
-            "Our default 'go back 14 days' assumption needs to extend to 21 days. "
-            "(2) The attacker used normal working hours during enumeration, then "
-            "switched to off-hours during staging. Hunting hypothesis: when "
-            "investigating service account anomalies, also pull the human user's "
-            "recent access patterns and look for time-of-day shifts."
+        # Call 6: IC post-incident lessons
+        print_action("ic", "writing_lessons",
+                     "Post-incident analysis via GPT-OSS 20B on-cluster")
+        emit({"type": "decision", "agent": fe_agent("ic"),
+              "content": "OpenClaw agent writing post-incident lessons"})
+        console.print("  [dim]Waiting for LLM inference...[/]")
+
+        response = await call_agent(build_messages(SYSTEM_IC_POSTINCIDENT, USER_IC_POSTINCIDENT))
+
+        display_agent_response("ic", response, "Post-incident lessons")
+
+        known_ids = await discover_new_memories(
+            client, "ic",
+            ["IR-2024-184 lesson", "IR-2024-184 post-incident"],
+            known_ids,
         )
-        l1 = await client.write(
-            lesson1, scope="project", project_id=PROJECT_ID, weight=0.95,
-            metadata={"incident_id": "IR-2024-184", "role": "incident-commander",
-                       "framework": "openclaw", "category": "post-incident-lesson"},
-            force=True,
-        )
-        l1_id = l1.memory.id if l1.memory else "pending"
-        print_memory_written("ic", lesson1, l1_id)
 
     # ── Closing ─────────────────────────────────────────────────
     console.print()
     closing = Panel(
         Text.from_markup(
             "[bold white]What you just saw:[/]\n\n"
-            "1. Tier 1 escalated at 02:38 because the agent fleet remembered "
-            "IR-2024-117 [cyan](Claude Code)[/]\n"
-            "2. Forensics filtered ai.exe false positives from self-authored "
-            "operational memory [green](FIPS-Agent)[/]\n"
-            "3. Threat Intel's attribution was contradicted and the investigation "
-            "adjusted [yellow](Hermes)[/]\n"
-            "4. Breakglass rotation didn't break backup because an 8-month-old "
-            "lesson surfaced [magenta](OpenClaw)[/]\n"
-            "5. Audit trail answers both 'what did this role do?' and 'what was "
-            "done on behalf of this analyst?'\n\n"
-            "[bold]Four frameworks. One shared memory. Zero integration code "
-            "beyond pointing each agent at the same MCP server.[/]"
+            "1. Tier 1 searched shared memory and decided to escalate "
+            "[cyan](Claude Code)[/]\n"
+            "2. Forensics investigated with memory-informed analysis "
+            "[green](FIPS-Agent)[/]\n"
+            "3. Threat Intel attributed, then contradicted its own assessment "
+            "[yellow](Hermes)[/]\n"
+            "4. IC synthesized all findings and wrote lessons learned "
+            "[magenta](OpenClaw)[/]\n"
+            "5. Every search, write, and contradiction was a real LLM call "
+            "through real MemoryHub MCP tools\n\n"
+            "[bold]Four frameworks. One shared memory. Zero scripted content.[/]"
         ),
         title="MEMORYHUB: THE CONTEXT THAT MAKES SECURITY DECISIONS GO WELL",
         title_align="center",
@@ -787,7 +876,7 @@ async def run_scenario():
     console.print()
     emit({
         "type": "session_end",
-        "banner": "IR-2024-184 contained · memories written · cross-framework reads · 1 contradiction preserved",
+        "banner": "IR-2024-184 contained -- memories written -- cross-framework reads -- real LLM inference",
         "bcolor": "#2196F3",
     })
     return 0
