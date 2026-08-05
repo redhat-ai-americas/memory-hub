@@ -5,8 +5,8 @@ See CLAUDE.md ("Calling Patterns") for richer patterns — structured output
 via ``call_model_json``, validation-with-retry via ``call_model_validated``,
 and agent-code tool dispatch via ``self.use_tool()``.
 
-Replace ``MyAgent`` with your agent class name (``/create-agent`` does this
-automatically from your ``AGENT_PLAN.md``).
+SOC Forensics Specialist agent for the cross-framework SOC demo.
+Connects to MemoryHub MCP at startup so the LLM can use memory tools.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from __future__ import annotations
 from fipsagents.baseagent import BaseAgent, StepResult
 
 
-class MyAgent(BaseAgent):
-    """Single-turn agent — calls the model, runs any tool calls, returns."""
+class SOCForensicsAgent(BaseAgent):
+    """SOC Forensics Specialist — investigates incidents using MemoryHub."""
 
     async def step(self) -> StepResult:
         response = await self.call_model()
@@ -36,7 +36,7 @@ class MyAgent(BaseAgent):
 #        from fipsagents.baseagent import load_config
 #        async def main():
 #            config = load_config()
-#            agent = MyAgent(config=config)
+#            agent = SOCForensicsAgent(config=config)
 #            await agent.start()
 #        asyncio.run(main())
 #   2. Comment out EXPOSE 8080 in the Containerfile
@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     config = load_config("agent.yaml")
     server = OpenAIChatServer(
-        agent_class=MyAgent,
+        agent_class=SOCForensicsAgent,
         config_path="agent.yaml",
         title=config.agent.name,
         version=config.agent.version,
