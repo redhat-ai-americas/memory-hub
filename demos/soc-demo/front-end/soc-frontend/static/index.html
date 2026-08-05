@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MemoryHub — SOC Operational Display</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;700;900&family=Red+Hat+Text:wght@400;500;700&family=Red+Hat+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#101120; --panel:#131523; --card:#171a2b; --line:#23263a; --border:#272b40;
+  --txt:#e6e8f0; --mut:#8b90a5; --dim:#5d637d; --faint:#4a4f68;
+  --tier1:#00BCD4; --forensics:#4CAF50; --intel:#FFC107; --ic:#E040FB;
+  --hub:#2196F3; --red:#F44336; --shift:#FFEB3B;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:'Red Hat Text',sans-serif;overflow:hidden}
+a{color:#4fc3f7;text-decoration:none} a:hover{color:#81d4fa}
+.mono{font-family:'Red Hat Mono',monospace}
+#app{height:100vh;min-height:560px;display:grid;grid-template-rows:auto 1fr auto;position:relative}
+header{display:flex;align-items:center;gap:16px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel);z-index:5}
+.reddot{width:10px;height:10px;background:#EE0000;border-radius:2px}
+.brand{font-family:'Red Hat Display',sans-serif;font-weight:900;font-size:15px}
+.subbrand{font-family:'Red Hat Mono',monospace;font-size:9.5px;color:var(--dim);letter-spacing:.14em}
+#phasehead{text-align:right;margin-left:auto}
+#phaselabel{font-family:'Red Hat Display',sans-serif;font-weight:700;font-size:12.5px;color:#c7cbe0}
+#phasedesc{font-size:10px;color:#7f86a3}
+#segs{display:flex;gap:3px}
+.seg{width:22px;height:19px;display:flex;align-items:center;justify-content:center;border-radius:4px;font-family:'Red Hat Mono',monospace;font-size:9.5px;font-weight:700;background:#1a1d31;color:var(--faint);border:1px solid #262a44}
+.seg.on{background:#1c3a63;color:#64b5f6;border-color:#2c4a75}
+.seg.cur{background:var(--hub);color:#fff;border-color:var(--hub)}
+#clockbox{display:flex;flex-direction:column;align-items:flex-end;min-width:76px}
+#clock{font-family:'Red Hat Mono',monospace;font-size:13px;font-weight:700}
+#evt{font-family:'Red Hat Mono',monospace;font-size:9px;color:var(--dim)}
+#incident{font-family:'Red Hat Mono',monospace;font-size:10.5px;font-weight:700;color:#ffab91;border:1px solid #ff572244;background:#ff572212;border-radius:6px;padding:4px 9px}
+#conn{font-family:'Red Hat Mono',monospace;font-size:9.5px;padding:4px 9px;border-radius:99px;border:1px solid #2a2d44;color:var(--mut)}
+#conn.ok{color:#81C784;border-color:#4CAF5055;background:#4CAF5012}
+main{position:relative;overflow:hidden;background-image:radial-gradient(circle,#1d2138 1px,transparent 1px);background-size:26px 26px}
+#lines{position:absolute;inset:0;width:100%;height:100%;z-index:1}
+#hubwrap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;border-radius:50%}
+#hubwrap.flash{animation:hubflash .9s ease 2}
+#hub{width:150px;height:150px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#1c3a63,#0c1730);border:2px solid var(--hub);box-shadow:0 0 40px rgba(33,150,243,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center}
+#hub .t{font-family:'Red Hat Display',sans-serif;font-weight:900;font-size:16px;color:#e9f2ff}
+#hub .c{font-family:'Red Hat Mono',monospace;font-size:11px;color:#64b5f6}
+#hub .s{font-family:'Red Hat Mono',monospace;font-size:8.5px;color:#4a5a7d}
+#ring{position:absolute;left:50%;top:50%;width:170px;height:170px;border:2px solid var(--hub);border-radius:50%;animation:ring 1.1s ease-out infinite;pointer-events:none;z-index:2}
+.cardwrap{position:absolute;transform:translate(-50%,-50%);width:238px;z-index:3;border-radius:14px;transition:opacity .4s,box-shadow .3s;opacity:.4}
+.cardwrap.reg{opacity:1}
+.card{background:#171a2bee;border:1px solid var(--border);border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:6px}
+.crow{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.role{font-family:'Red Hat Display',sans-serif;font-weight:700;font-size:13.5px}
+.fw{font-family:'Red Hat Mono',monospace;font-size:9.5px;font-weight:700;padding:3px 7px;border-radius:5px;white-space:nowrap}
+.model{font-family:'Red Hat Mono',monospace;font-size:9.5px;color:var(--mut)}
+.ids{display:flex;flex-direction:column;gap:2px;font-family:'Red Hat Mono',monospace;font-size:10.5px}
+.ids .k{color:var(--dim)}
+.driver{border-radius:3px}
+.driver.flash{animation:shiftflash 1.8s ease-out;padding:0 3px}
+.pill{font-family:'Red Hat Mono',monospace;font-size:9.5px;font-weight:700;letter-spacing:.08em;padding:3px 9px;border-radius:99px;background:#20233566;color:#7f86a3;border:1px solid #2a2d44;align-self:flex-start}
+.log{display:flex;flex-direction:column;gap:2px;border-top:1px solid #232742;padding-top:5px}
+.log div{font-family:'Red Hat Mono',monospace;font-size:9.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log .ts{color:var(--dim)}
+#bannerwrap{position:absolute;top:14px;z-index:7}
+#bannerwrap.center{left:50%;transform:translateX(-50%);max-width:72%;animation:bannerin .45s ease both}
+#bannerwrap.lane{left:14px;right:384px;display:flex;justify-content:center;animation:bannerdrop .45s ease both}
+#banner{padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px;background:rgba(19,21,36,.94);color:#e9ebf5}
+#panel{position:absolute;top:10px;right:10px;bottom:10px;width:350px;max-width:46%;background:#151726f5;border:1px solid #2a2e4a;border-radius:12px;z-index:8;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.5);animation:pop .22s ease}
+#ptitle{font-family:'Red Hat Mono',monospace;font-size:10px;letter-spacing:.16em;color:#7f86a3}
+#phead{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #23263e}
+#pclose{cursor:pointer;color:#7f86a3;font-size:14px;line-height:1;padding:3px 7px;border-radius:5px;margin-left:auto}
+#pclose:hover{background:#242844;color:#fff}
+#pbody{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.memtext{font-size:12.5px;line-height:1.55;color:#ccd1e4;background:#191c30;border:1px solid #262a48;border-radius:8px;padding:10px 12px}
+.meta{display:flex;flex-direction:column;gap:4px;font-family:'Red Hat Mono',monospace;font-size:10.5px}
+.meta .row{display:flex;gap:8px;align-items:center}
+.meta .k{color:var(--dim);width:74px;flex:0 0 auto}
+.meta .v{color:#c7cbe0}
+.wbar{flex:1;height:5px;background:#232742;border-radius:99px;overflow:hidden}
+.wfill{height:100%;border-radius:99px}
+.mbadge{font-family:'Red Hat Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.06em;border-radius:5px;padding:3px 6px}
+.contranote{border:1px solid #F4433666;background:#F4433612;border-radius:8px;padding:8px 10px;font-family:'Red Hat Mono',monospace;font-size:10.5px;color:#ff8a80}
+.cblock{border-radius:8px;padding:10px 12px;background:#191c30}
+.cblock .h{font-family:'Red Hat Mono',monospace;font-size:10.5px;font-weight:700;margin-bottom:5px;color:#e9ebf5}
+.cblock .b{font-size:11.5px;line-height:1.5;color:#ccd1e4}
+.cdivider{text-align:center;font-family:'Red Hat Mono',monospace;font-size:10.5px;font-weight:700;letter-spacing:.14em;color:#ff5252}
+.auditgrid{display:grid;grid-template-columns:36px 1fr 1fr 62px 84px;gap:5px 8px;font-family:'Red Hat Mono',monospace;font-size:9.8px}
+.auditgrid .h{color:var(--dim)}
+.note{font-size:11px;color:#9aa0b8;line-height:1.5}
+footer{border-top:1px solid var(--line);background:var(--panel);padding:8px 14px;display:flex;flex-direction:column;gap:6px;z-index:5}
+#tlbar{display:flex;align-items:center;gap:10px}
+#tllabel{font-family:'Red Hat Mono',monospace;font-size:9.5px;letter-spacing:.16em;color:var(--dim)}
+#keys{font-family:'Red Hat Mono',monospace;font-size:9.5px;color:var(--faint);margin-left:auto}
+.btn{cursor:pointer;font-family:'Red Hat Mono',monospace;font-size:10px;padding:5px 10px;background:#1c1f33;border:1px solid #2c3050;border-radius:6px;color:#aab0c8;user-select:none}
+.btn:hover{background:#262a45;color:#fff}
+.btn.live{background:#4CAF5022;border-color:#4CAF5066;color:#81C784}
+#chips{display:flex;gap:6px;align-items:center;overflow-x:auto;padding:3px 2px;min-height:30px}
+#chips::-webkit-scrollbar,#pbody::-webkit-scrollbar{height:8px;width:8px}
+#chips::-webkit-scrollbar-thumb,#pbody::-webkit-scrollbar-thumb{background:#2a2e4a;border-radius:99px}
+.chip{font-family:'Red Hat Mono',monospace;font-size:10px;padding:4px 9px;border-radius:6px;background:#1a1d31;color:#c7cbe0;cursor:pointer;white-space:nowrap;flex:0 0 auto}
+.chip.new{animation:pop .35s ease}
+.chip.warn{border:1px solid #F4433666;background:#F4433614;color:#ff8a80;font-weight:700}
+#empty{font-family:'Red Hat Mono',monospace;font-size:10px;color:#3d4258}
+#standby{position:absolute;inset:0;z-index:20;background:radial-gradient(ellipse at 50% 35%,#151a33 0%,#0d0f1c 72%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center;padding:24px}
+#standby .eyebrow{display:flex;align-items:center;gap:10px;font-family:'Red Hat Mono',monospace;font-size:10px;letter-spacing:.24em;color:#7f86a3}
+#standby h1{font-family:'Red Hat Display',sans-serif;font-weight:900;font-size:clamp(42px,7vw,68px);color:#f0f2fa;line-height:1;margin:0}
+#standby .tag{margin-top:10px;font-size:15px;color:#9aa0b8}
+#standby .inc{font-family:'Red Hat Mono',monospace;font-size:11px;color:#7f86a3}
+#roster{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.rchip{border-radius:8px;padding:8px 14px;text-align:left}
+.rchip .r{font-weight:700;font-size:12px}
+.rchip .f{font-family:'Red Hat Mono',monospace;font-size:9.5px;margin-top:2px}
+#waiting{font-family:'Red Hat Mono',monospace;font-size:12px;letter-spacing:.18em;color:var(--txt);border:1px solid #3a3f63;border-radius:8px;padding:11px 22px;animation:blink 1.7s step-end infinite}
+#standby .foot{font-family:'Red Hat Mono',monospace;font-size:9.5px;color:var(--faint)}
+@keyframes dash{to{stroke-dashoffset:-34px}}
+@keyframes ring{from{transform:translate(-50%,-50%) scale(.5);opacity:.9}to{transform:translate(-50%,-50%) scale(2.1);opacity:0}}
+@keyframes hubflash{0%,100%{box-shadow:0 0 40px rgba(33,150,243,.3)}50%{box-shadow:0 0 80px rgba(244,67,54,.95)}}
+@keyframes shiftflash{0%{background:rgba(255,235,59,.5)}100%{background:rgba(255,235,59,0)}}
+@keyframes pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes bannerin{from{transform:translate(-50%,-14px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
+@keyframes bannerdrop{from{transform:translateY(-14px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes blink{50%{opacity:.4}}
+[hidden]{display:none !important}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div style="display:flex;align-items:center;gap:9px">
+      <div class="reddot"></div>
+      <div class="brand">MemoryHub</div>
+      <div class="subbrand">SOC OPERATIONAL DISPLAY</div>
+    </div>
+    <div id="phasehead">
+      <div id="phaselabel">PHASE 0 · STANDBY</div>
+      <div id="phasedesc">awaiting scenario start</div>
+    </div>
+    <div id="segs"></div>
+    <div id="clockbox"><div id="clock" class="mono">T+--:--</div><div id="evt">EVENT 0 / 0</div></div>
+    <div id="incident">IR-2024-184</div>
+    <div id="conn">● offline</div>
+  </header>
+  <main>
+    <svg id="lines"></svg>
+    <div id="bannerwrap" class="center" hidden><div id="banner"></div></div>
+    <div id="ring" hidden></div>
+    <div id="hubwrap"><div id="hub"><div class="t">MemoryHub</div><div class="c"><span id="memcount">1,281</span> memories</div><div class="s">on OpenShift</div></div></div>
+    <aside id="panel" hidden>
+      <div id="phead"><div id="ptitle">MEMORY DETAIL</div><div id="pclose">✕</div></div>
+      <div id="pbody"></div>
+    </aside>
+  </main>
+  <footer>
+    <div id="tlbar">
+      <div id="tllabel">MEMORY TIMELINE</div>
+      <div id="keys">SPACE / → advance · ← back · ESC close panel · L live/step</div>
+      <div style="display:flex;gap:5px">
+        <div class="btn" id="bprev">◀</div>
+        <div class="btn" id="bnext">▶</div>
+        <div class="btn" id="bmode">LIVE</div>
+        <div class="btn" id="breset" title="Rewind to standby">RESET</div>
+      </div>
+    </div>
+    <div id="chips"><div id="empty">— no memories yet · nodes appear here as agents write and retrieve —</div></div>
+  </footer>
+  <div id="standby">
+    <div class="eyebrow"><div class="reddot" style="width:12px;height:12px"></div>SOC AGENT FLEET · OPERATIONAL DISPLAY</div>
+    <div><h1>MemoryHub</h1><div class="tag">Four agents. Four frameworks. One shared memory.</div></div>
+    <div class="inc">INCIDENT IR-2024-184 · HOST FIN-WS-0219 · ALERT AT T+02:47</div>
+    <div id="roster"></div>
+    <div id="waiting">WAITING FOR EVENT STREAM…</div>
+    <div class="foot">memoryhub + vLLM on OpenShift · api.anthropic.com · fed by harness events over WebSocket</div>
+  </div>
+</div>
+<script>
+'use strict';
+const AGENTS = {
+  tier1:    {role:'Tier 1 SOC Analyst',  fw:'Claude Code', color:'#00BCD4', actor:'soc.tier1',     model:'Claude · cloud API',       pos:{left:'50%',                       top:'max(78px,14%)'},              lx:'50%', ly:'14%'},
+  intel:    {role:'Threat Intel',        fw:'Hermes',      color:'#FFC107', actor:'soc.intel',     model:'Gemma 4 E4B · on-cluster', pos:{left:'max(132px,16%)',            top:'50%'},                        lx:'16%', ly:'50%'},
+  forensics:{role:'Forensics',           fw:'FIPS-Agent',  color:'#4CAF50', actor:'soc.forensics', model:'Gemma 4 E4B · on-cluster', pos:{left:'min(calc(100% - 132px),84%)',top:'50%'},                       lx:'84%', ly:'50%'},
+  ic:       {role:'Incident Commander',  fw:'OpenClaw',    color:'#E040FB', actor:'soc.ic',        model:'Gemma 4 E4B · on-cluster', pos:{left:'50%',                       top:'min(calc(100% - 78px),86%)'}, lx:'50%', ly:'86%'}
+};
+const PHASES = ['Detection & Triage','Forensic Investigation','Attribution','Contradiction','Containment','Shift Change','Recovery & Audit'];
+const STATUS = {memory_search:'SEARCHING', memory_hit:'READING', memory_read:'READING', memory_write:'WRITING', alert:'ALERT', decision:'DECIDING', quarantine:'BLOCKED'};
+const OUT_OPS = {memory_search:1, memory_write:1, quarantine:1};
+const OP_COL = {write:'#81C784', read:'#4DD0E1', search:'#8b90a5', contradict:'#ff8a80', quarantine:'#ff8a80', shift:'#FFD54F'};
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let events = [], idx = 0, live = true, dismissed = -1, manual = null;
+
+// ---- boot static DOM ----
+const linesSvg = $('lines');
+for (const pass of ['base','active']) for (const k in AGENTS) {
+  const a = AGENTS[k];
+  const l = document.createElementNS('http://www.w3.org/2000/svg','line');
+  l.setAttribute('x1','50%'); l.setAttribute('y1','50%');
+  l.setAttribute('x2',a.lx);  l.setAttribute('y2',a.ly);
+  if (pass==='base') { l.setAttribute('stroke','#252940'); l.setAttribute('stroke-width','1.5'); }
+  else { l.id = 'line-'+k; l.style.opacity = 0; }
+  linesSvg.appendChild(l);
+}
+const main = document.querySelector('main');
+for (const k in AGENTS) {
+  const a = AGENTS[k];
+  const w = document.createElement('div');
+  w.className = 'cardwrap'; w.id = 'cw-'+k;
+  w.style.left = a.pos.left; w.style.top = a.pos.top;
+  w.innerHTML = `<div class="card">
+    <div class="crow"><div class="role">${a.role}</div><div class="fw" style="background:${a.color}1f;color:${a.color};border:1px solid ${a.color}55">${a.fw}</div></div>
+    <div class="model" id="model-${k}">model: ${a.model}</div>
+    <div class="ids">
+      <div><span class="k">actor_id&nbsp;</span><span style="color:${a.color}">${a.actor}</span></div>
+      <div><span class="k">driver_id</span> <span class="driver" id="driver-${k}">—</span></div>
+    </div>
+    <div class="pill" id="pill-${k}">OFFLINE</div>
+    <div class="log" id="log-${k}"></div>
+  </div>`;
+  main.insertBefore(w, $('panel'));
+  const rc = document.createElement('div');
+  rc.className = 'rchip';
+  rc.style.cssText = `border:1px solid ${a.color}55;background:${a.color}10`;
+  rc.innerHTML = `<div class="r">${a.role}</div><div class="f" style="color:${a.color}">${a.fw} · ${a.model}</div>`;
+  $('roster').appendChild(rc);
+}
+$('segs').innerHTML = PHASES.map((p,i)=>`<div class="seg" id="seg-${i+1}" title="Phase ${i+1} · ${p}">${i+1}</div>`).join('');
+
+// ---- websocket ----
+function connect(){
+  const ws = new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+  ws.onopen = () => { $('conn').className='ok'; $('conn').textContent='● connected'; };
+  ws.onclose = () => { $('conn').className=''; $('conn').textContent='● reconnecting…'; setTimeout(connect,1500); };
+  ws.onmessage = m => {
+    events.push(JSON.parse(m.data));
+    if (live) { idx = events.length; manual = null; }
+    render();
+  };
+}
+connect();
+
+// ---- state derivation (replay events[0..idx)) ----
+function build(n){
+  const s = {mems:[], tl:[], logs:{}, drivers:{}, reg:{}, phase:null};
+  for (const k in AGENTS){ s.logs[k]=[]; s.drivers[k]='—'; }
+  const log = (ag,ts,txt) => { if(s.logs[ag]) s.logs[ag].push({ts,txt}); };
+  for (let i=0;i<n;i++){
+    const e = events[i], md = e.metadata||{};
+    switch(e.type){
+      case 'phase_start': s.phase=e; break;
+      case 'agent_register': s.reg[e.agent]=true; s.drivers[e.agent]=e.driver_id||'—'; log(e.agent,e.timestamp,'registered via '+(e.framework||'')); break;
+      case 'alert': case 'decision': log(e.agent,e.timestamp,e.content); break;
+      case 'memory_search': log(e.agent,e.timestamp,'SEARCH “'+e.query+'”'); break;
+      case 'memory_hit': {
+        let m = s.mems.find(x=>x.id===e.memory_id);
+        if(!m){ m={id:e.memory_id, agent:md.author_agent||e.agent, driver:md.author_driver||'—', inc:md.incident_id, age:md.age, weight:md.weight, self:!!md.self_authored, text:e.content, prior:true, contra:[]}; s.mems.push(m); s.tl.push({k:'mem',id:m.id}); }
+        log(e.agent,e.timestamp,'HIT '+m.id+' · '+(m.inc||'')); break;
+      }
+      case 'memory_write': {
+        const m={id:e.memory_id, agent:e.agent, driver:s.drivers[e.agent], inc:md.incident_id||'IR-2024-184', ts:e.timestamp, weight:md.weight, refs:md.references||[], text:e.content, contra:[]};
+        s.mems.push(m); s.tl.push({k:'mem',id:m.id}); log(e.agent,e.timestamp,'WRITE '+m.id); break;
+      }
+      case 'memory_read': log(e.agent,e.timestamp,'READ '+(e.memory_ids||[]).join(' · ')); break;
+      case 'contradiction': {
+        const a=s.mems.find(m=>m.id===e.memory_id), b=s.mems.find(m=>m.id===e.contradicts);
+        if(a&&b){a.contra.push(b.id);b.contra.push(a.id);}
+        s.tl.push({k:'contra',a:e.memory_id,b:e.contradicts}); break;
+      }
+      case 'quarantine': log(e.agent,e.timestamp,'WRITE BLOCKED — secret pattern'); s.tl.push({k:'blocked',text:e.content}); break;
+      case 'shift_change': for(const [k,v] of Object.entries(e.changes||{})){ log(k,e.timestamp,'driver_id '+s.drivers[k]+' → '+v); s.drivers[k]=v; } break;
+    }
+  }
+  return s;
+}
+
+// ---- rendering ----
+function render(){
+  const s = build(idx), cur = idx>0 ? events[idx-1] : null;
+  $('standby').hidden = idx !== 0;
+  $('waiting').textContent = events.length ? 'PRESS SPACE TO BEGIN' : 'WAITING FOR EVENT STREAM…';
+
+  const phN = s.phase ? s.phase.phase : 0;
+  $('phaselabel').textContent = 'PHASE '+phN+' · '+(s.phase ? (s.phase.label||'').toUpperCase() : 'STANDBY');
+  $('phasedesc').textContent = s.phase ? (s.phase.description||'') : 'awaiting scenario start';
+  for (let i=1;i<=7;i++) $('seg-'+i).className = 'seg'+(i===phN?' cur':i<phN?' on':'');
+  $('clock').textContent = 'T+'+(cur ? cur.timestamp : '--:--');
+  $('evt').textContent = 'EVENT '+idx+' / '+events.length;
+  $('memcount').textContent = (1281+s.mems.length).toLocaleString();
+  $('bmode').textContent = live ? 'LIVE' : 'STEP';
+  $('bmode').className = 'btn'+(live?' live':'');
+
+  for (const k in AGENTS){
+    const a = AGENTS[k];
+    const isCur = cur && cur.agent===k, isShift = cur && cur.type==='shift_change' && cur.changes && cur.changes[k];
+    const active = isCur && STATUS[cur.type];
+    const w = $('cw-'+k);
+    w.classList.toggle('reg', !!s.reg[k]);
+    w.style.boxShadow = (active||isShift) ? '0 0 28px '+(isShift?'#FFEB3B':a.color)+'66' : 'none';
+    const d = $('driver-'+k);
+    d.textContent = s.drivers[k];
+    d.className = 'driver'+(isShift?' flash':'');
+    const pill = $('pill-'+k);
+    pill.textContent = !s.reg[k] ? 'OFFLINE' : isShift ? 'HANDOFF' : isCur ? (STATUS[cur.type]||'IDLE') : 'IDLE';
+    pill.style.cssText = (active||isShift)
+      ? `background:${a.color}22;color:${isShift?'#FFEB3B':a.color};border-color:${isShift?'#FFEB3B':a.color}66`
+      : '';
+    $('log-'+k).innerHTML = s.logs[k].slice(-3).map(l=>`<div><span class="ts">${esc(l.ts)}</span> ${esc(l.txt)}</div>`).join('');
+    const line = $('line-'+k);
+    if (isCur && ['memory_search','memory_write','memory_hit','memory_read','quarantine'].includes(cur.type)){
+      const col = cur.type==='quarantine' ? '#F44336' : a.color;
+      line.style.cssText = `opacity:1;stroke:${col};stroke-width:2.5;stroke-dasharray:11 8;animation:dash .55s linear infinite;animation-direction:${OUT_OPS[cur.type]?'reverse':'normal'};filter:drop-shadow(0 0 5px ${col})`;
+    } else if (cur && cur.type==='contradiction' && (k==='intel'||k==='forensics')){
+      line.style.cssText = 'opacity:1;stroke:#F44336;stroke-width:2;stroke-dasharray:4 5;animation:dash .8s linear infinite;filter:drop-shadow(0 0 5px #F44336)';
+    } else line.style.cssText = 'opacity:0';
+  }
+
+  $('ring').hidden = !(cur && cur.type==='memory_search');
+  $('hubwrap').classList.toggle('flash', !!(cur && cur.type==='quarantine'));
+
+  // timeline
+  const chips = s.tl.map((c,i)=>{
+    const isNew = i===s.tl.length-1 && cur && ['memory_write','memory_hit','contradiction','quarantine'].includes(cur.type);
+    if (c.k==='mem'){
+      const m = s.mems.find(x=>x.id===c.id), col = AGENTS[m.agent].color;
+      return `<div class="chip${isNew?' new':''}" data-mem="${m.id}" title="${esc((m.prior?'[prior incident] ':'')+m.text)}" style="border:1px ${m.prior?'dashed':'solid'} ${col}55;border-left:3px solid ${col};${m.contra.length?'color:#ffb3ad':''}">${m.id.replace('m-','')}${m.contra.length?' ⇄':''}</div>`;
+    }
+    if (c.k==='contra') return `<div class="chip warn${isNew?' new':''}" data-contra="1" title="${esc(c.a)} contradicts ${esc(c.b)} — both preserved">⇄ CONTRADICTS</div>`;
+    return `<div class="chip warn${isNew?' new':''}" style="cursor:default;background:#F4433622" title="${esc(c.text)}">✕ BLOCKED</div>`;
+  }).join('');
+  $('chips').innerHTML = chips || '<div id="empty">— no memories yet · nodes appear here as agents write and retrieve —</div>';
+  $('chips').scrollLeft = $('chips').scrollWidth;
+
+  // detail panel
+  let lastJ=-1, lastEv=null;
+  for (let i=0;i<idx;i++) if (events[i].detail){ lastJ=i+1; lastEv=events[i]; }
+  render._lastJ = lastJ;
+  const findM = id => s.mems.find(m=>m.id===id);
+  let detail=null;
+  if (manual==='::contra'){ const p=s.tl.find(c=>c.k==='contra'); if(p) detail={kind:'contra',a:findM(p.a),b:findM(p.b)}; }
+  else if (manual){ const m=findM(manual); if(m) detail={kind:'mem',mem:m}; }
+  else if (lastEv && lastJ>dismissed){
+    if (lastEv.type==='audit_query') detail={kind:'audit',rows:lastEv.rows||[]};
+    else if (lastEv.type==='contradiction') detail={kind:'contra',a:findM(lastEv.memory_id),b:findM(lastEv.contradicts)};
+    else { const m=findM(lastEv.memory_id); if(m) detail={kind:'mem',mem:m}; }
+  }
+  $('panel').hidden = !detail;
+  if (detail) renderPanel(detail);
+
+  // banner
+  const bw = $('bannerwrap');
+  if (cur && cur.banner){
+    const bc = cur.bcolor||'#2196F3';
+    bw.hidden=false; bw.className = detail ? 'lane' : 'center';
+    $('banner').textContent = cur.banner;
+    $('banner').style.cssText = `border:1px solid ${bc}66;border-left:4px solid ${bc};box-shadow:0 6px 30px ${bc}33`;
+  } else bw.hidden=true;
+}
+
+function renderPanel(d){
+  const body = $('pbody');
+  $('ptitle').textContent = d.kind==='mem' ? 'MEMORY DETAIL' : d.kind==='contra' ? 'CONTRADICTION' : 'AUDIT TRAIL';
+  if (d.kind==='mem'){
+    const m=d.mem, a=AGENTS[m.agent];
+    body.innerHTML = `
+      <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+        <div class="mono" style="font-size:13px;font-weight:700">${esc(m.id)}</div>
+        <div class="mbadge" style="background:${a.color}1f;color:${a.color};border:1px solid ${a.color}55">${a.fw}</div>
+        ${m.self?'<div class="mbadge" style="color:#81C784;border:1px solid #4CAF5066;background:#4CAF5014">SELF-AUTHORED · NO HUMAN INPUT</div>':''}
+        ${m.prior?'<div class="mbadge" style="color:#9aa0b8;border:1px dashed #4a4f68">PRIOR INCIDENT</div>':''}
+        ${m.contra.length?'<div class="mbadge" style="color:#ff8a80;border:1px solid #F4433666;background:#F4433614">CONTRADICTED</div>':''}
+      </div>
+      <div class="memtext">${esc(m.text)}</div>
+      <div class="meta">
+        <div class="row"><span class="k">incident</span><span class="v">${esc(m.inc||'IR-2024-184')}</span></div>
+        <div class="row"><span class="k">author</span><span class="v">${esc(a.role)}</span></div>
+        <div class="row"><span class="k">actor_id</span><span class="v">${esc(a.actor)}</span></div>
+        <div class="row"><span class="k">driver_id</span><span class="v">${esc(m.driver||'—')}</span></div>
+        <div class="row"><span class="k">written</span><span class="v">${esc(m.prior?(m.age||'prior incident'):'T+'+m.ts)}</span></div>
+        <div class="row"><span class="k">weight</span><div class="wbar"><div class="wfill" style="width:${(m.weight||0)*100}%;background:${a.color}"></div></div><span class="v">${m.weight??'—'}</span></div>
+      </div>
+      ${m.contra.length?`<div class="contranote">⇄ contradicts ${esc(m.contra.join(', '))} — both versions preserved</div>`:''}
+      ${(m.refs&&m.refs.length)?`<div class="mono" style="font-size:10px;color:#7f86a3">references ${esc(m.refs.join(', '))}</div>`:''}`;
+  } else if (d.kind==='contra'){
+    const blk = m => { const a=AGENTS[m.agent]; return `<div class="cblock" style="border:1px solid ${a.color}66"><div class="h">${esc(m.id)} <span class="mbadge" style="background:${a.color}1f;color:${a.color}">${a.fw}</span></div><div class="b">${esc(m.text)}</div></div>`; };
+    body.innerHTML = (d.a?blk(d.a):'') + '<div class="cdivider">⇄ CONTRADICTS</div>' + (d.b?blk(d.b):'') +
+      '<div class="note">Neither memory is overwritten. The Incident Commander reads both and writes a synthesis that records the disagreement.</div>';
+  } else {
+    body.innerHTML = `<div class="mono" style="font-size:10px;color:#7f86a3">memoryhub audit log · incident IR-2024-184</div>
+      <div class="auditgrid"><div class="h">ts</div><div class="h">actor_id</div><div class="h">driver_id</div><div class="h">op</div><div class="h">memory</div>
+      ${d.rows.map(r=>`<div style="color:#8b90a5">${esc(r.ts)}</div><div>${esc(r.actor)}</div><div>${esc(r.driver)}</div><div style="color:${OP_COL[r.op]||'#8b90a5'};font-weight:700">${esc(r.op)}</div><div style="color:#8b90a5">${esc(r.mem)}</div>`).join('')}</div>
+      <div class="note">Every memory operation is attributed to an agent role (actor_id) and the human on shift (driver_id) — the audit trail survives the shift change.</div>`;
+  }
+}
+
+// ---- controls ----
+function go(i){ idx = Math.max(0, Math.min(i, events.length)); manual = null; render(); }
+function next(){ if (idx < events.length){ live = idx+1===events.length && live; go(idx+1); } }
+function prev(){ live = false; go(idx-1); }
+function toggleLive(){ live = !live; if (live){ idx = events.length; manual = null; } render(); }
+$('bnext').onclick = () => { live=false; next(); };
+$('bprev').onclick = prev;
+$('bmode').onclick = toggleLive;
+$('breset').onclick = () => { live=false; dismissed=-1; manual=null; go(0); };
+$('pclose').onclick = () => { manual=null; dismissed=render._lastJ??-1; render(); };
+$('chips').addEventListener('click', e => {
+  const c = e.target.closest('.chip'); if (!c) return;
+  if (c.dataset.mem){ manual = c.dataset.mem; render(); }
+  else if (c.dataset.contra){ manual = '::contra'; render(); }
+});
+window.addEventListener('keydown', e => {
+  if (e.repeat) return;
+  if (e.key===' '||e.key==='ArrowRight'){ e.preventDefault(); live=false; next(); }
+  else if (e.key==='ArrowLeft'){ e.preventDefault(); prev(); }
+  else if (e.key==='Escape'){ $('pclose').onclick(); }
+  else if (e.key==='l'||e.key==='L'){ toggleLive(); }
+});
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;700;900&family=Red+Hat+Text:wght@400;500;700&family=Red+Hat+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#101120;color:#e6e8f0;font-family:'Red Hat Text',sans-serif;}
+a{color:#4fc3f7;text-decoration:none} a:hover{color:#81d4fa}
+@keyframes dash{to{stroke-dashoffset:-34px}}
+@keyframes ring{from{transform:translate(-50%,-50%) scale(.5);opacity:.9}to{transform:translate(-50%,-50%) scale(2.1);opacity:0}}
+@keyframes hubflash{0%,100%{box-shadow:0 0 40px rgba(33,150,243,.3)}50%{box-shadow:0 0 80px rgba(244,67,54,.95)}}
+@keyframes shiftflash{0%{background:rgba(255,235,59,.5)}100%{background:rgba(255,235,59,0)}}
+@keyframes pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes bannerin{from{transform:translate(-50%,-14px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
+@keyframes bannerdrop{from{transform:translateY(-14px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes blink{50%{opacity:.4}}
+::-webkit-scrollbar{height:8px;width:8px}::-webkit-scrollbar-thumb{background:#2a2e4a;border-radius:99px}::-webkit-scrollbar-track{background:transparent}
+</style>
+</helmet>
+<div style="position:relative;height:100vh;min-height:560px;display:grid;grid-template-rows:auto 1fr auto;background:#101120;color:#e6e8f0;font-family:'Red Hat Text',sans-serif;overflow:hidden" data-screen-label="SOC Display">
+  <div style="display:flex;align-items:center;gap:16px;padding:9px 16px;border-bottom:1px solid #23263a;background:#131523;z-index:5">
+    <div style="display:flex;align-items:center;gap:9px">
+      <div style="width:10px;height:10px;background:#EE0000;border-radius:2px"></div>
+      <div style="font-family:'Red Hat Display',sans-serif;font-weight:900;font-size:15px">MemoryHub</div>
+      <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#5d637d;letter-spacing:.14em">SOC OPERATIONAL DISPLAY</div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="text-align:right">
+      <div style="font-family:'Red Hat Display',sans-serif;font-weight:700;font-size:12.5px;color:#c7cbe0">PHASE {{phaseNum}} · {{phaseLabel}}</div>
+      <div style="font-size:10px;color:#7f86a3">{{phaseDesc}}</div>
+    </div>
+    <div style="display:flex;gap:3px">
+      <sc-for list="{{phaseSegs}}" as="p" hint-placeholder-count="7">
+        <div style="{{p.style}}" title="{{p.label}}">{{p.n}}</div>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;min-width:76px">
+      <div style="font-family:'Red Hat Mono',monospace;font-size:13px;font-weight:700;color:#e6e8f0">T+{{phaseTs}}</div>
+      <div style="font-family:'Red Hat Mono',monospace;font-size:9px;color:#5d637d">EVENT {{evt}}</div>
+    </div>
+    <div style="font-family:'Red Hat Mono',monospace;font-size:10.5px;font-weight:700;color:#ffab91;border:1px solid #ff572244;background:#ff572212;border-radius:6px;padding:4px 9px">IR-2024-184</div>
+  </div>
+  <div style="position:relative;overflow:hidden;background-image:radial-gradient(circle,#1d2138 1px,transparent 1px);background-size:26px 26px" data-screen-label="Constellation">
+    <svg style="position:absolute;inset:0;width:100%;height:100%;z-index:1">
+      <line x1="50%" y1="50%" x2="50%" y2="14%" stroke="#252940" stroke-width="1.5"></line>
+      <line x1="50%" y1="50%" x2="16%" y2="50%" stroke="#252940" stroke-width="1.5"></line>
+      <line x1="50%" y1="50%" x2="84%" y2="50%" stroke="#252940" stroke-width="1.5"></line>
+      <line x1="50%" y1="50%" x2="50%" y2="86%" stroke="#252940" stroke-width="1.5"></line>
+      <line x1="50%" y1="50%" x2="50%" y2="14%" style="{{tier1.lineStyle}}"></line>
+      <line x1="50%" y1="50%" x2="16%" y2="50%" style="{{intel.lineStyle}}"></line>
+      <line x1="50%" y1="50%" x2="84%" y2="50%" style="{{forensics.lineStyle}}"></line>
+      <line x1="50%" y1="50%" x2="50%" y2="86%" style="{{ic.lineStyle}}"></line>
+    </svg>
+    <sc-if value="{{bannerShow}}" hint-placeholder-val="{{ false }}">
+      <div style="{{bannerWrapStyle}}">
+        <div style="{{bannerStyle}}">{{bannerText}}</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{searchRing}}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:50%;top:50%;width:170px;height:170px;border:2px solid #2196F3;border-radius:50%;animation:ring 1.1s ease-out infinite;pointer-events:none;z-index:2"></div>
+    </sc-if>
+    <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2">
+      <div style="{{hubStyle}}">
+        <div style="width:150px;height:150px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#1c3a63,#0c1730);border:2px solid #2196F3;box-shadow:0 0 40px rgba(33,150,243,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center">
+          <div style="font-family:'Red Hat Display',sans-serif;font-weight:900;font-size:16px;color:#e9f2ff">MemoryHub</div>
+          <div style="font-family:'Red Hat Mono',monospace;font-size:11px;color:#64b5f6">{{hubCount}} memories</div>
+          <div style="font-family:'Red Hat Mono',monospace;font-size:8.5px;color:#4a5a7d">on OpenShift</div>
+        </div>
+      </div>
+    </div>
+    <div style="position:absolute;left:50%;top:max(78px,14%);transform:translate(-50%,-50%);width:238px;z-index:3">
+      <div style="{{tier1.glowStyle}}">
+        <div style="background:#171a2bee;border:1px solid #272b40;border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="font-family:'Red Hat Display',sans-serif;font-weight:700;font-size:13.5px">Tier 1 SOC Analyst</div>
+            <div style="{{tier1.badgeStyle}}">Claude Code</div>
+          </div>
+          <sc-if value="{{showModels}}" hint-placeholder-val="{{ true }}">
+            <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#8b90a5">model: Claude · cloud API</div>
+          </sc-if>
+          <div style="display:flex;flex-direction:column;gap:2px;font-family:'Red Hat Mono',monospace;font-size:10.5px">
+            <div style="display:flex;gap:6px"><span style="color:#5d637d">actor_id&nbsp;</span><span style="color:#00BCD4">soc.tier1</span></div>
+            <div style="display:flex;gap:6px"><span style="color:#5d637d">driver_id</span><span style="{{tier1.driverStyle}}">{{tier1.driver}}</span></div>
+          </div>
+          <div style="display:flex"><div style="{{tier1.statusStyle}}">{{tier1.status}}</div></div>
+          <div style="display:flex;flex-direction:column;gap:2px;border-top:1px solid #232742;padding-top:5px">
+            <sc-for list="{{tier1.log}}" as="l" hint-placeholder-count="2">
+              <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#8b90a5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:#5d637d">{{l.ts}}</span> {{l.txt}}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="position:absolute;left:max(132px,16%);top:50%;transform:translate(-50%,-50%);width:238px;z-index:3">
+      <div style="{{intel.glowStyle}}">
+        <div style="background:#171a2bee;border:1px solid #272b40;border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="font-family:'Red Hat Display',sans-serif;font-weight:700;font-size:13.5px">Threat Intel</div>
+            <div style="{{intel.badgeStyle}}">Hermes</div>
+          </div>
+          <sc-if value="{{showModels}}" hint-placeholder-val="{{ true }}">
+            <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#8b90a5">model: Gemma 4 E4B · on-cluster</div>
+          </sc-if>
+          <div style="display:flex;flex-direction:column;gap:2px;font-family:'Red Hat Mono',monospace;font-size:10.5px">
+            <div style="display:flex;gap:6px"><span style="color:#5d637d">actor_id&nbsp;</span><span style="color:#FFC107">soc.intel</span></div>
+            <div style="display:flex;gap:6px"><span style="color:#5d637d">driver_id</span><span style="{{intel.driverStyle}}">{{intel.driver}}</span></div>
+          </div>
+          <div style="display:flex"><div style="{{intel.statusStyle}}">{{intel.status}}</div></div>
+          <div style="display:flex;flex-direction:column;gap:2px;border-top:1px solid #232742;padding-top:5px">
+            <sc-for list="{{intel.log}}" as="l" hint-placeholder-count="2">
+              <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#8b90a5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:#5d637d">{{l.ts}}</span> {{l.txt}}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="position:absolute;left:min(calc(100% - 132px),84%);top:50%;transform:translate(-50%,-50%);width:238px;z-index:3">
+      <div style="{{forensics.glowStyle}}">
+        <div style="background:#171a2bee;border:1px solid #272b40;border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="font-family:'Red Hat Display',sans-serif;font-weight:700;font-size:13.5px">Forensics</div>
+            <div style="{{forensics.badgeStyle}}">FIPS-Agent</div>
+          </div>
+          <sc-if value="{{showModels}}" hint-placeholder-val="{{ true }}">
+            <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#8b90a5">model: Gemma 4 E4B · on-cluster</div>
+          </sc-if>
+          <div style="display:flex;flex-direction:column;gap:2px;font-family:'Red Hat Mono',monospace;font-size:10.5px">
+            <div style="display:flex;gap:6px"><span style="color:#5d637d">actor_id&nbsp;</span><span style="color:#4CAF50">soc.forensics</span></div>
+            <div style="display:flex;gap:6px"><span style="color:#5d637d">driver_id</span><span style="{{forensics.driverStyle}}">{{forensics.driver}}</span></div>
+          </div>
+          <div style="display:flex"><div style="{{forensics.statusStyle}}">{{forensics.status}}</div></div>
+          <div style="display:flex;flex-direction:column;gap:2px;border-top:1px solid #232742;padding-top:5px">
+            <sc-for list="{{forensics.log}}" as="l" hint-placeholder-count="2">
+              <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#8b90a5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:#5d637d">{{l.ts}}</span> {{l.txt}}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="position:absolute;left:50%;top:min(calc(100% - 78px),86%);transform:translate(-50%,-50%);width:238px;z-index:3">
+      <div style="{{ic.glowStyle}}">
+        <div style="background:#171a2bee;border:1px solid #272b40;border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="font-family:'Red Hat Display',sans-serif;font-weight:700;font-size:13.5px">Incident Commander</div>
+            <div style="{{ic.badgeStyle}}">OpenClaw</div>
+          </div>
+          <sc-if value="{{showModels}}" hint-placeholder-val="{{ true }}">
+            <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#8b90a5">model: Gemma 4 E4B · on-cluster</div>
+          </sc-if>
+          <div style="display:flex;flex-direction:column;gap:2px;font-family:'Red Hat Mono',monospace;font-size:10.5px">
+            <div style="display:flex;gap:6px"><span style="color:#5d637d">actor_id&nbsp;</span><span style="color:#E040FB">soc.ic</span></div>
+            <div style="display:flex;gap:6px"><span style="color:#5d637d">driver_id</span><span style="{{ic.driverStyle}}">{{ic.driver}}</span></div>
+          </div>
+          <div style="display:flex"><div style="{{ic.statusStyle}}">{{ic.status}}</div></div>
+          <div style="display:flex;flex-direction:column;gap:2px;border-top:1px solid #232742;padding-top:5px">
+            <sc-for list="{{ic.log}}" as="l" hint-placeholder-count="2">
+              <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#8b90a5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:#5d637d">{{l.ts}}</span> {{l.txt}}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+    <sc-if value="{{dOpen}}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;top:10px;right:10px;bottom:10px;width:350px;max-width:46%;background:#151726f5;border:1px solid #2a2e4a;border-radius:12px;z-index:8;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.5);animation:pop .22s ease">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #23263e">
+          <div style="font-family:'Red Hat Mono',monospace;font-size:10px;letter-spacing:.16em;color:#7f86a3">{{dTitle}}</div>
+          <div style="flex:1"></div>
+          <div onClick="{{closeDetail}}" style="cursor:pointer;color:#7f86a3;font-size:14px;line-height:1;padding:3px 7px;border-radius:5px" style-hover="background:#242844;color:#ffffff">✕</div>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px">
+          <sc-if value="{{dIsMem}}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <div style="font-family:'Red Hat Mono',monospace;font-size:13px;font-weight:700;color:#e9ebf5">{{dId}}</div>
+              <div style="{{dFwBadge}}">{{dFw}}</div>
+              <sc-if value="{{dSelf}}" hint-placeholder-val="{{ false }}"><div style="font-family:'Red Hat Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.06em;color:#81C784;border:1px solid #4CAF5066;background:#4CAF5014;border-radius:5px;padding:3px 6px">SELF-AUTHORED · NO HUMAN INPUT</div></sc-if>
+              <sc-if value="{{dPrior}}" hint-placeholder-val="{{ false }}"><div style="font-family:'Red Hat Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.06em;color:#9aa0b8;border:1px dashed #4a4f68;border-radius:5px;padding:3px 6px">PRIOR INCIDENT</div></sc-if>
+              <sc-if value="{{dHasContra}}" hint-placeholder-val="{{ false }}"><div style="font-family:'Red Hat Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.06em;color:#ff8a80;border:1px solid #F4433666;background:#F4433614;border-radius:5px;padding:3px 6px">CONTRADICTED</div></sc-if>
+            </div>
+            <div style="font-size:12.5px;line-height:1.55;color:#ccd1e4;background:#191c30;border:1px solid #262a48;border-radius:8px;padding:10px 12px">{{dText}}</div>
+            <div style="display:flex;flex-direction:column;gap:4px;font-family:'Red Hat Mono',monospace;font-size:10.5px">
+              <div style="display:flex;gap:8px"><span style="color:#5d637d;width:74px;flex:0 0 auto">incident</span><span style="color:#c7cbe0">{{dInc}}</span></div>
+              <div style="display:flex;gap:8px"><span style="color:#5d637d;width:74px;flex:0 0 auto">author</span><span style="color:#c7cbe0">{{dRole}}</span></div>
+              <div style="display:flex;gap:8px"><span style="color:#5d637d;width:74px;flex:0 0 auto">actor_id</span><span style="color:#c7cbe0">{{dActor}}</span></div>
+              <div style="display:flex;gap:8px"><span style="color:#5d637d;width:74px;flex:0 0 auto">driver_id</span><span style="color:#c7cbe0">{{dDriver}}</span></div>
+              <div style="display:flex;gap:8px"><span style="color:#5d637d;width:74px;flex:0 0 auto">written</span><span style="color:#c7cbe0">{{dTs}}</span></div>
+              <div style="display:flex;gap:8px;align-items:center"><span style="color:#5d637d;width:74px;flex:0 0 auto">weight</span><div style="flex:1;height:5px;background:#232742;border-radius:99px;overflow:hidden"><div style="{{dWeightStyle}}"></div></div><span style="color:#c7cbe0">{{dWeight}}</span></div>
+            </div>
+            <sc-if value="{{dHasContra}}" hint-placeholder-val="{{ false }}">
+              <div style="border:1px solid #F4433666;background:#F4433612;border-radius:8px;padding:8px 10px;font-family:'Red Hat Mono',monospace;font-size:10.5px;color:#ff8a80">⇄ contradicts {{dContraList}} — both versions preserved</div>
+            </sc-if>
+            <sc-if value="{{dHasRefs}}" hint-placeholder-val="{{ false }}">
+              <div style="font-family:'Red Hat Mono',monospace;font-size:10px;color:#7f86a3">references {{dRefs}}</div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{dIsContra}}" hint-placeholder-val="{{ false }}">
+            <div style="{{cAStyle}}">
+              <div style="font-family:'Red Hat Mono',monospace;font-size:10.5px;font-weight:700;margin-bottom:5px;color:#e9ebf5">{{cA.id}} <span style="{{cA.fwStyle}}">{{cA.fw}}</span></div>
+              <div style="font-size:11.5px;line-height:1.5;color:#ccd1e4">{{cA.text}}</div>
+            </div>
+            <div style="text-align:center;font-family:'Red Hat Mono',monospace;font-size:10.5px;font-weight:700;letter-spacing:.14em;color:#ff5252">⇄ CONTRADICTS</div>
+            <div style="{{cBStyle}}">
+              <div style="font-family:'Red Hat Mono',monospace;font-size:10.5px;font-weight:700;margin-bottom:5px;color:#e9ebf5">{{cB.id}} <span style="{{cB.fwStyle}}">{{cB.fw}}</span></div>
+              <div style="font-size:11.5px;line-height:1.5;color:#ccd1e4">{{cB.text}}</div>
+            </div>
+            <div style="font-size:11px;color:#9aa0b8;line-height:1.5">Neither memory is overwritten. The Incident Commander reads both and writes a synthesis that records the disagreement.</div>
+          </sc-if>
+          <sc-if value="{{dIsAudit}}" hint-placeholder-val="{{ false }}">
+            <div style="font-family:'Red Hat Mono',monospace;font-size:10px;color:#7f86a3">memoryhub audit log · incident IR-2024-184</div>
+            <div style="display:grid;grid-template-columns:36px 1fr 1fr 62px 84px;gap:5px 8px;font-family:'Red Hat Mono',monospace;font-size:9.8px">
+              <div style="color:#5d637d">ts</div><div style="color:#5d637d">actor_id</div><div style="color:#5d637d">driver_id</div><div style="color:#5d637d">op</div><div style="color:#5d637d">memory</div>
+              <sc-for list="{{dRows}}" as="r" hint-placeholder-count="6">
+                <div style="display:contents">
+                  <div style="color:#8b90a5">{{r.ts}}</div><div style="color:#c7cbe0">{{r.actor}}</div><div style="color:#c7cbe0">{{r.driver}}</div><div style="{{r.opStyle}}">{{r.op}}</div><div style="color:#8b90a5">{{r.mem}}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="font-size:11px;color:#9aa0b8;line-height:1.5">Every memory operation is attributed to an agent role (actor_id) and the human on shift (driver_id) — the audit trail survives the shift change.</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+  <div style="border-top:1px solid #23263a;background:#131523;padding:8px 14px;display:flex;flex-direction:column;gap:6px;z-index:5">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;letter-spacing:.16em;color:#5d637d">MEMORY TIMELINE</div>
+      <div style="flex:1"></div>
+      <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#4a4f68">SPACE / → advance · ← back · ESC close panel · A autoplay</div>
+      <div style="display:flex;gap:5px">
+        <div onClick="{{prev}}" style="cursor:pointer;font-family:'Red Hat Mono',monospace;font-size:10px;padding:5px 10px;background:#1c1f33;border:1px solid #2c3050;border-radius:6px;color:#aab0c8" style-hover="background:#262a45;color:#ffffff">◀</div>
+        <div onClick="{{next}}" style="cursor:pointer;font-family:'Red Hat Mono',monospace;font-size:10px;padding:5px 10px;background:#1c1f33;border:1px solid #2c3050;border-radius:6px;color:#aab0c8" style-hover="background:#262a45;color:#ffffff">▶</div>
+        <div onClick="{{togglePlay}}" style="{{playStyle}}">{{playLabel}}</div>
+        <div onClick="{{reset}}" title="Reset to standby" style="cursor:pointer;font-family:'Red Hat Mono',monospace;font-size:10px;padding:5px 10px;background:#1c1f33;border:1px solid #2c3050;border-radius:6px;color:#aab0c8" style-hover="background:#262a45;color:#ffffff">RESET</div>
+      </div>
+    </div>
+    <div ref="{{tlRef}}" style="display:flex;gap:6px;align-items:center;overflow-x:auto;padding:3px 2px;min-height:30px">
+      <sc-if value="{{tlEmpty}}" hint-placeholder-val="{{ true }}">
+        <div style="font-family:'Red Hat Mono',monospace;font-size:10px;color:#3d4258">— no memories yet · nodes appear here as agents write and retrieve —</div>
+      </sc-if>
+      <sc-for list="{{tl}}" as="c" hint-placeholder-count="0">
+        <div style="{{c.style}}" title="{{c.title}}" onClick="{{c.open}}">{{c.label}}</div>
+      </sc-for>
+    </div>
+  </div>
+  <sc-if value="{{standby}}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="Standby" style="position:absolute;inset:0;z-index:20;background:radial-gradient(ellipse at 50% 35%,#151a33 0%,#0d0f1c 72%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center;padding:24px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:12px;height:12px;background:#EE0000;border-radius:2px"></div>
+        <div style="font-family:'Red Hat Mono',monospace;font-size:10px;letter-spacing:.24em;color:#7f86a3">SOC AGENT FLEET · OPERATIONAL DISPLAY</div>
+      </div>
+      <div>
+        <div style="font-family:'Red Hat Display',sans-serif;font-weight:900;font-size:clamp(42px,7vw,68px);color:#f0f2fa;line-height:1">MemoryHub</div>
+        <div style="margin-top:10px;font-size:15px;color:#9aa0b8">Four agents. Four frameworks. One shared memory.</div>
+      </div>
+      <div style="font-family:'Red Hat Mono',monospace;font-size:11px;color:#7f86a3">INCIDENT IR-2024-184 · HOST FIN-WS-0219 · ALERT AT T+02:47</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+        <div style="border:1px solid #00BCD455;background:#00BCD410;border-radius:8px;padding:8px 14px"><div style="font-weight:700;font-size:12px">Tier 1 SOC Analyst</div><div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#00BCD4;margin-top:2px">Claude Code · Claude (cloud)</div></div>
+        <div style="border:1px solid #4CAF5055;background:#4CAF5010;border-radius:8px;padding:8px 14px"><div style="font-weight:700;font-size:12px">Forensics</div><div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#4CAF50;margin-top:2px">FIPS-Agent · Gemma 4 (on-cluster)</div></div>
+        <div style="border:1px solid #FFC10755;background:#FFC10710;border-radius:8px;padding:8px 14px"><div style="font-weight:700;font-size:12px">Threat Intel</div><div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#FFC107;margin-top:2px">Hermes · Gemma 4 (on-cluster)</div></div>
+        <div style="border:1px solid #E040FB55;background:#E040FB10;border-radius:8px;padding:8px 14px"><div style="font-weight:700;font-size:12px">Incident Commander</div><div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#E040FB;margin-top:2px">OpenClaw · Gemma 4 (on-cluster)</div></div>
+      </div>
+      <div onClick="{{next}}" style="cursor:pointer;font-family:'Red Hat Mono',monospace;font-size:12px;letter-spacing:.18em;color:#e6e8f0;border:1px solid #3a3f63;border-radius:8px;padding:11px 22px;animation:blink 1.7s step-end infinite" style-hover="background:#1d2138">PRESS SPACE TO BEGIN</div>
+      <div style="font-family:'Red Hat Mono',monospace;font-size:9.5px;color:#4a4f68">memoryhub + vLLM on OpenShift · api.anthropic.com · scripted replay of harness events</div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;pace&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:4,&quot;min&quot;:1,&quot;max&quot;:15,&quot;step&quot;:1,&quot;unit&quot;:&quot;s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Playback&quot;},&quot;theatrics&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;full&quot;,&quot;options&quot;:[&quot;full&quot;,&quot;moderate&quot;,&quot;subtle&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Playback&quot;},&quot;showModels&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Display&quot;}}">
+class Component extends DCLogic {
+  agents = {
+    tier1:{role:'Tier 1 SOC Analyst',fw:'Claude Code',color:'#00BCD4',actor:'soc.tier1',driver0:'j.okafor'},
+    forensics:{role:'Forensics',fw:'FIPS-Agent',color:'#4CAF50',actor:'soc.forensics',driver0:'m.tanaka'},
+    intel:{role:'Threat Intel',fw:'Hermes',color:'#FFC107',actor:'soc.intel',driver0:'a.volkov'},
+    ic:{role:'Incident Commander',fw:'OpenClaw',color:'#E040FB',actor:'soc.ic',driver0:'d.mbeki'}
+  };
+  scn = [
+    {t:'phase',ph:1,ts:'02:47',label:'Detection & Triage',desc:'EDR alert on finance workstation FIN-WS-0219'},
+    {t:'register',ts:'02:47'},
+    {t:'alert',ag:'tier1',ts:'02:48',text:'ALERT #48211 — encoded PowerShell spawned by outlook.exe, periodic 443 beacon → 45.147.230.19'},
+    {t:'search',ag:'tier1',ts:'02:49',query:'encoded powershell beacon outlook.exe finance workstation'},
+    {t:'result',ag:'tier1',ts:'02:49',moment:1,detail:true,mem:{id:'m-117-042',inc:'IR-2024-117',age:'4 months ago',author:'tier1',authorDriver:'k.chen',weight:.92,text:'Beaconing to rotating residential IPs over 443 from an outlook.exe child process was the initial access for the IR-2024-117 data-theft intrusion. The pattern was first dismissed as a false positive — that dismissal delayed response by 11 days.'}},
+    {t:'decision',ag:'tier1',ts:'02:51',banner:'MOMENT 1 · Cross-incident recall — a 4-month-old memory turns “dismiss” into “escalate”',bcolor:'#00BCD4',text:'ESCALATED → P2 · IR-2024-184 opened (baseline action was dismiss)'},
+    {t:'write',ag:'tier1',ts:'02:52',mem:{id:'m-184-001',weight:.8,text:'Triage: beacon pattern matches IR-2024-117 initial access. Escalated P2. FIN-WS-0219 isolated pending forensics.'}},
+    {t:'phase',ph:2,ts:'03:15',label:'Forensic Investigation',desc:'Disk and memory capture of FIN-WS-0219'},
+    {t:'search',ag:'forensics',ts:'03:16',query:'FIN-WS-0219 process tree · known false positives'},
+    {t:'result',ag:'forensics',ts:'03:16',moment:2,detail:true,banner:'MOMENT 2 · Self-learning — Forensics reads a lesson it wrote itself. No human authored this.',bcolor:'#4CAF50',mem:{id:'m-152-018',inc:'IR-2024-152',age:'2 months ago',author:'forensics',authorDriver:'— (agent-authored)',selfAuthored:true,weight:.85,text:'ai.exe under C:\\Program Files\\Adobe is Illustrator telemetry — recurring false positive in process-tree triage. Exclude from IOC extraction.'}},
+    {t:'decision',ag:'forensics',ts:'03:17',text:'ai.exe excluded from IOC set — ~40 min of manual triage skipped'},
+    {t:'write',ag:'forensics',ts:'03:42',mem:{id:'m-184-002',weight:.9,text:'Forensic timeline: phishing attachment Q3-invoice.xlsm → macro loader → SMB lateral movement to FIN-DB-02 at 01:12. Exfil staging dir C:\\Windows\\Temp\\~cache3.'}},
+    {t:'phase',ph:3,ts:'03:50',label:'Attribution',desc:'Threat Intel assesses actor TTP overlap'},
+    {t:'write',ag:'intel',ts:'03:55',mem:{id:'m-184-003',weight:.7,text:'Attribution: macro loader + SMB lateral pattern + staging naming consistent with FIN7-affiliate SILKLOOM. Confidence 68%.'}},
+    {t:'read',ag:'ic',ts:'04:02',memIds:['m-184-003'],text:'IC reads attribution assessment'},
+    {t:'phase',ph:4,ts:'04:20',label:'Contradiction',desc:'Network analysis disputes the attribution'},
+    {t:'write',ag:'forensics',ts:'04:24',mem:{id:'m-184-004',weight:.8,text:'Network analysis: C2 rotates through a commodity residential-proxy pool tied to Amadey botnet resellers — inconsistent with SILKLOOM’s dedicated infrastructure tradecraft.'}},
+    {t:'contradiction',ts:'04:25',a:'m-184-004',b:'m-184-003',detail:true,banner:'MOMENT 3 · Contradiction preserved — both assessments stay in memory, nothing is overwritten',bcolor:'#F44336'},
+    {t:'read',ag:'ic',ts:'04:28',memIds:['m-184-003','m-184-004'],text:'IC reads both conflicting assessments'},
+    {t:'write',ag:'ic',ts:'04:31',mem:{id:'m-184-005',weight:.9,refs:['m-184-003','m-184-004'],text:'Synthesis: attribution disputed (SILKLOOM vs commodity botnet). Treat as unattributed, financially motivated. Containment priority unchanged — attribution does not gate response.'}},
+    {t:'phase',ph:5,ts:'04:55',label:'Containment',desc:'Isolate, block C2, rotate credentials'},
+    {t:'decision',ag:'ic',ts:'04:58',text:'Plan: isolate FIN-DB-02 · block C2 range · rotate breakglass credential'},
+    {t:'search',ag:'ic',ts:'04:59',query:'breakglass credential rotation prior issues'},
+    {t:'result',ag:'ic',ts:'04:59',moment:4,detail:true,banner:'MOMENT 4 · Lesson at the moment of decision — an 8-month-old memory prevents a 6-hour outage',bcolor:'#E040FB',mem:{id:'m-291-007',inc:'IR-2023-291',age:'8 months ago',author:'ic',authorDriver:'r.singh',weight:.88,text:'Rotating the breakglass credential without pausing the backup service broke backup auth for 6 hours. Coordinate with the backup admin and pause jobs before rotation.'}},
+    {t:'decision',ag:'ic',ts:'05:01',text:'LESSON APPLIED — backup jobs paused with backup admin; credential rotated 05:14, zero backup impact'},
+    {t:'quarantine',ag:'forensics',ts:'05:20',banner:'Quarantine — MemoryHub blocked a service-account credential from entering shared memory',bcolor:'#F44336',text:'Write blocked: content matched secret pattern (service-account credential)'},
+    {t:'write',ag:'forensics',ts:'05:21',mem:{id:'m-184-006',weight:.8,text:'Containment evidence: C2 blocked at egress, staged archive quarantined. Credential redacted → vault pointer vault:kv/ir-184/svc-fin.'}},
+    {t:'phase',ph:6,ts:'06:00',label:'Shift Change',desc:'Night shift hands off to day shift'},
+    {t:'shift',ts:'06:00',banner:'MOMENT 5 · Shift change — driver_id changes, the agent and its memory persist',bcolor:'#FFEB3B',changes:{tier1:'s.reyes',forensics:'l.novak',ic:'p.almeida'}},
+    {t:'read',ag:'ic',ts:'06:05',memIds:['m-184-005'],text:'Incoming IC reads the synthesis — full context, zero re-briefing'},
+    {t:'phase',ph:7,ts:'06:30',label:'Recovery & Audit',desc:'Close out, audit trail, lessons written'},
+    {t:'audit',ts:'06:35',detail:true,rows:[
+      {ts:'02:49',actor:'soc.tier1',driver:'j.okafor',op:'search',mem:'—'},
+      {ts:'02:49',actor:'soc.tier1',driver:'j.okafor',op:'read',mem:'m-117-042'},
+      {ts:'02:52',actor:'soc.tier1',driver:'j.okafor',op:'write',mem:'m-184-001'},
+      {ts:'03:16',actor:'soc.forensics',driver:'m.tanaka',op:'read',mem:'m-152-018'},
+      {ts:'03:42',actor:'soc.forensics',driver:'m.tanaka',op:'write',mem:'m-184-002'},
+      {ts:'03:55',actor:'soc.intel',driver:'a.volkov',op:'write',mem:'m-184-003'},
+      {ts:'04:24',actor:'soc.forensics',driver:'m.tanaka',op:'write',mem:'m-184-004'},
+      {ts:'04:25',actor:'system',driver:'—',op:'contradict',mem:'003 ⇄ 004'},
+      {ts:'04:31',actor:'soc.ic',driver:'d.mbeki',op:'write',mem:'m-184-005'},
+      {ts:'05:20',actor:'soc.forensics',driver:'m.tanaka',op:'quarantine',mem:'blocked'},
+      {ts:'06:00',actor:'soc.ic',driver:'d.mbeki → p.almeida',op:'shift',mem:'—'},
+      {ts:'06:05',actor:'soc.ic',driver:'p.almeida',op:'read',mem:'m-184-005'}
+    ]},
+    {t:'write',ag:'ic',ts:'06:50',mem:{id:'m-184-007',weight:.95,text:'Post-incident: initial access phishing → macro. Attribution unresolved — contradiction preserved. Breakglass rotated safely per IR-2023-291 lesson. Recommend macro-blocking GPO for finance OU.'}},
+    {t:'end',ts:'07:00',banner:'IR-2024-184 contained · 7 memories written · 6 cross-framework reads · 1 contradiction preserved',bcolor:'#2196F3'}
+  ];
+  constructor(props){
+    super(props);
+    let saved=0; try{saved=Math.min(parseInt(localStorage.getItem('mh-soc-idx'),10)||0,this.scn.length);}catch(e){}
+    this.state={idx:saved,playing:false,dismissed:-1,manualMem:null};
+  }
+  componentDidMount(){
+    this._kd=(e)=>{
+      if(e.repeat)return;
+      if(e.key===' '||e.key==='ArrowRight'){e.preventDefault();this.next();}
+      else if(e.key==='ArrowLeft'){e.preventDefault();this.prev();}
+      else if(e.key==='Escape'){this.closeDetail();}
+      else if(e.key==='a'||e.key==='A'){this.togglePlay();}
+    };
+    window.addEventListener('keydown',this._kd);
+  }
+  componentWillUnmount(){ window.removeEventListener('keydown',this._kd); this.stopPlay(); }
+  go(i){
+    i=Math.max(0,Math.min(i,this.scn.length));
+    try{localStorage.setItem('mh-soc-idx',String(i));}catch(e){}
+    this.setState({idx:i,manualMem:null});
+    if(i>=this.scn.length)this.stopPlay();
+  }
+  next=()=>this.go(this.state.idx+1);
+  prev=()=>this.go(this.state.idx-1);
+  reset=()=>{ this.stopPlay(); this.setState({dismissed:-1,manualMem:null}); this.go(0); };
+  togglePlay=()=>{ this.state.playing?this.stopPlay():this.startPlay(); };
+  startPlay(){
+    if(this._t)return;
+    const pace=(this.props.pace??4)*1000;
+    this._t=setInterval(()=>{ this.state.idx>=this.scn.length?this.stopPlay():this.go(this.state.idx+1); },pace);
+    this.setState({playing:true});
+  }
+  stopPlay(){ if(this._t){clearInterval(this._t);this._t=null;} if(this.state.playing)this.setState({playing:false}); }
+  closeDetail=()=>{ this.setState({manualMem:null,dismissed:this._lastDetailJ==null?-1:this._lastDetailJ}); };
+  build(idx){
+    const s={mems:[],tl:[],logs:{tier1:[],forensics:[],intel:[],ic:[]},drivers:{},phase:null,registered:false};
+    Object.keys(this.agents).forEach(k=>s.drivers[k]=this.agents[k].driver0);
+    const log=(ag,ts,txt)=>s.logs[ag].push({ts,txt});
+    for(let i=0;i<idx;i++){
+      const e=this.scn[i];
+      switch(e.t){
+        case 'phase': s.phase=e; break;
+        case 'register': s.registered=true; Object.keys(s.logs).forEach(k=>log(k,e.ts,'registered via '+this.agents[k].fw)); break;
+        case 'alert': case 'decision': log(e.ag,e.ts,e.text); break;
+        case 'search': log(e.ag,e.ts,'SEARCH “'+e.query+'”'); break;
+        case 'result': {
+          let m=s.mems.find(x=>x.id===e.mem.id);
+          if(!m){ m={...e.mem,agent:e.mem.author,driver:e.mem.authorDriver||'—',prior:true,contra:[]}; s.mems.push(m); s.tl.push({k:'mem',id:m.id}); }
+          log(e.ag,e.ts,'HIT '+m.id+' · '+(m.inc||'')); break;
+        }
+        case 'write': {
+          const m={...e.mem,agent:e.ag,driver:s.drivers[e.ag],inc:e.mem.inc||'IR-2024-184',ts:e.ts,contra:[]};
+          s.mems.push(m); s.tl.push({k:'mem',id:m.id}); log(e.ag,e.ts,'WRITE '+m.id); break;
+        }
+        case 'read': log(e.ag,e.ts,'READ '+e.memIds.join(' · ')); break;
+        case 'contradiction': {
+          const a=s.mems.find(m=>m.id===e.a),b=s.mems.find(m=>m.id===e.b);
+          if(a&&b){a.contra.push(b.id);b.contra.push(a.id);}
+          s.tl.push({k:'contra',a:e.a,b:e.b}); break;
+        }
+        case 'quarantine': log(e.ag,e.ts,'WRITE BLOCKED — secret pattern'); s.tl.push({k:'blocked',text:e.text}); break;
+        case 'shift': Object.entries(e.changes).forEach(([k,v])=>{ log(k,e.ts,'driver_id '+s.drivers[k]+' → '+v); s.drivers[k]=v; }); break;
+      }
+    }
+    return s;
+  }
+  renderVals(){
+    const mono="'Red Hat Mono',monospace";
+    const idx=this.state.idx, scn=this.scn, s=this.build(idx), cur=idx>0?scn[idx-1]:null;
+    const theatrics=this.props.theatrics??'full', showModels=this.props.showModels??true;
+    const statusMap={search:'SEARCHING',result:'READING',read:'READING',write:'WRITING',alert:'ALERT',decision:'DECIDING',quarantine:'BLOCKED'};
+    const outOps={search:1,write:1,quarantine:1};
+    const vals={};
+    Object.keys(this.agents).forEach(k=>{
+      const a=this.agents[k];
+      const isCur=cur&&cur.ag===k;
+      const isShift=cur&&cur.t==='shift'&&cur.changes[k];
+      let status='IDLE';
+      if(!s.registered)status='OFFLINE';
+      else if(isShift)status='HANDOFF';
+      else if(isCur)status=statusMap[cur.t]||'ACTIVE';
+      const active=isCur&&statusMap[cur.t];
+      let lineStyle={opacity:0};
+      if(isCur&&(cur.t==='search'||cur.t==='write'||cur.t==='result'||cur.t==='read'||cur.t==='quarantine')){
+        const col=cur.t==='quarantine'?'#F44336':a.color;
+        lineStyle={opacity:1,stroke:col,strokeWidth:2.5,strokeDasharray:'11 8',animation:'dash .55s linear infinite',animationDirection:outOps[cur.t]?'reverse':'normal',filter:'drop-shadow(0 0 5px '+col+')'};
+      } else if(cur&&cur.t==='contradiction'&&(k==='intel'||k==='forensics')){
+        lineStyle={opacity:1,stroke:'#F44336',strokeWidth:2,strokeDasharray:'4 5',animation:'dash .8s linear infinite',filter:'drop-shadow(0 0 5px #F44336)'};
+      }
+      vals[k]={
+        driver:s.drivers[k],
+        status,
+        log:s.logs[k].slice(-3),
+        glowStyle:{borderRadius:'14px',opacity:s.registered?1:.4,boxShadow:(active||isShift)?'0 0 28px '+(isShift?'#FFEB3B':a.color)+'66':'none',transition:'opacity .4s, box-shadow .3s'},
+        badgeStyle:{fontFamily:mono,fontSize:'9.5px',fontWeight:700,padding:'3px 7px',borderRadius:'5px',background:a.color+'1f',color:a.color,border:'1px solid '+a.color+'55',whiteSpace:'nowrap'},
+        statusStyle:{fontFamily:mono,fontSize:'9.5px',fontWeight:700,letterSpacing:'.08em',padding:'3px 9px',borderRadius:'99px',...(active||isShift?{background:a.color+'22',color:isShift?'#FFEB3B':a.color,border:'1px solid '+(isShift?'#FFEB3B':a.color)+'66'}:{background:'#20233566',color:'#7f86a3',border:'1px solid #2a2d44'})},
+        driverStyle:{color:'#e6e8f0',borderRadius:'3px',...(isShift?{animation:'shiftflash 1.8s ease-out',padding:'0 3px'}:{})},
+        lineStyle
+      };
+    });
+    Object.assign(vals,{tier1:vals.tier1,intel:vals.intel,forensics:vals.forensics,ic:vals.ic});
+    vals.showModels=showModels;
+    vals.standby=idx===0;
+    vals.hubCount=(1281+s.mems.length).toLocaleString();
+    vals.hubStyle={borderRadius:'50%',...(cur&&cur.t==='quarantine'?{animation:'hubflash .9s ease 2'}:{})};
+    vals.searchRing=theatrics==='full'&&cur&&cur.t==='search';
+    vals.phaseNum=s.phase?s.phase.ph:0;
+    vals.phaseLabel=s.phase?s.phase.label.toUpperCase():'STANDBY';
+    vals.phaseDesc=s.phase?s.phase.desc:'awaiting scenario start';
+    vals.phaseTs=cur?cur.ts:'--:--';
+    vals.evt=idx+' / '+scn.length;
+    vals.phaseSegs=[1,2,3,4,5,6,7].map(n=>{
+      const labels=['Detection & Triage','Forensic Investigation','Attribution','Contradiction','Containment','Shift Change','Recovery & Audit'];
+      const on=n<=vals.phaseNum, curP=n===vals.phaseNum;
+      return {n,label:'Phase '+n+' · '+labels[n-1],style:{width:'22px',height:'19px',display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'4px',fontFamily:mono,fontSize:'9.5px',fontWeight:700,background:curP?'#2196F3':on?'#1c3a63':'#1a1d31',color:curP?'#ffffff':on?'#64b5f6':'#4a4f68',border:'1px solid '+(curP?'#2196F3':on?'#2c4a75':'#262a44')}};
+    });
+    const bcol=cur&&cur.bcolor?cur.bcolor:'#2196F3';
+    vals.bannerShow=!!(cur&&cur.banner)&&theatrics!=='subtle';
+    vals.bannerText=cur&&cur.banner?cur.banner:'';
+    vals.bannerStyle={padding:'10px 18px',borderRadius:'8px',fontWeight:600,fontSize:'13px',background:'rgba(19,21,36,.94)',border:'1px solid '+bcol+'66',borderLeft:'4px solid '+bcol,color:'#e9ebf5',boxShadow:'0 6px 30px '+bcol+'33'};
+    const opCol={write:'#81C784',read:'#4DD0E1',search:'#8b90a5',contradict:'#ff8a80',quarantine:'#ff8a80',shift:'#FFD54F'};
+    vals.tl=s.tl.map((c,i)=>{
+      const isNew=i===s.tl.length-1&&cur&&['write','result','contradiction','quarantine'].includes(cur.t);
+      const base={fontFamily:mono,fontSize:'10px',padding:'4px 9px',borderRadius:'6px',background:'#1a1d31',color:'#c7cbe0',cursor:'pointer',whiteSpace:'nowrap',flex:'0 0 auto',...(isNew?{animation:'pop .35s ease'}:{})};
+      if(c.k==='mem'){
+        const m=s.mems.find(x=>x.id===c.id), col=this.agents[m.agent].color;
+        return {label:m.id.replace('m-','')+(m.contra.length?' ⇄':''),title:(m.prior?'[prior incident] ':'')+m.text,
+          style:{...base,border:'1px '+(m.prior?'dashed':'solid')+' '+col+'55',borderLeft:'3px solid '+col,...(m.contra.length?{color:'#ffb3ad'}:{})},
+          open:()=>this.setState({manualMem:m.id,dismissed:this.state.dismissed})};
+      }
+      if(c.k==='contra')return {label:'⇄ CONTRADICTS',title:'m-184-004 contradicts m-184-003 — both preserved',style:{...base,border:'1px solid #F4433666',background:'#F4433614',color:'#ff8a80',fontWeight:700},open:()=>this.setState({manualMem:'::contra'})};
+      return {label:'✕ BLOCKED',title:c.text,style:{...base,border:'1px solid #F4433666',background:'#F4433622',color:'#ff8a80',fontWeight:700,cursor:'default'},open:()=>{}};
+    });
+    vals.tlEmpty=s.tl.length===0;
+    vals.tlRef=el=>{ if(el)el.scrollLeft=el.scrollWidth; };
+    // detail resolution
+    let detail=null, lastJ=-1, lastEv=null;
+    for(let i=0;i<idx;i++)if(scn[i].detail){lastJ=i+1;lastEv=scn[i];}
+    this._lastDetailJ=lastJ;
+    const findM=id=>s.mems.find(m=>m.id===id);
+    if(this.state.manualMem==='::contra')detail={kind:'contra',a:findM('m-184-004'),b:findM('m-184-003')};
+    else if(this.state.manualMem){const m=findM(this.state.manualMem); if(m)detail={kind:'mem',mem:m};}
+    else if(lastEv&&lastJ>this.state.dismissed){
+      if(lastEv.t==='audit')detail={kind:'audit',rows:lastEv.rows};
+      else if(lastEv.t==='contradiction')detail={kind:'contra',a:findM(lastEv.a),b:findM(lastEv.b)};
+      else {const m=findM(lastEv.mem.id); if(m)detail={kind:'mem',mem:m};}
+    }
+    vals.dOpen=!!detail;
+    vals.bannerWrapStyle=detail?{position:'absolute',top:'14px',left:'14px',right:'384px',zIndex:7,display:'flex',justifyContent:'center',animation:'bannerdrop .45s ease both'}:{position:'absolute',top:'14px',left:'50%',transform:'translateX(-50%)',zIndex:7,maxWidth:'72%',animation:'bannerin .45s ease both'};
+    vals.dIsMem=detail&&detail.kind==='mem';
+    vals.dIsContra=detail&&detail.kind==='contra';
+    vals.dIsAudit=detail&&detail.kind==='audit';
+    vals.dTitle=detail?(detail.kind==='mem'?'MEMORY DETAIL':detail.kind==='contra'?'CONTRADICTION':'AUDIT TRAIL'):'';
+    if(vals.dIsMem){
+      const m=detail.mem, a=this.agents[m.agent];
+      vals.dId=m.id; vals.dText=m.text; vals.dInc=m.inc||'IR-2024-184';
+      vals.dFw=a.fw; vals.dFwBadge={fontFamily:mono,fontSize:'9px',fontWeight:700,padding:'3px 6px',borderRadius:'5px',background:a.color+'1f',color:a.color,border:'1px solid '+a.color+'55'};
+      vals.dRole=a.role; vals.dActor=a.actor; vals.dDriver=m.driver||'—';
+      vals.dTs=m.prior?(m.age||'prior incident'):'T+'+m.ts;
+      vals.dWeight=String(m.weight); vals.dWeightStyle={width:(m.weight*100)+'%',height:'100%',borderRadius:'99px',background:a.color};
+      vals.dSelf=!!m.selfAuthored; vals.dPrior=!!m.prior;
+      vals.dHasContra=m.contra&&m.contra.length>0; vals.dContraList=(m.contra||[]).join(', ');
+      vals.dHasRefs=!!(m.refs&&m.refs.length); vals.dRefs=(m.refs||[]).join(', ');
+    }
+    if(vals.dIsContra&&detail.a&&detail.b){
+      const mk=m=>{const a=this.agents[m.agent];return {id:m.id,fw:a.fw,text:m.text,fwStyle:{fontFamily:mono,fontSize:'9px',fontWeight:700,padding:'2px 5px',borderRadius:'4px',background:a.color+'1f',color:a.color,marginLeft:'4px'}};};
+      vals.cA=mk(detail.a); vals.cB=mk(detail.b);
+      vals.cAStyle={border:'1px solid '+this.agents[detail.a.agent].color+'66',background:'#191c30',borderRadius:'8px',padding:'10px 12px'};
+      vals.cBStyle={border:'1px solid '+this.agents[detail.b.agent].color+'66',background:'#191c30',borderRadius:'8px',padding:'10px 12px'};
+    }
+    if(vals.dIsAudit)vals.dRows=detail.rows.map(r=>({...r,opStyle:{color:opCol[r.op]||'#8b90a5',fontWeight:700}}));
+    vals.playing=this.state.playing;
+    vals.playLabel=this.state.playing?'⏸ PAUSE':'▶ AUTO '+(this.props.pace??4)+'s';
+    vals.playStyle={cursor:'pointer',fontFamily:mono,fontSize:'10px',padding:'5px 10px',borderRadius:'6px',...(this.state.playing?{background:'#2196F322',border:'1px solid #2196F366',color:'#64b5f6'}:{background:'#1c1f33',border:'1px solid #2c3050',color:'#aab0c8'})};
+    vals.next=this.next; vals.prev=this.prev; vals.reset=this.reset; vals.togglePlay=this.togglePlay; vals.closeDetail=this.closeDetail;
+    return vals;
+  }
+}
+</script>
+</body>
+</html>

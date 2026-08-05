@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soc-frontend
+  annotations:
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"soc-frontend:latest"},
+        "fieldPath":"spec.template.spec.containers[?(@.name==\"soc-frontend\")].image"}]
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: soc-frontend
+  template:
+    metadata:
+      labels:
+        app: soc-frontend
+    spec:
+      containers:
+        - name: soc-frontend
+          image: image-registry.openshift-image-registry.svc:5000/soc-demo/soc-frontend:latest
+          ports:
+            - containerPort: 8000
+          # Optional: require a token on POST /emit (set it, then pass
+          # --token to replay.py / the harness)
+          # env:
+          #   - name: EMIT_TOKEN
+          #     valueFrom:
+          #       secretKeyRef:
+          #         name: soc-frontend-emit
+          #         key: token
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi

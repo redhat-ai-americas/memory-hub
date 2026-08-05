@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: soc-frontend
+spec:
+  selector:
+    app: soc-frontend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

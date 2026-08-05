@@ -1,0 +1,16 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: soc-frontend
+  annotations:
+    # WebSocket-friendly: don't kill the viewer connection mid-demo
+    haproxy.router.openshift.io/timeout: 8h
+spec:
+  to:
+    kind: Service
+    name: soc-frontend
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
