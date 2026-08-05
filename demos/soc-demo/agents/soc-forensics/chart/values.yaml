@@ -25,8 +25,8 @@ resources:
 # using the ${VAR:-default} pattern.  Only set values that differ from
 # the defaults baked into the image.
 config:
-  MODEL_ENDPOINT: http://gemma4.gemma-model.svc.cluster.local:80/v1
-  MODEL_NAME: google/gemma-4-E4B-it
+  MODEL_ENDPOINT: http://gpt-oss-20b.gpt-oss-model.svc.cluster.local:80/v1
+  MODEL_NAME: RedHatAI/gpt-oss-20b
   OPENAI_API_KEY: not-required
 
 # Additional environment variables (name/value pairs).

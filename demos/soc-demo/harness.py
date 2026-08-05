@@ -109,7 +109,7 @@ def emit_reset():
         pass
 
 
-async def call_agent(prompt: str, timeout: float = 90.0) -> str | None:
+async def call_agent(prompt: str, timeout: float = 180.0) -> str | None:
     """Call the FIPS-agent's /v1/chat/completions endpoint.
 
     Returns the assistant's response text, or None on error/timeout.
@@ -124,7 +124,7 @@ async def call_agent(prompt: str, timeout: float = 90.0) -> str | None:
             resp = await http.post(
                 url,
                 json={
-                    "model": "google/gemma-4-E4B-it",
+                    "model": "RedHatAI/gpt-oss-20b",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 2048,
                     "temperature": 0.3,
@@ -394,8 +394,8 @@ async def run_scenario():
     reg_table.add_column("Framework", style="dim")
     reg_table.add_column("actor_id", style="cyan")
     reg_table.add_column("driver_id", style="yellow")
-    models = {"tier1": "Claude · cloud API", "forensics": "Gemma 4 E4B · on-cluster",
-              "threatintel": "Gemma 4 E4B · on-cluster", "ic": "Gemma 4 E4B · on-cluster"}
+    models = {"tier1": "Claude · cloud API", "forensics": "GPT-OSS 20B · on-cluster",
+              "threatintel": "GPT-OSS 20B · on-cluster", "ic": "GPT-OSS 20B · on-cluster"}
     for key, agent in AGENTS.items():
         reg_table.add_row(
             Text(agent["name"], style=agent["color"]),
