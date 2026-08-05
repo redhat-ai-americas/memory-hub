@@ -1,32 +1,36 @@
 # Next Session — SOC Demo
 
-**Last session:** 2026-08-04 · `session-summaries/2026-08-04-soc-demo-openshell.md`
-**Branch:** `feat/soc-demo-openshell` (8 commits, not yet PR'd to main)
+**Last session:** 2026-08-05 · `session-summaries/2026-08-05-soc-demo-real-inference.md`
+**Branch:** `feat/soc-demo-openshell` (16 commits, PR #500 open to main)
 
 ## What landed
 
-Full infrastructure for the 4-agent cross-framework SOC demo: OpenShell on OpenShift, sandbox pods (Claude Code, OpenClaw, Hermes), FIPS-agent deployed, 6 incident memories seeded, orchestration harness with rich terminal output, web frontend visualization, harness-to-frontend wiring, Gemma 4 model config for all 3 open-source agents, asciinema recording pipeline.
+All 4 SOC agents (Tier 1/Claude Code, Forensics/FIPS-Agent, Threat Intel/Hermes, IC/OpenClaw) make real LLM calls through GPT-OSS-20B on-cluster via a single FIPS-Agent gateway. Each call searches MemoryHub autonomously via MCP tools. The harness persists each agent's LLM-generated output to MemoryHub. Push broadcast bridge captures real memory writes. Frontend deployed to mcp-rhoai with WebSocket working.
 
 ## What's next
 
-### Priority 1: Live agent inference through Gemma 4
+### Priority 1: Fix the Forensics empty-response issue
 
-The harness currently scripts the scenario via MemoryHub SDK calls. The agents have model configs pointing at Gemma 4 but haven't made real inference calls yet. Wire one agent (the FIPS-agent is the easiest -- it's a real BaseAgent with `/v1/chat/completions`) to receive a prompt, call Gemma 4, and use MemoryHub tools autonomously. This proves the full stack: agent -> LLM -> tool call -> MemoryHub -> memory written -> frontend event.
+The Forensics agent (Call 2) sometimes returns empty text content from GPT-OSS-20B. The model may be putting all output into tool calls rather than generating a text response. Investigate whether this is a prompt issue (too many steps?) or a model behavior. Try: shorter prompt, explicit "respond with your findings in text" instruction, or capturing tool call results as the response content.
 
-### Priority 2: Push broadcast event bridge
+### Priority 2: Clean up duplicate memories
 
-Build the ~80-line Python service that subscribes to MemoryHub push notifications and translates them into frontend events. This captures writes from any agent (including ones the harness doesn't drive) without the harness needing to know about the frontend. This is path 2 from the wiring discussion.
+Repeated test runs accumulated duplicate IC synthesis and lesson memories in the `midwest-financial-soc` project. Delete duplicates before the demo recording. Consider adding a `--clean` flag to the harness that removes agent-written memories from previous runs before starting.
 
-### Priority 3: Frontend iteration
+### Priority 3: Demo recording
 
-The frontend deployed to the wrong cluster (khsm8 instead of mcp-rhoai) due to a context switch by a terminal-worker subagent. Redeploy to mcp-rhoai. Also: the standby-to-live transition needs testing in a real browser (Puppeteer couldn't advance past the standby screen).
+Record the demo with asciinema using `demos/soc-demo/record.sh`. The full run takes 3-5 minutes with 6 LLM calls. Consider whether to also record with the frontend visible (split-screen or picture-in-picture).
 
-### Priority 4: PR to main
+### Priority 4: Merge PR #500
 
-When the demo is in a presentable state, PR `feat/soc-demo-openshell` to main. The branch has 8 commits -- consider squashing or grouping into prep + implementation + docs.
+Review and merge `feat/soc-demo-openshell` to main. 16 commits -- consider squashing into logical groups (infrastructure, harness, frontend, inference wiring).
+
+### Priority 5: Scale down GPU
+
+The GPU MachineSet was scaled from 3 to 4 for GPT-OSS-20B. Scale back to 3 after the demo is recorded to reduce costs, or keep it if GPT-OSS-20B is needed for other work.
 
 ## Open questions
 
-1. Should the harness drive real agent inference for the demo, or is the SDK-scripted approach sufficient for the RSA recording? Real inference adds unpredictability (the LLM might not produce the exact memory content the scenario expects), but it's more authentic.
-2. The Hermes install inside the sandbox is ephemeral (pip install in a running pod). Worth building a proper sandbox image, or is the ephemeral approach acceptable for the demo?
-3. The FIPS-agent deploys as a standard Helm Deployment, not an OpenShell sandbox. Is that distinction visible enough in the demo, or does it matter?
+1. The agents search MemoryHub autonomously but don't reliably execute write tool calls -- the harness handles persistence. Is this framing acceptable for the demo narrative, or does the write path need to be agent-driven too?
+2. Should the demo recording include the web frontend visualization alongside the terminal output?
+3. The cluster token expired mid-session -- `oc login` needed at next session start.
