@@ -511,31 +511,30 @@ async def call_agent(
         return data["choices"][0]["message"].get("content", "").strip()
 
 
-async def snapshot_memory_ids(client: MemoryHubClient) -> set[str]:
-    ids: set[str] = set()
-    for query in ["IR-2024-184", "SOC incident service account forensic"]:
-        sr = await client.search(query, scope="project", project_id=PROJECT_ID, max_results=50)
-        ids.update(r.id for r in sr.results)
-    return ids
-
-
-async def discover_new_memories(
+async def persist_agent_output(
     client: MemoryHubClient,
     agent_key: str,
-    search_queries: list[str],
-    known_ids: set[str],
-) -> set[str]:
-    new_ids: set[str] = set()
-    for query in search_queries:
-        sr = await client.search(query, scope="project", project_id=PROJECT_ID, max_results=20)
-        for r in sr.results:
-            if r.id not in known_ids and r.id not in new_ids:
-                new_ids.add(r.id)
-                content = r.content[:500] + ("..." if len(r.content) > 500 else "")
-                print_memory_written(agent_key, content, r.id, metadata=r.metadata)
-    if not new_ids:
-        console.print("  [dim yellow]Agent responded but no new memories detected[/]")
-    return known_ids | new_ids
+    response: str,
+    metadata: dict | None = None,
+) -> str | None:
+    """Write the agent's LLM-generated response to MemoryHub and display it."""
+    if not response or len(response.strip()) < 20:
+        return None
+    agent = AGENTS[agent_key]
+    meta = {
+        "incident_id": "IR-2024-184",
+        "role": agent["actor_id"],
+        "framework": agent["framework"],
+        **(metadata or {}),
+    }
+    result = await client.write(
+        response, scope="project", project_id=PROJECT_ID,
+        weight=0.9, metadata=meta, force=True,
+    )
+    mem_id = result.memory.id if result.memory else "pending"
+    content = response[:500] + ("..." if len(response) > 500 else "")
+    print_memory_written(agent_key, content, mem_id, metadata=meta)
+    return mem_id
 
 
 def display_agent_response(agent_key: str, response: str, task_label: str):
@@ -649,7 +648,6 @@ async def run_scenario():
         ]
 
     async with MemoryHubClient(url=url, api_key=api_key) as client:
-        known_ids = await snapshot_memory_ids(client)
 
         # ── PHASE 1: Detection (Call 1: Tier 1) ────────────────────
         print_phase(1, "DETECTION", "02:14 AM",
@@ -665,14 +663,7 @@ async def run_scenario():
         need_register = False
 
         display_agent_response("tier1", response, "Alert triage")
-        emit({"type": "memory_search", "agent": fe_agent("tier1"),
-              "query": "prior incidents + team heuristics"})
-
-        known_ids = await discover_new_memories(
-            client, "tier1",
-            ["IR-2024-184 triage", "IR-2024-184 escalat"],
-            known_ids,
-        )
+        await persist_agent_output(client, "tier1", response)
 
         # ── PHASE 2: Triage & Escalation ───────────────────────────
         print_phase(2, "TRIAGE & ESCALATION", "02:14 -- 02:55",
@@ -696,14 +687,7 @@ async def run_scenario():
         response = await call_agent(build_messages(SYSTEM_FORENSICS, USER_FORENSICS))
 
         display_agent_response("forensics", response, "Forensic investigation")
-        emit({"type": "memory_search", "agent": fe_agent("forensics"),
-              "query": "false positives + staging patterns + timeline"})
-
-        known_ids = await discover_new_memories(
-            client, "forensics",
-            ["IR-2024-184 forensic", "IR-2024-184 timeline"],
-            known_ids,
-        )
+        await persist_agent_output(client, "forensics", response)
 
         # Call 3: Threat Intel attribution
         print_action("threatintel", "investigating",
@@ -715,14 +699,7 @@ async def run_scenario():
         response = await call_agent(build_messages(SYSTEM_THREATINTEL_ATTR, USER_THREATINTEL_ATTR))
 
         display_agent_response("threatintel", response, "Attribution assessment")
-        emit({"type": "memory_search", "agent": fe_agent("threatintel"),
-              "query": "campaign correlation + attribution"})
-
-        known_ids = await discover_new_memories(
-            client, "threatintel",
-            ["IR-2024-184 attribution", "IR-2024-184 campaign"],
-            known_ids,
-        )
+        attr_id = await persist_agent_output(client, "threatintel", response)
 
         # ── PHASE 4: Scoping (Call 4 + feature demos) ──────────────
         print_phase(4, "SCOPING", "04:00 -- 06:30",
@@ -744,17 +721,19 @@ async def run_scenario():
 
         display_agent_response("threatintel", response, "Attribution review")
 
-        # The agent should have filed a contradiction via MCP; display it
+        # File the contradiction against the attribution memory
+        if attr_id:
+            try:
+                await client.report_contradiction(
+                    memory_id=attr_id, observed_behavior=response[:1000])
+            except Exception:
+                pass
+
         print_contradiction(
             "threatintel",
             "(see agent's prior attribution above)",
             response[:500],
-        )
-
-        known_ids = await discover_new_memories(
-            client, "threatintel",
-            ["IR-2024-184 contradiction", "IR-2024-184 beaconing"],
-            known_ids,
+            contradicts_id=attr_id or "",
         )
 
         # Feature demo: quarantine
@@ -783,14 +762,7 @@ async def run_scenario():
         response = await call_agent(build_messages(SYSTEM_IC_CONTAIN, USER_IC_CONTAIN))
 
         display_agent_response("ic", response, "Containment synthesis")
-        emit({"type": "memory_search", "agent": fe_agent("ic"),
-              "query": "breakglass lessons + CISO preferences + synthesis"})
-
-        known_ids = await discover_new_memories(
-            client, "ic",
-            ["IR-2024-184 synthesis", "IR-2024-184 containment", "IR-2024-184 IC"],
-            known_ids,
-        )
+        await persist_agent_output(client, "ic", response)
 
         # Feature demo: credential quarantine
         print_quarantine(
@@ -842,12 +814,7 @@ async def run_scenario():
         response = await call_agent(build_messages(SYSTEM_IC_POSTINCIDENT, USER_IC_POSTINCIDENT))
 
         display_agent_response("ic", response, "Post-incident lessons")
-
-        known_ids = await discover_new_memories(
-            client, "ic",
-            ["IR-2024-184 lesson", "IR-2024-184 post-incident"],
-            known_ids,
-        )
+        await persist_agent_output(client, "ic", response, {"category": "post-incident-lesson"})
 
     # ── Closing ─────────────────────────────────────────────────
     console.print()
