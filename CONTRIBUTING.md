@@ -96,6 +96,18 @@ Use the issue templates (`bug_report`, `feature_request`, `design_proposal`) —
 - **File issues under your own GitHub identity.** Do NOT add AI attribution to issue authors. Other developers need to know who to contact about an issue, and the human owner is the point of contact, not the AI assistant that helped draft the body.
 - **No internal-tooling issues on this public repo.** If something internal to your dev environment is broken, mention it in conversation rather than filing a public issue that reveals private infrastructure details.
 
+## Working on issues
+
+Any collaborator can pick up an open issue. Here's the workflow:
+
+1. **Find an issue.** Browse the [MemoryHub project board](https://github.com/orgs/redhat-ai-americas/projects/1) Backlog column, or filter the issue list by label (`good first issue` is a good starting point). The [stakeholder analysis](planning/open-issues-by-stakeholder.md) groups issues by who they serve if you want to pick something aligned with your interests.
+2. **Assign yourself.** Click "assign yourself" on the issue page. If you want to discuss approach before committing, leave a comment first. Do not start work on an issue that is already assigned to someone else without coordinating with them.
+3. **Move it to In Progress** on the project board when you start work.
+4. **Open a PR** that links the issue (`Closes #NN` in the PR description).
+5. **When the PR merges**, the issue moves to Done automatically (GitHub handles this via the `Closes` keyword).
+
+If you can't finish an issue you've claimed, unassign yourself and leave a comment summarizing what you learned and where you got stuck. This saves the next person from repeating your work.
+
 ## Submitting pull requests
 
 1. **Read the relevant design doc first.** Most subsystems have one in `docs/`. If you're touching the agent-memory-ergonomics work, read [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md). If you're touching auth, read [`docs/design/governance.md`](docs/design/governance.md). If you're touching the package layout, see the repo-layout section above (historical record of the #55 rename: [`planning/archive/package-layout.md`](planning/archive/package-layout.md)).
@@ -105,7 +117,7 @@ Use the issue templates (`bug_report`, `feature_request`, `design_proposal`) —
 5. **CI must pass before merge.** GitHub Actions runs the test matrix (`.github/workflows/test.yml`), version-consistency checks, and secret scanning on every PR. Local green is not a substitute — a PR with failing CI will not be merged.
 6. **Don't commit secrets.** CI runs [gitleaks](https://github.com/gitleaks/gitleaks) on every PR; running it locally before pushing (`gitleaks detect --source .`) saves you a round-trip. We don't depend on git pre-commit hooks. (Maintainers with the project agent tooling can use the `/pre-commit` slash command.)
 7. **Open the PR with a clear description** that links the issue number and references the design doc. Fill in the PR template. Reviewers check the design first, then the diff.
-8. **Expect review from a maintainer.** Review and merge rules (approval count, maintainer self-merge policy) are in [`MAINTAINERS.md`](MAINTAINERS.md).
+8. **Expect review from a maintainer.** Every PR requires approval from at least one maintainer who is not the author. The current maintainer list is in [`MAINTAINERS.md`](MAINTAINERS.md).
 9. **Update `CHANGELOG.md`** in the same PR for any user-visible change to a released component (SDK, CLI, MCP server). Releases are cut by tagging (`sdk/vX.Y.Z`, `mcp/vX.Y.Z`, `memoryhub-cli/vX.Y.Z`); `.github/workflows/version-check.yml` enforces version consistency and `release.yml` publishes.
 10. **Be ready to iterate.** We optimize for the right design, not the fastest merge.
 

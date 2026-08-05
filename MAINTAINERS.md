@@ -4,15 +4,17 @@
 
 | Name | GitHub | Areas |
 |---|---|---|
-| Wes Jackson | [@rdwj](https://github.com/rdwj) | All (interim — see bus factor note) |
+| Wes Jackson | [@rdwj](https://github.com/rdwj) | All |
+| Sanjay Rampal | [@srampal](https://github.com/srampal) | All |
+| Katya Romashko | [@KatyaRomashko](https://github.com/KatyaRomashko) | All |
+| Ray Carroll | [@raycarroll](https://github.com/raycarroll) | All |
 
 Maintainers have merge rights, deploy access to the shared demo cluster, and own project-board triage. `.github/CODEOWNERS` mirrors this list and must be updated in the same PR as any change here.
 
 ## Review and merge rules
 
 - Every PR requires approval from at least **one maintainer** who is not the PR author, plus green CI (`.github/workflows/test.yml`, version-check, secret scanning).
-- **Maintainer self-merge:** while the project has a single maintainer, maintainer-authored PRs may be self-merged after CI passes, with a minimum 24-hour open window for non-trivial changes so contributors can comment. Once a second maintainer joins, self-merge is retired and maintainer PRs require review from another maintainer like everyone else's.
-- Trivial changes (typos, doc formatting, CI config fixes) may be merged by any maintainer without the waiting period.
+- Trivial changes (typos, doc formatting, CI config fixes) still require one approval but reviewers should not block on them.
 - Disagreements are resolved by discussion on the PR/issue; if consensus isn't reached, the maintainer who owns the affected area decides. Design-level disputes should go through a `design_proposal` issue rather than being settled in a PR thread.
 
 ## Becoming a maintainer
@@ -29,6 +31,3 @@ Nomination happens in a GitHub Discussion; existing maintainers decide by consen
 
 Maintainers may step down at any time by PR to this file. A maintainer inactive for 6+ months may be moved to an "emeritus" section by consensus of the remaining maintainers. Conduct-related removal follows the [Code of Conduct](CODE_OF_CONDUCT.md) enforcement process.
 
-## Bus factor note
-
-The project currently has one maintainer. Growing this list is an explicit goal — if you're a regular contributor and interested, say so in a Discussion.
