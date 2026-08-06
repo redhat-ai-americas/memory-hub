@@ -778,10 +778,18 @@ else: sys.exit(1)
         return 0
     }
 
-    if ! command -v memoryhub &>/dev/null; then
-        warn "memoryhub CLI not installed -- skipping smoke test"
-        warn "Install with: pip install memoryhub-cli"
-        return 0
+    local memoryhub_bin
+    if command -v memoryhub &>/dev/null; then
+        memoryhub_bin="memoryhub"
+    elif "$REPO_ROOT/.venv/bin/memoryhub" --version &>/dev/null 2>&1; then
+        memoryhub_bin="$REPO_ROOT/.venv/bin/memoryhub"
+    else
+        info "Installing memoryhub CLI into .venv..."
+        "$REPO_ROOT/.venv/bin/pip" install -q "$REPO_ROOT/memoryhub-cli/" 2>/dev/null || {
+            warn "Failed to install memoryhub CLI -- skipping smoke test"
+            return 0
+        }
+        memoryhub_bin="$REPO_ROOT/.venv/bin/memoryhub"
     fi
 
     export MEMORYHUB_URL="$mcp_url"
@@ -789,30 +797,50 @@ else: sys.exit(1)
 
     info "Writing test memory..."
     local write_output memory_id
-    write_output=$(memoryhub write "MemoryHub smoke test $(date -u +%Y%m%dT%H%M%SZ)" \
-        --scope user --weight 0.5 -o json 2>&1) || {
+    local smoke_id="smoke-$$-$(date -u +%Y%m%dT%H%M%SZ)"
+    write_output=$($memoryhub_bin write "MemoryHub deploy verification ${smoke_id}" \
+        --scope user --weight 0.1 -o json 2>/dev/null) || {
         warn "Write failed: $write_output"
         return 0
     }
-    memory_id=$(echo "$write_output" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+    memory_id=$(echo "$write_output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+mem = (d.get('data') or {}).get('memory')
+if mem:
+    print(mem['id'])
+else:
+    cur = (d.get('data') or {}).get('curation') or {}
+    if cur.get('blocked'):
+        print('BLOCKED:' + (cur.get('reason') or 'unknown'))
+    else:
+        print('')
+" 2>/dev/null || echo "")
     if [ -z "$memory_id" ]; then
         warn "Could not parse write response"
+        return 0
+    fi
+    if [[ "$memory_id" == BLOCKED:* ]]; then
+        warn "Write blocked by curation: ${memory_id#BLOCKED:}"
+        warn "This is expected if a similar smoke-test memory already exists"
+        echo ""
+        echo -e "  ${GREEN}Smoke test partial (write blocked by dedup)${RESET}"
         return 0
     fi
     info "  Written: $memory_id"
 
     info "Searching..."
     local search_output search_count
-    search_output=$(memoryhub search "smoke test" --max-results 3 -o json 2>&1) || true
-    search_count=$(echo "$search_output" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('results',[])))" 2>/dev/null || echo "0")
+    search_output=$($memoryhub_bin search "smoke test" -n 3 -o json 2>/dev/null) || true
+    search_count=$(echo "$search_output" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('data',{}).get('results',[]) or d.get('results',[])))" 2>/dev/null || echo "0")
     info "  Search returned $search_count results"
 
     info "Reading back..."
-    memoryhub read "$memory_id" -o quiet 2>/dev/null || warn "Read failed"
+    $memoryhub_bin read "$memory_id" -o quiet 2>/dev/null || warn "Read failed"
     info "  Read OK"
 
     info "Cleaning up..."
-    memoryhub delete "$memory_id" -o quiet 2>/dev/null || true
+    $memoryhub_bin delete "$memory_id" -f -o quiet 2>/dev/null || true
     info "  Deleted test memory"
 
     echo ""
@@ -873,6 +901,11 @@ print_summary() {
         printf "    %-24s %s\n" "MCP endpoint (agents):" "https://${mcp_route}/mcp/"
     fi
     printf "    %-24s %s\n" "Credentials:" "~/.config/memoryhub/credentials [$CONTEXT]"
+
+    if ! command -v memoryhub &>/dev/null; then
+        echo ""
+        echo "    Note: pip install memoryhub-cli globally or use .venv/bin/memoryhub"
+    fi
 }
 
 # ---------------------------------------------------------------------------
