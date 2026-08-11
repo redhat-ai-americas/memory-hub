@@ -827,7 +827,7 @@ def _build_search_filters(
         # memories). Exclude them from normal search unless the caller explicitly
         # requests scope="entity".
         filters.append(MemoryNode.scope != "entity")
-    if owner_id is not None:
+    if owner_id is not None and not (scope == "project" and project_ids):
         filters.append(MemoryNode.owner_id == owner_id)
 
     if authorized_scopes is not None:

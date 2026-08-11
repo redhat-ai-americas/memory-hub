@@ -37,6 +37,7 @@ from src.core.authz import (
     get_claims_from_context,
     resolve_tenant,
 )
+from src.tools.auth import get_current_user
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
@@ -404,6 +405,12 @@ async def write_memory(
                     description=project_description,
                 )
                 await session_for_project.commit()
+                if was_auto_enrolled:
+                    user = get_current_user()
+                    if user is not None:
+                        existing = set(user.get("project_memberships", []))
+                        existing.add(project_id)
+                        user["project_memberships"] = sorted(existing)
             except ProjectInviteOnlyError as exc:
                 raise ToolError(str(exc)) from exc
             finally:
