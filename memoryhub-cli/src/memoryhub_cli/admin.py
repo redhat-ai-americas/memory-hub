@@ -100,7 +100,7 @@ def create_agent(
     write_config: bool = typer.Option(
         False,
         "--write-config",
-        help="Write the client_secret to ~/.config/memoryhub/credentials",
+        help="Write the api_key to ~/.config/memoryhub/credentials",
     ),
     context: str = typer.Option(
         "",
@@ -113,7 +113,7 @@ def create_agent(
 ):
     """Create a new agent (OAuth client).
 
-    The client_secret is shown only once. Save it immediately.
+    The client_secret and api_key are shown only once. Save them immediately.
     """
     admin_key = _get_admin_key(output)
     auth_url = _get_auth_url(output)
@@ -160,12 +160,15 @@ def create_agent(
         f"  [yellow bold]Client Secret:   {data['client_secret']}[/yellow bold]"
     )
     console.print(
-        "\n  [dim]Save this secret now. It will not be shown again.[/dim]"
+        f"  [yellow bold]API Key:         {data['api_key']}[/yellow bold]"
+    )
+    console.print(
+        "\n  [dim]Save both values now. They will not be shown again.[/dim]"
     )
 
     if write_config:
         section = context or os.environ.get("MEMORYHUB_CONTEXT", "").strip() or "default"
-        write_credentials_section(section, data["client_secret"])
+        write_credentials_section(section, data["api_key"])
         console.print(f"\n  [green]Secret written to {CREDENTIALS_FILE} [{section}][/green]")
 
 
@@ -234,9 +237,9 @@ def rotate_secret(
         OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
     ),
 ):
-    """Rotate the client secret for an agent.
+    """Rotate the client secret for an agent. This also regenerates the API key.
 
-    The new secret is shown only once. Save it immediately.
+    Both values are shown only once. Save them immediately.
     """
     admin_key = _get_admin_key(output)
     auth_url = _get_auth_url(output)
@@ -265,10 +268,13 @@ def rotate_secret(
 
     console.print(f"[green]Secret rotated for {data['client_id']}.[/green]\n")
     console.print(
-        f"  [yellow bold]New Secret:   {data['client_secret']}[/yellow bold]"
+        f"  [yellow bold]New Secret:    {data['client_secret']}[/yellow bold]"
     )
     console.print(
-        "\n  [dim]Save this secret now. It will not be shown again.[/dim]"
+        f"  [yellow bold]New API Key:   {data['api_key']}[/yellow bold]"
+    )
+    console.print(
+        "\n  [dim]Save both values now. They will not be shown again.[/dim]"
     )
 
 
