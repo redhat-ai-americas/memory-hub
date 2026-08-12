@@ -4,7 +4,7 @@
 
 ## Overview
 
-MemoryHub's work is organized into six milestones that sequence the path from reliable retrieval through platform maturity. Each milestone gates on the one before it: you can't curate what you can't retrieve, and you can't integrate what you haven't curated. Fifty issues are open across the backlog; 30 have been closed.
+MemoryHub's work is organized into six milestones that sequence the path from reliable retrieval through platform maturity. Each milestone gates on the one before it: you can't curate what you can't retrieve, and you can't integrate what you haven't curated. Sixty-two issues are open across the backlog; 30 have been closed across milestones.
 
 | Milestone | Progress | Status |
 |-----------|----------|--------|
@@ -13,7 +13,7 @@ MemoryHub's work is organized into six milestones that sequence the path from re
 | v0.4 - Curation & Governance | 10/16 (63%) | In progress |
 | v0.5 - Platform Integrations | 8/9 (89%) | Nearly complete |
 | v0.6 - UI & Dashboard | 6/6 (100%) | Complete |
-| Unassigned | 37 open | Needs triage |
+| Unassigned | 47 open | Needs triage |
 
 ---
 
@@ -138,7 +138,7 @@ All 6 issues closed. The UI and dashboard milestone is fully delivered.
 
 ## Proposed: Unassigned Issue Triage
 
-37 open issues have no milestone. Grouped by theme with triage recommendations:
+47 open issues have no milestone. Grouped by theme with triage recommendations:
 
 ### Retrieval and search improvements (7 issues)
 
@@ -240,7 +240,7 @@ All 6 issues closed. The UI and dashboard milestone is fully delivered.
 | #495 | OpenClaw: connection leak (**Bug**) | v0.3 -- client bugs |
 | #496 | OpenClaw: remove as-never casts (**Bug**) | v0.3 -- client bugs |
 
-### Other (1 issue)
+### Other (2 issues)
 
 | Issue | Title | Recommended milestone |
 |-------|-------|----------------------|

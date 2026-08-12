@@ -1,6 +1,6 @@
 # MemoryHub Open Issues by Stakeholder Dimension
 
-*Updated 2026-08-12 -- 50 open issues*
+*Updated 2026-08-12 -- 62 open issues*
 
 This document arranges the open issue backlog by who cares and why, across five stakeholder dimensions: the AI agent consuming MemoryHub, the developer integrating it, marketing/positioning, the customer's cybersecurity team, and the end user whose interactions are remembered.
 
@@ -305,7 +305,7 @@ Counts overlap because many issues serve multiple stakeholders. The "biggest gap
 |-----------|-------|--------|
 | v0.2 - Retrieval Quality | 3 | #272, #273, #306 |
 | v0.3 - Multi-Harness & Onboarding | 5 | #310, #312, #313, #489, #509 |
-| v0.4 - Curation & Governance | 5 | #40, #68, #70, #239, #290 |
+| v0.4 - Curation & Governance | 6 | #40, #68, #70, #239, #289, #290 |
 | v0.5 - Platform Integrations | 1 | #82 |
 | Unassigned | 47 | |
 
