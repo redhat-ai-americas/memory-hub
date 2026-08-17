@@ -1974,3 +1974,58 @@ class TestCompactEntryHonestyFlags:
         assert "content_truncated" in entry
         assert "full_available" in entry
         assert entry["relevance_score"] == 0.85
+
+
+# ---------------------------------------------------------------------------
+# effective_k observability (#404)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_memory_effective_k_in_response():
+    """effective_k appears in the search response metadata."""
+    result = await _patched_search_call(
+        [_fake_search_result("mem1", 0.9)],
+        total_matching=1,
+        max_results=15,
+    ).run()
+    assert "effective_k" in result
+    assert result["effective_k"] == 15
+
+
+@pytest.mark.asyncio
+async def test_search_memory_effective_k_default():
+    """effective_k equals max_results default (10) when not specified."""
+    result = await _patched_search_call(
+        [_fake_search_result("mem1", 0.9)],
+        total_matching=1,
+    ).run()
+    assert result["effective_k"] == 10
+
+
+@pytest.mark.asyncio
+async def test_search_memory_effective_k_in_empty_response():
+    """effective_k appears even when no results are returned."""
+    result = await _patched_search_call(
+        [],
+        total_matching=0,
+        max_results=20,
+    ).run()
+    assert "effective_k" in result
+    assert result["effective_k"] == 20
+
+
+@pytest.mark.asyncio
+async def test_search_memory_effective_k_at_tool_boundary():
+    """effective_k equals max_results at the upper boundary (200).
+
+    Pydantic rejects max_results > 200 before the function body runs,
+    so effective_k always equals the received max_results. This test
+    verifies behavior at the boundary.
+    """
+    result = await _patched_search_call(
+        [_fake_search_result("mem1", 0.9)],
+        total_matching=1,
+        max_results=200,
+    ).run()
+    assert result["effective_k"] == 200
