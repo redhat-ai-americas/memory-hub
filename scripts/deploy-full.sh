@@ -1,8 +1,8 @@
 #!/bin/bash
 # Full MemoryHub stack deployment to OpenShift.
-# Usage: scripts/deploy-full.sh [--skip-prereqs] [--skip-db] [--skip-migrations]
-#                                [--skip-mcp] [--skip-auth] [--skip-ui] [--skip-tile]
-#                                [--skip-models] [--gpu-models]
+# Usage: scripts/deploy-full.sh [--skip-prereqs] [--skip-data]
+#                                [--skip-migrations] [--skip-mcp] [--skip-auth]
+#                                [--skip-ui] [--skip-tile] [--skip-models] [--gpu-models]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,10 +17,11 @@ UI_NAMESPACE="memoryhub-ui"
 RHOAI_NAMESPACE="redhat-ods-applications"
 EMBEDDING_MODEL_NAMESPACE="embedding-model"
 RERANKER_MODEL_NAMESPACE="reranker-model"
+STORAGE_NAMESPACE="memoryhub-storage"
 DB_POD_LABEL="app.kubernetes.io/name=memoryhub-pg"
 
 SKIP_PREREQS=false
-SKIP_DB=false
+SKIP_DATA=false
 SKIP_MIGRATIONS=false
 SKIP_MCP=false
 SKIP_AUTH=false
@@ -106,7 +107,8 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --skip-prereqs)    SKIP_PREREQS=true ;;
-            --skip-db)         SKIP_DB=true ;;
+            --skip-data)       SKIP_DATA=true ;;
+            --skip-db)         SKIP_DATA=true ;;
             --skip-migrations) SKIP_MIGRATIONS=true ;;
             --skip-mcp)        SKIP_MCP=true ;;
             --skip-auth)       SKIP_AUTH=true ;;
@@ -129,7 +131,8 @@ parse_args() {
                 echo "Usage: $SCRIPT_NAME [OPTIONS]"
                 echo ""
                 echo "  --skip-prereqs     Skip check-prereqs.sh (for known-good environments)"
-                echo "  --skip-db          Skip PostgreSQL deployment"
+                echo "  --skip-data        Skip PostgreSQL and MinIO deployment (data already present)"
+                echo "  --skip-db          Deprecated alias for --skip-data"
                 echo "  --skip-migrations  Skip Alembic migrations"
                 echo "  --skip-mcp         Skip MCP server deployment"
                 echo "  --skip-auth        Skip Auth server deployment"
@@ -198,15 +201,15 @@ preflight() {
     echo -e "  ${GREEN}Preflight OK${RESET}"
     echo ""
     echo "  Deployment plan:"
-    echo "    PostgreSQL:  $([ "$SKIP_DB" = true ] && echo "skip" || echo "deploy")"
+    echo "    PostgreSQL:  $([ "$SKIP_DATA" = true ] && echo "skip" || echo "deploy")"
     echo "    Migrations:  $([ "$SKIP_MIGRATIONS" = true ] && echo "skip" || echo "run")"
     echo "    MCP server:  $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
-    echo "    MinIO:       $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
+    echo "    MinIO:       $([ "$SKIP_DATA" = true ] && echo "skip" || echo "deploy")"
     echo "    Valkey:      $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
     echo "    Models:      $([ "$SKIP_MODELS" = true ] && echo "skip" || ([ "$GPU_MODELS" = true ] && echo "deploy (GPU)" || echo "deploy (CPU)"))"
     echo "    Auth server: $([ "$SKIP_AUTH" = true ] && echo "skip" || echo "deploy")"
     echo "    UI:          $([ "$SKIP_UI" = true ] && echo "skip" || echo "deploy")"
-    echo "    RHOAI tile:  $([ "$SKIP_TILE" = true ] && echo "skip" || echo "apply")"
+    echo "    RHOAI tile:  $([ "$SKIP_TILE" = true ] && echo "skip" || echo "apply (if RHOAI installed)")"
 }
 
 # ---------------------------------------------------------------------------
@@ -215,8 +218,8 @@ preflight() {
 deploy_postgresql() {
     banner "2. PostgreSQL"
 
-    if [ "$SKIP_DB" = true ]; then
-        skipped "PostgreSQL (--skip-db)"
+    if [ "$SKIP_DATA" = true ]; then
+        skipped "PostgreSQL (--skip-data)"
         return 0
     fi
 
@@ -333,35 +336,63 @@ run_migrations() {
 }
 
 # ---------------------------------------------------------------------------
-# Section 3b: MinIO + Valkey infrastructure (MCP dependencies)
+# Section 3b: MinIO object storage (memoryhub-storage namespace)
 # ---------------------------------------------------------------------------
-deploy_infra() {
-    banner "3b. MinIO + Valkey"
+deploy_storage() {
+    banner "3b. MinIO Object Storage"
 
-    if [ "$SKIP_MCP" = true ]; then
-        skipped "Infrastructure (MCP skipped)"
+    if [ "$SKIP_DATA" = true ]; then
+        skipped "MinIO (--skip-data)"
         return 0
     fi
 
-    # Ensure MCP namespace exists (MCP deploy script also does this, but we
-    # need it now for MinIO/Valkey which must be ready before MCP starts)
+    # The kustomization includes namespace.yaml, but we need the namespace
+    # to exist before we can grant SCCs, so create it imperatively first.
+    if ! oc get namespace --context "$CONTEXT" "$STORAGE_NAMESPACE" &>/dev/null; then
+        info "Creating namespace $STORAGE_NAMESPACE..."
+        oc create namespace --context "$CONTEXT" "$STORAGE_NAMESPACE"
+    fi
+
+    info "Deploying MinIO..."
+    oc apply --context "$CONTEXT" -k "$REPO_ROOT/deploy/minio/"
+    oc adm policy --context "$CONTEXT" add-scc-to-user anyuid -z memoryhub-minio -n "$STORAGE_NAMESPACE"
+
+    info "Waiting for MinIO rollout..."
+    if ! oc rollout --context "$CONTEXT" status deployment/memoryhub-minio -n "$STORAGE_NAMESPACE" --timeout=120s; then
+        die "MinIO did not become ready. Check: oc describe deployment/memoryhub-minio -n $STORAGE_NAMESPACE"
+    fi
+
+    # Copy MinIO credentials to the MCP namespace so the MCP server and
+    # retention cronjob can reference the secret locally.
+    if ! oc get namespace --context "$CONTEXT" "$MCP_PROJECT" &>/dev/null; then
+        info "Creating namespace $MCP_PROJECT (for cross-namespace secret copy)..."
+        oc create namespace --context "$CONTEXT" "$MCP_PROJECT"
+    fi
+    copy_secret memoryhub-minio-credentials "$STORAGE_NAMESPACE" memoryhub-minio-credentials "$MCP_PROJECT"
+
+    echo ""
+    echo -e "  ${GREEN}MinIO ready${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Section 3b2: Valkey (MCP namespace, ephemeral cache)
+# ---------------------------------------------------------------------------
+deploy_valkey() {
+    banner "3b2. Valkey"
+
+    if [ "$SKIP_MCP" = true ]; then
+        skipped "Valkey (MCP skipped)"
+        return 0
+    fi
+
     if ! oc get namespace --context "$CONTEXT" "$MCP_PROJECT" &>/dev/null; then
         info "Creating namespace $MCP_PROJECT..."
         oc create namespace --context "$CONTEXT" "$MCP_PROJECT"
     fi
 
-    info "Deploying MinIO..."
-    oc apply --context "$CONTEXT" -k "$REPO_ROOT/deploy/minio/" -n "$MCP_PROJECT"
-    oc adm policy --context "$CONTEXT" add-scc-to-user anyuid -z memoryhub-minio -n "$MCP_PROJECT"
-
     info "Deploying Valkey..."
     oc apply --context "$CONTEXT" -k "$REPO_ROOT/deploy/valkey/" -n "$MCP_PROJECT"
     oc adm policy --context "$CONTEXT" add-scc-to-user anyuid -z memoryhub-valkey -n "$MCP_PROJECT"
-
-    info "Waiting for MinIO rollout..."
-    if ! oc rollout --context "$CONTEXT" status deployment/memoryhub-minio -n "$MCP_PROJECT" --timeout=120s; then
-        die "MinIO did not become ready. Check: oc describe deployment/memoryhub-minio -n $MCP_PROJECT"
-    fi
 
     info "Waiting for Valkey rollout..."
     if ! oc rollout --context "$CONTEXT" status deployment/memoryhub-valkey -n "$MCP_PROJECT" --timeout=120s; then
@@ -369,7 +400,7 @@ deploy_infra() {
     fi
 
     echo ""
-    echo -e "  ${GREEN}MinIO + Valkey ready${RESET}"
+    echo -e "  ${GREEN}Valkey ready${RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -450,8 +481,8 @@ deploy_models() {
 deploy_retention_cronjob() {
     banner "3c. Retention Enforcement CronJob"
 
-    if [ "$SKIP_DB" = true ]; then
-        skipped "Retention CronJob (DB skipped)"
+    if [ "$SKIP_DATA" = true ]; then
+        skipped "Retention CronJob (--skip-data)"
         return 0
     fi
 
@@ -663,7 +694,11 @@ deploy_ui() {
     fi
 
     info "Deploying UI (namespace: $UI_NAMESPACE)..."
-    if ! bash "$ui_deploy"; then
+    if [ "$SKIP_TILE" = true ]; then
+        if ! bash "$ui_deploy" --skip-tile; then
+            die "UI deployment failed. Check output above."
+        fi
+    elif ! bash "$ui_deploy"; then
         die "UI deployment failed. Check output above."
     fi
 
@@ -672,37 +707,7 @@ deploy_ui() {
 }
 
 # ---------------------------------------------------------------------------
-# Section 7: RHOAI OdhApplication tile
-# ---------------------------------------------------------------------------
-deploy_tile() {
-    banner "7. RHOAI OdhApplication Tile"
-
-    if [ "$SKIP_TILE" = true ]; then
-        skipped "OdhApplication tile (--skip-tile)"
-        return 0
-    fi
-
-    local odh_manifest="$REPO_ROOT/memoryhub-ui/openshift/odh-application.yaml"
-    if [ ! -f "$odh_manifest" ]; then
-        die "OdhApplication manifest not found: $odh_manifest"
-    fi
-
-    if oc get crd odhapplications.dashboard.opendatahub.io --context "$CONTEXT" &>/dev/null; then
-        info "Applying OdhApplication CR to $RHOAI_NAMESPACE..."
-        if ! oc apply --context "$CONTEXT" -f "$odh_manifest" -n "$RHOAI_NAMESPACE"; then
-            die "Failed to apply OdhApplication manifest."
-        fi
-        echo ""
-        echo -e "  ${GREEN}RHOAI tile applied${RESET}"
-    else
-        warn "OdhApplication CRD not found — skipping dashboard tile (non-blocking)"
-        echo ""
-        echo -e "  ${YELLOW}RHOAI tile skipped (CRD not available)${RESET}"
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# Section 7b: Configure local client (API key for CLI/SDK)
+# Section 7: Configure local client (API key for CLI/SDK)
 # ---------------------------------------------------------------------------
 configure_local_client() {
     local users_cm="$REPO_ROOT/memory-hub-mcp/deploy/users-configmap.yaml"
@@ -923,7 +928,8 @@ main() {
     deploy_postgresql
     restore_from_backup
     run_migrations
-    deploy_infra              # MinIO + Valkey before MCP
+    deploy_storage            # MinIO in memoryhub-storage namespace
+    deploy_valkey             # Valkey in MCP namespace (ephemeral)
     deploy_models             # Embedding + Reranker before MCP
     deploy_retention_cronjob  # Retention sweep after DB
     prepare_auth_infra        # Secrets before auth
@@ -932,7 +938,6 @@ main() {
     configure_local_client    # Write API key for CLI/SDK
     prepare_ui_infra          # SA + Secrets before UI
     deploy_ui
-    deploy_tile
     print_summary
     smoke_test
 

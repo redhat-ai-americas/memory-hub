@@ -75,7 +75,7 @@ make install ARGS="--skip-ui --skip-tile"          # headless (no dashboard)
 ```bash
 make uninstall                                     # prompts for confirmation
 make uninstall ARGS="--yes"                        # non-interactive (CI)
-make uninstall ARGS="--skip-db"                    # preserve database across reinstall
+make uninstall ARGS="--skip-data"                   # preserve database + storage across reinstall
 make uninstall ARGS="--skip-models"                # keep embedding/reranker models running
 ```
 
@@ -84,7 +84,7 @@ make uninstall ARGS="--skip-models"                # keep embedding/reranker mod
 **Image digest mismatch.** If the MCP deploy fails with `running digest does not match imagestream :latest`, the OpenShift deployment cached a stale image. Re-run the install and it will pick up the correct digest:
 
 ```bash
-make install ARGS="--skip-db --skip-migrations --skip-auth"
+make install ARGS="--skip-data --skip-migrations --skip-auth"
 ```
 
 **Reranker timeout with `--gpu-models`.** On single-GPU clusters, the embedding model takes the GPU. The reranker runs on CPU (with a GPU node toleration for scheduling). If the reranker times out, check for PVC contention -- the CPU model variant may still be running and holding the shared PVC. The deploy script scales down CPU models automatically, but leftover deployments from a prior install can interfere. Delete them manually: `oc delete deployment <cpu-model-name> -n reranker-model`.

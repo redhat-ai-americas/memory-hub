@@ -161,13 +161,15 @@ async def list_memory(
             f"Valid scopes: {', '.join(sorted(VALID_SCOPES))}."
         )
 
+    list_owner_id = None if scope == "project" and project_ids else claims["sub"]
+
     session, gen = await get_db_session()
     try:
         results, next_cursor = await list_memories(
             session,
             tenant_id=tenant,
             scope=scope,
-            owner_id=claims["sub"],
+            owner_id=list_owner_id,
             max_results=max_results,
             cursor=cursor,
             current_only=current_only,

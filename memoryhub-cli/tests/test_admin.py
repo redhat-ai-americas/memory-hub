@@ -27,11 +27,16 @@ SAMPLE_CLIENT = {
     "updated_at": "2026-04-14T12:00:00",
 }
 
-SAMPLE_CREATED = {**SAMPLE_CLIENT, "client_secret": "super-secret-value"}
+SAMPLE_CREATED = {
+    **SAMPLE_CLIENT,
+    "client_secret": "super-secret-value",
+    "api_key": "mh-dev-abc123",
+}
 
 SAMPLE_ROTATED = {
     "client_id": "test-agent",
     "client_secret": "new-secret-value",
+    "api_key": "mh-dev-rotated789",
 }
 
 
@@ -82,7 +87,8 @@ class TestCreateAgent:
         assert result.exit_code == 0
         assert "test-agent" in result.output
         assert "super-secret-value" in result.output
-        assert "Save this secret" in result.output
+        assert "mh-dev-abc123" in result.output
+        assert "Save both values" in result.output
 
     def test_json_output(self):
         mock_client = AsyncMock()
@@ -100,6 +106,7 @@ class TestCreateAgent:
         parsed = json.loads(result.output)
         assert parsed["data"]["client_id"] == "test-agent"
         assert parsed["data"]["client_secret"] == "super-secret-value"
+        assert parsed["data"]["api_key"] == "mh-dev-abc123"
 
     def _run_write_config(self, tmp_path, extra_args=None):
         mock_client = AsyncMock()
@@ -129,7 +136,7 @@ class TestCreateAgent:
         import configparser
         cp = configparser.ConfigParser(interpolation=None)
         cp.read(creds)
-        assert cp.get("default", "api_key") == "super-secret-value"
+        assert cp.get("default", "api_key") == "mh-dev-abc123"
 
     def test_write_config_with_context(self, tmp_path):
         result, creds = self._run_write_config(
@@ -139,7 +146,7 @@ class TestCreateAgent:
         import configparser
         cp = configparser.ConfigParser(interpolation=None)
         cp.read(creds)
-        assert cp.get("my-cluster", "api_key") == "super-secret-value"
+        assert cp.get("my-cluster", "api_key") == "mh-dev-abc123"
 
     def test_conflict_409(self):
         error_resp = _mock_error_response(
@@ -233,6 +240,8 @@ class TestRotateSecret:
 
         assert result.exit_code == 0
         assert "new-secret-value" in result.output
+        assert "mh-dev-rotated789" in result.output
+        assert "Save both values" in result.output
         assert "rotated" in result.output.lower()
 
     def test_json_output(self):
@@ -252,6 +261,7 @@ class TestRotateSecret:
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert parsed["data"]["client_secret"] == "new-secret-value"
+        assert parsed["data"]["api_key"] == "mh-dev-rotated789"
 
     def test_not_found(self):
         error_resp = _mock_error_response(404, "Client 'ghost' not found")

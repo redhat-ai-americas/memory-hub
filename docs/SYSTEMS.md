@@ -87,11 +87,12 @@ The agent-memory-ergonomics subsystem is cross-cutting rather than load-bearing 
 
 ## Deployment topology
 
-The deployed system spans four OpenShift namespaces:
+The deployed system spans five OpenShift namespaces:
 
 | Namespace | Pods | Purpose |
 |---|---|---|
-| `memory-hub-mcp` | `memory-hub-mcp` (FastMCP server), `memoryhub-ui` (BFF + oauth-proxy sidecar), `memoryhub-valkey` (Valkey 8.0), `fact-checker` (CronJob, daily), MinIO | Agent-facing MCP server, the dashboard, job queues/push, and object storage. Co-located so the BFF and agents can call MCP over the cluster network with low latency. |
+| `memory-hub-mcp` | `memory-hub-mcp` (FastMCP server), `memoryhub-ui` (BFF + oauth-proxy sidecar), `memoryhub-valkey` (Valkey 8.0), `fact-checker` (CronJob, daily) | Agent-facing MCP server, the dashboard, and job queues/push. Co-located so the BFF and agents can call MCP over the cluster network with low latency. |
+| `memoryhub-storage` | `memoryhub-minio` (MinIO) | S3-compatible object storage for oversized memory content. Isolated in its own namespace so data survives MCP server reinstalls (#395). |
 | `memoryhub-agents` | `trace-reviewer` (Deployment) | Background curation agents with a different scaling profile (HPA-eligible, continuous); reaches Valkey cross-namespace via `memoryhub-valkey.memory-hub-mcp.svc:6379`. |
 | `memoryhub-auth` | `auth-server` | Standalone OAuth 2.1 authorization server. Issues JWTs consumed by the MCP server's `JWTVerifier` and by the BFF's admin proxy. |
 | `memoryhub-db` | `memoryhub-pg-0` | PostgreSQL with the pgvector extension. Backs all relational, vector, and graph queries. |

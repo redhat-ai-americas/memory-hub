@@ -12,7 +12,6 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel, Field, ValidationError
 
-from memoryhub_core.config import AppSettings
 from memoryhub_core.models.schemas import MemoryNodeCreate
 from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import (
@@ -37,6 +36,7 @@ from src.core.authz import (
     get_claims_from_context,
     resolve_tenant,
 )
+from src.tools.auth import get_current_user
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
@@ -404,6 +404,12 @@ async def write_memory(
                     description=project_description,
                 )
                 await session_for_project.commit()
+                if was_auto_enrolled:
+                    user = get_current_user()
+                    if user is not None:
+                        existing = set(user.get("project_memberships", []))
+                        existing.add(project_id)
+                        user["project_memberships"] = sorted(existing)
             except ProjectInviteOnlyError as exc:
                 raise ToolError(str(exc)) from exc
             finally:
@@ -589,8 +595,7 @@ async def write_memory(
         # Eager fact extraction via MCP sampling. Non-fatal -- the write
         # never fails on extraction failure.
         facts_extracted = None
-        app_settings = AppSettings()
-        embedding_max_chars = app_settings.embedding_max_tokens * 4
+        embedding_max_chars = embedding_service.max_tokens * 4
         is_oversized = len(content) > embedding_max_chars
 
         valid_extract_modes = {"eager", "off", "background", None}

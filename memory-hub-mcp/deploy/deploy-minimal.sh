@@ -2,7 +2,7 @@
 # Deploy the minimal-profile MCP server instance for small model testing.
 #
 # This creates a SEPARATE deployment alongside the primary memory-hub-mcp.
-# Same namespace, shared DB/Valkey/MinIO, but different name and route.
+# Same namespace, shared DB/Valkey, cross-namespace MinIO, but different name and route.
 # Sets MEMORYHUB_TOOL_PROFILE=minimal (4 tools: register_session +
 # search_memory + write_memory + read_memory).
 set -euo pipefail

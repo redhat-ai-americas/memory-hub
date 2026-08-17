@@ -1651,8 +1651,6 @@ async def test_create_memory_s3_no_adapter_inline_fallback(async_session, embedd
 
 async def test_create_memory_oversized_no_s3_truncates_embed_text(async_session, embedding_service):
     """Oversized content without S3 still truncates embed text to prevent 413."""
-    from memoryhub_core.config import AppSettings
-
     big_content = _make_oversized_content()
     captured_texts = []
     original_embed = embedding_service.embed
@@ -1668,8 +1666,7 @@ async def test_create_memory_oversized_no_s3_truncates_embed_text(async_session,
     finally:
         embedding_service.embed = original_embed
 
-    settings = AppSettings()
-    embedding_max_chars = settings.embedding_max_tokens * 4
+    embedding_max_chars = embedding_service.max_tokens * 4
     # The first embed call is for the parent node
     assert len(captured_texts) >= 1
     assert len(captured_texts[0]) == embedding_max_chars, (
@@ -1712,6 +1709,65 @@ async def test_create_memory_oversized_no_s3_stores_full_content_inline(async_se
     assert result.content == big_content, "full content should be stored inline"
     assert result.storage_type == "inline"
     assert result.content_ref is None
+
+
+async def test_chunking_uses_embedding_service_max_tokens(async_session):
+    """Chunking threshold comes from embedding_service.max_tokens, not config (#511)."""
+    from sqlalchemy import select as sa_select
+
+    from memoryhub_core.models.memory import MemoryNode
+    from memoryhub_core.services.embeddings import MockEmbeddingService
+
+    low_limit_service = MockEmbeddingService(max_tokens=64)
+    max_chars = low_limit_service.max_tokens * 4  # 256 chars
+
+    paragraphs = [f"Paragraph {i}: " + "x" * 100 for i in range(10)]
+    content = "\n\n".join(paragraphs)
+    assert len(content) > max_chars
+    data = _make_create_data(content=content)
+    result, _ = await create_memory(data, async_session, low_limit_service, s3_adapter=None)
+
+    chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == result.id,
+        MemoryNode.branch_type == "chunk",
+        MemoryNode.deleted_at.is_(None),
+    )
+    chunks = (await async_session.execute(chunks_stmt)).scalars().all()
+    assert len(chunks) >= 1, (
+        f"content of {len(content)} chars should be chunked with max_tokens=64 "
+        f"(threshold={max_chars} chars), got 0 chunks"
+    )
+
+
+async def test_truncation_uses_embedding_service_max_tokens(async_session):
+    """Parent embed text is truncated to embedding_service.max_tokens * 4 (#511)."""
+    from memoryhub_core.services.embeddings import MockEmbeddingService
+
+    low_limit_service = MockEmbeddingService(max_tokens=64)
+    max_chars = low_limit_service.max_tokens * 4  # 256 chars
+
+    captured_texts = []
+    original_embed = low_limit_service.embed
+
+    async def capturing_embed(text):
+        captured_texts.append(text)
+        return await original_embed(text)
+
+    low_limit_service.embed = capturing_embed
+    paragraphs = [f"Paragraph {i}: " + "x" * 100 for i in range(10)]
+    content = "\n\n".join(paragraphs)
+    assert len(content) > max_chars
+    data = _make_create_data(content=content)
+    try:
+        await create_memory(data, async_session, low_limit_service, s3_adapter=None)
+    finally:
+        low_limit_service.embed = original_embed
+
+    assert len(captured_texts) >= 1
+    assert len(captured_texts[0]) == max_chars, (
+        f"embed text should be truncated to {max_chars} chars (max_tokens=64), "
+        f"got {len(captured_texts[0])}"
+    )
 
 
 # -- update_memory: two-tier storage --

@@ -56,7 +56,6 @@ export function createTools(
       try {
         const options: Record<string, unknown> = {};
         if (params.limit) options.max_results = params.limit;
-        if (params.scope) options.scope = params.scope;
         if (params.content_type) options.content_type = params.content_type;
 
         const domains =
@@ -66,10 +65,16 @@ export function createTools(
             : undefined);
         if (domains) options.domains = domains;
 
-        const result = await mcpClient.callMemory("search", {
+        const callParams: Record<string, unknown> = {
           query: params.query,
           options,
-        });
+        };
+        if (params.scope) callParams.scope = params.scope;
+        if (config.defaults.projectId) {
+          callParams.project_id = config.defaults.projectId;
+        }
+
+        const result = await mcpClient.callMemory("search", callParams);
         return textResult(result);
       } catch (e) {
         return errorResult(
@@ -148,11 +153,16 @@ export function createTools(
       try {
         const options: Record<string, unknown> = {};
         if (params.limit) options.max_results = params.limit;
-        if (params.scope) options.scope = params.scope;
         if (params.content_type) options.content_type = params.content_type;
         if (params.cursor) options.cursor = params.cursor;
 
-        const result = await mcpClient.callMemory("list", { options });
+        const callParams: Record<string, unknown> = { options };
+        if (params.scope) callParams.scope = params.scope;
+        if (config.defaults.projectId) {
+          callParams.project_id = config.defaults.projectId;
+        }
+
+        const result = await mcpClient.callMemory("list", callParams);
         return textResult(result);
       } catch (e) {
         return errorResult(
@@ -222,15 +232,16 @@ export function createTools(
         const domains = params.domains as string[] | undefined;
         if (domains) options.domains = domains;
 
-        if (config.defaults.projectId) {
-          options.project_id = config.defaults.projectId;
-        }
-
-        const result = await mcpClient.callMemory("write", {
+        const callParams: Record<string, unknown> = {
           content: params.content,
           scope,
           options,
-        });
+        };
+        if (config.defaults.projectId) {
+          callParams.project_id = config.defaults.projectId;
+        }
+
+        const result = await mcpClient.callMemory("write", callParams);
         return textResult(result);
       } catch (e) {
         return errorResult(

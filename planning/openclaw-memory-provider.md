@@ -797,13 +797,13 @@ V1's `promptBuilder` returns static tool description lines. A future enhancement
 
 The following issues were identified during V1 code review. None are blockers for the demo path, but each represents a correctness or consistency gap that should be addressed before V2.
 
-### 1. `scope` parameter silently dropped in `memoryhub_search`
+### 1. `scope` parameter silently dropped in `memoryhub_search` — *Fixed in PR #513*
 
 **File:** `src/tools.ts` (memoryhub_search tool)
 
 The tool schema accepts a `scope` parameter, but the `execute` implementation never includes it in the `callMemory()` call. The MemoryHub MCP `memory(action="search")` action supports a top-level `scope` filter, so the user's intent to scope a search is silently ignored. The parameter should be passed through to the MCP call.
 
-### 2. `project_id` not passed in search or list tools
+### 2. `project_id` not passed in search or list tools — *Fixed in PR #513*
 
 **File:** `src/tools.ts` (memoryhub_search, memoryhub_list tools)
 
