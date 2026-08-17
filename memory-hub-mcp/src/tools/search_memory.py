@@ -912,6 +912,13 @@ async def search_memory(
             f"Valid scopes: {', '.join(sorted(VALID_SCOPES))}."
         )
 
+    # effective_k: the actual result count limit the server will apply.
+    # Pydantic already validated max_results to [1, 200], so this is
+    # the value the server uses. Upstream caps (harness env, SDK config)
+    # happen before the request reaches us — this field lets consumers
+    # compare what the server received against what they originally wanted.
+    effective_k = max_results
+
     record_event(
         event_type="memory.search",
         actor_id=claims["sub"],
@@ -1054,6 +1061,7 @@ async def search_memory(
                 "results": [],
                 "total_matching": total_matching,
                 "has_more": False,
+                "effective_k": effective_k,
                 "message": (
                     "No memories found matching your query. "
                     "Try broader search terms or remove scope/owner filters."
@@ -1284,6 +1292,7 @@ async def search_memory(
             "total_matching": total_matching,
             "has_more": total_matching > len(formatted),
             "content_mode": content_mode,
+            "effective_k": effective_k,
         }
         if compilation_meta is not None:
             response["compilation_hash"] = compilation_meta["compilation_hash"]
