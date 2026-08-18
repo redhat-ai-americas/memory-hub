@@ -47,7 +47,6 @@ from memoryhub_core.services.valkey_client import (
     get_valkey_client,
 )
 from src.core.app import mcp
-from src.core.audit import record_event
 from src.core.authz import (
     PROJECT_ISOLATION_ENABLED,
     ROLE_ISOLATION_ENABLED,
@@ -56,6 +55,7 @@ from src.core.authz import (
     get_claims_from_context,
     resolve_tenant,
 )
+from src.tools._audit_helpers import record_audit_event
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
@@ -919,22 +919,24 @@ async def search_memory(
     # compare what the server received against what they originally wanted.
     effective_k = max_results
 
-    record_event(
-        event_type="memory.search",
-        actor_id=claims["sub"],
-        driver_id=claims["sub"],
-        scope=scope or "all",
-        owner_id=owner_id or claims["sub"],
-        memory_id=None,
-        decision="allowed",
-        metadata={"query": query[:200], "max_results": max_results},
-    )
-
-    # mode='full_only' overrides weight_threshold so the service never stubs.
-    effective_weight_threshold = 0.0 if mode == "full_only" else weight_threshold
-
     session, gen = await get_db_session()
     try:
+        await record_audit_event(
+            event_type="memory.search",
+            actor_id=claims["sub"],
+            driver_id=claims["sub"],
+            scope=scope or "all",
+            owner_id=owner_id or claims["sub"],
+            memory_id=None,
+            decision="allowed",
+            tenant_id=tenant,
+            metadata={"query": query[:200], "max_results": max_results},
+            session=session,
+        )
+
+        # mode='full_only' overrides weight_threshold so the service never stubs.
+        effective_weight_threshold = 0.0 if mode == "full_only" else weight_threshold
+
         if ctx:
             await ctx.info(f"Searching memories: '{query}'")
 
