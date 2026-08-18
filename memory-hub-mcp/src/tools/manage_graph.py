@@ -31,7 +31,6 @@ from memoryhub_core.services.memory import read_memory as read_memory_service
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
-from src.core.audit import record_event
 from src.core.authz import (
     DEFAULT_TENANT_ID,
     AuthenticationError,
@@ -39,6 +38,7 @@ from src.core.authz import (
     get_claims_from_context,
     get_tenant_filter,
 )
+from src.tools._audit_helpers import record_audit_event
 from src.tools._deps import get_db_session, release_db_session, resolve_driver_id
 
 logger = logging.getLogger(__name__)
@@ -367,9 +367,22 @@ async def _handle_create_relationship(
                 )
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
         if not authorize_read(claims, node, campaign_ids=campaign_ids):
+            # Gap #2 fix: Record denied audit event
+            await record_audit_event(
+                event_type="memory.relationship_created",
+                actor_id=actor_id,
+                driver_id=resolved_driver,
+                scope=node.scope,
+                owner_id=node.owner_id,
+                memory_id=str(node_id_parsed),
+                decision="denied",
+                tenant_id=tenant,
+                metadata={"relationship_type": relationship_type, "failed_on": label},
+                session=session,
+            )
             raise ToolError(f"Not authorized to access {label} ({node_id_parsed}).")
 
-    record_event(
+    await record_audit_event(
         event_type="memory.relationship_created",
         actor_id=actor_id,
         driver_id=resolved_driver,
@@ -377,7 +390,9 @@ async def _handle_create_relationship(
         owner_id=claims["sub"],
         memory_id=source_id,
         decision="allowed",
+        tenant_id=tenant,
         metadata={"target_id": target_id, "relationship_type": relationship_type},
+        session=session,
     )
 
     try:

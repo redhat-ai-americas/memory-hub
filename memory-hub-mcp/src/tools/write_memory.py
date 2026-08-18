@@ -27,7 +27,6 @@ from memoryhub_core.services.project import ensure_project_membership
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
-from src.core.audit import record_event
 from src.core.authz import (
     PROJECT_ISOLATION_ENABLED,
     ROLE_ISOLATION_ENABLED,
@@ -36,6 +35,7 @@ from src.core.authz import (
     get_claims_from_context,
     resolve_tenant,
 )
+from src.tools._audit_helpers import record_audit_event
 from src.tools.auth import get_current_user
 from src.tools._deps import (
     get_db_session,
@@ -436,7 +436,7 @@ async def write_memory(
         role_names=role_names,
         scope_id=scope_id_value,
     ):
-        record_event(
+        await record_audit_event(
             event_type="memory.write",
             actor_id=claims["sub"],
             driver_id=resolve_driver_id(driver_id, claims),
@@ -444,6 +444,8 @@ async def write_memory(
             owner_id=owner_id,
             memory_id=None,
             decision="denied",
+            tenant_id=write_tenant_id,
+            session=None,  # No session yet - will use stub fallback
         )
         raise ToolError(
             f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
@@ -453,7 +455,7 @@ async def write_memory(
     actor_id = claims["sub"]
     resolved_driver = resolve_driver_id(driver_id, claims)
 
-    record_event(
+    await record_audit_event(
         event_type="memory.write",
         actor_id=actor_id,
         driver_id=resolved_driver,
@@ -461,6 +463,8 @@ async def write_memory(
         owner_id=owner_id,
         memory_id=None,
         decision="allowed",
+        tenant_id=write_tenant_id,
+        session=None,  # No session yet - will use stub fallback
     )
 
     # Validate branch_type / parent_id pairing in both directions:
