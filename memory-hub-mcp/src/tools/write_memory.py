@@ -429,121 +429,123 @@ async def write_memory(
         finally:
             await release_db_session(gen_for_roles)
 
-    if not authorize_write(
-        claims, scope, owner_id, write_tenant_id,
-        campaign_ids=campaign_ids,
-        project_ids=project_ids,
-        role_names=role_names,
-        scope_id=scope_id_value,
-    ):
-        await record_audit_event(
-            event_type="memory.write",
-            actor_id=claims["sub"],
-            driver_id=resolve_driver_id(driver_id, claims),
-            scope=scope,
-            owner_id=owner_id,
-            memory_id=None,
-            decision="denied",
-            tenant_id=write_tenant_id,
-            session=None,  # No session yet - will use stub fallback
-        )
-        raise ToolError(
-            f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
-        )
-
     # Resolve actor/driver identity for audit trail.
     actor_id = claims["sub"]
     resolved_driver = resolve_driver_id(driver_id, claims)
 
-    await record_audit_event(
-        event_type="memory.write",
-        actor_id=actor_id,
-        driver_id=resolved_driver,
-        scope=scope,
-        owner_id=owner_id,
-        memory_id=None,
-        decision="allowed",
-        tenant_id=write_tenant_id,
-        session=None,  # No session yet - will use stub fallback
-    )
-
-    # Validate branch_type / parent_id pairing in both directions:
-    # - parent_id without branch_type: branch with no kind label
-    # - branch_type without parent_id: orphan branch with no parent to attach to
-    if parent_id is not None and branch_type is None:
-        raise ToolError(
-            "branch_type is required when parent_id is set. "
-            "Common types: rationale, provenance, description, evidence."
-        )
-    if branch_type is not None and parent_id is None:
-        raise ToolError(
-            "parent_id is required when branch_type is set. "
-            "A branch must attach to a parent memory; omit branch_type "
-            "to create a root-level memory instead."
-        )
-
-    # Parse parent_id to UUID if provided
-    parsed_parent_id: uuid.UUID | None = None
-    if parent_id is not None:
-        try:
-            parsed_parent_id = uuid.UUID(parent_id)
-        except ValueError:
-            raise ToolError(
-                f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID."
-            ) from None
-
-    # Parse relevant_until string to datetime if provided.
-    parsed_relevant_until = None
-    if relevant_until is not None:
-        from datetime import UTC as _UTC
-        from datetime import datetime as dt
-
-        try:
-            parsed_relevant_until = dt.fromisoformat(relevant_until)
-            # Ensure timezone-aware
-            if parsed_relevant_until.tzinfo is None:
-                parsed_relevant_until = parsed_relevant_until.replace(tzinfo=_UTC)
-        except (ValueError, TypeError):
-            raise ToolError(
-                f"Invalid relevant_until format: '{relevant_until}'. "
-                "Must be a valid ISO 8601 timestamp (e.g. '2026-12-31T23:59:59Z')."
-            ) from None
-
-    # Build the create schema with validation
-    # Only pass content_type if explicitly provided; let Pydantic default apply
-    create_kwargs = dict(
-        content=content,
-        scope=scope,
-        weight=weight,
-        owner_id=owner_id,
-        actor_id=actor_id,
-        driver_id=resolved_driver,
-        parent_id=parsed_parent_id,
-        branch_type=branch_type,
-        metadata=metadata,
-        domains=domains,
-        scope_id=scope_id_value,
-        relevant_until=parsed_relevant_until,
-    )
-    if content_type is not None:
-        create_kwargs["content_type"] = content_type
-    if chunk_target_tokens is not None:
-        create_kwargs["chunk_target_tokens"] = chunk_target_tokens
-    if chunk_overlap_tokens is not None:
-        create_kwargs["chunk_overlap_tokens"] = chunk_overlap_tokens
-    try:
-        node_create = MemoryNodeCreate(**create_kwargs)
-    except ValidationError as exc:
-        errors = exc.errors()
-        messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
-        raise ToolError(
-            "Parameter validation failed:\n" + "\n".join(messages)
-        ) from exc
-
+    # Acquire DB session early so it's available for audit events
     session = None
     gen = None
     try:
         session, gen = await get_db_session()
+
+        if not authorize_write(
+            claims, scope, owner_id, write_tenant_id,
+            campaign_ids=campaign_ids,
+            project_ids=project_ids,
+            role_names=role_names,
+            scope_id=scope_id_value,
+        ):
+            await record_audit_event(
+                event_type="memory.write",
+                actor_id=actor_id,
+                driver_id=resolved_driver,
+                scope=scope,
+                owner_id=owner_id,
+                memory_id=None,
+                decision="denied",
+                tenant_id=write_tenant_id,
+                session=session,
+            )
+            raise ToolError(
+                f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
+            )
+
+        await record_audit_event(
+            event_type="memory.write",
+            actor_id=actor_id,
+            driver_id=resolved_driver,
+            scope=scope,
+            owner_id=owner_id,
+            memory_id=None,
+            decision="allowed",
+            tenant_id=write_tenant_id,
+            session=session,
+        )
+
+        # Validate branch_type / parent_id pairing in both directions:
+        # - parent_id without branch_type: branch with no kind label
+        # - branch_type without parent_id: orphan branch with no parent to attach to
+        if parent_id is not None and branch_type is None:
+            raise ToolError(
+                "branch_type is required when parent_id is set. "
+                "Common types: rationale, provenance, description, evidence."
+            )
+        if branch_type is not None and parent_id is None:
+            raise ToolError(
+                "parent_id is required when branch_type is set. "
+                "A branch must attach to a parent memory; omit branch_type "
+                "to create a root-level memory instead."
+            )
+
+        # Parse parent_id to UUID if provided
+        parsed_parent_id: uuid.UUID | None = None
+        if parent_id is not None:
+            try:
+                parsed_parent_id = uuid.UUID(parent_id)
+            except ValueError:
+                raise ToolError(
+                    f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID."
+                ) from None
+
+        # Parse relevant_until string to datetime if provided.
+        parsed_relevant_until = None
+        if relevant_until is not None:
+            from datetime import UTC as _UTC
+            from datetime import datetime as dt
+
+            try:
+                parsed_relevant_until = dt.fromisoformat(relevant_until)
+                # Ensure timezone-aware
+                if parsed_relevant_until.tzinfo is None:
+                    parsed_relevant_until = parsed_relevant_until.replace(tzinfo=_UTC)
+            except (ValueError, TypeError):
+                raise ToolError(
+                    f"Invalid relevant_until format: '{relevant_until}'. "
+                    "Must be a valid ISO 8601 timestamp (e.g. '2026-12-31T23:59:59Z')."
+                ) from None
+
+        # Build the create schema with validation
+        # Only pass content_type if explicitly provided; let Pydantic default apply
+        create_kwargs = dict(
+            content=content,
+            scope=scope,
+            weight=weight,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            driver_id=resolved_driver,
+            parent_id=parsed_parent_id,
+            branch_type=branch_type,
+            metadata=metadata,
+            domains=domains,
+            scope_id=scope_id_value,
+            relevant_until=parsed_relevant_until,
+        )
+        if content_type is not None:
+            create_kwargs["content_type"] = content_type
+        if chunk_target_tokens is not None:
+            create_kwargs["chunk_target_tokens"] = chunk_target_tokens
+        if chunk_overlap_tokens is not None:
+            create_kwargs["chunk_overlap_tokens"] = chunk_overlap_tokens
+        try:
+            node_create = MemoryNodeCreate(**create_kwargs)
+        except ValidationError as exc:
+            errors = exc.errors()
+            messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
+            raise ToolError(
+                "Parameter validation failed:\n" + "\n".join(messages)
+            ) from exc
+
         embedding_service = get_embedding_service()
 
         memory, curation_result = await create_memory(
