@@ -244,69 +244,96 @@ auditors care about most.
 audit (which memories were returned in response to which query) is
 deferred — it's expensive and the demo doesn't need it.
 
-### Persistence (future work) — prefer LlamaStack telemetry over rolling our own
+### Persistence backend evaluation and implementation
 
-The original plan was a custom audit log: partitioned `audit_log` table,
-append-only enforcement via PostgreSQL Row-Level Security, dedicated
-`audit_writer` role, retention policies (the design at
-`docs/design/governance.md:407`). Before building any of that, evaluate
-**LlamaStack telemetry** as the persistence backend.
+Issue #70 required evaluating persistence backends before implementation. Four candidates were considered:
 
-LlamaStack ships as a Technology Preview on Red Hat OpenShift AI and
-exposes a first-class `telemetry` provider in its run config — the
-`llamastack-integration/architecture.md` example at line 291 already lists
-`provider_type: inline::meta-reference` for telemetry. The platform we're
-deploying on already has tracing and logging infrastructure built in. The
-existing llamastack-integration architecture even flags the gap:
-"MCP-level metrics and access logs are available only through MemoryHub's
-own Prometheus instrumentation, not through a unified platform view"
-(`../../planning/llamastack-integration/architecture.md:322`). Pushing audit events
-through LlamaStack telemetry closes that gap *and* avoids duplicating
-infrastructure.
+**LlamaStack telemetry** — Evaluated against the five criteria but taken off the table per backlog refinement 2026-07-28. LlamaStack ships as a Technology Preview on RHOAI and exposes a first-class telemetry provider (`provider_type: inline::meta-reference`), but evaluation revealed gaps:
 
-Why this matters: a custom `audit_log` table is real engineering — schema,
-RLS policies, a privileged writer role, retention, query API,
-performance work. LlamaStack telemetry gives us trace correlation, log
-aggregation, retention, and a query surface that integrates with the rest
-of the RHOAI observability stack. If it covers MemoryHub's audit
-requirements, we should use it. If it has gaps (e.g., immutability
-guarantees, structured field schemas, retention policies tied to
-healthcare compliance), we identify the gaps specifically and decide
-whether to fill them in LlamaStack-land or fall back to a custom store.
+- **First-class identity fields** (criterion 1): Unknown. LlamaStack telemetry spec doesn't document whether `actor_id`/`driver_id` would be first-class fields or free-form span attributes. If attributes, queryability suffers (string matching vs indexed columns).
+- **Tamper-evidence** (criterion 2): Storage-dependent. LlamaStack telemetry delegates to backend storage (S3, block storage). Immutability requires platform-side configuration (S3 object lock, immutable storage class) rather than application-enforced guarantees. Harder to verify and audit.
+- **Retention** (criterion 3): Platform-managed. Would require negotiating RHOAI platform team to configure 7-year retention, fund storage costs, and maintain the pipeline. Typical telemetry retention is 30-90 days; 7 years is atypical and expensive.
+- **Denied operations** (criterion 4): Likely supported. Telemetry systems capture error traces alongside successful traces. But verification needed — some telemetry backends drop error spans to reduce volume.
+- **Query path** (criterion 5): TraceQL/Grafana. Healthcare compliance auditors expect SQL export to CSV, not Grafana dashboards. Would need export tooling to bridge the gap.
 
-The stub interface in `memory-hub-mcp/src/core/audit.py` is deliberately
-backend-agnostic: `record_event(...)` takes structured fields and returns
-nothing. The eventual implementation can route to LlamaStack telemetry,
-OpenTelemetry, a database, or all of the above without changing call
-sites.
+Conclusion: LlamaStack telemetry *could* meet requirements with sufficient platform investment (immutable storage, 7-year retention config, export tooling), but MemoryHub can't control that timeline. Deferred for future evaluation once LlamaStack reaches GA and RHOAI's telemetry stack matures.
 
-**Evaluation criteria when picking up the persistence work:**
+**OpenTelemetry export** — Evaluated but rejected. Would push audit events as OTLP spans to platform Loki/Tempo backends. Assessment against criteria:
 
-- Does LlamaStack telemetry preserve `actor_id` and `driver_id` as
-  first-class fields, or only as free-form attributes? First-class is
-  preferred for queryability.
-- Can audit events be made tamper-evident or append-only? This may
-  require RHOAI-side configuration (immutable storage backend) rather
-  than application code.
-- What's the retention story? Healthcare compliance frequently requires
-  6-7 year retention; verify this is achievable through the LlamaStack
-  telemetry pipeline before committing to it.
-- How are denied operations recorded? The MCP tool returns an error and
-  the audit call still has to happen — verify LlamaStack telemetry can
-  capture both successful and denied operations with equal fidelity.
-- What does the query path look like for "show me everything actor X did
-  during conversation Y"? If it's a Grafana/Loki query, that's fine for
-  a demo. If it's a custom UI, that's a separate piece of work.
+- **First-class identity fields** (criterion 1): ❌ Fields become span attributes (string key-value pairs like `audit.actor_id="user-123"`), not typed schema columns. Queryable but slower than indexed SQL.
+- **Tamper-evidence** (criterion 2): ⚠️ Storage-dependent. Loki/Tempo can use immutable S3 backends, but requires platform configuration. Not application-enforced.
+- **Retention** (criterion 3): ❌ Loki retention often capped at 30-90 days due to cost. Configuring 7-year retention is expensive and requires platform negotiation.
+- **Denied operations** (criterion 4): ✅ Both successful and error spans captured. OpenTelemetry handles errors well.
+- **Query path** (criterion 5): ⚠️ PromQL (Loki) or TraceQL (Tempo). Healthcare compliance teams expect SQL exports to CSV, not Grafana dashboards. Would need export tooling.
 
-If the evaluation finds LlamaStack telemetry sufficient, the persistence
-issue is closed by writing a thin adapter from `audit.record_event` to
-the LlamaStack telemetry SDK plus configuration of the telemetry provider
-in MemoryHub's deployment. If it's insufficient, the original `audit_log`
-table design remains the fallback — but only the parts that LlamaStack
-can't cover, not a wholesale custom build.
+Rejected because retention limits (criterion 3) and query path mismatch (criterion 5) create compliance risk.
 
-The stub interface doesn't change shape regardless of which backend
-wins.
+**Platform logs (JSON to stdout)** — Stub implementation already shipping. Rejected for production use. Assessment against criteria:
+
+- **First-class identity fields** (criterion 1): ❌ Fields are string values in JSON blobs (`"actor_id": "user-123"`), not queryable columns. Every query requires full log scan.
+- **Tamper-evidence** (criterion 2): ❌ None. Cluster admin or compromised workload can edit log lines to change `actor_id` or delete entries to hide unauthorized operations. Violates core audit trust property.
+- **Retention** (criterion 3): ❌ Pod logs rotate in days. Platform log aggregation (if configured) typically retains 30-90 days, not 7 years.
+- **Denied operations** (criterion 4): ✅ Both allowed/denied logged identically (same JSON structure).
+- **Query path** (criterion 5): ❌ Grep/jq on log files. Doesn't scale beyond thousands of events. No compliance-friendly export.
+
+Critical gap: tamper-evidence (criterion 2). Healthcare auditors cannot trust mutable logs as authoritative record.
+
+**PostgreSQL audit table** — Selected. Meets all five criteria:
+
+1. **First-class identity fields**: `actor_id` and `driver_id` are typed VARCHAR(255) columns with dedicated indexes. Queryable in milliseconds via `WHERE actor_id = '...'`.
+2. **Tamper-evidence**: Application-enforced immutability via RLS policies + `REVOKE UPDATE, DELETE FROM PUBLIC`. A compromised MCP server can insert new events (correct audit path) but cannot modify/delete historical records. Optional: add SHA-256 hash chain in `metadata.previous_hash` for cryptographic proof.
+3. **Retention**: 7-year retention via monthly partitioning. Drop partitions older than 84 months with a cron job (`DROP TABLE audit_log_2019_08`). Each partition is independent — can be backed up to S3, archived, or dropped without downtime.
+4. **Denied operations**: Both `decision='allowed'` and `decision='denied'` use identical schema. No difference in capture, storage, or query path.
+5. **Query path**: Native SQL. Healthcare compliance auditors run standard queries, export to CSV, and present findings in regulatory reviews. No Grafana or custom UI required.
+
+Additional wins: (6) No platform dependency (PostgreSQL already deployed as OOTB component), (7) transactional safety (audit events commit/rollback with operations when using caller's session), (8) proven technology (every compliance team understands SQL audit tables).
+
+#### Implementation (2026-08-18/19)
+
+**Dual-path architecture**: Every audit call writes to both PostgreSQL (when session available) and JSON logs (always). PostgreSQL provides queryable compliance trail, logs provide backward compatibility and graceful degradation when DB unavailable.
+
+**Schema** (`alembic/versions/028_add_audit_log.py`):
+- 11 columns: id, timestamp, event_type, actor_id, driver_id, scope, owner_id, memory_id, decision, metadata (JSONB), tenant_id
+- 5 indexes for query performance (actor+time, event+time, decision+time, tenant+time, memory_id)
+- RLS enabled with INSERT-only policy (UPDATE/DELETE revoked from PUBLIC)
+- CHECK constraint: `decision IN ('allowed', 'denied')`
+
+**Service layer** (`src/memoryhub_core/services/audit.py`):
+```python
+async def record_event(session, ...):
+    # Fire-and-forget: exceptions logged but never propagate
+    # Transactional: participates in caller's transaction
+    stmt = insert(AuditLog).values(...)
+    await session.execute(stmt)
+```
+
+**Dual-path helper** (`memory-hub-mcp/src/tools/_audit_helpers.py`):
+```python
+async def record_audit_event(..., session=None):
+    if session is not None:
+        await record_event_db(session=session, ...)  # PostgreSQL
+    record_event_stub(...)  # JSON logs (always)
+```
+
+All 8 MCP tools use this helper. **Session timing is critical**: tools must acquire DB session before authorization checks to ensure both allowed and denied events reach PostgreSQL. Tools that authorize first then get session will only write to logs, not database.
+
+**Query patterns**:
+```sql
+-- Everything actor X did
+SELECT timestamp, event_type, decision, scope, owner_id
+FROM audit_log WHERE actor_id = 'user-123'
+ORDER BY timestamp DESC;
+
+-- All denied operations in last hour
+SELECT * FROM audit_log WHERE decision = 'denied'
+  AND timestamp >= NOW() - INTERVAL '1 hour';
+
+-- Count by event type and decision
+SELECT event_type, decision, COUNT(*)
+FROM audit_log GROUP BY event_type, decision;
+```
+
+**Future work**: Monthly partitioning for automated 7-year retention (drop partitions older than 84 months). Optional: cryptographic hash chain in metadata.previous_hash for tamper detection (RLS provides application-enforced immutability; hash chain provides cryptographic proof).
 
 ## How the new fields flow through the existing enforcement layer
 
