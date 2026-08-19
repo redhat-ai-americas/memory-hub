@@ -51,7 +51,34 @@ small enough to land in one session.
   - Any public-facing write on a repo not owned by rdwj
 - Close ritual: session summary; update this epic file with what landed
 
-## What landed last session (2026-08-18)
+## What landed last session (2026-08-18, session 2)
+
+Prep session on slow connection. Completed premise checks and upstream repo analysis,
+but lost the working window to clone timeouts (738 MB repo).
+
+**Completed:**
+- Fork created at `rdwj/agent-memory-benchmark`
+- Filtered clone landed at `~/Developer/agent-memory-benchmark/` (needs `git checkout` to populate working tree)
+- Studied all upstream provider conventions: base class, __init__.py registry, catalog.json format, results-manifest.json format
+- Read 4 reference adapters (Hindsight, Cognee, mem0_cloud, Ogham) and extracted the pattern
+- Verified our result file exists (500/589 = 84.89%, ingestion 99.6s, avg retrieve 2491ms, avg context 26695 tokens)
+- Confirmed no prior MemoryHub submissions exist upstream (no issues or PRs)
+- Reviewed PRs #9 (Ogham, merged), #24 (AutoMem), #29 (Letta) and issue #11 (Audrey) for submission norms
+- Confirmed MemoryHub cluster is healthy (pod running 5d)
+
+**Not started:**
+- Writing the clean adapter (ready to start: all conventions documented, our 503-line source adapter read)
+- Reproduction run
+- PR submission
+
+**Prerequisite for next session:**
+- Fast network connection (clone checkout needs blob downloads)
+- Run `cd ~/Developer/agent-memory-benchmark && git checkout main` to populate working tree
+
+**Artifacts created:**
+- Memory: `feedback_keep_upstream_fork_local.md` (clone upstream repos on fast connections before working sessions)
+
+## What landed session 1 (2026-08-18)
 
 Research and planning session. Mapped both submission venues (AMB and AML), audited
 existing benchmark data, wrote the epic arc.
