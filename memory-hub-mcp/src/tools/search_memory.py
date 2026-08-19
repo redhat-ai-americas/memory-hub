@@ -1064,32 +1064,6 @@ async def search_memory(
                 response["pivot_reason"] = focus_meta["pivot_reason"]
             return response
 
-        # --- S3 hydration for content_mode="full" ---
-        if content_mode == "full":
-            s3 = get_s3_adapter()
-            if s3 is not None:
-                for idx, (item, score) in enumerate(results):
-                    if (
-                        isinstance(item, MemoryNodeRead)
-                        and item.storage_type == "s3"
-                        and item.content_ref
-                    ):
-                        try:
-                            full_content = await s3.get_content(item.content_ref)
-                            results[idx] = (
-                                item.model_copy(update={
-                                    "content": full_content,
-                                    "content_truncated": False,
-                                    "full_available": False,
-                                }),
-                                score,
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "S3 hydration failed for %s: %s",
-                                item.id, exc,
-                            )
-
         # mode='index' degrades every full result to stub form. Done before
         # branch handling so nested branches are also stubs in this mode.
         if mode == "index":
@@ -1179,6 +1153,64 @@ async def search_memory(
                     pid: bs for pid, bs in nested_by_parent.items() if pid in kept_ids
                 }
 
+        # --- S3 hydration for content_mode="full" ---
+        # Hydration happens lazily inside the token-budget packing loop
+        # below, right before an entry is finalized as full-form. That is
+        # the only point where the true final top-k -- post mode
+        # conversion, backfill, compilation cap, branch nesting, AND
+        # budget packing -- is known. Fetching eagerly here would still
+        # pay S3 I/O for entries the budget cap goes on to degrade to
+        # stubs.
+        #
+        # The cost check that gates the fetch is computed from the
+        # un-hydrated (truncated) content, so it's an estimate -- but
+        # max_response_tokens is already documented as a *soft* cap, so
+        # an entry occasionally landing a bit over budget once hydrated
+        # is consistent with the existing contract, not a new risk.
+        s3 = get_s3_adapter() if content_mode == "full" else None
+
+        async def _hydrate_item(item: MemoryNodeRead) -> MemoryNodeRead:
+            if item.storage_type == "s3" and item.content_ref:
+                try:
+                    full = await s3.get_content(item.content_ref)
+                    return item.model_copy(update={
+                        "content": full,
+                        "content_truncated": False,
+                        "full_available": False,
+                    })
+                except Exception as exc:
+                    logger.warning(
+                        "S3 hydration failed for %s: %s",
+                        item.id, exc,
+                    )
+            return item
+
+        async def _hydrate_full_entry(
+            item: MemoryNodeRead | MemoryNodeStub,
+            child_branches: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+        ) -> tuple[
+            MemoryNodeRead | MemoryNodeStub,
+            list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+            bool,
+        ]:
+            """Hydrate an item and its branches once they're known to survive
+            as full-form. Returns (item, child_branches, changed); changed is
+            True when a fetch updated content, so the caller knows to re-run
+            _format_entry/_format_entry_cached for an accurate cost."""
+            if s3 is None or not isinstance(item, MemoryNodeRead):
+                return item, child_branches, False
+            new_item = await _hydrate_item(item)
+            changed = new_item is not item
+            new_branches = []
+            for b, bscore in child_branches:
+                if isinstance(b, MemoryNodeRead):
+                    new_b = await _hydrate_item(b)
+                    changed = changed or (new_b is not b)
+                else:
+                    new_b = b
+                new_branches.append((new_b, bscore))
+            return new_item, new_branches, changed
+
         # Token-budget packing. Walk results in order; full-form entries
         # that exceed the remaining budget (and everything after them)
         # are degraded to stub form. Stubs are always included so the
@@ -1217,8 +1249,35 @@ async def search_memory(
                     item, child_branches, is_appendix, verbose=verbose,
                 )
                 if skip_budget or isinstance(item, MemoryNodeStub) or cost <= budget:
-                    formatted.append(entry)
-                    budget = max(0, budget - cost)
+                    item, child_branches, changed = await _hydrate_full_entry(
+                        item, child_branches,
+                    )
+                    if changed:
+                        entry, cost = _format_entry_cached(
+                            item, child_branches, is_appendix, verbose=verbose,
+                        )
+                    # Re-check against the real (post-hydration) cost -- the
+                    # pre-hydration estimate came from truncated content and
+                    # can be far off for S3-backed items, which were spilled
+                    # to S3 precisely because they're large. Bound the waste
+                    # to this one boundary item rather than trusting the
+                    # cheap estimate.
+                    if skip_budget or cost <= budget:
+                        formatted.append(entry)
+                        budget = max(0, budget - cost)
+                    else:
+                        budget_exhausted = True
+                        stub_item = _to_stub(item)
+                        stub_branches = [
+                            ((_to_stub(b) if isinstance(b, MemoryNodeRead) else b), s)
+                            for b, s in child_branches
+                        ]
+                        stub_entry, stub_cost = _format_entry_cached(
+                            stub_item, stub_branches, is_appendix,
+                            verbose=verbose,
+                        )
+                        formatted.append(stub_entry)
+                        budget = max(0, budget - stub_cost)
                 else:
                     budget_exhausted = True
                     stub_item = _to_stub(item)
@@ -1260,8 +1319,34 @@ async def search_memory(
                     item, relevance_score, child_branches, verbose=verbose,
                 )
                 if skip_budget or isinstance(item, MemoryNodeStub) or cost <= budget:
-                    formatted.append(entry)
-                    budget = max(0, budget - cost)
+                    item, child_branches, changed = await _hydrate_full_entry(
+                        item, child_branches,
+                    )
+                    if changed:
+                        entry, cost = _format_entry(
+                            item, relevance_score, child_branches, verbose=verbose,
+                        )
+                    # Re-check against the real (post-hydration) cost -- see
+                    # the matching comment in the cache-optimized branch above.
+                    if skip_budget or cost <= budget:
+                        formatted.append(entry)
+                        budget = max(0, budget - cost)
+                    else:
+                        budget_exhausted = True
+                        stub_item = _to_stub(item)
+                        stub_branches = [
+                            (
+                                (_to_stub(b) if isinstance(b, MemoryNodeRead) else b),
+                                s,
+                            )
+                            for b, s in child_branches
+                        ]
+                        stub_entry, stub_cost = _format_entry(
+                            stub_item, relevance_score, stub_branches,
+                            verbose=verbose,
+                        )
+                        formatted.append(stub_entry)
+                        budget = max(0, budget - stub_cost)
                 else:
                     budget_exhausted = True
                     stub_item = _to_stub(item)
