@@ -292,46 +292,9 @@ Additional wins: (6) No platform dependency (PostgreSQL already deployed as OOTB
 
 **Dual-path architecture**: Every audit call writes to both PostgreSQL (when session available) and JSON logs (always). PostgreSQL provides queryable compliance trail, logs provide backward compatibility and graceful degradation when DB unavailable.
 
-**Schema** (`alembic/versions/028_add_audit_log.py`):
-- 11 columns: id, timestamp, event_type, actor_id, driver_id, scope, owner_id, memory_id, decision, metadata (JSONB), tenant_id
-- 5 indexes for query performance (actor+time, event+time, decision+time, tenant+time, memory_id)
-- RLS enabled with INSERT-only policy (UPDATE/DELETE revoked from PUBLIC)
-- CHECK constraint: `decision IN ('allowed', 'denied')`
+**Schema**: Migration 028 creates the `audit_log` table with 11 identity/event columns, 5 indexes for query performance, RLS policies enforcing INSERT-only semantics, and a CHECK constraint on `decision IN ('allowed', 'denied')`. The `FORCE ROW LEVEL SECURITY` directive ensures append-only semantics apply even to the table owner, backing the tamper-evidence claim.
 
-**Service layer** (`src/memoryhub_core/services/audit.py`):
-```python
-async def record_event(session, ...):
-    # Fire-and-forget: exceptions logged but never propagate
-    # Transactional: participates in caller's transaction
-    stmt = insert(AuditLog).values(...)
-    await session.execute(stmt)
-```
-
-**Dual-path helper** (`memory-hub-mcp/src/tools/_audit_helpers.py`):
-```python
-async def record_audit_event(..., session=None):
-    if session is not None:
-        await record_event_db(session=session, ...)  # PostgreSQL
-    record_event_stub(...)  # JSON logs (always)
-```
-
-All 8 MCP tools use this helper. **Session timing is critical**: tools must acquire DB session before authorization checks to ensure both allowed and denied events reach PostgreSQL. Tools that authorize first then get session will only write to logs, not database.
-
-**Query patterns**:
-```sql
--- Everything actor X did
-SELECT timestamp, event_type, decision, scope, owner_id
-FROM audit_log WHERE actor_id = 'user-123'
-ORDER BY timestamp DESC;
-
--- All denied operations in last hour
-SELECT * FROM audit_log WHERE decision = 'denied'
-  AND timestamp >= NOW() - INTERVAL '1 hour';
-
--- Count by event type and decision
-SELECT event_type, decision, COUNT(*)
-FROM audit_log GROUP BY event_type, decision;
-```
+**Session timing is critical**: tools must acquire DB session before authorization checks to ensure both allowed and denied events reach PostgreSQL. Tools that authorize first then get session will only write to logs, not database.
 
 **Future work**: Monthly partitioning for automated 7-year retention (drop partitions older than 84 months). Optional: cryptographic hash chain in metadata.previous_hash for tamper detection (RLS provides application-enforced immutability; hash chain provides cryptographic proof).
 

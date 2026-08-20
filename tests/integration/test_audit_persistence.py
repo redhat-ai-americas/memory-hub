@@ -12,7 +12,7 @@ These tests require a local PostgreSQL container running:
 
 Run with:
     PGHOST=localhost PGPORT=5432 PGUSER=memoryhub PGPASSWORD=memoryhub \
-    PGDATABASE=memoryhub pytest tests/test_audit_persistence.py -v
+    PGDATABASE=memoryhub pytest tests/integration/test_audit_persistence.py -v
 """
 
 import os
@@ -46,6 +46,7 @@ async def db_session():
     await engine.dispose()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audit_event_written_to_db(db_session):
     """Verify event is persisted to audit_log table."""
@@ -81,6 +82,7 @@ async def test_audit_event_written_to_db(db_session):
     assert event.event_metadata == {"test": True}
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audit_event_denied_operation(db_session):
     """Verify denied operations are audited."""
@@ -109,6 +111,7 @@ async def test_audit_event_denied_operation(db_session):
     assert event.decision == "denied"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audit_event_fire_and_forget(db_session):
     """Verify audit failures don't propagate exceptions."""

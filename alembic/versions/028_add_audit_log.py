@@ -77,6 +77,10 @@ def upgrade() -> None:
     # Note: RLS requires PostgreSQL 9.5+; OpenShift PostgreSQL meets this
     op.execute("ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY")
 
+    # Force RLS for table owner (memoryhub user) — owners bypass RLS by default
+    # This is what backs the tamper-evidence claim (append-only at DB level)
+    op.execute("ALTER TABLE audit_log FORCE ROW LEVEL SECURITY")
+
     # Revoke UPDATE and DELETE from PUBLIC to enforce append-only at DB level
     # INSERT is allowed for the application role (memoryhub user)
     op.execute("REVOKE UPDATE, DELETE ON audit_log FROM PUBLIC")
@@ -101,6 +105,7 @@ def downgrade() -> None:
     # Drop policies before disabling RLS
     op.execute("DROP POLICY IF EXISTS audit_insert_only ON audit_log")
     op.execute("DROP POLICY IF EXISTS audit_select_all ON audit_log")
+    op.execute("ALTER TABLE audit_log NO FORCE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE audit_log DISABLE ROW LEVEL SECURITY")
 
     # Restore UPDATE/DELETE permissions (for clean downgrade)
