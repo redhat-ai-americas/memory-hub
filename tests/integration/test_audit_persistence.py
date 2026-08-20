@@ -10,9 +10,11 @@ These tests require a local PostgreSQL container running:
         -e POSTGRES_DB=memoryhub \
         -p 5432:5432 pgvector/pgvector:pg15
 
-Run with:
+Run locally with:
     PGHOST=localhost PGPORT=5432 PGUSER=memoryhub PGPASSWORD=memoryhub \
     PGDATABASE=memoryhub pytest tests/integration/test_audit_persistence.py -v
+
+CI uses MEMORYHUB_DB_* environment variables set by the integration-tests job.
 """
 
 import os
@@ -30,11 +32,12 @@ from memoryhub_core.services.audit import record_event
 async def db_session():
     """Create async session connected to local PostgreSQL."""
     # Build connection URL from environment variables
-    host = os.getenv("PGHOST", "localhost")
-    port = os.getenv("PGPORT", "5432")
-    user = os.getenv("PGUSER", "memoryhub")
-    password = os.getenv("PGPASSWORD", "memoryhub")
-    database = os.getenv("PGDATABASE", "memoryhub")
+    # Support both MEMORYHUB_DB_* (CI) and PG* (local dev) variable names
+    host = os.getenv("MEMORYHUB_DB_HOST") or os.getenv("PGHOST", "localhost")
+    port = os.getenv("MEMORYHUB_DB_PORT") or os.getenv("PGPORT", "5432")
+    user = os.getenv("MEMORYHUB_DB_USER") or os.getenv("PGUSER", "memoryhub")
+    password = os.getenv("MEMORYHUB_DB_PASSWORD") or os.getenv("PGPASSWORD", "memoryhub")
+    database = os.getenv("MEMORYHUB_DB_NAME") or os.getenv("PGDATABASE", "memoryhub")
 
     url = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}"
     engine = create_async_engine(url, echo=False)
