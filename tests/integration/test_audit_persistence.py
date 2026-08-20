@@ -29,8 +29,11 @@ from memoryhub_core.services.audit import record_event
 
 
 @pytest.fixture
-async def db_session():
-    """Create async session connected to local PostgreSQL."""
+async def db_session(_db_schema):
+    """Create async session connected to local PostgreSQL.
+
+    Depends on _db_schema fixture from conftest.py to ensure migrations run.
+    """
     # Build connection URL from environment variables
     # Support both MEMORYHUB_DB_* (CI) and PG* (local dev) variable names
     host = os.getenv("MEMORYHUB_DB_HOST") or os.getenv("PGHOST", "localhost")
