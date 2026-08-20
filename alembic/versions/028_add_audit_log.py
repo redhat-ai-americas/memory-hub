@@ -93,16 +93,33 @@ def upgrade() -> None:
     """)
 
     # Policy: allow INSERT for application role (audit event writes)
-    # No UPDATE or DELETE policies — those operations are blocked by REVOKE
     op.execute("""
         CREATE POLICY audit_insert_only ON audit_log
         FOR INSERT
         WITH CHECK (true)
     """)
 
+    # Restrictive policies: explicitly deny UPDATE and DELETE (even for owner)
+    # RESTRICTIVE policies combine with AND, so USING (false) blocks the operation
+    op.execute("""
+        CREATE POLICY audit_deny_update ON audit_log
+        AS RESTRICTIVE
+        FOR UPDATE
+        USING (false)
+    """)
+
+    op.execute("""
+        CREATE POLICY audit_deny_delete ON audit_log
+        AS RESTRICTIVE
+        FOR DELETE
+        USING (false)
+    """)
+
 
 def downgrade() -> None:
     # Drop policies before disabling RLS
+    op.execute("DROP POLICY IF EXISTS audit_deny_delete ON audit_log")
+    op.execute("DROP POLICY IF EXISTS audit_deny_update ON audit_log")
     op.execute("DROP POLICY IF EXISTS audit_insert_only ON audit_log")
     op.execute("DROP POLICY IF EXISTS audit_select_all ON audit_log")
     op.execute("ALTER TABLE audit_log NO FORCE ROW LEVEL SECURITY")
