@@ -98,33 +98,3 @@ async def record_event(
             exc_info=True,
         )
         # Swallow the exception — audit failures never block operations
-
-
-def record_event_sync(
-    event_type: str,
-    actor_id: str,
-    driver_id: str,
-    scope: str,
-    owner_id: str,
-    memory_id: uuid.UUID | str | None,
-    decision: str,
-    metadata: dict | None = None,
-) -> None:
-    """Synchronous fallback for the stub logger path (deprecated).
-
-    This function is a no-op shim for backward compatibility with the
-    stub implementation. New code should use the async record_event()
-    with a database session.
-
-    The stub logger path (logger.info(json.dumps(...))) is still available
-    for environments where the database is not accessible (e.g., local
-    development without PostgreSQL running). This function emits a warning
-    and does nothing.
-
-    DEPRECATED: Use async record_event() with a database session instead.
-    """
-    logger.warning(
-        "record_event_sync called for event_type=%s — stub path is deprecated, "
-        "use async record_event() with database session",
-        event_type,
-    )
