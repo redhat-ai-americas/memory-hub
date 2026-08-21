@@ -477,6 +477,100 @@ async def test_update_chain_shares_logical_id(async_session, embedding_service):
     assert v1.logical_id == v2.logical_id == v3.logical_id
     assert len({v1.id, v2.id, v3.id}) == 3
 
+async def test_chunk_children_have_logical_id(async_session, embedding_service):
+    """Chunk children set logical_id = id (new entities)."""
+    from sqlalchemy import select as sa_select
+    
+    from memoryhub_core.models.memory import MemoryNode
+    
+    s3 = MockS3Adapter()
+    data = _make_create_data(content=_make_oversized_content())
+    result, _ = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
+
+    chunks_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == result.id,
+        MemoryNode.branch_type == "chunk",
+    )
+    chunks = (await async_session.execute(chunks_stmt)).scalars().all()
+
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        assert chunk.logical_id is not None
+        assert chunk.logical_id == chunk.id
+
+async def test_fact_children_have_logical_id(async_session, embedding_service):
+    """Fact children set logical_id = id (new entities)."""
+    from memoryhub_core.services.memory import create_fact_children
+
+    from sqlalchemy import select as sa_select
+
+    from memoryhub_core.models.memory import MemoryNode
+
+    parent, _ = await create_memory(
+        _make_create_data(content="User preferences"), async_session, embedding_service,
+    )
+
+    await create_fact_children(
+        facts=[
+            {"content": "Prefers Python"},
+            {"content": "Uses Red Hat UBI"},
+        ],
+        parent_id=parent.id,
+        scope="user",
+        scope_id=None,
+        owner_id="test-owner",
+        tenant_id="default",
+        domains=None,
+        extraction_run_id="test-run-1",
+        embedding_service=embedding_service,
+        session=async_session,
+    )
+
+    facts_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == parent.id,
+        MemoryNode.branch_type == "fact",
+    )
+    facts = (await async_session.execute(facts_stmt)).scalars().all()
+
+    assert len(facts) == 2
+    for fact in facts:
+        assert fact.logical_id is not None
+        assert fact.logical_id == fact.id
+
+
+async def test_deep_copied_branches_inherit_logical_id(async_session, embedding_service):
+    """Deep-copied branches keep their logical_id across parent versions."""
+    from sqlalchemy import select as sa_select
+
+    from memoryhub_core.models.memory import MemoryNode
+
+    parent, _ = await create_memory(
+        _make_create_data(content="Original"), async_session, embedding_service,
+    )
+
+    rationale_data = _make_create_data(
+        content="Because this is important",
+        parent_id=parent.id,
+        branch_type="rationale",
+    )
+    rationale, _ = await create_memory(rationale_data, async_session, embedding_service)
+    original_logical_id = rationale.logical_id
+
+    updated = await update_memory(
+        parent.id, MemoryNodeUpdate(content="Updated"), async_session, embedding_service,
+    )
+
+    children_stmt = sa_select(MemoryNode).where(
+        MemoryNode.parent_id == updated.id,
+        MemoryNode.branch_type == "rationale"
+    )
+    children = (await async_session.execute(children_stmt)).scalars().all()
+
+    assert len(children) == 1
+    copied = children[0]
+    assert copied.id != rationale.id
+    assert copied.logical_id == original_logical_id
+
 
 # -- get_memory_history --
 
