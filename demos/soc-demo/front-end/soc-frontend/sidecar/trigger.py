@@ -102,7 +102,11 @@ async def stop_run():
         raise HTTPException(status_code=409, detail="No run is in progress")
 
     _state["proc"].send_signal(signal.SIGTERM)
-    _state["proc"].wait(timeout=10)
+    try:
+        _state["proc"].wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        _state["proc"].kill()
+        _state["proc"].wait(timeout=5)
     _state["status"] = "done"
     return {"status": "stopped"}
 
@@ -110,6 +114,12 @@ async def stop_run():
 @app.post("/reset")
 async def reset_state():
     _poll_state()
+    if _state["proc"] is not None and _state["status"] == "running":
+        _state["proc"].send_signal(signal.SIGTERM)
+        try:
+            _state["proc"].wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _state["proc"].kill()
     _state["proc"] = None
     _state["mode"] = None
     _state["status"] = "idle"
