@@ -495,7 +495,8 @@ async def call_agent(
     url = SOC_FORENSICS_URL.rstrip("/")
     if not url.endswith("/v1/chat/completions"):
         url = f"{url}/v1/chat/completions"
-    async with httpx.AsyncClient(timeout=timeout, verify=False) as http:
+    verify = os.environ.get("SOC_TLS_VERIFY", "true").lower() != "false"
+    async with httpx.AsyncClient(timeout=timeout, verify=verify) as http:
         resp = await http.post(
             url,
             json={
@@ -580,9 +581,9 @@ async def run_scenario():
         return 1
 
     register_block = (
-        f'\n## Session Registration (REQUIRED FIRST STEP)\n\n'
-        f'Before using any memory tools, call register_session '
-        f'with api_key="{api_key}". Do this FIRST.\n'
+        '\n## Session Registration (REQUIRED FIRST STEP)\n\n'
+        'Before using any memory tools, call register_session. '
+        'The api_key is pre-configured in your environment. Do this FIRST.\n'
     )
 
     emit_reset()
@@ -726,8 +727,8 @@ async def run_scenario():
             try:
                 await client.report_contradiction(
                     memory_id=attr_id, observed_behavior=response[:1000])
-            except Exception:
-                pass
+            except Exception as exc:
+                console.print(f"  [dim red]Contradiction report failed: {exc}[/]")
 
         print_contradiction(
             "threatintel",
