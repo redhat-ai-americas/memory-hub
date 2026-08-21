@@ -118,6 +118,14 @@ footer{border-top:1px solid var(--line);background:var(--panel);padding:8px 14px
 @keyframes bannerin{from{transform:translate(-50%,-14px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
 @keyframes bannerdrop{from{transform:translateY(-14px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes blink{50%{opacity:.4}}
+#trigger-btns{display:flex;gap:14px;margin-top:8px}
+.trigger-btn{font-family:'Red Hat Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.12em;padding:13px 28px;border-radius:8px;border:2px solid;cursor:pointer;transition:all .2s;background:transparent}
+.trigger-btn.replay{color:#4DD0E1;border-color:#4DD0E155}
+.trigger-btn.replay:hover:not(:disabled){background:#4DD0E118;border-color:#4DD0E1}
+.trigger-btn.live-btn{color:#81C784;border-color:#81C78455}
+.trigger-btn.live-btn:hover:not(:disabled){background:#81C78418;border-color:#81C784}
+.trigger-btn:disabled{opacity:.35;cursor:not-allowed}
+#trigger-status{font-family:'Red Hat Mono',monospace;font-size:11px;color:#7f86a3;margin-top:6px;letter-spacing:.1em}
 [hidden]{display:none !important}
 </style>
 </head>
@@ -167,6 +175,11 @@ footer{border-top:1px solid var(--line);background:var(--panel);padding:8px 14px
     <div class="inc">INCIDENT IR-2024-184 · HOST FIN-WS-0219 · ALERT AT T+02:47</div>
     <div id="roster"></div>
     <div id="waiting">WAITING FOR EVENT STREAM…</div>
+    <div id="trigger-btns" hidden>
+      <button class="trigger-btn replay" id="btn-replay">▶ REPLAY</button>
+      <button class="trigger-btn live-btn" id="btn-live">◉ LIVE</button>
+    </div>
+    <div id="trigger-status" hidden></div>
     <div class="foot">memoryhub + vLLM on OpenShift · api.anthropic.com · fed by harness events over WebSocket</div>
   </div>
 </div>
@@ -274,7 +287,12 @@ function build(n){
 function render(){
   const s = build(idx), cur = idx>0 ? events[idx-1] : null;
   $('standby').hidden = idx !== 0;
-  $('waiting').textContent = events.length ? 'PRESS SPACE TO BEGIN' : 'WAITING FOR EVENT STREAM…';
+  if (!triggerAvailable) {
+    $('waiting').textContent = events.length ? 'PRESS SPACE TO BEGIN' : 'WAITING FOR EVENT STREAM…';
+  } else if (events.length) {
+    $('waiting').hidden = true;
+    $('trigger-btns').hidden = true;
+  }
 
   const phN = s.phase ? s.phase.phase : 0;
   $('phaselabel').textContent = 'PHASE '+phN+' · '+(s.phase ? (s.phase.label||'').toUpperCase() : 'STANDBY');
@@ -411,6 +429,89 @@ window.addEventListener('keydown', e => {
   else if (e.key==='Escape'){ $('pclose').onclick(); }
   else if (e.key==='l'||e.key==='L'){ toggleLive(); }
 });
+// ---- sidecar trigger ----
+let triggerAvailable = false, triggerPollId = null;
+
+async function checkSidecar() {
+  try {
+    const r = await fetch('/trigger/status');
+    if (!r.ok) return;
+    triggerAvailable = true;
+    updateTriggerUI(await r.json());
+  } catch (e) { /* sidecar not available */ }
+}
+
+function updateTriggerUI(data) {
+  if (!triggerAvailable) return;
+  const btns = $('trigger-btns'), waiting = $('waiting'), status = $('trigger-status');
+  if (data.status === 'running') {
+    btns.hidden = false; waiting.hidden = true;
+    $('btn-replay').disabled = true; $('btn-live').disabled = true;
+    status.hidden = false;
+    status.textContent = 'RUNNING ' + (data.mode || '').toUpperCase() + '…';
+    status.style.color = '#7f86a3';
+    if (!triggerPollId) triggerPollId = setInterval(pollStatus, 2000);
+  } else if (data.status === 'error') {
+    btns.hidden = false; waiting.hidden = true;
+    $('btn-replay').disabled = false; $('btn-live').disabled = false;
+    status.hidden = false;
+    status.textContent = 'ERROR · exit code ' + (data.exit_code ?? '?');
+    status.style.color = '#ff8a80';
+    clearTriggerPoll();
+  } else if (data.status === 'done') {
+    btns.hidden = false; waiting.hidden = true;
+    $('btn-replay').disabled = false; $('btn-live').disabled = false;
+    status.hidden = false;
+    status.textContent = 'COMPLETE · press SPACE to step through';
+    status.style.color = '#81C784';
+    clearTriggerPoll();
+  } else {
+    btns.hidden = false; waiting.hidden = true;
+    $('btn-replay').disabled = false; $('btn-live').disabled = false;
+    status.hidden = true;
+    clearTriggerPoll();
+  }
+}
+
+function clearTriggerPoll() {
+  if (triggerPollId) { clearInterval(triggerPollId); triggerPollId = null; }
+}
+
+async function triggerRun(mode) {
+  $('btn-replay').disabled = true; $('btn-live').disabled = true;
+  $('trigger-status').hidden = false;
+  $('trigger-status').textContent = 'STARTING ' + mode.toUpperCase() + '…';
+  $('trigger-status').style.color = '#7f86a3';
+  try {
+    // reset frontend event history first
+    await fetch('/trigger/reset', {method: 'POST'});
+    events = []; idx = 0; manual = null; render();
+    const r = await fetch('/trigger/' + mode, {method: 'POST'});
+    const data = await r.json();
+    if (r.status === 409) {
+      $('trigger-status').textContent = 'ALREADY RUNNING';
+      $('btn-replay').disabled = true; $('btn-live').disabled = true;
+      triggerPollId = setInterval(pollStatus, 2000);
+    } else {
+      triggerPollId = setInterval(pollStatus, 2000);
+    }
+  } catch (e) {
+    $('trigger-status').textContent = 'FAILED: ' + e.message;
+    $('trigger-status').style.color = '#ff8a80';
+    $('btn-replay').disabled = false; $('btn-live').disabled = false;
+  }
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/trigger/status');
+    if (r.ok) updateTriggerUI(await r.json());
+  } catch (e) { /* ignore transient errors */ }
+}
+
+$('btn-replay').onclick = () => triggerRun('replay');
+$('btn-live').onclick = () => triggerRun('live');
+checkSidecar();
 render();
 </script>
 </body>
