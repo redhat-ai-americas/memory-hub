@@ -1,95 +1,100 @@
 # Next Session — public-benchmarks
 
-## Next: AMB upstream provider adapter + submission
+## Next: Reproduce benchmark result and submit upstream PR
 
-Fork `vectorize-io/agent-memory-benchmark`, contribute a clean MemoryHub provider
-adapter, reproduce our 84.9% result through the upstream harness, and submit the PR.
-This is Phases 1+2 combined — the adapter and submission are tightly coupled and
-small enough to land in one session.
+The adapter, infrastructure, and checkpoint-gated harness are all done. What remains
+is operational: top up Gemini credits, run the smoke test + batched reproduction using
+`gemini-3.1-pro-preview`, and submit the PR once the score is confirmed.
 
-1. **Fork and adapter cleanup**
-   Fork the upstream repo. Derive a clean `memoryhub.py` from our existing 503-line
-   adapter at `benchmarks/amb-harness/src/memory_bench/memory/memoryhub.py`. Strip
-   ablation-specific env vars (routing mode, chunk sweep params, extraction model
-   config) down to the three essentials: `MEMORYHUB_URL`, `MEMORYHUB_API_KEY`,
-   `MEMORYHUB_PROJECT_ID`. Keep `kind: "cloud"` since MemoryHub is a hosted service.
-   Check upstream providers (Hindsight, Cognee, mem0_cloud) for conventions on
-   class attributes, docstrings, and import style — match their patterns.
+1. **Verify credits and run smoke test**
+   Confirm Gemini prepaid credits are replenished. Run the checkpoint-gated smoke test
+   to prove the pipeline end-to-end before committing to the full run.
+   ```bash
+   cd ~/Developer/agent-memory-benchmark
+   amb run --smoke-test --dataset personamem --split 32k \
+       --memory memoryhub --skip-ingestion --name memoryhub
+   ```
 
-2. **Verify reproduction**
-   Run `uv run amb run --dataset personamem --domain 32k --memory memoryhub` from
-   the fork against our cluster. Confirm the result is within 1% of 84.9% (500/589).
-   If it diverges, investigate before proceeding — don't submit a result we can't
-   reproduce through the upstream harness.
+2. **Run full reproduction in batches**
+   Execute the 589-query PersonaMem 32k benchmark with checkpoint-gated batching.
+   Data is already ingested (project `amb-upstream-repro`, 195 docs). Use
+   `gemini-3.1-pro-preview` as the answer LLM to match our original 84.9% result.
+   ```bash
+   export OMB_ANSWER_LLM=gemini
+   export OMB_ANSWER_MODEL=gemini-3.1-pro-preview
+   export OMB_JUDGE_MODEL=gemini-3.5-flash-lite
+   amb run --batch-size 5 --dataset personamem --split 32k \
+       --memory memoryhub --skip-ingestion --name memoryhub
+   ```
+   Checkpoints every 5 queries to `outputs/.checkpoints/`. If credits run out
+   or the session ends, re-run the same command to resume from the last checkpoint.
 
-3. **Submit to upstream**
-   Open an issue on `vectorize-io/agent-memory-benchmark` introducing MemoryHub
-   (follow the pattern from their issue #11). Then submit PR with: adapter code,
-   results JSON, manifest entry. Use `/issue-gate` since this is a write to an
-   external repo.
+3. **Investigate the 2x context token gap**
+   Our upstream run showed 53k avg context tokens vs 26k in the original. If the
+   score diverges significantly from 84.9%, investigate before submitting. Possible
+   causes: duplicate data from prior ingestion attempts, different chunk behavior
+   post-logical_id fix, or harness-side context formatting differences.
 
-**Sequencing.** Fork and adapter first (step 1), then reproduce (step 2), then submit
-(step 3). Steps 1-2 are the bulk of the work; step 3 is mostly process.
+4. **Add results and submit PR**
+   Once the score is confirmed, add results to `results-manifest.json`, compress
+   the output, commit to the fork, push. Then open issue + PR to
+   `vectorize-io/agent-memory-benchmark` using `/issue-gate`. PR draft is already
+   at `~/Developer/agent-memory-benchmark/PR_DRAFT.md`.
+
+**Sequencing.** Steps 1-2 are gated on credits. Step 3 only if the score diverges.
+Step 4 requires user approval for every external write.
 
 **Constraints for the session:**
-- The upstream repo has no CONTRIBUTING.md — review existing PRs and issues for norms before submitting
-- Our cluster must be accessible during reproduction (verify MemoryHub is healthy before starting)
-- External repo write requires `/issue-gate` and explicit user approval per CLAUDE.md rules
+- Gemini prepaid credits must be replenished before starting
+- The upstream repo has no CONTRIBUTING.md; PR norms were studied (PRs #9, #24, #29)
+- External repo writes require `/issue-gate` + explicit user approval
 
 **Session start protocol:**
 - Premise checks (~5 min, report before acting):
-  - `oc get pods --context mcp-rhoai -n memory-hub-mcp` — confirm MemoryHub is running and healthy
-  - `gh repo view vectorize-io/agent-memory-benchmark` — confirm upstream repo still exists and is active
-  - Check if anyone else has submitted a MemoryHub provider since planning (search upstream issues/PRs)
-  - Verify our 84.9% result file exists: `ls benchmarks/amb-harness/outputs/personamem/granite-pro/rag/32k.json.gz`
+  - Gemini credits: `python3 -c "from google import genai; ..."` quick generate call
+  - `oc get pods --context mcp-rhoai -n memory-hub-mcp` -- confirm MemoryHub healthy
+  - Check fork is up to date: `cd ~/Developer/agent-memory-benchmark && git log --oneline -3`
+  - Verify ingested data still on cluster: quick search query against `amb-upstream-repro` project
+  - Check if anyone else submitted MemoryHub upstream since last session
 - Rules with history:
-  - External repo writes require `/issue-gate` + explicit user approval (CLAUDE.md: "External Repository Gate")
-  - Do not push to the fork without user review of the diff — this will be publicly visible
+  - Checkpointing is structural: `--smoke-test` then `--batch-size 5`. Do not run without these flags.
+  - External repo writes require `/issue-gate` + explicit user approval
+  - Do not push to fork without user review of the diff
+  - Back up result files before any re-run that writes to the same output path
 - Stop-and-ask before:
   - Opening the issue on the upstream repo
   - Submitting the PR
   - Any public-facing write on a repo not owned by rdwj
 - Close ritual: session summary; update this epic file with what landed
 
-## What landed last session (2026-08-18, session 2)
+## What landed last session (2026-08-21)
 
-Prep session on slow connection. Completed premise checks and upstream repo analysis,
-but lost the working window to clone timeouts (738 MB repo).
+Adapter and infrastructure session. All code is done; reproduction blocked by
+Gemini credit exhaustion. See `session-summaries/2026-08-21-public-benchmarks-adapter-and-checkpointing.md`.
 
-**Completed:**
-- Fork created at `rdwj/agent-memory-benchmark`
-- Filtered clone landed at `~/Developer/agent-memory-benchmark/` (needs `git checkout` to populate working tree)
-- Studied all upstream provider conventions: base class, __init__.py registry, catalog.json format, results-manifest.json format
-- Read 4 reference adapters (Hindsight, Cognee, mem0_cloud, Ogham) and extracted the pattern
-- Verified our result file exists (500/589 = 84.89%, ingestion 99.6s, avg retrieve 2491ms, avg context 26695 tokens)
-- Confirmed no prior MemoryHub submissions exist upstream (no issues or PRs)
-- Reviewed PRs #9 (Ogham, merged), #24 (AutoMem), #29 (Letta) and issue #11 (Audrey) for submission norms
-- Confirmed MemoryHub cluster is healthy (pod running 5d)
+**Shipped:**
+- Clean MemoryHub adapter (130 lines) in fork, registered and discoverable
+- Server-side `logical_id` NOT NULL bug fixed (`c4b3c06`), deployed as build 33
+- Checkpoint-gated batch evaluation (`--smoke-test` / `--batch-size`) in fork
+- 195 PersonaMem docs ingested on cluster (project: `amb-upstream-repro`)
+- 3/3 smoke test correct with `gemini-3.1-pro-preview`
+- Lab notes, PR draft template, run-repro script in fork
+- Memories: `feedback_implement_checkpointing_not_notes`, `feedback_keep_upstream_fork_local`
 
-**Not started:**
-- Writing the clean adapter (ready to start: all conventions documented, our 503-line source adapter read)
-- Reproduction run
-- PR submission
+**Not shipped (blocked on credits):**
+- Full 589-query reproduction run
+- Results manifest entry
+- Upstream issue + PR submission
 
-**Prerequisite for next session:**
-- Fast network connection (clone checkout needs blob downloads)
-- Run `cd ~/Developer/agent-memory-benchmark && git checkout main` to populate working tree
+**Open questions:**
+- Context tokens 2x higher than original (53k vs 26k). May affect score comparison.
+- `gemini-2.5-flash-lite` deprecated mid-session; `gemini-3.5-flash-lite` got 75.2%
+  (weaker model). Pro model matched original quality (3/3) but credits ran out.
 
-**Artifacts created:**
-- Memory: `feedback_keep_upstream_fork_local.md` (clone upstream repos on fast connections before working sessions)
+## Prior sessions
 
-## What landed session 1 (2026-08-18)
-
-Research and planning session. Mapped both submission venues (AMB and AML), audited
-existing benchmark data, wrote the epic arc.
-
-**Key findings:**
-- AMB (Vectorize): PR-based, open timeline, three memory systems already on PersonaMem board (Hindsight 86.6%, hybrid-search 84.4%, Cognee 81.8%). MemoryHub would be 2nd.
-- AML (agentmemories.ai): Managed platform, Aug 7 deadline passed, next window ~November 2026.
-- PersonaMem (original): Dataset only, no submission process.
-
-**Artifacts created:**
-- `NEXT_SESSION-public-benchmarks.md` (this file)
+See `session-summaries/2026-08-18-public-benchmarks-*.md` for sessions 1-2
+(research/planning, then prep/clone work).
 
 ## Remaining epic phases
 
@@ -232,15 +237,17 @@ AMB first (no deadline, first memory system on board, high marketing value). AML
 
 ## Watch out for
 
-- AMB upstream repo has no CONTRIBUTING.md — submission norms are informal. Open an issue first.
-- Our adapter has heavy env-var config for ablation experiments — upstream version needs to be much simpler.
-- AML controls the answer LLM (gpt-4o-mini) — our score will differ from the 84.9% we got with Gemini Pro.
-- AML requires 30+ days API stability post-submission — cluster must stay up through eval period.
-- The AMB PersonaMem board has three memory systems (Hindsight 86.6%, hybrid-search 84.4%, Cognee 81.8%). We'd be 4th entry, 2nd place. The long-context LLM baselines (49-52%) are in `external_results.json`, not the main manifest.
+- **Gemini credits**: The Pro model burns credits fast with retries on 429s. The 2026-08-21 session depleted all credits after ~540 queries + 25 retries. Monitor credit balance during the run. The checkpoint-gated harness limits exposure to 5 queries per batch.
+- **Gemini model deprecation**: `gemini-2.5-flash-lite` was deprecated mid-session (404). Check model availability before starting. Current working models: `gemini-3.1-pro-preview`, `gemini-3.5-flash-lite`, `gemini-3.5-flash`.
+- **Context token gap**: Upstream run averaged 53k context tokens vs 26k in the original. Root cause not confirmed. Could affect score even with the same answer model. Investigate if score diverges from 84.9%.
+- **Back up results before re-runs**: Three runs lost to overwriting output files. The checkpoint system prevents this going forward, but verify `outputs/.checkpoints/` is populated before re-running.
+- AMB upstream repo has no CONTRIBUTING.md; submission norms studied from PRs #9, #24, #29 and issue #11.
+- AML controls the answer LLM (gpt-4o-mini); our score will differ. AML submission parks until November 2026.
+- The AMB PersonaMem board has three memory systems (Hindsight 86.6%, hybrid-search 84.4%, Cognee 81.8%). We'd be 4th entry, 2nd place.
 
 ## If blocked
 
-- **AMB PR stalls:** If Vectorize doesn't review within 2 weeks, ping maintainers on the issue. Consider whether `external_results.json` (simpler, no adapter code needed) is an acceptable fallback.
-- **AML window unclear:** Email contact@agentmemories.ai or check Twitter @AgentMemoryL for next cycle dates. Current intel says ~November 2026 but this isn't confirmed.
-- **Score regression on re-run:** If reproducing our 84.9% against the upstream harness yields a lower number, investigate before submitting. Don't submit a result we can't explain.
-- **Cluster instability during AML eval:** Have a backup plan for the 30-day stability window — monitor the route, set up a health check alert.
+- **Gemini credits still depleted**: Switch to `gemini-3.5-flash` (cheaper) and accept a different score. The adapter and pipeline are model-agnostic; the PR can note which model was used.
+- **AMB PR stalls:** If Vectorize doesn't review within 2 weeks, ping maintainers on the issue. Consider `external_results.json` (simpler, no adapter code needed) as fallback.
+- **Score regression on re-run:** If the Pro model doesn't reproduce near 84.9%, the 2x context token gap is the first place to investigate. Check whether the cluster's `amb-upstream-repro` project has stale/duplicate data from earlier failed ingestion attempts.
+- **Cluster down**: MemoryHub must be running for retrieval. Check `oc get pods --context mcp-rhoai -n memory-hub-mcp`.
