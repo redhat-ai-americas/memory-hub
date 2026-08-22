@@ -215,6 +215,44 @@ async def test_info_fallback_env_var(monkeypatch):
     assert svc.max_tokens == 256
 
 
+# -- Eager initialization (#523) --
+
+
+@pytest.mark.asyncio
+async def test_initialize_triggers_fetch_info():
+    """initialize() calls _fetch_info so max_tokens is populated before first embed."""
+    svc = HttpEmbeddingService(url=_URL)
+
+    info_body = json.dumps({"max_input_length": 256}).encode()
+    info_response = httpx.Response(200, request=httpx.Request("GET", "http://test-embedder/info"), content=info_body)
+    mock_get = AsyncMock(return_value=info_response)
+
+    with patch.object(svc._client, "get", mock_get):
+        await svc.initialize()
+
+    assert svc.max_tokens == 256
+    assert svc._info_fetched is True
+    mock_get.assert_called_once()
+
+
+# -- Cached env fallback (#524) --
+
+
+def test_fallback_env_var_cached_at_construction(monkeypatch):
+    """MEMORYHUB_EMBEDDING_MAX_TOKENS is read once at construction, not on every access."""
+    monkeypatch.setenv("MEMORYHUB_EMBEDDING_MAX_TOKENS", "512")
+    svc = HttpEmbeddingService(url=_URL)
+    monkeypatch.delenv("MEMORYHUB_EMBEDDING_MAX_TOKENS")
+
+    assert svc.max_tokens == 512
+
+
+def test_fallback_without_env_var():
+    """Without the env var, fallback returns the hardcoded default."""
+    svc = HttpEmbeddingService(url=_URL)
+    assert svc.max_tokens == _DEFAULT_MAX_TOKENS
+
+
 # -- MockEmbeddingService max_tokens --
 
 
