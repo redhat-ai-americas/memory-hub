@@ -4,7 +4,7 @@ Persistent, governed memory for AI agents. MemoryHub gives agents a shared memor
 
 **Try it now** -- `pip install "memoryhub[local]"` for a personal edition backed by SQLite (no infrastructure needed), or deploy the [cluster edition](docs/guides/cluster-install.md) on OpenShift AI for multi-agent governance, OAuth 2.1, and team-wide shared memory.
 
-Retrieval quality: 84.9% on [AMB PersonaMem](benchmarks/RESULTS.md) (2nd on the leaderboard), R@5=0.999 on LongMemEval. Requires Python 3.10+.
+Retrieval quality: 83.7% on [AMB PersonaMem 32k](benchmarks/RESULTS.md) (submitted to leaderboard, pending review), R@5=0.999 on LongMemEval oracle. Requires Python 3.10+.
 
 ## How to think about agent memory
 
