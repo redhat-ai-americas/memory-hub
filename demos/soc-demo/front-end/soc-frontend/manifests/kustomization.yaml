@@ -6,7 +6,9 @@ commonLabels:
   app.kubernetes.io/part-of: memoryhub-demo
 resources:
   - imagestream.yaml
+  - imagestream-sidecar.yaml
   - buildconfig.yaml
+  - buildconfig-sidecar.yaml
   - deployment.yaml
   - service.yaml
   - route.yaml
