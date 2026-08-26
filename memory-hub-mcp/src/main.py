@@ -23,6 +23,7 @@ Default: compact.
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
 
@@ -116,7 +117,17 @@ _PROFILE_MAP = {
 
 tools, instructions = _PROFILE_MAP[TOOL_PROFILE]
 
-mcp = FastMCP("MemoryHub", instructions=instructions)
+
+@asynccontextmanager
+async def lifespan(server):
+    from src.tools._deps import get_embedding_service
+    svc = get_embedding_service()
+    if hasattr(svc, "initialize"):
+        await svc.initialize()
+    yield {}
+
+
+mcp = FastMCP("MemoryHub", instructions=instructions, lifespan=lifespan)
 
 for tool_fn in tools:
     mcp.add_tool(tool_fn)
