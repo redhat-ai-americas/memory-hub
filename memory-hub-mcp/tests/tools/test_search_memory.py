@@ -1999,7 +1999,7 @@ def _fake_s3_result(content_prefix, ref, weight=0.9, score=0.9, *, node_id=None)
             weight=weight,
             scope=MemoryScope.USER,
             branch_type=None,
-            owner_id="wjackson",
+            owner_id="test-user",
             tenant_id="default",
             is_current=True,
             version=1,
