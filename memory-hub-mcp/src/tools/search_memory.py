@@ -1224,145 +1224,83 @@ async def search_memory(
         budget_exhausted = False
         formatted: list[dict[str, Any]] = []
 
+        def _stubbed_entry(
+            item: MemoryNodeRead | MemoryNodeStub,
+            child_branches: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+            format_fn,
+        ) -> tuple[dict[str, Any], int]:
+            stub_item = _to_stub(item) if isinstance(item, MemoryNodeRead) else item
+            stub_branches = [
+                ((_to_stub(b) if isinstance(b, MemoryNodeRead) else b), s)
+                for b, s in child_branches
+            ]
+            return format_fn(stub_item, stub_branches)
+
+        async def _pack_entry(
+            item: MemoryNodeRead | MemoryNodeStub,
+            child_branches: list[tuple[MemoryNodeRead | MemoryNodeStub, float]],
+            budget: int,
+            budget_exhausted: bool,
+            format_fn,
+        ) -> tuple[dict[str, Any], int, bool]:
+            """Decide full vs. stub for one packing-loop entry, hydrating
+            lazily. format_fn(item, child_branches) -> (entry, cost)
+            abstracts over the raw vs. cache-optimized entry shapes -- their
+            extra relevance_score/is_appendix arguments are already bound by
+            the caller. Returns (entry, new_budget, new_budget_exhausted).
+            """
+            if not skip_budget and budget_exhausted:
+                entry, cost = _stubbed_entry(item, child_branches, format_fn)
+                return entry, max(0, budget - cost), budget_exhausted
+
+            entry, cost = format_fn(item, child_branches)
+            if not (skip_budget or isinstance(item, MemoryNodeStub) or cost <= budget):
+                entry, cost = _stubbed_entry(item, child_branches, format_fn)
+                return entry, max(0, budget - cost), True
+
+            item, child_branches, changed = await _hydrate_full_entry(
+                item, child_branches,
+            )
+            if changed:
+                entry, cost = format_fn(item, child_branches)
+            # Re-check against the real (post-hydration) cost -- the
+            # pre-hydration estimate came from truncated content and can be
+            # far off for S3-backed items, which were spilled to S3
+            # precisely because they're large. Bound the waste to this one
+            # boundary item rather than trusting the cheap estimate.
+            if skip_budget or cost <= budget:
+                return entry, max(0, budget - cost), budget_exhausted
+            entry, cost = _stubbed_entry(item, child_branches, format_fn)
+            return entry, max(0, budget - cost), True
+
         if compilation_meta is not None:
             # Cache-optimized: iterate compilation-ordered results
             for item, _score, is_appendix in compilation_meta["ordered_results"]:
                 child_branches = nested_by_parent.get(str(item.id), [])
 
-                if not skip_budget and budget_exhausted:
-                    output_item = (
-                        _to_stub(item) if isinstance(item, MemoryNodeRead) else item
+                def _format(it, branches, is_appendix=is_appendix):
+                    return _format_entry_cached(
+                        it, branches, is_appendix, verbose=verbose,
                     )
-                    output_branches = [
-                        ((_to_stub(b) if isinstance(b, MemoryNodeRead) else b), s)
-                        for b, s in child_branches
-                    ]
-                    entry, cost = _format_entry_cached(
-                        output_item, output_branches, is_appendix,
-                        verbose=verbose,
-                    )
-                    formatted.append(entry)
-                    budget = max(0, budget - cost)
-                    continue
 
-                entry, cost = _format_entry_cached(
-                    item, child_branches, is_appendix, verbose=verbose,
+                entry, budget, budget_exhausted = await _pack_entry(
+                    item, child_branches, budget, budget_exhausted, _format,
                 )
-                if skip_budget or isinstance(item, MemoryNodeStub) or cost <= budget:
-                    item, child_branches, changed = await _hydrate_full_entry(
-                        item, child_branches,
-                    )
-                    if changed:
-                        entry, cost = _format_entry_cached(
-                            item, child_branches, is_appendix, verbose=verbose,
-                        )
-                    # Re-check against the real (post-hydration) cost -- the
-                    # pre-hydration estimate came from truncated content and
-                    # can be far off for S3-backed items, which were spilled
-                    # to S3 precisely because they're large. Bound the waste
-                    # to this one boundary item rather than trusting the
-                    # cheap estimate.
-                    if skip_budget or cost <= budget:
-                        formatted.append(entry)
-                        budget = max(0, budget - cost)
-                    else:
-                        budget_exhausted = True
-                        stub_item = _to_stub(item)
-                        stub_branches = [
-                            ((_to_stub(b) if isinstance(b, MemoryNodeRead) else b), s)
-                            for b, s in child_branches
-                        ]
-                        stub_entry, stub_cost = _format_entry_cached(
-                            stub_item, stub_branches, is_appendix,
-                            verbose=verbose,
-                        )
-                        formatted.append(stub_entry)
-                        budget = max(0, budget - stub_cost)
-                else:
-                    budget_exhausted = True
-                    stub_item = _to_stub(item)
-                    stub_branches = [
-                        ((_to_stub(b) if isinstance(b, MemoryNodeRead) else b), s)
-                        for b, s in child_branches
-                    ]
-                    stub_entry, stub_cost = _format_entry_cached(
-                        stub_item, stub_branches, is_appendix,
-                        verbose=verbose,
-                    )
-                    formatted.append(stub_entry)
-                    budget = max(0, budget - stub_cost)
+                formatted.append(entry)
         else:
             # Raw results: existing similarity-ranked behavior
             for item, relevance_score in top_level:
                 child_branches = nested_by_parent.get(str(item.id), [])
 
-                if not skip_budget and budget_exhausted:
-                    output_item = (
-                        _to_stub(item) if isinstance(item, MemoryNodeRead) else item
+                def _format(it, branches, relevance_score=relevance_score):
+                    return _format_entry(
+                        it, relevance_score, branches, verbose=verbose,
                     )
-                    output_branches = [
-                        (
-                            (_to_stub(b) if isinstance(b, MemoryNodeRead) else b),
-                            s,
-                        )
-                        for b, s in child_branches
-                    ]
-                    entry, cost = _format_entry(
-                        output_item, relevance_score, output_branches,
-                        verbose=verbose,
-                    )
-                    formatted.append(entry)
-                    budget = max(0, budget - cost)
-                    continue
 
-                entry, cost = _format_entry(
-                    item, relevance_score, child_branches, verbose=verbose,
+                entry, budget, budget_exhausted = await _pack_entry(
+                    item, child_branches, budget, budget_exhausted, _format,
                 )
-                if skip_budget or isinstance(item, MemoryNodeStub) or cost <= budget:
-                    item, child_branches, changed = await _hydrate_full_entry(
-                        item, child_branches,
-                    )
-                    if changed:
-                        entry, cost = _format_entry(
-                            item, relevance_score, child_branches, verbose=verbose,
-                        )
-                    # Re-check against the real (post-hydration) cost -- see
-                    # the matching comment in the cache-optimized branch above.
-                    if skip_budget or cost <= budget:
-                        formatted.append(entry)
-                        budget = max(0, budget - cost)
-                    else:
-                        budget_exhausted = True
-                        stub_item = _to_stub(item)
-                        stub_branches = [
-                            (
-                                (_to_stub(b) if isinstance(b, MemoryNodeRead) else b),
-                                s,
-                            )
-                            for b, s in child_branches
-                        ]
-                        stub_entry, stub_cost = _format_entry(
-                            stub_item, relevance_score, stub_branches,
-                            verbose=verbose,
-                        )
-                        formatted.append(stub_entry)
-                        budget = max(0, budget - stub_cost)
-                else:
-                    budget_exhausted = True
-                    stub_item = _to_stub(item)
-                    stub_branches = [
-                        (
-                            (_to_stub(b) if isinstance(b, MemoryNodeRead) else b),
-                            s,
-                        )
-                        for b, s in child_branches
-                    ]
-                    stub_entry, stub_cost = _format_entry(
-                        stub_item, relevance_score, stub_branches,
-                        verbose=verbose,
-                    )
-                    formatted.append(stub_entry)
-                    budget = max(0, budget - stub_cost)
+                formatted.append(entry)
 
         response = {
             "results": formatted,
