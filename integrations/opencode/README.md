@@ -19,17 +19,36 @@ What it does:
 
 ## Install
 
+The package is not on npm yet, so install from a checkout of this repo.
+In the project where you want memory:
+
+```bash
+mkdir -p .opencode/plugins
+
+cat > .opencode/package.json <<'EOF'
+{
+  "dependencies": {
+    "@memory-hub/opencode-mh-plugin": "file:/path/to/memory-hub/integrations/opencode"
+  }
+}
+EOF
+
+echo 'export { MemoryHubPlugin } from "@memory-hub/opencode-mh-plugin";' \
+  > .opencode/plugins/memoryhub.ts
+```
+
+Build the plugin once in the checkout (`npm install && npm run build` in
+`integrations/opencode/`). opencode's Bun runtime installs the dependency
+automatically on next start. Put the same two files under
+`~/.config/opencode/` instead to enable it globally.
+
+Once published to npm this collapses to:
+
 ```bash
 opencode plugin @memory-hub/opencode-mh-plugin
 ```
 
-or add it to `opencode.json`:
-
-```json
-{
-  "plugin": ["@memory-hub/opencode-mh-plugin"]
-}
-```
+or `"plugin": ["@memory-hub/opencode-mh-plugin"]` in `opencode.json`.
 
 ## Configure
 
