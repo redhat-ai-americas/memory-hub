@@ -1974,3 +1974,373 @@ class TestCompactEntryHonestyFlags:
         assert "content_truncated" in entry
         assert "full_available" in entry
         assert entry["relevance_score"] == 0.85
+
+
+# ---------------------------------------------------------------------------
+# #389 -- S3 hydration must target only the final top-k
+# ---------------------------------------------------------------------------
+
+
+def _fake_s3_result(content_prefix, ref, weight=0.9, score=0.9, *, node_id=None):
+    """Build a (MemoryNodeRead, score) tuple with S3-backed storage."""
+    import uuid as _uuid
+    from datetime import datetime
+
+    from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, StorageType
+
+    return (
+        MemoryNodeRead(
+            id=node_id or _uuid.uuid4(),
+            parent_id=None,
+            content=content_prefix,
+            stub=content_prefix[:80],
+            storage_type=StorageType.S3,
+            content_ref=ref,
+            weight=weight,
+            scope=MemoryScope.USER,
+            branch_type=None,
+            owner_id="test-user",
+            tenant_id="default",
+            is_current=True,
+            version=1,
+            previous_version_id=None,
+            metadata=None,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            content_truncated=True,
+            full_available=True,
+            has_children=False,
+            has_rationale=False,
+            branch_count=0,
+        ),
+        score,
+    )
+
+
+@pytest.mark.asyncio
+async def test_s3_hydration_skips_entries_trimmed_by_compilation_cap():
+    """#389: S3 hydration must only fetch content for the final top-k.
+
+    When backfill inflates the result set beyond max_results, the compilation
+    cap trims it. S3 hydration should NOT be called for entries that were
+    trimmed, only for the surviving top-k.
+    """
+    # 2 entries survive the cap, 3 get trimmed
+    kept = [_fake_s3_result(f"kept-{i}", f"s3://bucket/kept-{i}") for i in range(2)]
+    trimmed = [_fake_s3_result(f"trimmed-{i}", f"s3://bucket/trimmed-{i}") for i in range(3)]
+    all_results = kept + trimmed
+
+    ordered = [(item, score, False) for item, score in all_results]
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    mock_s3 = AsyncMock()
+    hydrated_refs = []
+
+    async def _track_get_content(ref):
+        hydrated_refs.append(ref)
+        return f"FULL CONTENT FOR {ref}"
+
+    mock_s3.get_content = _track_get_content
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=all_results,
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=5,
+            ),
+            patch(
+                "src.tools.search_memory._backfill_compiled_entries",
+                new_callable=AsyncMock,
+                return_value=all_results,
+            ),
+            patch(
+                "src.tools.search_memory._apply_cache_optimized_ordering",
+                new_callable=AsyncMock,
+                return_value={
+                    "ordered_results": ordered,
+                    "compilation_hash": "deadbeef",
+                    "compilation_epoch": 1,
+                    "appendix_count": 0,
+                },
+            ),
+            patch(
+                "src.tools.search_memory.get_s3_adapter",
+                return_value=mock_s3,
+            ),
+            patch("src.tools.search_memory.ROLE_ISOLATION_ENABLED", False),
+            patch("src.tools.search_memory.PROJECT_ISOLATION_ENABLED", False),
+        ):
+            result = await search_memory(
+                query="memory", max_results=2, content_mode="full",
+                max_response_tokens=0,
+            )
+    finally:
+        auth_mod._current_session = None
+
+    assert len(result["results"]) == 2
+    assert set(hydrated_refs) == {"s3://bucket/kept-0", "s3://bucket/kept-1"}
+    for entry in result["results"]:
+        assert entry["content_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_s3_hydration_skipped_for_mode_index():
+    """#389: mode='index' converts all results to stubs before hydration runs.
+
+    Since stubs have no storage_type/content_ref, hydration is a no-op.
+    No S3 calls should be made even with content_mode='full'.
+    """
+    s3_results = [_fake_s3_result(f"item-{i}", f"s3://bucket/item-{i}") for i in range(3)]
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    mock_s3 = AsyncMock()
+    mock_s3.get_content = AsyncMock(return_value="should not be called")
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=s3_results,
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=3,
+            ),
+            patch(
+                "src.tools.search_memory.get_s3_adapter",
+                return_value=mock_s3,
+            ),
+            patch("src.tools.search_memory.ROLE_ISOLATION_ENABLED", False),
+            patch("src.tools.search_memory.PROJECT_ISOLATION_ENABLED", False),
+            patch(
+                "src.tools.search_memory.detect_patterns",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            result = await search_memory(
+                query="memory", mode="index", content_mode="full",
+                raw_results=True,
+            )
+    finally:
+        auth_mod._current_session = None
+
+    mock_s3.get_content.assert_not_called()
+    assert len(result["results"]) == 3
+    assert all(entry["result_type"] == "stub" for entry in result["results"])
+
+
+@pytest.mark.asyncio
+async def test_s3_hydration_covers_nested_branches():
+    """#389: S3 hydration must also hydrate branch entries nested under parents.
+
+    With include_branches=True and content_mode='full', both the parent and
+    its child branch should have their S3 content fetched.
+    """
+    import uuid as _uuid
+
+    parent_id = _uuid.uuid4()
+    child_id = _uuid.uuid4()
+
+    parent = _fake_s3_result(
+        "parent prefix", "s3://bucket/parent",
+        node_id=parent_id,
+    )
+    child_item, child_score = _fake_s3_result(
+        "child prefix", "s3://bucket/child",
+        node_id=child_id,
+    )
+    child_with_parent = (
+        child_item.model_copy(update={
+            "parent_id": parent_id,
+            "branch_type": "rationale",
+        }),
+        child_score,
+    )
+
+    all_results = [parent, child_with_parent]
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    mock_s3 = AsyncMock()
+    hydrated_refs = []
+
+    async def _track_get_content(ref):
+        hydrated_refs.append(ref)
+        return f"FULL CONTENT FOR {ref}"
+
+    mock_s3.get_content = _track_get_content
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=all_results,
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=2,
+            ),
+            patch(
+                "src.tools.search_memory.get_s3_adapter",
+                return_value=mock_s3,
+            ),
+            patch("src.tools.search_memory.ROLE_ISOLATION_ENABLED", False),
+            patch("src.tools.search_memory.PROJECT_ISOLATION_ENABLED", False),
+            patch(
+                "src.tools.search_memory.detect_patterns",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            result = await search_memory(
+                query="memory", content_mode="full", raw_results=True,
+                include_branches=True, max_response_tokens=0,
+            )
+    finally:
+        auth_mod._current_session = None
+
+    assert set(hydrated_refs) == {"s3://bucket/parent", "s3://bucket/child"}
+    assert len(result["results"]) == 1
+    parent_entry = result["results"][0]
+    assert parent_entry["content_truncated"] is False
+    assert "branches" in parent_entry
+    assert parent_entry["branches"][0]["content_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_s3_hydration_then_budget_degrades_to_stub():
+    """#389: an item whose truncated-content cost estimate fits the budget,
+    but whose real hydrated content does not, must be re-checked against
+    the real cost and degraded to a stub -- not kept as full just because
+    the pre-hydration estimate looked cheap. The S3 fetch itself is
+    unavoidable (verbose=False keeps the estimate low enough that the
+    item clears the pre-hydration gate, exactly as a real S3-backed item
+    would since it was spilled to S3 for being large), but the discarded
+    content must never leak into the stub response.
+    """
+    s3_results = [
+        _fake_s3_result("big item", "s3://bucket/big", score=0.9),
+    ]
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    mock_s3 = AsyncMock()
+    calls = []
+
+    async def _return_huge(ref):
+        calls.append(ref)
+        return "x" * 100_000
+
+    mock_s3.get_content = _return_huge
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=s3_results,
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=1,
+            ),
+            patch(
+                "src.tools.search_memory.get_s3_adapter",
+                return_value=mock_s3,
+            ),
+            patch("src.tools.search_memory.ROLE_ISOLATION_ENABLED", False),
+            patch("src.tools.search_memory.PROJECT_ISOLATION_ENABLED", False),
+            patch(
+                "src.tools.search_memory.detect_patterns",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            result = await search_memory(
+                query="memory", content_mode="full", raw_results=True,
+                max_response_tokens=100, verbose=False,
+            )
+    finally:
+        auth_mod._current_session = None
+
+    assert calls == ["s3://bucket/big"]
+    assert len(result["results"]) == 1
+    entry = result["results"][0]
+    assert entry["result_type"] == "stub"
+    # The stub must not leak the hydrated (huge) content -- _to_stub()
+    # discards it, falling back to the original truncated prefix.
+    assert entry["content"] == "big item"
