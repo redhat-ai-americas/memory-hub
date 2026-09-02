@@ -8,6 +8,8 @@ Retrieval quality: 83.7% on [AMB PersonaMem 32k](benchmarks/RESULTS.md) (submitt
 
 ## How to think about agent memory
 
+**Agent memory is experiential knowledge — decisions made, preferences discovered, outcomes observed — accumulated through agent interactions, persisted across sessions, and recalled to shape future behavior.** It is distinct from documents retrieved (RAG), information found (search), or domains modeled (ontology). See [How Information Enters Context](docs/guides/context-assembly.md) for a visual breakdown of how these sources converge into the model's context window.
+
 The model never remembers anything -- at inference time, a memory is just tokens in context, and it makes no difference whether they came from a markdown file, a vector store, or a graph. Memory is a **context-assembly policy problem**: how did the right items get selected, who was allowed to see them, what happens when they conflict, and can you reconstruct what an agent knew when it acted?
 
 Two principles drive everything here. First, give the agent **100% of what it needs and 0% of what it doesn't** -- no retrieval trick compensates for missing context, and garbage overlap degrades performance even when the right facts are present. Second, **work backwards from the forensic investigation**: who or what did the thing, what memories were in context, who wrote them, were they in conflict, did storing them violate policy, and which other agents were exposed to them?
