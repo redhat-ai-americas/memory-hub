@@ -23,6 +23,8 @@ export interface GraphEdge {
 export interface GraphResponse {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  total_count: number;
+  returned_count: number;
 }
 
 export interface ScopeCount {

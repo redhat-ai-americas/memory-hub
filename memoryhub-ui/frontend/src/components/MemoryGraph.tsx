@@ -18,6 +18,7 @@ import {
 import { SearchIcon } from '@patternfly/react-icons';
 import type { GraphResponse, SearchMatch } from '@/types';
 import { fetchGraph, searchGraph } from '@/api/client';
+import type { GraphFilters } from '@/api/client';
 import MemoryDetailDrawer from './MemoryDetailDrawer';
 import type { EdgeInfo } from './MemoryDetailDrawer';
 import { SCOPE_COLORS, SCOPE_OPTIONS } from '@/utils/scopes';
@@ -181,11 +182,12 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
   const [searchResults, setSearchResults] = useState<SearchMatch[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [enabledScopes, setEnabledScopes] = useState<Set<string>>(new Set(SCOPE_OPTIONS));
-  const [ownerFilter, setOwnerFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState(initialOwnerFilter ?? '');
+  const [scopeIdFilter, setScopeIdFilter] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<EdgeInfo | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Apply initial owner filter from navigation (e.g. Users & Agents panel)
+  // Sync owner filter when navigating between users (prop changes after mount)
   useEffect(() => {
     if (initialOwnerFilter !== undefined) {
       setOwnerFilter(initialOwnerFilter);
@@ -255,10 +257,42 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
     return () => clearInterval(interval);
   }, []);
 
+  // Refs to let loadGraph always read current filter values without
+  // needing them as useCallback dependencies (avoids double-fire).
+  const enabledScopesRef = useRef(enabledScopes);
+  const ownerFilterRef = useRef(ownerFilter);
+  const scopeIdFilterRef = useRef(scopeIdFilter);
+  useEffect(() => { enabledScopesRef.current = enabledScopes; }, [enabledScopes]);
+  useEffect(() => { ownerFilterRef.current = ownerFilter; }, [ownerFilter]);
+  useEffect(() => { scopeIdFilterRef.current = scopeIdFilter; }, [scopeIdFilter]);
+
   const loadGraph = useCallback(() => {
+    // Build server-side filters from current ref values
+    const filters: GraphFilters = { limit: 500 };
+    const scopes = enabledScopesRef.current;
+    const owner = ownerFilterRef.current;
+    const scopeId = scopeIdFilterRef.current;
+
+    // Send scope filter when not all scopes are enabled
+    if (scopes.size === 0) {
+      // All unchecked: show nothing (set empty result without fetching)
+      setGraphData({ nodes: [], edges: [], total_count: 0, returned_count: 0 });
+      setLoading(false);
+      return;
+    }
+    if (scopes.size < SCOPE_OPTIONS.length) {
+      filters.scope = Array.from(scopes).join(',');
+    }
+    if (owner.trim()) {
+      filters.owner_id = owner.trim();
+    }
+    if (scopeId.trim()) {
+      filters.scope_id = scopeId.trim();
+    }
+
     setLoading(true);
     setError(null);
-    fetchGraph()
+    fetchGraph(filters)
       .then((data) => setGraphData(data))
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load graph data');
@@ -266,9 +300,23 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
       .finally(() => setLoading(false));
   }, []);
 
+  // Initial load
   useEffect(() => {
     loadGraph();
   }, [loadGraph]);
+
+  // Debounced reload when any filter changes
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    const timeout = setTimeout(() => {
+      loadGraph();
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [enabledScopes, ownerFilter, scopeIdFilter, loadGraph]);
 
   const handleSearch = useCallback(() => {
     if (!searchQuery.trim()) {
@@ -297,17 +345,9 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
 
   const filteredElements = React.useMemo(() => {
     if (!graphData) return [];
-    const filtered: GraphResponse = {
-      nodes: graphData.nodes.filter((n) => {
-        if (!enabledScopes.has(n.scope)) return false;
-        if (ownerFilter && !n.owner_id.includes(ownerFilter)) return false;
-        return true;
-      }),
-      edges: graphData.edges,
-    };
     setNeedsLayout(true);
-    return buildElements(filtered);
-  }, [graphData, enabledScopes, ownerFilter]);
+    return buildElements(graphData);
+  }, [graphData]);
 
   const toggleScope = (scope: string) => {
     setEnabledScopes((prev) => {
@@ -396,10 +436,28 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
           </ToolbarItem>
 
           <ToolbarItem>
+            <TextInput
+              value={scopeIdFilter}
+              onChange={(_e, val) => setScopeIdFilter(val)}
+              placeholder="Filter by project…"
+              style={{ width: '180px' }}
+              aria-label="Filter by project (scope_id)"
+            />
+          </ToolbarItem>
+
+          <ToolbarItem>
             <Button variant="secondary" onClick={loadGraph} isDisabled={loading}>
               Refresh
             </Button>
           </ToolbarItem>
+
+          {graphData && (
+            <ToolbarItem>
+              <span style={{ fontSize: '0.875rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                Showing {graphData.returned_count} of {graphData.total_count} memories
+              </span>
+            </ToolbarItem>
+          )}
         </ToolbarContent>
       </Toolbar>
 

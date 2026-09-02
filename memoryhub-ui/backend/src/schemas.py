@@ -30,6 +30,8 @@ class GraphEdge(BaseModel):
 class GraphResponse(BaseModel):
     nodes: list[GraphNode]
     edges: list[GraphEdge]
+    total_count: int = 0
+    returned_count: int = 0
 
 
 class ScopeCount(BaseModel):

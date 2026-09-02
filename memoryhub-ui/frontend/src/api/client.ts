@@ -30,10 +30,21 @@ async function apiFetch<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function fetchGraph(scope?: string, owner?: string): Promise<GraphResponse> {
+export interface GraphFilters {
+  scope?: string;       // comma-separated scopes
+  owner_id?: string;
+  scope_id?: string;
+  limit?: number;
+  top_level_only?: boolean;
+}
+
+export async function fetchGraph(filters?: GraphFilters): Promise<GraphResponse> {
   const params = new URLSearchParams();
-  if (scope) params.set('scope', scope);
-  if (owner) params.set('owner_id', owner);
+  if (filters?.scope) params.set('scope', filters.scope);
+  if (filters?.owner_id) params.set('owner_id', filters.owner_id);
+  if (filters?.scope_id) params.set('scope_id', filters.scope_id);
+  if (filters?.limit) params.set('limit', String(filters.limit));
+  if (filters?.top_level_only) params.set('top_level_only', 'true');
   const query = params.toString() ? `?${params.toString()}` : '';
   return apiFetch<GraphResponse>(`/graph${query}`);
 }

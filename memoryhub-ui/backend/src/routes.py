@@ -169,8 +169,16 @@ async def get_graph(
     settings: SettingsDep,
     scope: str | None = Query(default=None),
     owner_id: str | None = Query(default=None),
+    scope_id: str | None = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=5000),
+    top_level_only: bool = Query(default=False),
 ):
-    """Return all current memory nodes and their edges for graph visualization.
+    """Return current memory nodes and their edges for graph visualization.
+
+    Returns at most ``limit`` nodes (default 500, max 5000) ordered by
+    most-recently-updated first.  The response includes ``total_count``
+    (matching nodes before the limit) and ``returned_count`` so the UI
+    can show "Showing X of Y".
 
     Filters strictly by ``settings.ui_tenant_id`` (Phase 6 / issue #46).
     Cross-tenant rows are invisible at the SQL level, not merely hidden in
@@ -185,9 +193,25 @@ async def get_graph(
         MemoryNode.deleted_at.is_(None),
     )
     if scope:
-        stmt = stmt.where(MemoryNode.scope == scope)
+        scopes = [s.strip() for s in scope.split(",") if s.strip()]
+        if len(scopes) == 1:
+            stmt = stmt.where(MemoryNode.scope == scopes[0])
+        elif scopes:
+            stmt = stmt.where(MemoryNode.scope.in_(scopes))
     if owner_id:
         stmt = stmt.where(MemoryNode.owner_id == owner_id)
+    if scope_id:
+        stmt = stmt.where(MemoryNode.scope_id == scope_id)
+    if top_level_only:
+        stmt = stmt.where(MemoryNode.parent_id.is_(None))
+
+    # Count matching nodes before applying the limit
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    count_result = await db.execute(count_stmt)
+    total_count = count_result.scalar_one()
+
+    # Apply ordering and limit
+    stmt = stmt.order_by(MemoryNode.updated_at.desc()).limit(limit)
 
     result = await db.execute(stmt)
     nodes = result.scalars().all()
@@ -225,7 +249,12 @@ async def get_graph(
         relationships = rel_result.scalars().all()
         edges.extend(_rel_to_edge(r) for r in relationships)
 
-    return GraphResponse(nodes=graph_nodes, edges=edges)
+    return GraphResponse(
+        nodes=graph_nodes,
+        edges=edges,
+        total_count=total_count,
+        returned_count=len(graph_nodes),
+    )
 
 
 # ---------------------------------------------------------------------------
