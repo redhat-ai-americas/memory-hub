@@ -171,6 +171,7 @@ async def find_or_create_entity(
 
     node = MemoryNode(
         id=entity_id,
+        logical_id=entity_id,
         content=normalized_name,
         stub=stub,
         scope="entity",
