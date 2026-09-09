@@ -8,8 +8,11 @@ function ok(title: string, data: unknown) {
   return { title, output: JSON.stringify(data, null, 2) };
 }
 
-function err(e: unknown, fallback: string): string {
-  return `Error: ${e instanceof Error ? e.message : fallback}`;
+function err(e: unknown, fallback: string) {
+  return {
+    title: "Error",
+    output: e instanceof Error ? e.message : fallback,
+  };
 }
 
 /**
