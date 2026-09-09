@@ -5,20 +5,63 @@
 **Issue:** #310
 **Related:** #536 (global install), #312 (multi-harness tracking), #489 (OpenClaw), #509 (OpenCode)
 
-## Problem
+## Core Principle: One Abstraction, Two Patterns
 
-`memoryhub config init` is Claude Code-specific. It writes `.claude/rules/`,
-`.claude/hooks/`, and `.claude/settings.json` — artifacts only Claude Code
-understands. The `--format` flag added `system-prompt`, `agents-md`, `ogx`,
-and `raw` output formats, but these only print instructions to stdout for
-manual copy-paste. There is no automated onboarding path for non-Claude-Code
-frameworks.
+**The adapter protocol is deliberately generic enough to handle fundamentally different integration patterns.**
 
-The OpenClaw integration (`integrations/openclaw/`, PR #490) shipped a full
-plugin that bypasses `config init` entirely — its own config format, protocol
-doc, lifecycle hooks. Each new framework requires bespoke integration work.
+MemoryHub integrations fall into two categories:
 
-## Design principles
+### Pattern 1: Instruction-Driven (Claude Code, Goose, OGX)
+- Agent gets MCP tools via native MCP connection
+- Follows written instructions (rule file, system prompt section, AGENTS.md)
+- Agent drives all memory behavior by reading the instructions
+- **Onboarding = MCP config + instruction file + optional hooks**
+
+### Pattern 2: Plugin-Driven (OpenClaw, OpenCode)
+- Framework plugin handles MCP connection, session lifecycle, auto-recall
+- Plugin enforces behavior programmatically (no instruction file needed)
+- Plugin IS the integration — agent doesn't need to read instructions
+- **Onboarding = `npm install` plugin + plugin config in framework's JSON**
+
+**The adapter protocol doesn't constrain what `setup()` does.** Both patterns return the same `AdapterResult` reporting what happened. An instruction-driven adapter writes files. A plugin-driven adapter runs `npm install` and merges JSON. New patterns require new adapters, not changes to the core abstraction.
+
+## Current Landscape
+
+| Framework | Integration | Pattern | Config Format | Automated install? | Status |
+|-----------|-------------|---------|---------------|-------------------|--------|
+| **Claude Code** | Built-in CLI | Instruction-driven | `.claude/` files | ✅ `config init` | Shipped |
+| **OpenClaw** | Plugin (#490) | Plugin-driven | `openclaw.json` | ❌ Manual | Shipped |
+| **OpenCode** | Plugin (#549) | Plugin-driven | `opencode.json` | ❌ Manual | PR open |
+| **Goose** | Unknown | Likely instruction | YAML (unverified) | ❌ None | Not started |
+| **OGX** | None | Instruction | `config.yaml` | ❌ None | Speculative |
+| **LibreChat** | Planned (#82) | MCP-discovered | `librechat.yaml` | ❌ None | Not started |
+
+**The problem:** Only Claude Code has automated setup. Every other framework requires manual config file editing, plugin installation, and following scattered docs.
+
+## What This PR Delivers
+
+This PR ships **the framework only — no concrete adapters**:
+
+1. ✅ **Core abstraction**: `MemoryInstruction` dataclass + `Adapter` protocol
+2. ✅ **Adapter registry**: Discovery and invocation plumbing
+3. ✅ **CLI wiring**: `--framework`, `--global`, `--dry-run` flags
+4. ✅ **Documented examples**: Code samples showing instruction-driven (Goose) and plugin-driven (OpenClaw/OpenCode) patterns
+5. ✅ **MCP resource**: `memoryhub://agent-instructions` for zero-config discovery
+
+**Explicitly NOT in scope:**
+- ❌ Working adapters (Claude Code, OpenClaw, OpenCode, Goose, OGX)
+- ❌ Refactoring existing `config init` into an adapter
+- ❌ Plugin installation automation
+
+**Why no adapters?** Each concrete adapter requires framework-specific decisions:
+- Claude Code: Convert to plugin first, or keep instruction-driven?
+- OpenClaw/OpenCode: Plugins already exist — is config merging even needed?
+- Goose: MCP config pattern needs verification
+- OGX: No working integration to test against
+
+Shipping the framework proves the abstraction. Each adapter becomes its own issue with clear prerequisites.
+
+## Design Principles
 
 1. **Single-command setup.** `memoryhub config init --framework X` should
    leave MemoryHub fully working — MCP config, agent instructions, and
@@ -34,36 +77,36 @@ doc, lifecycle hooks. Each new framework requires bespoke integration work.
    testable, composable with framework-specific logic, no abstraction
    layers between the adapter and the filesystem.
 
-## Three onboarding paths
+4. **The protocol handles both patterns.** Instruction-driven and plugin-driven
+   integrations use the same adapter interface. The difference is what
+   `setup()` does, not the signature it implements.
 
-Frameworks fall into three categories based on how the agent discovers
-and uses MemoryHub:
+## How the Adapter Protocol Handles Both Patterns
 
-### Instruction-driven (Claude Code, OpenCode, OGX)
+The `Adapter` protocol's `setup` method has **no constraints on what it does**. Both patterns fit the same interface:
 
-The agent gets MCP tools via a native MCP connection and follows
-instructions (a rule file, system prompt section, or `AGENTS.md`
-block) that tell it when to search, how to write, and how to handle
-contradictions. The agent drives all memory behavior.
+**Instruction-driven adapter** (Claude Code):
+```python
+def setup(self, content, credentials, project_dir, *, scope, overwrite):
+    # Uses 'content' to write rule file
+    rule_path.write_text(render_rule_markdown(content))
+    hook_path.write_text(HOOK_SCRIPT)
+    merge_settings_hooks(settings_path)
+    return AdapterResult(files_written=[rule_path, hook_path])
+```
 
-Onboarding = MCP config + instruction file + optional hooks.
+**Plugin-driven adapter** (OpenClaw, OpenCode):
+```python
+def setup(self, content, credentials, project_dir, *, scope, overwrite):
+    # Ignores 'content' - plugin handles instructions
+    subprocess.run(["npm", "install", "@memory-hub/openclaw-mh-plugin"])
+    merge_plugin_config(config_path, credentials)
+    return AdapterResult(files_modified=[config_path])
+```
 
-### Plugin-driven (OpenClaw)
+Both return `AdapterResult`. The protocol doesn't care how you got there.
 
-A framework plugin handles the MCP connection, session registration,
-auto-recall, memory slot ownership, and tool exposure programmatically.
-The agent doesn't need instructions telling it when to search — the
-plugin does it via hooks. The plugin IS the integration.
-
-Onboarding = plugin installation + plugin config in the framework's
-config file.
-
-An instruction file is redundant for plugin-driven frameworks because
-the plugin enforces the behavior the instructions would describe. The
-adapter for a plugin-driven framework installs and configures the
-plugin rather than writing instructions.
-
-### MCP-discovered (custom agent loops, unknown frameworks)
+### MCP-Discovered Path (zero-config)
 
 The agent connects to MemoryHub's MCP server, discovers tools via the
 standard MCP `tools/list`, and fetches behavioral instructions from an
@@ -76,14 +119,7 @@ is discoverable.
 This is the zero-config path for frameworks that have MCP support but
 no dedicated adapter. It's also the fallback for frameworks where the
 `raw` adapter's "paste into your system prompt" workflow is too manual.
-
-### The adapter interface covers all three
-
-The `Adapter` protocol's `setup` method has no constraints on what
-it does. An instruction-driven adapter writes MCP config + instructions.
-A plugin-driven adapter installs the plugin package + writes plugin
-config. The MCP resource path needs no adapter at all — it's a server-
-side feature.
+This is a server-side feature, not an adapter.
 
 ## Design
 
@@ -174,88 +210,74 @@ Three things to implement:
 - **`name`/`display_name`** — for CLI display and `--framework` flag
   matching.
 
-### Layer 3: Adapter implementations
+### Layer 3: Adapter Patterns (Documented Examples)
 
-Each adapter is a single Python file, typically 40-80 lines. The adapter
-has full control over what it writes.
+The following show what adapters look like when implemented. **None of these ship in this PR.**
+Each is a single Python file, typically 40-80 lines. The adapter has full control over what it writes.
 
-#### `claude_code.py` (~80 lines) — instruction-driven
+#### Pattern A: Instruction-Driven Adapter (Goose example)
 
-Refactors the existing `write_init_files`, `write_hook_script`, and
-`merge_settings_hooks` into the adapter protocol. No behavior change.
+An instruction-driven adapter writes MCP config + instruction files the agent reads at startup.
 
 ```python
-class ClaudeCodeAdapter:
-    name = "claude-code"
-    display_name = "Claude Code"
+class GooseAdapter:
+    name = "goose"
+    display_name = "Goose"
 
-    def setup(self, content, credentials, project_dir, *,
-                    scope, overwrite=False):
+    def setup(self, content, credentials, project_dir, *, scope, overwrite=False):
+        # Goose uses YAML config in platform-specific config dir
         if scope == "global":
-            base = Path.home() / ".claude"
+            config_path = Path.home() / ".config" / "goose" / "config.yaml"
         else:
-            base = project_dir / ".claude"
+            config_path = project_dir / ".goose" / "config.yaml"
 
-        # 1. Write rule file
-        rules_dir = base / "rules"
-        rules_dir.mkdir(parents=True, exist_ok=True)
-        rule_path = rules_dir / "memoryhub-loading.md"
-        rule_path.write_text(render_rule_markdown(content))
+        # 1. Add MCP server to extensions config (YAML merge)
+        config = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+        extensions = config.setdefault("extensions", {})
+        extensions["memoryhub"] = {
+            "type": "mcp",
+            "url": credentials.server_url,
+            "auth": {"api_key": f"${{{credentials.api_key_env}}}"},
+        }
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(yaml.safe_dump(config))
 
-        # 2. Write hook script
-        hooks_dir = base / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        hook_path = hooks_dir / "load-memories.sh"
-        hook_path.write_text(HOOK_SCRIPT)
-        hook_path.chmod(hook_path.stat().st_mode | 0o111)
-
-        # 3. Merge hook entries into settings.json
-        settings_path = base / "settings.json"
-        merge_settings_hooks(settings_path)
+        # 2. Write agent instructions (Goose reads from project .goosehints or system prompt)
+        # This assumes .goosehints is the instruction file - actual pattern TBD
+        instr_path = project_dir / ".goosehints"
+        instr_path.write_text(render_rule_markdown(content))
 
         return AdapterResult(
-            files_written=[rule_path, hook_path],
-            files_modified=[settings_path],
+            files_written=[instr_path],
+            files_modified=[config_path],
         )
 
     def detect(self, project_dir):
-        return (project_dir / ".claude").is_dir()
+        return (project_dir / ".goose").is_dir()
 ```
 
-The `render_rule_markdown(content: MemoryInstruction) -> str` helper
-assembles the sections into the markdown format with headers. This is a
-shared utility, not adapter-specific — every adapter that writes a
-markdown file uses it.
+**Note:** Goose's MCP config pattern is unverified. This example shows the structure;
+actual implementation requires investigating Goose's extension config format.
 
-The hook script remains a static string constant (it doesn't vary per
-project). It stays in `project_config.py` or moves to a separate
-`hooks.py` module.
+#### Pattern B: Plugin-Driven Adapter (OpenClaw example)
 
-#### `openclaw.py` (~80 lines) — plugin-driven
-
-Installs the MemoryHub plugin and configures it in `openclaw.json`. The
-plugin handles MCP connection, auto-recall, session lifecycle, and memory
-slot ownership. No instruction file is needed.
+A plugin-driven adapter assumes the plugin is already installed and just writes framework
+config pointing to the MemoryHub server. The plugin handles MCP connection, auto-recall,
+and session lifecycle programmatically — no instruction file needed.
 
 ```python
 class OpenClawAdapter:
     name = "openclaw"
     display_name = "OpenClaw"
 
-    def setup(self, content, credentials, project_dir, *,
-                    scope, overwrite=False):
+    def setup(self, content, credentials, project_dir, *, scope, overwrite=False):
+        # Assumes plugin already installed via: npm install @memory-hub/openclaw-mh-plugin
         if scope == "global":
             config_path = Path.home() / ".config" / "openclaw" / "config.json"
         else:
             config_path = project_dir / "openclaw.json"
 
-        # 1. Install the plugin package
-        subprocess.run(
-            ["npm", "install", "@memory-hub/openclaw-mh-plugin"],
-            cwd=project_dir, check=True,
-        )
-
-        # 2. Merge plugin config into openclaw.json
+        # Merge plugin config into openclaw.json
         config = json.loads(config_path.read_text()) if config_path.exists() else {}
         plugins = config.setdefault("plugins", {})
         plugins.setdefault("slots", {})["memory"] = "openclaw-memoryhub"
@@ -271,139 +293,61 @@ class OpenClawAdapter:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(config, indent=2) + "\n")
 
-        return AdapterResult(
-            files_written=[],
-            files_modified=[config_path],
-        )
+        return AdapterResult(files_written=[], files_modified=[config_path])
 
     def detect(self, project_dir):
         return (project_dir / "openclaw.json").exists()
 ```
 
-The `MemoryInstruction` argument is unused — the plugin handles agent
-behavior programmatically, not via instructions.
+**Note:** The `content` parameter is unused — the plugin bundles its own instructions.
+This adapter just writes ~15 lines of JSON config.
 
-#### `opencode.py` (~50 lines) — instruction-driven
+OpenCode follows the same pattern with slightly different JSON structure:
 
 ```python
 class OpenCodeAdapter:
     name = "opencode"
     display_name = "OpenCode"
 
-    def setup(self, content, credentials, project_dir, *,
-                    scope, overwrite=False):
+    def setup(self, content, credentials, project_dir, *, scope, overwrite=False):
+        # Assumes plugin already installed via: opencode plugin @memory-hub/opencode-mh-plugin
         if scope == "global":
-            config_path = Path.home() / ".opencode" / "config.json"
+            config_path = Path.home() / ".config" / "opencode" / "config.json"
         else:
-            config_path = project_dir / ".opencode" / "config.json"
+            config_path = project_dir / "opencode.json"
 
-        # 1. Merge MCP server entry (OpenCode format: type + string array headers)
+        # Merge plugin config into opencode.json (different structure than OpenClaw)
         config = json.loads(config_path.read_text()) if config_path.exists() else {}
-        servers = config.setdefault("mcpServers", {})
-        servers["memoryhub"] = {
-            "type": "remote",
-            "url": credentials.server_url,
-            "headers": [
-                f"Authorization: Bearer ${{{credentials.api_key_env}}}"
-            ],
-        }
+        plugins = config.setdefault("plugin", [])
+        plugins.append([
+            "@memory-hub/opencode-mh-plugin",
+            {
+                "server": {"url": credentials.server_url},
+                "auth": {"apiKey": f"${{{credentials.api_key_env}}}"},
+                "defaults": {"scope": "user"},
+            }
+        ])
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(config, indent=2) + "\n")
 
-        # 2. Instructions — OpenCode has no global rules mechanism
-        if scope == "project":
-            instr_path = project_dir / "memoryhub-loading.md"
-            instr_path.write_text(render_rule_markdown(content))
-            return AdapterResult(
-                files_written=[instr_path],
-                files_modified=[config_path],
-            )
-
-        return AdapterResult(
-            files_written=[],
-            files_modified=[config_path],
-            instructions_text=render_rule_markdown(content),
-        )
+        return AdapterResult(files_written=[], files_modified=[config_path])
 
     def detect(self, project_dir):
         return (project_dir / ".opencode").is_dir()
 ```
 
-#### `ogx.py` (~60 lines) — instruction-driven
+**Note:** OpenCode's plugin array format differs from OpenClaw's object-based format,
+but the adapter pattern is the same — merge config, return what changed.
 
-OGX/LlamaStack uses YAML-based `config.yaml` with a connectors list.
-The adapter writes the MCP connector entry and appends an OGX-specific
-snippet showing how to reference MemoryHub tools in Responses API calls.
+#### Other Frameworks
 
-```python
-class OgxAdapter:
-    name = "ogx"
-    display_name = "OGX / LlamaStack"
+Additional frameworks (OGX, Cursor, Aider, LibreChat, etc.) would follow similar patterns:
+- **Instruction-driven**: Write MCP config + instruction files (like Goose example)
+- **Plugin-driven**: Merge plugin config JSON (like OpenClaw/OpenCode examples)
 
-    def setup(self, content, credentials, project_dir, *,
-                    scope, overwrite=False):
-        # OGX config is YAML, not JSON
-        config_path = project_dir / "config.yaml"
-        if config_path.exists():
-            config = yaml.safe_load(config_path.read_text()) or {}
-        else:
-            config = {}
+The pattern is determined by framework capabilities, not adapter design.
 
-        # Add MCP connector
-        connectors = config.setdefault("connectors", [])
-        if not any(c.get("connector_id") == "memoryhub" for c in connectors):
-            connectors.append({
-                "connector_id": "memoryhub",
-                "provider_id": "model-context-protocol",
-                "url": credentials.server_url,
-            })
-        config_path.write_text(yaml.safe_dump(config, sort_keys=False))
-
-        # Write instructions (print to stdout — OGX has no rules file convention)
-        text = render_rule_markdown(content) + "\n" + OGX_API_SNIPPET
-        return AdapterResult(
-            files_written=[],
-            files_modified=[config_path],
-            instructions_text=text,
-        )
-
-    def detect(self, project_dir):
-        return (project_dir / "config.yaml").exists()
-```
-
-`OGX_API_SNIPPET` is the existing `_OGX_SNIPPET` block showing `run.yaml`
-connector config and Responses API tool reference.
-
-#### `raw.py` (~20 lines)
-
-Prints instructions to stdout, writes no files. The output is universal
-markdown suitable for pasting into any system prompt or `AGENTS.md` file.
-
-```python
-class RawAdapter:
-    name = "raw"
-    display_name = "Raw (print to stdout)"
-
-    def setup(self, content, credentials, project_dir, *,
-                    scope, overwrite=False):
-        return AdapterResult(
-            files_written=[],
-            files_modified=[],
-            instructions_text=render_rule_markdown(content),
-        )
-
-    def detect(self, project_dir):
-        return False  # never auto-detected
-```
-
-The `raw` adapter replaces three former `--format` values:
-- `system-prompt` → `raw` (paste the output into a system prompt)
-- `agents-md` → `raw` (paste into `AGENTS.md` for Codex CLI, OpenCode)
-- `raw` → `raw` (unchanged)
-
-These were all print-to-stdout with minor header variations. The
-differences weren't worth separate adapters — the user pastes the
-output wherever their framework reads instructions.
+**These examples demonstrate the adapter pattern. None are implemented in this PR.**
 
 ### Layer 4: Universal core (orchestration)
 
@@ -583,33 +527,81 @@ needs different merge logic just does it inline.
   generator produces them for all projects, or should they remain
   repo-specific additions outside the generator's scope?
 
-## What this design does NOT cover
+## What This PR Does NOT Cover
 
-- **OpenClaw plugin development.** The OpenClaw adapter installs and
-  configures the existing plugin. Changes to the plugin itself (e.g.,
-  removing tool wrappers now that native MCP handles tool exposure) are
-  a separate task.
+- **Full working adapters for OpenClaw, OpenCode, Goose, OGX.** Those are
+  follow-up PRs. This PR ships the framework + documented examples showing
+  how they would work.
+
+- **OpenClaw plugin simplification.** The plugin (#490) wraps MCP tools.
+  Native MCP eliminates the need for wrappers. Separate cleanup PR.
 
 - **Turn-level hooks** (#313) — automatic rebias and extraction on each
   turn. Independent of onboarding.
 
-- **Auto-detection of framework** — the `detect` method is defined but
-  not wired into the CLI. A follow-up can add `--framework auto` that
-  calls `detect_adapter()`. The interface is ready.
+- **Auto-detection of framework** — the `detect` method is defined in the
+  protocol but not wired into the CLI. A follow-up can add `--framework auto`
+  that calls `detect_adapter()`. The interface is ready.
 
-## Adding a new framework
+- **Publishing plugins to npm.** OpenClaw and OpenCode plugins exist but
+  aren't published. Packaging and publishing are separate efforts.
 
-To add support for a new framework, a contributor:
+## Adding a New Framework (After This PR)
 
-1. Creates `memoryhub_cli/adapters/newframework.py` (~40-80 lines)
-2. Implements `setup`, `detect`, and the two name fields
-3. Registers it in `adapters/__init__.py` (one line)
-4. Adds a test file `tests/test_adapter_newframework.py`
+Once the framework lands, adding support for a new framework is straightforward:
 
-The contributor reads an existing adapter (50 lines of Python) and
-writes a similar one. The adapter has full control over file formats,
-merge semantics, and framework-specific quirks — whether that's JSON
-merge for OpenCode, YAML merge for OGX, or `npm install` for OpenClaw.
+1. Create `memoryhub_cli/adapters/newframework.py` (~40-80 lines)
+2. Implement `setup`, `detect`, and the two name fields
+3. Register it in `adapters/__init__.py` (one line)
+4. Add a test file `tests/test_adapter_newframework.py`
+
+The contributor reads an existing adapter (Claude Code for instruction-driven,
+or the openclaw/opencode examples for plugin-driven) and writes a similar one.
+The adapter has full control over file formats, merge semantics, and framework-
+specific quirks — whether that's JSON merge, YAML merge, or `npm install`.
+
+## Summary: What Ships vs What's Next
+
+### This PR Ships ✅
+
+**Framework only:**
+- `MemoryInstruction` dataclass (universal content model)
+- `Adapter` protocol (generic enough for both patterns)
+- `AdapterResult` (what happened, not how)
+- Adapter registry (`ADAPTERS` dict, `get_adapter()`, `detect_adapter()`)
+- CLI wiring (`--framework`, `--global`, `--dry-run`)
+- MCP resource `memoryhub://agent-instructions` for zero-config discovery
+- Tests for protocol, registry, and MCP resource
+- **Documented adapter patterns** (code examples in this doc showing how to implement adapters)
+
+**Estimated:** ~270 lines of production code + pattern documentation
+
+**No concrete adapters ship.** The framework is proven through examples, not implementations.
+
+### Follow-Up Issues 📋
+
+Each adapter becomes its own issue with clear prerequisites:
+
+**High Priority (plugins exist):**
+1. **Claude Code plugin** — Bundle existing rules + hooks, submit to claude.com/plugins directory
+   - Blocks: Decision on whether to keep `config init` instruction-driven support
+2. **OpenClaw config adapter** — Merge plugin config into `openclaw.json` (if needed)
+   - Prerequisite: Verify plugin can't handle config interactively
+3. **OpenCode config adapter** — Merge plugin config into `opencode.json` (if needed)
+   - Prerequisite: Verify plugin can't handle config interactively
+
+**Medium Priority (MCP-capable, no plugin yet):**
+4. **Goose adapter** — Add MCP server to YAML config + write instructions
+   - Prerequisite: Verify Goose MCP config pattern
+5. **LibreChat adapter** — Configure MCP server with OAuth (#82)
+   - Prerequisite: LibreChat integration complete
+
+**Low Priority (speculative):**
+6. **OGX adapter** — YAML config + Responses API snippet
+   - Prerequisite: Working OGX/LlamaStack integration
+7. **Auto-detection** — `--framework auto` using adapter `detect()` methods
+
+Each follow-up is ~80 lines of adapter code + ~100 lines of tests.
 
 ## Impact on existing code
 
@@ -638,18 +630,20 @@ The refactor is additive until the final switchover:
 Steps 1-2 are the core refactor with no behavior change for existing
 users. Steps 3-5 add new capability. Step 6 is cleanup.
 
-## Implementation plan
+## Implementation Plan
 
-| Step | What | Behavior change | Est. lines |
-|------|------|----------------|------------|
-| 1 | Extract `MemoryInstruction` dataclass + `build_instructions()` | None (internal refactor) | +60, -40 |
-| 2 | Create `adapters/claude_code.py` wrapping existing functions | None (existing behavior preserved) | +80 |
-| 3 | Create `adapters/openclaw.py` (plugin-driven) | New: `--framework openclaw` installs plugin + config | +80 |
-| 4 | Create `adapters/opencode.py` | New: `--framework opencode` works | +50 |
-| 5 | Create `adapters/ogx.py` | New: `--framework ogx` works | +60 |
-| 6 | Create `adapters/raw.py` | Replaces `system-prompt`, `agents-md`, `raw` | +20 |
-| 7 | Adapter registry + `--framework` / `--global` CLI flags | New flags, `--format` deprecated | +40 |
-| 8 | `--dry-run` flag | New: safe preview | +30 |
-| 9 | MCP resource `memoryhub://agent-instructions` | New: agents fetch instructions via MCP | +30 |
-| 10 | Tests for each adapter + MCP resource | | +250 |
-| 11 | Simplify OpenClaw plugin (remove tool wrappers) | Separate PR | -340 |
+This PR delivers **the framework only**:
+
+| Step | What | Est. lines |
+|------|------|------------|
+| 1 | Extract `MemoryInstruction` dataclass + `build_instructions()` | +60 |
+| 2 | Define `Adapter` protocol + `AdapterResult` | +30 |
+| 3 | Adapter registry + discovery (`ADAPTERS` dict, `get_adapter()`) | +30 |
+| 4 | CLI wiring: `--framework`, `--global`, `--dry-run` flags | +40 |
+| 5 | MCP resource `memoryhub://agent-instructions` | +30 |
+| 6 | Tests for protocol + registry + MCP resource | +80 |
+| 7 | Document adapter patterns in this design doc (examples below) | +200 (doc) |
+
+**Total estimated:** ~270 lines of code + pattern documentation
+
+**No adapters ship in this PR.** Examples in the design doc show how to implement them.
