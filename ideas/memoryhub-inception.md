@@ -128,7 +128,7 @@ The development path: build it as a standalone component deployable to existing 
 Landscape survey of existing solutions:
 
 - **Mem0** (51.8k stars, Apache 2.0): most popular OSS memory layer; hybrid vector+graph+KV, MCP support. But graph memory, analytics, and governance are cloud-only; no K8s operator, no multi-agent coordination, no temporal awareness.
-- **Letta/MemGPT** (21.9k stars): LLM self-managed memory blocks (NeurIPS 2023). Clever, but Docker-centric, no compliance framework, no shared memory, and memory ops consume tokens.
+- **Letta/MemGPT** (21.9k stars): pioneered LLM self-managed memory blocks (NeurIPS 2023). Different deployment model (Docker-centric) and different architectural trade-offs around compliance, shared memory, and token budget for memory ops.
 - **Zep/Graphiti**: strongest temporal model in the market (bi-temporal validity intervals, hybrid retrieval without query-time LLM calls). Requires Neo4j; full platform is commercial SaaS; no K8s story.
 - **Cognee** (14.9k stars): ECL pipeline, 14 retrieval modes, self-improving memory; well-funded but young, no compliance or K8s narrative.
 - **Hindsight** (7.1k stars): retain/recall/reflect learning, first to cross 90% on LongMemEval; unclear OSS/commercial boundary.

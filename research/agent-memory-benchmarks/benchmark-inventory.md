@@ -217,7 +217,7 @@ Long-context benchmarks are included here because they are routinely cited as "m
 | AMA-Bench | 2026 | PM + AG | Yes | Not yet | Likely (arxiv + AMB listing) | **Likely exposes gaps** |
 | MemoryArena | 2026 | PM + AG | Yes | Not yet | To verify | **Exposes long-context vs memory confusion** |
 | DMR (MemGPT) | 2023 | PM | Yes | Yes | Letta repo | Legacy |
-| Letta Context-Bench | 2025–26 | AG | Framework-held | No | Yes | **Wrong fit** (tests models, not memory systems) |
+| Letta Context-Bench | 2025–26 | AG | Framework-held | No | Yes | **Different focus** (tests models within a fixed framework, not memory systems head-to-head) |
 | AMB (harness) | 2026 | PM | Yes | N/A (harness) | Yes | **Run MemoryHub against it** |
 | BEAM | 2026 | PM | Yes | Not yet | Via AMB | Good at million-token scale |
 | LifeBench | 2026 | PM + PS | Yes | Not yet | Via AMB + arxiv | Niche (non-declarative) |

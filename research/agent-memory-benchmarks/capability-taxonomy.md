@@ -76,7 +76,7 @@ The persistent-memory benchmarks focus almost entirely on groups 1–3. The ente
 
 - **What it measures:** is the layer good at deciding what to store and how to structure it?
 - **Benchmarks:** AMB (ingestion time tracked separately), MemoryAgentBench (test-time learning), AMA-Bench (causality graph construction during ingest).
-- **Ergonomic sub-question (Letta):** if an agent is given explicit write tools (e.g. `create_entity`, `add_observation`), does it actually use them correctly? The "well-designed agent with a filesystem beats specialized memory tools" result says agent-driven writes are fragile.
+- **Ergonomic sub-question (Letta):** if an agent is given explicit write tools (e.g. `create_entity`, `add_observation`), does it actually use them correctly? Letta's finding that a well-designed agent with filesystem tools can outperform specialized memory tools suggests that tool ergonomics and model familiarity matter as much as the storage backend.
 
 ### 3.2 Deduplication / consolidation
 

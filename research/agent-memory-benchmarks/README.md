@@ -53,7 +53,7 @@ Close runners-up (see `memoryhub-gap-analysis.md` for the full list):
 | AMA-Bench | 2026 | Persistent memory + agent | Not yet | **Will expose retrieval gaps** |
 | MemoryArena | 2026 | Persistent memory + agent | Not yet | Mirrors our use case |
 | DMR (MemGPT) | 2023 | Persistent memory | Yes | Legacy |
-| Letta Context-Bench | 2025–26 | Agent (framework-held) | No | **Wrong fit** — tests models, not memory systems |
+| Letta Context-Bench | 2025–26 | Agent (framework-held) | No | **Different focus** — tests models within a fixed framework, not memory systems head-to-head |
 | AMB harness | 2026 | PM harness | N/A | **The on-ramp** |
 | BEAM | 2026 | Persistent memory | Not yet | Good for scale |
 | LifeBench | 2026 | Personalization (non-declarative) | No | Niche |
