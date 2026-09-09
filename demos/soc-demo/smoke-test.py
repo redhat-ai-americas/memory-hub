@@ -18,10 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../sdk/src"))
 
 from memoryhub import MemoryHubClient
 
-URL = os.environ.get(
-    "MEMORYHUB_URL",
-    "https://memory-hub-mcp-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/",
-)
+URL = os.environ.get("MEMORYHUB_URL", "")
 API_KEY = os.environ.get("MEMORYHUB_API_KEY", "")
 PROJECT_ID = "midwest-financial-soc"
 

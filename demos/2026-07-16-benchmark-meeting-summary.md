@@ -2,7 +2,7 @@
 
 ### Where we are
 
-MemoryHub's PersonaMem accuracy is **84.9%** with Granite embeddings, Granite reranker, and Gemini Pro as the answer model. This is a fresh full-pipeline run (589 queries) that passes both Cognee (81.8%) and hybrid-search (84.4%) on the AMB leaderboard. We are 1.7pp behind Hindsight (86.6%) -- the gap to close with fact extraction and reconciliation.
+MemoryHub's PersonaMem accuracy is **83.7%** (submitted) with Granite embeddings, Granite reranker, and Gemini Pro as the answer model. An earlier internal run scored 84.9%; the submitted result uses the upstream adapter. Both scores exceed Cognee (81.8%) among published AMB leaderboard entries. We are behind Hindsight (86.6%) and hybrid-search (84.4%) -- the gap to close with fact extraction and reconciliation. Leaderboard placement is pending maintainer review of [PR #34](https://github.com/vectorize-io/agent-memory-benchmark/pull/34).
 
 On LongMemEval (retrieval benchmark, 500 queries), MemoryHub scores **R@10 = 1.000** and **MRR = 1.000** -- perfect retrieval.
 
@@ -59,12 +59,15 @@ The 85% target is within reach. Reconciliation and fact-augmented retrieval are 
 
 ### Competitive landscape (PersonaMem 32k, all Gemini 3.1 Pro Preview)
 
-| System | Accuracy | Approach |
-|---|---|---|
-| Hindsight | 86.6% | LLM fact extraction into semantic graph |
-| **MemoryHub (Granite)** | **84.9%** | **Granite embed + reranker, hybrid search, no extraction** |
-| hybrid-search | 84.4% | 512-token chunking, dense+sparse embeddings |
-| Cognee | 81.8% | Chunking + graph entity extraction |
-| MemoryHub (MiniLM, July 12) | 81.2% | MiniLM embed, no working reranker |
+Published AMB leaderboard entries shown for context; MemoryHub's results are internal measurements, not published leaderboard positions. The submitted score (83.7%, August 2026) is pending review.
 
-The story: MemoryHub is now competitive with the top systems on raw accuracy, and the remaining 1.7pp gap to Hindsight is attributable to fact extraction (which Hindsight uses and we have built but not yet activated in the benchmark path). The reconciliation pipeline (#347) is the next step toward closing it.
+| System | Accuracy | Approach | Source |
+|---|---|---|---|
+| Hindsight | 86.6% | LLM fact extraction into semantic graph | AMB leaderboard |
+| hybrid-search | 84.4% | 512-token chunking, dense+sparse embeddings | AMB leaderboard |
+| MemoryHub (Granite, internal) | 84.9% | Granite embed + reranker, hybrid search, no extraction | Internal run, 2026-07-16 |
+| **MemoryHub (submitted)** | **83.7%** | **Granite embed + reranker, upstream adapter** | **PR #34, 2026-08-21** |
+| Cognee | 81.8% | Chunking + graph entity extraction | AMB leaderboard |
+| MemoryHub (MiniLM, July 12) | 81.2% | MiniLM embed, no working reranker | Internal run |
+
+The remaining gap to Hindsight is attributable to fact extraction (which Hindsight uses and we have built but not yet activated in the benchmark path). The reconciliation pipeline (#347) is the next step toward closing it.

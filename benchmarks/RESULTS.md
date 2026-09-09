@@ -25,14 +25,24 @@ Raw result JSON files are committed alongside this document in `benchmarks/`.
 | MemPalace (semantic only) | LongMemEval | 0.966 | -- | -- | text-embedding-3-large (3072d) | Wu et al., ICLR 2025 |
 | GPT-4o (no memory layer) | LongMemEval | ~0.30-0.70 | -- | -- | (none) | Wu et al., ICLR 2025 |
 
+**Published leaderboard results (AMB):**
+
 | System | PersonaMem 32k | Answer LLM | Embedding / Retrieval | Source |
 |--------|---------------|------------|----------------------|--------|
 | Hindsight | 86.6% | Gemini 3.1 Pro Preview | LLM fact extraction into semantic graph | AMB leaderboard |
-| **MemoryHub v0.3 (Granite)** | **84.9%** | Gemini 3.1 Pro Preview | granite-embedding-english + granite-reranker-english-r2 (GPU) | This document, 2026-07-16 |
 | hybrid-search | 84.4% | Gemini 3.1 Pro Preview | 512-token chunking, dense+sparse embeddings | AMB leaderboard |
 | Cognee | 81.8% | Gemini 3.1 Pro Preview | chunking + graph entity extraction | AMB leaderboard |
-| MemoryHub v0.2 (MiniLM) | 81.2% | Gemini 3.1 Pro Preview | all-MiniLM-L6-v2 (384d), no reranker | This document, 2026-07-12 |
-| BM25 baseline | 67.7% | Gemini 3.1 Flash Lite | keyword only | This document, 2026-07-12 |
+
+**MemoryHub results (submitted to AMB leaderboard, pending review):**
+
+| Run | PersonaMem 32k | Answer LLM | Embedding / Retrieval | Date |
+|-----|---------------|------------|----------------------|------|
+| Upstream adapter (submitted) | **83.7%** | Gemini 3.1 Pro Preview | granite-embedding-english + granite-reranker-english-r2 (GPU) | 2026-08-21 |
+| Internal v0.3 (Granite) | 84.9% | Gemini 3.1 Pro Preview | granite-embedding-english + granite-reranker-english-r2 (GPU) | 2026-07-16 |
+| Internal v0.2 (MiniLM) | 81.2% | Gemini 3.1 Pro Preview | all-MiniLM-L6-v2 (384d), no reranker | 2026-07-12 |
+| BM25 baseline | 67.7% | Gemini 3.1 Flash Lite | keyword only | 2026-07-12 |
+
+MemoryHub's upstream adapter and results were submitted as [PR #34](https://github.com/vectorize-io/agent-memory-benchmark/pull/34) to the AMB repository on 2026-08-21. Leaderboard placement is pending maintainer review.
 
 **Source ablation (Flash Lite answer LLM, not leaderboard-comparable -- same model across all three for relative comparison):**
 
@@ -44,9 +54,9 @@ Raw result JSON files are committed alongside this document in `benchmarks/`.
 
 Notes:
 - MemPalace numbers are from the LongMemEval paper's reported "session decomposition + fact-augmented key expansion + time-aware query expansion" pipeline.
-- Our run uses the oracle variant (evidence sessions only, not the full 115K-token haystack). The oracle variant isolates retrieval quality from the haystack-filtering step. Running LongMemEval_S (full haystack) is the next comparison point.
-- MemoryHub v0.3 uses granite-embedding-english + granite-reranker-english-r2 (GPU). MemoryHub v0.2 used all-MiniLM-L6-v2 (384-dim). MemPalace uses text-embedding-3-large (3072-dim).
-- All PersonaMem leaderboard runs use Gemini 3.1 Pro Preview as the answer LLM. The ablation table uses Gemini 3.1 Flash Lite (not comparable to leaderboard numbers, but valid for relative comparison across source configurations).
+- Our LongMemEval run uses the oracle variant (evidence sessions only, not the full 115K-token haystack). The oracle variant isolates retrieval quality from the haystack-filtering step. Running LongMemEval_S (full haystack) is the next comparison point.
+- The 83.7% submitted result and the 84.9% internal result both use Granite embeddings and reranker. The difference is attributable to adapter implementation details (upstream vs internal harness) and run-to-run variance.
+- All PersonaMem runs targeting leaderboard comparison use Gemini 3.1 Pro Preview as the answer LLM. The ablation table uses Gemini 3.1 Flash Lite (not comparable to Pro numbers, but valid for relative comparison across source configurations).
 - The v0.3 Combined row (84.9%, 2026-07-19) was removed from the main table -- it was invalidated by a tenant mismatch bug (dreaming memories were never searched). See the detailed run section below.
 - Retrieval-unit routing (#447) is the planned architecture change to make dreaming facts contribute to combined search results.
 
@@ -72,7 +82,7 @@ Notes:
 | MemoryHub | Gemini 3.1 Flash Lite | 589 | 417 | 70.8% |
 | BM25 baseline | Gemini 3.1 Flash Lite | 589 | 399 | 67.7% |
 
-**AMB Leaderboard comparison (all using Gemini 3.1 Pro Preview):**
+**Comparison with published AMB leaderboard entries (all using Gemini 3.1 Pro Preview):**
 
 | System | Approach | Accuracy |
 |--------|----------|----------|
@@ -93,7 +103,7 @@ Result files: `amb-outputs/personamem/_archive/memoryhub-pro-unchunked-20260712/
 |----------|-------|---------|---------|----------|
 | **MemoryHub (Granite)** | **Gemini 3.1 Pro Preview** | **589** | **500** | **84.9%** |
 
-**AMB Leaderboard comparison (all using Gemini 3.1 Pro Preview):**
+**Comparison with published AMB leaderboard entries (all using Gemini 3.1 Pro Preview):**
 
 | System | Approach | Accuracy |
 |--------|----------|----------|
@@ -151,6 +161,22 @@ Result file: `outputs/personamem/combined-pro/rag/32k.json`
 3. **Architecture changes needed to realize value:** retrieval-unit routing (search facts and transcripts separately, merge results), fact-aware scoring (boost extracted facts in RRF), or a two-stage pipeline (retrieve transcripts, then enrich with related facts).
 
 Result files: `outputs/personamem/combined-flash-lite/rag/32k.json`, `outputs/personamem/ablation-library-only/rag/32k.json`, `outputs/personamem/ablation-dreaming-only/rag/32k.json`
+
+#### Run: 2026-08-21 (Upstream adapter reproduction, Gemini 3.1 Pro Preview) -- SUBMITTED
+
+**Pipeline state:** Upstream AMB provider adapter (`memoryhub.py`, ~130 lines) running against the deployed MemoryHub cluster. Granite embeddings + granite-reranker-english-r2 (GPU), hybrid search with RRF blend. Same retrieval pipeline as the 2026-07-16 internal run. Documents ingested into a fresh `amb-*` tenant via the upstream adapter's `add_memories()` path.
+
+**Answer LLM:** Gemini 3.1 Pro Preview (leaderboard-comparable).
+
+| Provider | Model | Queries | Correct | Accuracy |
+|----------|-------|---------|---------|----------|
+| **MemoryHub (upstream adapter)** | **Gemini 3.1 Pro Preview** | **589** | **493** | **83.7%** |
+
+**Delta from internal v0.3 run:** -1.2pp (83.7% vs 84.9%). The difference is attributable to adapter implementation differences (upstream adapter vs internal harness) and run-to-run variance. Both runs use the same retrieval pipeline and answer LLM.
+
+**Submission:** This result was submitted to the AMB leaderboard as [PR #34](https://github.com/vectorize-io/agent-memory-benchmark/pull/34) with [issue #33](https://github.com/vectorize-io/agent-memory-benchmark/issues/33). Leaderboard placement pending maintainer review.
+
+Result file: upstream fork at `~/Developer/agent-memory-benchmark/outputs/personamem/memoryhub/rag/32k.json`
 
 #### Run: 2026-07-12 (v0.2, SDK provider with chunking, Flash Lite)
 
