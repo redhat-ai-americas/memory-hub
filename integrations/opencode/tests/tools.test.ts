@@ -102,7 +102,7 @@ describe("createTools", () => {
       });
     });
 
-    it("returns an error string instead of throwing", async () => {
+    it("returns a structured error result instead of throwing", async () => {
       const { tools } = makeTools({
         callMemory: vi.fn().mockRejectedValue(new Error("boom")),
       });
@@ -110,7 +110,7 @@ describe("createTools", () => {
         { query: "anything" },
         ctx,
       );
-      expect(result).toBe("Error: boom");
+      expect(result).toEqual({ title: "Error", output: "boom" });
     });
   });
 

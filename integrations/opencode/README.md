@@ -117,7 +117,7 @@ streamable HTTP — the same governed path every other MemoryHub surface uses.
 
 ```bash
 npm install
-npm test          # vitest, 61 tests
+npm test          # vitest
 npm run typecheck
 npm run build     # tsup -> dist/
 ```
