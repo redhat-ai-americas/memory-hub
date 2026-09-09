@@ -1,5 +1,6 @@
 """Memory data models (Pydantic + SQLAlchemy)."""
 
+from memoryhub_core.models.audit import AuditLog
 from memoryhub_core.models.base import Base, TimestampMixin
 from memoryhub_core.models.campaign import Campaign, CampaignMembership
 from memoryhub_core.models.contradiction import ContradictionReport
@@ -58,6 +59,7 @@ from memoryhub_core.models.utils import generate_stub
 
 __all__ = [
     "AccessLevel",
+    "AuditLog",
     "Base",
     "Campaign",
     "CampaignCreate",

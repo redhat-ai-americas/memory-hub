@@ -15,13 +15,13 @@ from memoryhub_core.services.memory import read_memory as _read_memory
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
-from src.core.audit import record_event
 from src.core.authz import (
     AuthenticationError,
     authorize_read,
     get_claims_from_context,
     resolve_tenant,
 )
+from src.tools._audit_helpers import record_audit_event
 from src.tools._deps import get_db_session, get_s3_adapter, release_db_session
 
 logger = logging.getLogger(__name__)
@@ -206,7 +206,7 @@ async def read_memory(
             project_ids=project_ids,
             role_names=role_names,
         ):
-            record_event(
+            await record_audit_event(
                 event_type="memory.read",
                 actor_id=claims["sub"],
                 driver_id=claims["sub"],
@@ -214,10 +214,12 @@ async def read_memory(
                 owner_id=node.owner_id,
                 memory_id=memory_id,
                 decision="denied",
+                tenant_id=tenant,
+                session=session,  # Session available - will use DB + stub
             )
             raise ToolError(f"Not authorized to read memory {memory_id}.")
 
-        record_event(
+        await record_audit_event(
             event_type="memory.read",
             actor_id=claims["sub"],
             driver_id=claims["sub"],
@@ -225,6 +227,8 @@ async def read_memory(
             owner_id=node.owner_id,
             memory_id=memory_id,
             decision="allowed",
+            tenant_id=tenant,
+            session=session,  # Session available - will use DB + stub
         )
 
         result = node.model_dump(mode="json")

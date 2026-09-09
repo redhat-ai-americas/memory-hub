@@ -1,9 +1,9 @@
 """Structured audit logging for MemoryHub MCP operations.
 
-Every tool invocation that touches authorization or data mutation emits
-a JSON event via the ``memoryhub.audit`` logger. This stub writes to the
-standard Python logging pipeline; a future phase will persist events to
-a durable store (PostgreSQL audit table or external SIEM).
+Stub implementation that writes JSON to the memoryhub.audit logger.
+Tools should use memoryhub_core.services.audit.record_event() for
+PostgreSQL persistence; this stub remains for backward compatibility
+and local development without a database.
 
 Events are fire-and-forget: audit failures never block the tool operation.
 """
@@ -26,6 +26,14 @@ def record_event(
     metadata: dict | None = None,
 ) -> None:
     """Emit a structured audit event as JSON to the memoryhub.audit logger.
+
+    DEPRECATED: This is the stub implementation (logger-only).
+    Use memoryhub_core.services.audit.record_event() for PostgreSQL persistence.
+
+    This function remains for:
+    - Local development without PostgreSQL
+    - register_session (which has no DB session available)
+    - Backward compatibility during migration
 
     Args:
         event_type: Dot-separated event kind (e.g. "memory.write",
