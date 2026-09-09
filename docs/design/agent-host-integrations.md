@@ -134,6 +134,30 @@ context (this is also what happens when the 15s timeout fires).
   fresh transport the first caller's retry is using. Non-auth errors
   propagate without retry.
 
+### What opencode expects of a plugin (loading and packaging)
+
+For reviewers unfamiliar with opencode's plugin model:
+
+- **Loading.** opencode discovers plugins from `.opencode/plugins/*.ts|js`
+  (project), `~/.config/opencode/plugins/` (global), and npm package
+  names listed in `opencode.json`'s `"plugin"` array. npm plugins are
+  auto-installed by opencode's embedded Bun runtime at startup; local
+  plugin files declare extra dependencies in `.opencode/package.json`.
+- **Contract.** A plugin file exports one or more named async factories
+  typed `Plugin` from `@opencode-ai/plugin`. The factory receives
+  `{ project, client, directory, worktree, $, serverUrl }` plus an
+  optional per-plugin options object, and returns a `Hooks` object.
+  There is no manifest file, no lifecycle registration, and no
+  capability/slot system (unlike OpenClaw's `openclaw.plugin.json` and
+  exclusive memory slot) — a plugin is just hooks plus tools.
+- **Failure expectations.** Plugin factories run at host startup;
+  throwing breaks the host session. Hence the inert-when-unconfigured
+  rule below and the never-throw policy in hooks.
+- **Versioning.** `@opencode-ai/plugin` versions track opencode
+  releases. The plugin pins a minimum and relies on structural typing;
+  the hook names it uses are stable except the two `experimental.*`
+  transforms (see Known risk).
+
 ### Configuration
 
 Resolution precedence, per value (first hit wins):
