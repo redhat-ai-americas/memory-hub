@@ -298,8 +298,10 @@ async def _create_chunk_children(
             branch_count=0,
             has_rationale=False,
         )
+        chunk_id = uuid.uuid4()
         chunk_node = MemoryNode(
-            id=uuid.uuid4(),
+            id=chunk_id,
+            logical_id=chunk_id,
             content=chunk_text,
             stub=chunk_stub,
             scope=scope,
@@ -366,8 +368,10 @@ async def create_fact_children(
             branch_count=0,
             has_rationale=False,
         )
+        fact_id = uuid.uuid4()
         fact_node = MemoryNode(
-            id=uuid.uuid4(),
+            id=fact_id,
+            logical_id=fact_id,
             content=fact["content"],
             stub=fact_stub,
             scope=scope,
@@ -639,8 +643,10 @@ async def update_memory(
             continue
 
         # Deep copy non-chunk branch to new parent
+        copied_id = uuid.uuid4()
         copied_child = MemoryNode(
-            id=uuid.uuid4(),
+            id=copied_id,
+            logical_id=child.logical_id or copied_id,
             content=child.content,
             stub=child.stub,
             scope=child.scope,
