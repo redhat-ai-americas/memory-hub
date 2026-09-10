@@ -442,6 +442,8 @@ async def _backfill_compiled_entries(
                     branch_type=node.branch_type,
                     has_children=has_children,
                     has_rationale=has_rationale,
+                    source=getattr(node, 'source', 'agent'),
+                    upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
                     created_at=node.created_at,
                 ),
                 0.0,
