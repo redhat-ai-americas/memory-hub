@@ -1,9 +1,75 @@
 # Next Session -- OMP Interop
 
-## Next: <to be planned via /plan-next-session>
+## Next: Trust provenance and dreaming gates (#559, #562)
 
-(No next-session focus selected yet. Run `/plan-next-session omp-interop`
-to pick the first slice from the phases below.)
+Add upstream trust level tracking to the memory model and deterministic
+threshold gates to the dreaming pipeline. Both are internal security and
+quality improvements with no OMP dependency.
+
+1. **#559 -- Track upstream trust level through dreaming extraction**
+   Add `upstream_trust_level` field to MemoryNode (values: `trusted`,
+   `untrusted`, `mixed`). Alembic migration with `'trusted'` default
+   for existing rows. The dreaming extraction pipeline determines trust
+   level from the conversation's source metadata and carries it through
+   to the extracted memory. Surface on MemoryNodeRead and SDK Memory
+   response models.
+
+   Key files:
+   - `src/memoryhub_core/models/memory.py` (new column)
+   - `src/memoryhub_core/models/schemas.py` (new field, new StrEnum)
+   - `sdk/src/memoryhub/extraction/` (carry trust through extraction)
+   - Design doc: `planning/omp-informed-improvements.md#upstream-trust-level`
+
+2. **#562 -- Add deterministic threshold gates before dreaming consolidation**
+   Add configurable gates (`min_recall_count`, `min_unique_queries`,
+   `min_score`) that candidates must pass before the LLM consolidation
+   step. Candidates below threshold are deferred to the next cycle, not
+   discarded. Modeled on OpenClaw's deep-phase gates.
+
+   Key files:
+   - `sdk/src/memoryhub/extraction/` (gate logic before consolidation)
+   - Design doc: `planning/omp-informed-improvements.md#dreaming-gates`
+   - Reference: OpenClaw's `extensions/memory-core/` dreaming phases
+
+**Sequencing.** #559 first (schema + migration + extraction pipeline
+change), then #562 (pipeline logic only, no schema). Commit after each.
+
+**Constraints for the session:**
+- Schema changes require Alembic migration (CLAUDE.md)
+- Commit incrementally, not batched at end
+- The `source` column already exists with values `agent`/`dreaming`/
+  `import`. The new `upstream_trust_level` is orthogonal (source says
+  *who* created the memory; trust level says *how trustworthy* the
+  upstream content was)
+- Check whether recall counts are currently tracked at the candidate
+  level. If not, #562 may need a lightweight tracking mechanism before
+  the gates can evaluate candidates
+
+**Session start protocol:**
+- Premise checks (~5 min, report before acting):
+  - Verify `upstream_trust_level` column does not exist yet:
+    `grep -n upstream_trust src/memoryhub_core/models/memory.py`
+  - Check current extraction pipeline structure:
+    `ls sdk/src/memoryhub/extraction/`
+  - Check whether recall/query counts are tracked per candidate:
+    `grep -rn recall_count sdk/src/memoryhub/`
+  - Git state: `git status`, confirm branch, no stale index.lock
+- Rules with history:
+  - All pushes through PRs, never direct to main
+  - Schema changes require Alembic migration
+  - Commit incrementally during implementation
+- Stop-and-ask before:
+  - Adding columns to MemoryNode beyond what's in the design doc
+  - Changing existing extraction pipeline behavior (additive only)
+
+**Exit predicate:**
+- `upstream_trust_level` column exists with Alembic migration
+- Extraction pipeline populates trust level from source metadata
+- Field appears on API response models and SDK Memory model
+- Dreaming gates are configurable and run before LLM consolidation
+- Candidates below threshold are deferred, not discarded
+- Tests pass for both features
+- PR opened targeting `main`
 
 ## Remaining epic phases
 
@@ -164,10 +230,19 @@ phase are independent and could split across sessions if needed.
 - Phase 2's context assembly pipeline (#561) may surface retrieval
   quality concerns that belong in the retrieval-polish epic.
 
-## What landed last session
+## What landed last session (2026-09-09)
 
-(No sessions yet for this epic. Created 2026-09-09 from OMP prior art
-survey and standards sketching.)
+Epic bootstrapped from OMP prior art survey and standards sketching session.
+
+- OMP PR #3: prior art survey (7 docs, ~90KB) -- 16 harnesses, 10
+  enterprise services, 12 standards, protocol landscape, academic
+  foundations, convergence analysis
+- OMP PR #4: standards sketch (5 docs, ~25KB) -- MOF, MAP, Memory
+  Rights Standard, Memory Security Considerations
+- Design doc: `planning/omp-informed-improvements.md`
+- Issues #559-#567 filed, all in Backlog. #516 closed as superseded.
+
+**Closed:** #516 -- PTC-aligned provenance (superseded by #559 + #563)
 
 ## Watch out for
 
