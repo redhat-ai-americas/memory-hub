@@ -45,6 +45,7 @@ class Memory(BaseModel):
     source: str = "agent"  # "agent", "dreaming", or "import"
     upstream_trust_level: str = "trusted"
     generating_model: str | None = None
+    taint: dict[str, Any] | None = None
     content_truncated: bool = False
     full_available: bool = False
 
