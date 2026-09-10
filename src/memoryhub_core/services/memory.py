@@ -1187,6 +1187,8 @@ async def search_memories(
                     has_rationale=has_rationale,
                     content_type=node.content_type,
                     source=getattr(node, 'source', 'agent'),
+                    upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
+                    generating_model=getattr(node, 'generating_model', None),
                     created_at=node.created_at,
                 ), score))
         return results
@@ -1304,6 +1306,8 @@ async def search_memories(
                 has_rationale=has_rationale,
                 content_type=node.content_type,
                 source=getattr(node, 'source', 'agent'),
+                upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
+                generating_model=getattr(node, 'generating_model', None),
                 created_at=node.created_at,
             ), rrf_score))
     used_reranker = (
@@ -1906,6 +1910,8 @@ async def search_memories_with_focus(
                         has_rationale=has_rationale,
                         content_type=node.content_type,
                         source=getattr(node, 'source', 'agent'),
+                        upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
+                        generating_model=getattr(node, 'generating_model', None),
                         created_at=node.created_at,
                     ),
                     relevance_score,
@@ -2263,6 +2269,8 @@ def node_to_read(
         domains=node.domains,
         content_type=node.content_type,
         source=getattr(node, 'source', 'agent'),
+        upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
+        generating_model=getattr(node, 'generating_model', None),
         content_hash=getattr(node, 'content_hash', None),
         is_current=node.is_current,
         version=node.version,
