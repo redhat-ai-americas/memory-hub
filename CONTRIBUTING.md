@@ -176,39 +176,54 @@ Consumer priority order (check in this order): `memoryhub-ui/backend/` (breaks v
 
 ## Mock-vs-real test discipline
 
-A 100%-line-covered unit test suite is **not** sufficient evidence that a server-side change is deploy-ready. We have shipped at least two bugs that the unit tests passed but real production caught:
-
-1. **`numpy.float32` leakage** — pgvector returns numpy arrays, the test mocks return Python lists. The cosine-distance helper propagated `numpy.float32` to the response, which `pydantic_core.to_jsonable_python` rejected, and FastMCP silently dropped `structured_content`. 100% line coverage in unit tests; caught only by post-deploy `mcp-test-mcp` verification.
-2. **File permission mismatch** — Claude Code's Write tool creates 600 files, but OpenShift containers run as arbitrary non-root UIDs that need 644 to read. Tests passed locally; container crashed with `PermissionError` on deploy.
-
-Two takeaways:
-
-- **For new code that touches embeddings or pgvector**, add an integration test in `tests/integration/test_pgvector.py`. The integration suite already runs against real PostgreSQL via podman-compose.
-- **For deploys**, run `mcp-test-mcp` against the deployed pod to verify the changed code paths actually work end-to-end. The project-local `/deploy-mcp` slash command in `memory-hub-mcp/.claude/commands/deploy-mcp.md` already enforces this; if you're not using the agent tooling, that file doubles as the manual deploy-and-verify checklist — follow its steps by hand.
-
-The full mock-vs-real boundary audit is in the [#58 retrospective](retrospectives/2026-04-07_session-focus-vector-58/RETRO.md) under "Patterns."
+Unit tests alone don't prove a server-side change is deploy-ready. Add integration tests for code that touches embeddings or pgvector (`tests/integration/test_pgvector.py`), and run `mcp-test-mcp` against the deployed pod after any MCP server deploy. The full mock-vs-real boundary audit, with two detailed case studies, is in the [#58 retrospective](retrospectives/2026-04-07_session-focus-vector-58/RETRO.md) under "Patterns."
 
 ## Test data identification and cleanup
 
-When integration tests or manual testing run against a live deployment, they leave test data in the database. To keep dashboards and search results clean, **all test data must be identifiable** so automated cleanup can find it.
-
-**Required convention:** prefix test memory content with `[test]` — e.g., `[test] RBAC scope isolation a1b2c3`. The SDK helper `_test_content()` in `sdk/tests/test_rbac_live.py` does this automatically.
-
-**Known test owner_ids:** integration test fixtures use owner_ids like `test-user`, `dup-test-user`, `domain-test-user`, etc. The full list lives in `scripts/cleanup-test-data.py`.
-
-**Cleanup tooling:**
-
-- **Local:** `python scripts/cleanup-test-data.py` (dry-run by default, pass `--execute` to soft-delete)
-- **Cluster:** `deploy/cleanup/cronjob.yaml` runs weekly on Sundays at 03:00 UTC
-
-Both tools soft-delete matching rows (set `deleted_at`, clear `is_current`). They do not hard-delete — that's reserved for the admin API (#45).
+All test data created against a live deployment must be identifiable for automated cleanup. Prefix test memory content with `[test]` (e.g., `[test] RBAC scope isolation a1b2c3`). Run `python scripts/cleanup-test-data.py` locally (dry-run by default, `--execute` to soft-delete) or rely on the weekly cluster cronjob (`deploy/cleanup/cronjob.yaml`). See the cleanup script for the full list of known test `owner_id` values.
 
 ## Documentation expectations
 
 - **Update docs in the same PR as the code change.** A new feature with a stale design doc is worse than a new feature with no doc.
 - **`SYSTEMS.md` and `ARCHITECTURE.md` are the repo's front door.** Keep them current. If you add or remove a subsystem, update both.
 - **Per-subsystem docs in `docs/`** are the design source of truth. If implementation drifts from design, update the design first (or file an issue tracking the drift).
-- **Retrospectives.** After a major effort or a session that taught you something durable, write a retro under `retrospectives/YYYY-MM-DD_<topic>/RETRO.md`. The retros are where the project's institutional knowledge lives — they're worth more than the design docs in some cases.
+- **Retrospectives.** See the "How we work" section below for when and how to run retros.
+
+## How we work: epics, sessions, and retros
+
+We organize work into **epics** (multi-session efforts toward a goal) and **sessions** (individual working blocks, usually a few hours). Six slash commands in `.claude/skills/` drive the process. You don't need to memorize the details of each skill; the instructions are in the skill files themselves. What matters is understanding the workflow and knowing when to run each one.
+
+### The workflow
+
+```
+/plan-epics  →  /plan-epic  →  /plan-next-session  →  [do the work]  →  /session-close
+                                                                              ↓
+                                                          /reconcile  ←  (periodically)
+                                                          /retro      ←  (after major efforts)
+```
+
+### The skills
+
+| Skill | When to run | What it does |
+|---|---|---|
+| `/plan-epics` | Monthly, or when picking a focus | Portfolio view across all active epics. Identifies stalled or finished epics, surfaces new ones, helps you decide which to push next. |
+| `/plan-epic` | When starting a new epic or replanning an existing one | Decomposes one epic into phases with definitions-of-done, dependency gating, and ordering. Writes the multi-session arc. |
+| `/plan-next-session` | At the start of a working session | Reflects on what landed last time, triages open issues, and slices the next session's work from the epic plan. |
+| `/session-close` | Before wrapping up a session | Runs a checklist (tests, lint, uncommitted changes, secrets, docs), remediates safe issues, and writes a durable session summary. |
+| `/reconcile` | After a big session or several moderate ones | Reconciles the backlog against what recent sessions actually did. Catches issues that decayed or were quietly satisfied by adjacent work. |
+| `/retro` | After completing a major effort | Reviews what was planned versus what was built, identifies gaps and recurring patterns, and produces follow-up action items. |
+
+### Why session summaries
+
+Every `/session-close` produces a session summary in `session-summaries/`. These are the project's audit trail. Future sessions read them to understand what landed and where work stopped. The `/reconcile` step reads them to catch drift between what the backlog says and what actually happened. Without summaries, each session starts from scratch and duplicate work follows.
+
+### Why retros
+
+Retros (`/retro`) are where institutional knowledge accumulates. They catch recurring patterns across sessions, surface things that worked and things that didn't, and produce follow-up issues for structural problems. The `retrospectives/` directory is the project's long-term memory. Read past retros before starting work in an area they cover.
+
+### Why reconcile
+
+Issues describe a point in time. Sessions can quietly satisfy or decay issues without anyone noticing. `/reconcile` catches this drift before it causes duplicate work or stale issues piling up in the backlog. Run it after a big push, when the backlog feels off, or when you're about to plan the next session and want a clean starting point.
 
 ## Project conventions reference
 
