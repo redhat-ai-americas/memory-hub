@@ -459,6 +459,7 @@ async def _backfill_compiled_entries(
                     has_rationale=has_rationale,
                     content_type=node.content_type,
                     source=getattr(node, "source", "agent"),
+                    upstream_trust_level=getattr(node, "upstream_trust_level", "trusted"),
                     created_at=node.created_at,
                 ),
                 0.0,
