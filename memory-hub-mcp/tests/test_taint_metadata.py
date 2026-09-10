@@ -10,15 +10,14 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
+from src.tools.search_memory import _inject_taint, _taint_entry
 
 from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub
 from memoryhub_core.services.memory import node_to_read
-
-from src.tools.search_memory import _inject_taint, _taint_entry
 
 
 def _make_read(**overrides) -> MemoryNodeRead:
@@ -38,8 +37,8 @@ def _make_read(**overrides) -> MemoryNodeRead:
         "version": 1,
         "previous_version_id": None,
         "metadata": None,
-        "created_at": datetime.now(tz=timezone.utc),
-        "updated_at": datetime.now(tz=timezone.utc),
+        "created_at": datetime.now(tz=UTC),
+        "updated_at": datetime.now(tz=UTC),
         "has_children": False,
         "has_rationale": False,
         "source": "agent",
@@ -97,7 +96,7 @@ class TestInjectTaint:
 
 class TestTrustLevelPropagation:
     def test_node_to_read_propagates_trust_level(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         node = MemoryNode(
             id=uuid.uuid4(),
             logical_id=uuid.uuid4(),
@@ -123,7 +122,7 @@ class TestTrustLevelPropagation:
         assert read.source == "dreaming"
 
     def test_node_to_read_defaults_trusted(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         node = MemoryNode(
             id=uuid.uuid4(),
             logical_id=uuid.uuid4(),
@@ -146,6 +145,14 @@ class TestTrustLevelPropagation:
         assert read.generating_model is None
 
 
+try:
+    from memoryhub.models import Memory as _Memory  # noqa: F401
+    _HAS_SDK = True
+except ImportError:
+    _HAS_SDK = False
+
+
+@pytest.mark.skipif(not _HAS_SDK, reason="memoryhub SDK not installed")
 class TestSDKMemoryTaintField:
     def test_memory_accepts_taint(self):
         from memoryhub.models import Memory

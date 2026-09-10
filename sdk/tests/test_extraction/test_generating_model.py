@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from memoryhub.extraction.base import Extractor
-from memoryhub.extraction.models import CandidateMemory, TraceEvent, TraceEventType
+from memoryhub.extraction.models import CandidateMemory, TraceEvent
 from memoryhub.extraction.pipeline import ExtractionPipeline
 
 

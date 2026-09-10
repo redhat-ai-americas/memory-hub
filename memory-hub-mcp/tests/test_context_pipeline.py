@@ -11,11 +11,7 @@ Tests cover:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-
-import pytest
-
-from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
+from datetime import UTC, datetime
 
 from src.tools._context_pipeline import (
     PipelineLogEntry,
@@ -32,6 +28,8 @@ from src.tools._context_pipeline import (
     stage_stamp_provenance,
     stage_validate_schema,
 )
+
+from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub
 
 
 def _make_read(
@@ -59,8 +57,8 @@ def _make_read(
         "version": 1,
         "previous_version_id": None,
         "metadata": None,
-        "created_at": datetime.now(tz=timezone.utc),
-        "updated_at": datetime.now(tz=timezone.utc),
+        "created_at": datetime.now(tz=UTC),
+        "updated_at": datetime.now(tz=UTC),
         "has_children": False,
         "has_rationale": False,
         "source": source,

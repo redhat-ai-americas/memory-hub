@@ -11,6 +11,7 @@ Create Date: 2026-09-10
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "029_add_generating_model"
