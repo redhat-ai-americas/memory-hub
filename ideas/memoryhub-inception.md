@@ -27,7 +27,7 @@ Mem0, Zep, Letta, Cognee and others exist, but MemoryHub differs in ways that ma
 - Memory versioning with temporal awareness (the isCurrent model): "What did the agent believe on March 15th?" is answerable.
 - A rationale layer: memories carry their "why" as a linked record. Nobody else does this.
 - Enterprise forensics: reconstruct beliefs at any point in time, trace provenance, distinguish intent from mistake.
-- FIPS compliance, secrets detection, policy enforcement — requirements commercial solutions wave away or paywall.
+- FIPS compliance, secrets detection, policy enforcement — requirements not yet addressed by most solutions in this space.
 - MCP server interface for universal agent compatibility; Grafana-native observability.
 
 The development path: build it as a standalone component deployable to existing RHOAI clusters, prove it works, then pitch the RHOAI engineering team (whom the user meets with regularly).
@@ -127,12 +127,12 @@ The development path: build it as a standalone component deployable to existing 
 
 Landscape survey of existing solutions:
 
-- **Mem0** (51.8k stars, Apache 2.0): most popular OSS memory layer; hybrid vector+graph+KV, MCP support. But graph memory, analytics, and governance are cloud-only; no K8s operator, no multi-agent coordination, no temporal awareness.
-- **Letta/MemGPT** (21.9k stars): LLM self-managed memory blocks (NeurIPS 2023). Clever, but Docker-centric, no compliance framework, no shared memory, and memory ops consume tokens.
-- **Zep/Graphiti**: strongest temporal model in the market (bi-temporal validity intervals, hybrid retrieval without query-time LLM calls). Requires Neo4j; full platform is commercial SaaS; no K8s story.
-- **Cognee** (14.9k stars): ECL pipeline, 14 retrieval modes, self-improving memory; well-funded but young, no compliance or K8s narrative.
-- **Hindsight** (7.1k stars): retain/recall/reflect learning, first to cross 90% on LongMemEval; unclear OSS/commercial boundary.
-- **Redis Agent Memory Server** (218 stars): clean two-tier design, REST+MCP; very early, no graph memory or governance.
+- **Mem0** (51.8k stars, Apache 2.0): most popular OSS memory layer; hybrid vector+graph+KV, MCP support. Graph memory, analytics, and governance are cloud-hosted; different focus than K8s-native deployment.
+- **Letta/MemGPT** (21.9k stars): pioneered LLM self-managed memory blocks (NeurIPS 2023). Different deployment model (Docker-centric) and different architectural trade-offs around compliance, shared memory, and token budget for memory ops.
+- **Zep/Graphiti**: strongest temporal model in the market (bi-temporal validity intervals, hybrid retrieval without query-time LLM calls). Built on Neo4j; full platform available as commercial SaaS.
+- **Cognee** (14.9k stars): ECL pipeline, 14 retrieval modes, self-improving memory; well-funded and growing quickly.
+- **Hindsight** (7.1k stars): retain/recall/reflect learning, first to cross 90% on LongMemEval.
+- **Redis Agent Memory Server** (218 stars): clean two-tier design, REST+MCP; early-stage project.
 
 Academic work: the **"Governed Memory" paper** (arXiv:2603.17787, in production at Personize.ai, 99.6% fact recall with zero cross-entity leakage) is the closest to what we're building and needs a detailed read. Also relevant: "Multi-Agent Memory from Computer Architecture Perspective" (arXiv:2603.10062) and MAGMA (arXiv:2601.03236, multi-graph architecture). ICLR 2026's dedicated MemAgents workshop signals the field has reached critical mass.
 

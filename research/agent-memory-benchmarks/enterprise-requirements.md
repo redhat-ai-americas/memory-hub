@@ -124,7 +124,7 @@ This is another differentiator that academic benchmarks don't touch and that ven
 
 **What is needed.** Oracle's December 2025 launch post is explicit: enterprises do not want a "vector store + graph DB + document store + RDBMS" stack just to run agent memory. They want one system that supports all four data models with consistent governance.
 
-**MemoryHub status.** **Aligned.** PostgreSQL + pgvector handles vectors, relational, and graph (we use it for `create_relationship` / `get_relationships`). MinIO is the only auxiliary store, and it is deferred. This is the same architectural bet Oracle just made. We should expect to see Oracle AI Agent Memory and MemoryHub described as making the same architectural choice, against the Mem0 / Zep / Letta "separate specialized service" model.
+**MemoryHub status.** **Aligned.** PostgreSQL + pgvector handles vectors, relational, and graph (we use it for `create_relationship` / `get_relationships`). MinIO is the only auxiliary store, and it is deferred. This is the same architectural bet Oracle just made. We should expect to see Oracle AI Agent Memory and MemoryHub described as making the same architectural choice, while Mem0, Zep, and Letta take a different approach with purpose-built specialized services.
 
 ---
 
