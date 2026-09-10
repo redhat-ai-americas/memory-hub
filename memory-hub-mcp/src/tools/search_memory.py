@@ -117,6 +117,27 @@ def _apply_domain_boost(
     return boosted
 
 
+_TAINTED_LEVELS = frozenset({"untrusted", "mixed"})
+
+
+def _taint_entry(item: MemoryNodeRead | MemoryNodeStub) -> dict[str, Any] | None:
+    """Build taint metadata when the memory's upstream content is not fully trusted."""
+    trust = getattr(item, "upstream_trust_level", "trusted")
+    if trust not in _TAINTED_LEVELS:
+        return None
+    return {
+        "tainted": True,
+        "sources": [getattr(item, "source", "agent")],
+    }
+
+
+def _inject_taint(entry: dict[str, Any], item: MemoryNodeRead | MemoryNodeStub) -> None:
+    """Add taint metadata to a formatted entry dict when applicable."""
+    taint = _taint_entry(item)
+    if taint is not None:
+        entry["taint"] = taint
+
+
 def _estimate_tokens(payload: dict[str, Any]) -> int:
     """Estimate the token cost of a serialized result entry."""
     return max(1, len(json.dumps(payload, default=str)) // _CHARS_PER_TOKEN)
@@ -143,6 +164,7 @@ def _compact_entry(
     entry["content_truncated"] = item.content_truncated
     entry["full_available"] = item.full_available
     entry["source"] = getattr(item, "source", "agent")
+    _inject_taint(entry, item)
     if relevance_score is not None:
         entry["relevance_score"] = round(relevance_score, 4)
     return entry
@@ -178,6 +200,7 @@ def _format_entry(
     entry = item.model_dump(mode="json")
     entry["result_type"] = entry_type
     entry["relevance_score"] = round(relevance_score, 4)
+    _inject_taint(entry, item)
     # Guide agents from chunk hits to the parent memory's full content
     if item.branch_type == "chunk" and item.parent_id is not None:
         entry["parent_hint"] = (
@@ -188,6 +211,7 @@ def _format_entry(
         branch_entries: list[dict[str, Any]] = []
         for branch_item, branch_score in nested_branches:
             branch_entry = branch_item.model_dump(mode="json")
+            _inject_taint(branch_entry, branch_item)
             branch_entry["result_type"] = (
                 "full" if isinstance(branch_item, MemoryNodeRead) else "stub"
             )
@@ -221,6 +245,7 @@ def _format_entry_cached(
     entry = item.model_dump(mode="json")
     entry["result_type"] = entry_type
     entry["is_appendix"] = is_appendix
+    _inject_taint(entry, item)
     if item.branch_type == "chunk" and item.parent_id is not None:
         entry["parent_hint"] = (
             f"This is a chunk of a larger memory. Call "
@@ -230,6 +255,7 @@ def _format_entry_cached(
         branch_entries: list[dict[str, Any]] = []
         for branch_item, _score in nested_branches:
             branch_entry = branch_item.model_dump(mode="json")
+            _inject_taint(branch_entry, branch_item)
             branch_entry["result_type"] = (
                 "full" if isinstance(branch_item, MemoryNodeRead) else "stub"
             )
