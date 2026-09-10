@@ -44,6 +44,7 @@ class Memory(BaseModel):
     content_type: str | None = None  # "declarative" or "behavioral"
     source: str = "agent"  # "agent", "dreaming", or "import"
     upstream_trust_level: str = "trusted"
+    generating_model: str | None = None
     content_truncated: bool = False
     full_available: bool = False
 

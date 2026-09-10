@@ -95,6 +95,10 @@ class MemoryNodeCreate(BaseModel):
         default=UpstreamTrustLevel.TRUSTED,
         description="Trust level of upstream content: trusted, untrusted, or mixed",
     )
+    generating_model: str | None = Field(
+        default=None,
+        description="Model identifier that produced this memory via dreaming extraction. NULL for user-stated.",
+    )
     relevant_until: datetime | None = Field(
         default=None,
         description="Semantic expiry timestamp. NULL means evergreen or version-bound.",
@@ -156,6 +160,7 @@ class MemoryNodeRead(BaseModel):
     content_type: ContentType = ContentType.EXPERIENTIAL
     source: str = Field(default="agent", description="What produced this memory")
     upstream_trust_level: str = Field(default="trusted", description="Trust level of upstream content")
+    generating_model: str | None = Field(default=None, description="Model that produced this memory via extraction")
     content_hash: str | None = None
     is_current: bool
     version: int
@@ -195,6 +200,7 @@ class MemoryNodeStub(BaseModel):
     content_type: ContentType | None = None
     source: str = Field(default="agent", description="What produced this memory")
     upstream_trust_level: str = Field(default="trusted", description="Trust level of upstream content")
+    generating_model: str | None = Field(default=None, description="Model that produced this memory via extraction")
     created_at: datetime | None = None  # needed for cache-optimized sort ordering (#175)
     content_truncated: bool = True
     full_available: bool = True

@@ -98,6 +98,12 @@ class MemoryNode(TimestampMixin, Base):
         String(20), nullable=False, server_default="trusted",
     )
 
+    # Which model produced this memory via dreaming extraction (#566).
+    # NULL for user-stated memories.
+    generating_model: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+    )
+
     # Content-addressed entity IDs for deduplication (#247)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
