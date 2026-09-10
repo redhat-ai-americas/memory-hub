@@ -550,6 +550,10 @@ class MemoryHubClient:
         loading = self._project_config.memory_loading
         if max_results is None:
             max_results = defaults.max_results
+            logger.debug(
+                "max_results not specified, using SDK default: %d",
+                max_results,
+            )
         if mode is None:
             mode = defaults.default_mode
         if max_response_tokens is None:

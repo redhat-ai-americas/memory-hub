@@ -107,7 +107,7 @@ async def create_memory(
     """
     app_settings = AppSettings()
     content_bytes = len(data.content.encode("utf-8"))
-    embedding_max_chars = app_settings.embedding_max_tokens * 4
+    embedding_max_chars = embedding_service.max_tokens * 4
     needs_chunking = len(data.content) > embedding_max_chars
     use_s3 = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
 
@@ -298,8 +298,10 @@ async def _create_chunk_children(
             branch_count=0,
             has_rationale=False,
         )
+        chunk_id = uuid.uuid4()
         chunk_node = MemoryNode(
-            id=uuid.uuid4(),
+            id=chunk_id,
+            logical_id=chunk_id,
             content=chunk_text,
             stub=chunk_stub,
             scope=scope,
@@ -366,8 +368,10 @@ async def create_fact_children(
             branch_count=0,
             has_rationale=False,
         )
+        fact_id = uuid.uuid4()
         fact_node = MemoryNode(
-            id=uuid.uuid4(),
+            id=fact_id,
+            logical_id=fact_id,
             content=fact["content"],
             stub=fact_stub,
             scope=scope,
@@ -525,7 +529,7 @@ async def update_memory(
     # Determine storage and chunking strategy for the new version
     if content_changed:
         content_bytes = len(new_content.encode("utf-8"))
-        embedding_max_chars = app_settings.embedding_max_tokens * 4
+        embedding_max_chars = embedding_service.max_tokens * 4
         needs_chunking = len(new_content) > embedding_max_chars
         use_s3 = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
         embed_text = new_content[:embedding_max_chars] if needs_chunking else new_content
@@ -639,8 +643,10 @@ async def update_memory(
             continue
 
         # Deep copy non-chunk branch to new parent
+        copied_id = uuid.uuid4()
         copied_child = MemoryNode(
-            id=uuid.uuid4(),
+            id=copied_id,
+            logical_id=child.logical_id or copied_id,
             content=child.content,
             stub=child.stub,
             scope=child.scope,
@@ -827,7 +833,7 @@ def _build_search_filters(
         # memories). Exclude them from normal search unless the caller explicitly
         # requests scope="entity".
         filters.append(MemoryNode.scope != "entity")
-    if owner_id is not None:
+    if owner_id is not None and not (scope == "project" and project_ids):
         filters.append(MemoryNode.owner_id == owner_id)
 
     if authorized_scopes is not None:

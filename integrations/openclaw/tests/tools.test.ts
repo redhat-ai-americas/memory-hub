@@ -73,6 +73,28 @@ describe("tools", () => {
       });
     });
 
+    it("passes scope as top-level param not in options", async () => {
+      (mcpClient.callMemory as ReturnType<typeof vi.fn>).mockResolvedValue({ results: [] });
+
+      const tool = findTool("memoryhub_search");
+      await tool.execute("tc1", { query: "test", scope: "project" });
+
+      const callArgs = (mcpClient.callMemory as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(callArgs[1].scope).toBe("project");
+      expect(callArgs[1].options.scope).toBeUndefined();
+    });
+
+    it("includes configured projectId", async () => {
+      config.defaults.projectId = "proj-1";
+      (mcpClient.callMemory as ReturnType<typeof vi.fn>).mockResolvedValue({ results: [] });
+
+      const tool = findTool("memoryhub_search");
+      await tool.execute("tc1", { query: "test" });
+
+      const callArgs = (mcpClient.callMemory as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(callArgs[1].project_id).toBe("proj-1");
+    });
+
     it("returns error result on failure", async () => {
       (mcpClient.callMemory as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error("connection refused"),
@@ -147,8 +169,23 @@ describe("tools", () => {
       });
 
       expect(mcpClient.callMemory).toHaveBeenCalledWith("list", {
-        options: { max_results: 5, scope: "project", cursor: "abc123" },
+        options: { max_results: 5, cursor: "abc123" },
+        scope: "project",
       });
+    });
+
+    it("includes configured projectId", async () => {
+      config.defaults.projectId = "proj-1";
+      (mcpClient.callMemory as ReturnType<typeof vi.fn>).mockResolvedValue({
+        results: [],
+        count: 0,
+      });
+
+      const tool = findTool("memoryhub_list");
+      await tool.execute("tc1", {});
+
+      const callArgs = (mcpClient.callMemory as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(callArgs[1].project_id).toBe("proj-1");
     });
   });
 
@@ -197,7 +234,7 @@ describe("tools", () => {
       });
     });
 
-    it("includes configured projectId in options", async () => {
+    it("includes configured projectId as top-level param", async () => {
       config.defaults.projectId = "proj-1";
       (mcpClient.callMemory as ReturnType<typeof vi.fn>).mockResolvedValue({
         memory: { id: "new-id" },
@@ -209,7 +246,8 @@ describe("tools", () => {
 
       const callArgs = (mcpClient.callMemory as ReturnType<typeof vi.fn>).mock
         .calls[0];
-      expect(callArgs[1].options.project_id).toBe("proj-1");
+      expect(callArgs[1].project_id).toBe("proj-1");
+      expect(callArgs[1].options.project_id).toBeUndefined();
     });
   });
 

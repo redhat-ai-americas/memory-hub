@@ -1,7 +1,8 @@
 #!/bin/bash
 # WARNING: This script is destructive. It removes all MemoryHub
 # resources, including the database and all stored memories.
-# Use --skip-db to preserve the database.
+# Use --skip-data to preserve the database and object storage.
+# (--skip-db is a deprecated alias for --skip-data.)
 #
 # CREDENTIAL DRIFT: When the DB namespace is deleted and recreated,
 # deploy-full.sh generates a new random password for memoryhub-pg-credentials.
@@ -12,7 +13,7 @@
 # also reads from the DB namespace, so credentials stay in sync even without
 # deploy-full.sh.
 #
-# Usage: scripts/uninstall-full.sh [--yes] [--skip-db] [--skip-tile] [--skip-models] [--no-backup]
+# Usage: scripts/uninstall-full.sh [--yes] [--skip-db] [--skip-data] [--skip-tile] [--skip-models] [--no-backup]
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
@@ -25,12 +26,14 @@ UI_NAMESPACE="memoryhub-ui"
 RHOAI_NAMESPACE="redhat-ods-applications"
 EMBEDDING_MODEL_NAMESPACE="embedding-model"
 RERANKER_MODEL_NAMESPACE="reranker-model"
+STORAGE_NAMESPACE="memoryhub-storage"
 
 YES=false
-SKIP_DB=false
+SKIP_DATA=false
 SKIP_TILE=false
 SKIP_MODELS=false
 NO_BACKUP=false
+RHOAI_PRESENT=false
 
 START_TIME=$(date +%s)
 
@@ -76,15 +79,17 @@ parse_args() {
     for arg in "$@"; do
         case "$arg" in
             --yes)        YES=true ;;
-            --skip-db)    SKIP_DB=true ;;
+            --skip-data)  SKIP_DATA=true ;;
+            --skip-db)    SKIP_DATA=true ;;
             --skip-tile)  SKIP_TILE=true ;;
             --skip-models) SKIP_MODELS=true ;;
             --no-backup)  NO_BACKUP=true ;;
             -h|--help)
-                echo "Usage: $SCRIPT_NAME [--yes] [--skip-db] [--skip-tile] [--skip-models] [--no-backup]"
+                echo "Usage: $SCRIPT_NAME [--yes] [--skip-db] [--skip-data] [--skip-tile] [--skip-models] [--no-backup]"
                 echo ""
                 echo "  --yes           Skip all confirmation prompts (non-interactive / CI mode)"
-                echo "  --skip-db       Preserve the database namespace and its PVC (no memory loss)"
+                echo "  --skip-data     Preserve database AND object storage namespaces (no data loss)"
+                echo "  --skip-db       Deprecated alias for --skip-data"
                 echo "  --skip-tile     Leave RHOAI tile artifacts in redhat-ods-applications"
                 echo "  --skip-models   Preserve embedding + reranker model namespaces"
                 echo "  --no-backup     Skip automatic pre-uninstall database backup"
@@ -120,7 +125,8 @@ confirm() {
     echo ""
     echo "  The following resources will be removed:"
     echo ""
-    if [ "$SKIP_TILE" = false ]; then
+    if [ "$SKIP_TILE" = false ] && oc get namespace --context "$CONTEXT" "$RHOAI_NAMESPACE" &>/dev/null; then
+        RHOAI_PRESENT=true
         echo "    RHOAI tile artifacts in $RHOAI_NAMESPACE"
         echo "      - OdhApplication/memoryhub"
         echo "      - Route/memoryhub-ui"
@@ -136,7 +142,12 @@ confirm() {
     echo "      - ImageStream/memoryhub-ui"
     echo "      - BuildConfig/memoryhub-ui"
     echo "      - ServiceAccount/memoryhub-ui"
-    echo "    Namespace: $MCP_PROJECT  (MCP server + MinIO + Valkey)"
+    echo "    Namespace: $MCP_PROJECT  (MCP server + Valkey)"
+    if [ "$SKIP_DATA" = true ]; then
+        echo "    Object storage: PRESERVED  (--skip-data)"
+    else
+        echo "    Namespace: $STORAGE_NAMESPACE  (MinIO object storage — S3-SPILLED DATA LOSS)"
+    fi
     if [ "$SKIP_MODELS" = true ]; then
         echo "    Models: PRESERVED  (--skip-models)"
     else
@@ -144,8 +155,8 @@ confirm() {
         echo "    Namespace: $RERANKER_MODEL_NAMESPACE  (Reranker model)"
     fi
     echo "    Namespace: $AUTH_PROJECT  (Auth server)"
-    if [ "$SKIP_DB" = true ]; then
-        echo "    Database: PRESERVED  (--skip-db)"
+    if [ "$SKIP_DATA" = true ]; then
+        echo "    Database: PRESERVED  (--skip-data)"
     else
         echo "    Namespace: $DB_NAMESPACE  (PostgreSQL + ALL STORED MEMORIES — DATA LOSS)"
     fi
@@ -169,7 +180,7 @@ confirm() {
 # ---------------------------------------------------------------------------
 backup_before_uninstall() {
     # Skip backup when DB is preserved (no data loss) or explicitly opted out.
-    if [ "$SKIP_DB" = true ]; then
+    if [ "$SKIP_DATA" = true ]; then
         return 0
     fi
     if [ "$NO_BACKUP" = true ]; then
@@ -217,10 +228,19 @@ remove_tile() {
         return 0
     fi
 
-    info "Removing OdhApplication/memoryhub..."
-    oc delete odhapplication --context "$CONTEXT" memoryhub \
-        -n "$RHOAI_NAMESPACE" \
-        --ignore-not-found
+    if ! oc get namespace "$RHOAI_NAMESPACE" --context "$CONTEXT" &>/dev/null; then
+        info "RHOAI not installed ($RHOAI_NAMESPACE namespace not found) — skipping tile cleanup."
+        return 0
+    fi
+
+    if oc get crd odhapplications.dashboard.opendatahub.io --context "$CONTEXT" &>/dev/null; then
+        info "Removing OdhApplication/memoryhub..."
+        oc delete odhapplication --context "$CONTEXT" memoryhub \
+            -n "$RHOAI_NAMESPACE" \
+            --ignore-not-found
+    else
+        info "OdhApplication CRD not found — skipping tile removal."
+    fi
 
     info "Removing Route/memoryhub-ui..."
     oc delete route --context "$CONTEXT" memoryhub-ui \
@@ -322,6 +342,26 @@ remove_mcp_namespace() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 4a: Storage namespace
+# ---------------------------------------------------------------------------
+remove_storage_namespace() {
+    banner "4a. Storage Namespace ($STORAGE_NAMESPACE)"
+
+    if [ "$SKIP_DATA" = true ]; then
+        skipped "Storage namespace (--skip-data). S3-spilled content preserved."
+        return 0
+    fi
+
+    warn "Deleting $STORAGE_NAMESPACE — S3-SPILLED MEMORY CONTENT WILL BE LOST."
+    oc delete namespace --context "$CONTEXT" "$STORAGE_NAMESPACE" \
+        --ignore-not-found \
+        --wait=false
+
+    echo ""
+    echo -e "  ${GREEN}Namespace $STORAGE_NAMESPACE deletion initiated${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # Step 4b: Model namespaces
 # ---------------------------------------------------------------------------
 remove_model_namespaces() {
@@ -367,8 +407,8 @@ remove_auth_namespace() {
 remove_db_namespace() {
     banner "6. Database Namespace ($DB_NAMESPACE)"
 
-    if [ "$SKIP_DB" = true ]; then
-        skipped "Database namespace (--skip-db). Stored memories preserved."
+    if [ "$SKIP_DATA" = true ]; then
+        skipped "Database namespace (--skip-data). Stored memories preserved."
         return 0
     fi
 
@@ -394,25 +434,32 @@ summary() {
     banner "Uninstall Complete"
     echo ""
     echo "  Resources removed:"
-    if [ "$SKIP_TILE" = false ]; then
-        echo "    ${GREEN}✓${RESET} RHOAI tile artifacts ($RHOAI_NAMESPACE)"
+    if [ "$SKIP_TILE" = true ]; then
+        echo -e "    ${YELLOW}-${RESET} RHOAI tile artifacts (skipped)"
+    elif [ "$RHOAI_PRESENT" = true ]; then
+        echo -e "    ${GREEN}✓${RESET} RHOAI tile artifacts ($RHOAI_NAMESPACE)"
     else
-        echo "    ${YELLOW}-${RESET} RHOAI tile artifacts (skipped)"
+        echo -e "    ${YELLOW}-${RESET} RHOAI tile artifacts (not installed)"
     fi
-    echo "    ${GREEN}✓${RESET} Namespace $UI_NAMESPACE"
-    echo "    ${GREEN}✓${RESET} Legacy UI artifacts in $MCP_PROJECT"
-    echo "    ${GREEN}✓${RESET} Namespace $MCP_PROJECT"
+    echo -e "    ${GREEN}✓${RESET} Namespace $UI_NAMESPACE"
+    echo -e "    ${GREEN}✓${RESET} Legacy UI artifacts in $MCP_PROJECT"
+    echo -e "    ${GREEN}✓${RESET} Namespace $MCP_PROJECT"
+    if [ "$SKIP_DATA" = false ]; then
+        echo -e "    ${GREEN}✓${RESET} Namespace $STORAGE_NAMESPACE (S3 data deleted)"
+    else
+        echo -e "    ${YELLOW}-${RESET} Namespace $STORAGE_NAMESPACE (preserved)"
+    fi
     if [ "$SKIP_MODELS" = false ]; then
-        echo "    ${GREEN}✓${RESET} Namespace $EMBEDDING_MODEL_NAMESPACE"
-        echo "    ${GREEN}✓${RESET} Namespace $RERANKER_MODEL_NAMESPACE"
+        echo -e "    ${GREEN}✓${RESET} Namespace $EMBEDDING_MODEL_NAMESPACE"
+        echo -e "    ${GREEN}✓${RESET} Namespace $RERANKER_MODEL_NAMESPACE"
     else
-        echo "    ${YELLOW}-${RESET} Model namespaces (skipped)"
+        echo -e "    ${YELLOW}-${RESET} Model namespaces (skipped)"
     fi
-    echo "    ${GREEN}✓${RESET} Namespace $AUTH_PROJECT"
-    if [ "$SKIP_DB" = false ]; then
-        echo "    ${GREEN}✓${RESET} Namespace $DB_NAMESPACE (data deleted)"
+    echo -e "    ${GREEN}✓${RESET} Namespace $AUTH_PROJECT"
+    if [ "$SKIP_DATA" = false ]; then
+        echo -e "    ${GREEN}✓${RESET} Namespace $DB_NAMESPACE (data deleted)"
     else
-        echo "    ${YELLOW}-${RESET} Namespace $DB_NAMESPACE (preserved)"
+        echo -e "    ${YELLOW}-${RESET} Namespace $DB_NAMESPACE (preserved)"
     fi
     echo ""
     warn "Namespace deletions are async. Verify with:"
@@ -439,6 +486,7 @@ main() {
     remove_ui_namespace
     remove_legacy_ui
     remove_mcp_namespace
+    remove_storage_namespace
     remove_model_namespaces
     remove_auth_namespace
     remove_db_namespace

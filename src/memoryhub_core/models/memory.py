@@ -37,8 +37,8 @@ class MemoryNode(TimestampMixin, Base):
 
     # Stable identity across versions. All versions of the same logical
     # memory share one logical_id; v1 sets logical_id = id, updates inherit.
-    logical_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True, index=True,
+    logical_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True,
     )
 
     # Tree structure (adjacency list)

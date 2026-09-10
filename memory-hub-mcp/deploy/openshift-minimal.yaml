@@ -91,7 +91,7 @@ spec:
         - name: MEMORYHUB_VALKEY_URL
           value: "redis://memoryhub-valkey.memory-hub-mcp.svc.cluster.local:6379/0"
         - name: MEMORYHUB_S3_ENDPOINT
-          value: "memoryhub-minio:9000"
+          value: "memoryhub-minio.memoryhub-storage.svc.cluster.local:9000"
         - name: MEMORYHUB_S3_ACCESS_KEY
           valueFrom:
             secretKeyRef:

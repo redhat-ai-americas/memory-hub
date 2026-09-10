@@ -22,8 +22,18 @@ NAMESPACE="${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}"
 DEPLOYMENT="memoryhub-ui"
 IMAGESTREAM="memoryhub-ui"
 CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+RHOAI_NS="redhat-ods-applications"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+SKIP_TILE=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-tile) SKIP_TILE=true ;;
+        *) echo "Unknown argument: $1"; exit 1 ;;
+    esac
+    shift
+done
 
 echo "=== MemoryHub UI Deployment ==="
 echo "Namespace: $NAMESPACE"
@@ -152,29 +162,34 @@ if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ]; then
 fi
 echo "  OK: running digest matches imagestream :latest"
 
-# Step 9: Sync the RHOAI dashboard proxy route.
-#
-# The RHOAI dashboard resolves the "Open application" link by looking up
-# a Route named `memoryhub-ui` in its own namespace (redhat-ods-applications).
-# The `routeNamespace` field in OdhApplication is defined in the CRD but
-# the dashboard backend does not read it (logs "namespace undefined").
-#
-# Workaround: create a selectorless Service + Endpoints + Route in the
-# dashboard namespace. The Endpoints point at the ClusterIP of the real
-# memoryhub-ui Service (not the pod IP), so the proxy is stable across
-# pod restarts, rollouts, and node migrations. The ClusterIP only changes
-# if the Service in memoryhub-ui is deleted and recreated (full uninstall).
-RHOAI_NS="redhat-ods-applications"
-echo ""
-echo "Syncing RHOAI dashboard proxy route in $RHOAI_NS..."
-UI_CLUSTER_IP=$(oc get svc memoryhub-ui --context "$CONTEXT" -n "$NAMESPACE" \
-    -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
-if [ -z "$UI_CLUSTER_IP" ]; then
-    echo "  WARNING: could not resolve memoryhub-ui Service ClusterIP."
-    echo "  Re-run this script after the UI Service exists in $NAMESPACE."
-else
-    echo "  UI Service ClusterIP: $UI_CLUSTER_IP"
-    cat <<PROXY_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
+# Steps 9-10: RHOAI dashboard integration (proxy route + tile).
+# Skipped when RHOAI is not installed or --skip-tile is passed.
+if [ "$SKIP_TILE" = true ]; then
+    echo ""
+    echo "Skipping RHOAI proxy route and tile (--skip-tile)"
+elif oc get namespace "$RHOAI_NS" --context "$CONTEXT" &>/dev/null; then
+    # Step 9: Sync the RHOAI dashboard proxy route.
+    #
+    # The RHOAI dashboard resolves the "Open application" link by looking up
+    # a Route named `memoryhub-ui` in its own namespace (redhat-ods-applications).
+    # The `routeNamespace` field in OdhApplication is defined in the CRD but
+    # the dashboard backend does not read it (logs "namespace undefined").
+    #
+    # Workaround: create a selectorless Service + Endpoints + Route in the
+    # dashboard namespace. The Endpoints point at the ClusterIP of the real
+    # memoryhub-ui Service (not the pod IP), so the proxy is stable across
+    # pod restarts, rollouts, and node migrations. The ClusterIP only changes
+    # if the Service in memoryhub-ui is deleted and recreated (full uninstall).
+    echo ""
+    echo "Syncing RHOAI dashboard proxy route in $RHOAI_NS..."
+    UI_CLUSTER_IP=$(oc get svc memoryhub-ui --context "$CONTEXT" -n "$NAMESPACE" \
+        -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
+    if [ -z "$UI_CLUSTER_IP" ]; then
+        echo "  WARNING: could not resolve memoryhub-ui Service ClusterIP."
+        echo "  Re-run this script after the UI Service exists in $NAMESPACE."
+    else
+        echo "  UI Service ClusterIP: $UI_CLUSTER_IP"
+        cat <<PROXY_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
 apiVersion: v1
 kind: Service
 metadata:
@@ -198,9 +213,9 @@ subsets:
   - port: 8080
     protocol: TCP
 PROXY_EOF
-    # Create the Route only if it doesn't exist (idempotent).
-    if ! oc get route memoryhub-ui --context "$CONTEXT" -n "$RHOAI_NS" &>/dev/null; then
-        cat <<ROUTE_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
+        # Create the Route only if it doesn't exist (idempotent).
+        if ! oc get route memoryhub-ui --context "$CONTEXT" -n "$RHOAI_NS" &>/dev/null; then
+            cat <<ROUTE_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -216,14 +231,23 @@ spec:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
 ROUTE_EOF
+        fi
+        echo "  Proxy route synced."
     fi
-    echo "  Proxy route synced."
-fi
 
-# Step 10: Apply the OdhApplication tile (idempotent).
-echo ""
-echo "Applying RHOAI tile..."
-oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift/odh-application.yaml"
+    # Step 10: Apply the OdhApplication tile (idempotent).
+    if oc get crd odhapplications.dashboard.opendatahub.io --context "$CONTEXT" &>/dev/null; then
+        echo ""
+        echo "Applying RHOAI tile..."
+        oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift/odh-application.yaml"
+    else
+        echo ""
+        echo "  OdhApplication CRD not found — skipping tile (proxy route still synced)"
+    fi
+else
+    echo ""
+    echo "RHOAI not installed ($RHOAI_NS namespace not found) — skipping proxy route and tile."
+fi
 
 # Step 11: Print route URL
 ROUTE=$(oc get route "$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")

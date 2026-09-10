@@ -1,6 +1,6 @@
 # MemoryHub Open Issues by Stakeholder Dimension
 
-*Generated 2026-08-05 -- 51 open issues*
+*Updated 2026-08-12 -- 62 open issues*
 
 This document arranges the open issue backlog by who cares and why, across five stakeholder dimensions: the AI agent consuming MemoryHub, the developer integrating it, marketing/positioning, the customer's cybersecurity team, and the end user whose interactions are remembered.
 
@@ -22,8 +22,9 @@ These issues directly affect what the agent retrieves, how accurately it recalls
 | #404 | Effective-k observability -- kill the silent capping funnel | **Bug** -- agent silently gets fewer results than requested |
 | #453 | Reimplement disabled_signals for RRF signal toggling | future |
 | #454 | Reimplement entity-aware search | future |
+| #511 | embedding_max_tokens config mismatches deployed model limit | **Bug** -- config hardcoded to 8192 (GPU model) but CPU variant maxes at 256 tokens; memories exceeding ~1000 chars fail with HTTP 413 |
 
-Bad retrieval means the agent hallucinates or ignores what it should know. #404 is the scariest: the agent silently gets fewer results than it asked for, and nobody knows.
+Bad retrieval means the agent hallucinates or ignores what it should know. #404 is the scariest: the agent silently gets fewer results than it asked for, and nobody knows. #511 blocks writes entirely for longer memories when the CPU embedding model is active.
 
 ### Memory hygiene -- keeping the memory store trustworthy over time
 
@@ -42,8 +43,9 @@ Bad retrieval means the agent hallucinates or ignores what it should know. #404 
 | #345 | Provenance-driven reflection (Layer 3) | |
 | #346 | Domain ontology refinement | |
 | #239 | Convergent learning (consolidate duplicates across users) | v0.4, future |
+| #512 | Chunk and fact node creation fails: logical_id NOT NULL violation | **Bug** -- three MemoryNode construction sites omit logical_id; zero chunk or fact nodes exist in the database. These features have never worked end-to-end |
 
-Without curation, memory accumulates noise. The agent's recall degrades as the store grows. #352 and #353 are the highest-leverage: dedup and staleness are the two ways memory rots.
+Without curation, memory accumulates noise. The agent's recall degrades as the store grows. #352 and #353 are the highest-leverage: dedup and staleness are the two ways memory rots. #512 reveals that chunk/fact node creation is completely non-functional -- a foundational storage bug.
 
 ### Agent autonomy and resilience
 
@@ -94,12 +96,13 @@ Without curation, memory accumulates noise. The agent's recall degrades as the s
 | #312 | Multi-harness support (tracking) | v0.3 |
 | #313 | Turn-level hooks | v0.3 |
 | #489 | OpenClaw integration | v0.3 |
+| #509 | OpenCode integration | v0.3 |
 | #494 | OpenClaw: Fix scope/project_id placement | **Bug** |
 | #495 | OpenClaw: Connection leak in resetSession | **Bug** |
 | #496 | OpenClaw: Remove as-never casts, cleanup | **Bug** |
 | #82 | LibreChat integration | v0.5 |
 
-Today MemoryHub works well with Claude Code. #310 is the gate for every other harness. The OpenClaw bugs (#494-496) are the lived proof that onboarding a second client surfaces rough edges.
+Today MemoryHub works well with Claude Code. #310 is the gate for every other harness. The OpenClaw bugs (#494-496) are the lived proof that onboarding a second client surfaces rough edges. #509 adds OpenCode as a third harness target.
 
 ### Developer confidence
 
@@ -108,6 +111,11 @@ Today MemoryHub works well with Claude Code. #310 is the gate for every other ha
 | #375 | Full local test suite hang | **Bug** -- corrosive; devs stop running tests |
 | #383 | Capability-claim sweep of agent-facing documents | Catches docs that promise features that don't exist yet |
 | #426 | EvalHub sidecar result-drain retry | |
+| #505 | Create test deployment of Hindsight | Competitive analysis -- hands-on comparison |
+| #506 | Create test deployment of GBrain | Competitive analysis -- hands-on comparison |
+| #511 | embedding_max_tokens config mismatches deployed model limit | **Bug** -- blocks writes for longer memories on CPU |
+| #512 | Chunk and fact node creation fails: logical_id NOT NULL | **Bug** -- chunk/fact features completely non-functional |
+| #518 | UI deploy script hard-fails without RHOAI installed | **Bug** -- RHOAI is optional but deploy.sh treats it as required |
 
 ---
 
@@ -131,8 +139,9 @@ Today MemoryHub works well with Claude Code. #310 is the gate for every other ha
 | #400 | Evaluate AutoRAG for pipeline optimization | |
 | #337 | Platform-level benchmark design | Depends on #334 |
 | #334 | Adversarial write / poisoning resistance | Feeds #337 |
+| #507 | Demo: quantitative benefits of agent memory sharing | needs-design -- a demo scenario showing clear quantitative gains from cross-user memory sharing |
 
-Marketing can't claim "better recall" without #330/#331. #273 is the "why not just use pgvector?" question every prospect asks. #337 is the benchmark that positions MemoryHub as a platform, not just a vector store.
+Marketing can't claim "better recall" without #330/#331. #273 is the "why not just use pgvector?" question every prospect asks. #337 is the benchmark that positions MemoryHub as a platform, not just a vector store. #507 provides the tangible demo for the memory-sharing value proposition.
 
 ### Differentiation features
 
@@ -142,8 +151,19 @@ Marketing can't claim "better recall" without #330/#331. #273 is the "why not ju
 | #289 | Statistician Agent (population-level patterns) | v0.4 |
 | #290 | Five-stage promotion pipeline | v0.4 |
 | #270 | Semantic search over conversation threads | future -- demo crowd-pleaser |
+| #516 | PTC-aligned provenance and taint metadata | compliance -- Trust Bricks PTC standard for provenance envelopes |
+| #517 | GAL-aligned memory trust lifecycle (promotion/demotion) | compliance -- Trust Bricks GAL standard for authority lifecycle |
 
-Dreaming (#345), population statistics (#289), and governed promotion (#290) are the curation story that separates MemoryHub from "just another RAG database."
+Dreaming (#345), population statistics (#289), and governed promotion (#290) are the curation story that separates MemoryHub from "just another RAG database." #516 and #517 add formal compliance standards (Trust Bricks PTC/GAL) that strengthen the governance narrative for regulated industries.
+
+### Competitive landscape
+
+| Issue | Title | Notes |
+|-------|-------|-------|
+| #505 | Create test deployment of Hindsight | Hands-on comparison with competing agent memory service |
+| #506 | Create test deployment of GBrain | Hands-on comparison with competing agent memory service |
+
+Understanding what competitors offer strengthens positioning and identifies gaps worth closing.
 
 ### Integration breadth
 
@@ -151,9 +171,16 @@ Dreaming (#345), population statistics (#289), and governed promotion (#290) are
 |-------|-------|-------|
 | #82 | LibreChat integration | v0.5 |
 | #489 | OpenClaw integration | v0.3 |
+| #509 | OpenCode integration | v0.3 |
 | #310 | Framework-agnostic onboarding | v0.3 |
 
 "Works with X" is a marketing checkbox. Each integration widens the addressable market.
+
+### Design documents
+
+| Issue | Title | Notes |
+|-------|-------|-------|
+| #508 | "Building the case for agent memory" design document | subsystem: memory-tree, target: planning/ folder |
 
 ---
 
@@ -173,8 +200,9 @@ Dreaming (#345), population statistics (#289), and governed promotion (#290) are
 | #71 | Intersection authorization (actor + driver permissions) | future, references #70 |
 | #497 | Surface last_updated_by in responses | Complements #492 |
 | #492 | Per-project identity selection | Makes identity legible |
+| #514 | Validate project membership before owner_id bypass in list/search | **Bug** -- PR #513 removed the owner_id safety net; callers can now see other members' memories in projects they don't belong to |
 
-#70 is table stakes for any regulated customer. Today audit events exist in-memory but don't survive restarts. Without it, "who did what when" is unanswerable after a pod recycle.
+#70 is table stakes for any regulated customer. Today audit events exist in-memory but don't survive restarts. Without it, "who did what when" is unanswerable after a pod recycle. #514 is an authorization bug with immediate security implications -- project membership is not enforced on list/search.
 
 ### Data protection and privacy
 
@@ -183,8 +211,10 @@ Dreaming (#345), population statistics (#289), and governed promotion (#290) are
 | #72 | driver_id redaction on read for sensitive contexts | future |
 | #68 | HIPAA/PHI detection in curation pipeline | v0.4 -- hard gate for healthcare |
 | #40 | Versioning and edit tracking for curation rules | v0.4 |
+| #516 | PTC-aligned provenance and taint metadata | Trust Bricks PTC standard for memory provenance envelopes |
+| #517 | GAL-aligned memory trust lifecycle (promotion/demotion) | Trust Bricks GAL standard for authority lifecycle |
 
-#68 is a hard gate for healthcare customers. #72 addresses "the agent remembers who asked, but the next reader shouldn't see that."
+#68 is a hard gate for healthcare customers. #72 addresses "the agent remembers who asked, but the next reader shouldn't see that." #516 and #517 formalize provenance and trust lifecycle using Trust Bricks standards -- relevant for any customer with data classification requirements.
 
 ### Adversarial resistance
 
@@ -251,6 +281,9 @@ Issues at the intersection of multiple stakeholders are the highest-leverage ite
 | **#68** HIPAA/PHI detection | | | healthcare gate | primary | protected |
 | **#334** Adversarial resistance | | | proof point | primary | protected |
 | **#404** Effective-k bug | primary | | | | feels it |
+| **#514** AuthZ project membership | | primary | | primary | |
+| **#511/#512** Storage bugs | primary | primary | | | |
+| **#516/#517** Trust Bricks compliance | | | differentiator | primary | |
 
 ---
 
@@ -258,10 +291,10 @@ Issues at the intersection of multiple stakeholders are the highest-leverage ite
 
 | Stakeholder | Issue count | Biggest gap |
 |-------------|-------------|-------------|
-| Agent | ~20 | Retrieval quality + curation pipeline |
-| Developer | ~15 | Multi-harness onboarding (#310) |
-| Marketing | ~12 | No provable benchmark numbers yet (#330 -> #331) |
-| Security | ~10 | No durable audit log (#70) |
+| Agent | ~22 | Retrieval quality + curation pipeline |
+| Developer | ~18 | Multi-harness onboarding (#310) |
+| Marketing | ~16 | No provable benchmark numbers yet (#330 -> #331) |
+| Security | ~13 | No durable audit log (#70); authorization bug (#514) |
 | End User | ~8 | No rollback/undo capability (#491) |
 
 Counts overlap because many issues serve multiple stakeholders. The "biggest gap" column is the single most painful absence for each audience today.
@@ -271,19 +304,19 @@ Counts overlap because many issues serve multiple stakeholders. The "biggest gap
 | Milestone | Count | Issues |
 |-----------|-------|--------|
 | v0.2 - Retrieval Quality | 3 | #272, #273, #306 |
-| v0.3 - Multi-Harness & Onboarding | 4 | #310, #312, #313, #489 |
-| v0.4 - Curation & Governance | 5 | #40, #68, #70, #239, #290 |
+| v0.3 - Multi-Harness & Onboarding | 5 | #310, #312, #313, #489, #509 |
+| v0.4 - Curation & Governance | 6 | #40, #68, #70, #239, #289, #290 |
 | v0.5 - Platform Integrations | 1 | #82 |
-| Unassigned | 38 | |
+| Unassigned | 47 | |
 
 ### By type
 
 | Type | Count |
 |------|-------|
-| Bugs | 7 (#375, #395, #404, #458, #494, #495, #496) |
+| Bugs | 11 (#375, #395, #404, #458, #494, #495, #496, #511, #512, #514, #518) |
 | Features | 24 |
-| Design | 4 (#104, #270, #337, #383) |
-| Enhancement | 7 |
+| Design | 5 (#104, #270, #337, #383, #508) |
+| Enhancement | 9 |
 | Tracking | 1 (#312) |
 | Investigation | 1 (#400) |
 | Flagged future/deferred | 7 (#71, #72, #87, #241, #270, #453, #454) |

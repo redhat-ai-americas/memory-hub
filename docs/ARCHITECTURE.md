@@ -88,7 +88,7 @@ graph TB
         PG[(PostgreSQL<br/>pgvector + graph)]
     end
 
-    subgraph "memory-hub-mcp namespace (cont.)"
+    subgraph "memoryhub-storage namespace"
         MINIO[MinIO<br/>S3 object storage]
     end
 
@@ -127,7 +127,7 @@ Every memory operation flows through the MCP server. The server applies authoriz
 
 The OAuth 2.1 authorization server runs in a separate namespace and never touches PostgreSQL. The MCP server validates incoming JWTs against the auth server's JWKS endpoint; the dashboard BFF brokers admin client management calls. SDK consumers fetch tokens via `client_credentials` and refresh transparently. Token rotation, JWKS caching, and signature validation are all handled by FastMCP 3's built-in `JWTVerifier`.
 
-PostgreSQL with pgvector handles relational data, vector similarity search, and graph relationships in a single database -- no separate vector store, no separate graph database. The `all-MiniLM-L6-v2` embedding model and the optional `ms-marco-MiniLM-L12-v2` cross-encoder reranker run on HuggingFace Text Embeddings Inference (TEI) in their own namespaces (`embedding-model` and `reranker-model`) and are reached over the cluster network. The reranker is only invoked on the focus path of `search_memory` and gracefully degrades to plain cosine recall when unreachable, so the system stays usable if the reranker pod is unhealthy. MinIO provides S3-compatible object storage in the `memory-hub-mcp` namespace for oversized memory content (>100KB); the service layer stores a prefix in PostgreSQL and spills the full content to S3, hydrating on demand at read time.
+PostgreSQL with pgvector handles relational data, vector similarity search, and graph relationships in a single database -- no separate vector store, no separate graph database. The `all-MiniLM-L6-v2` embedding model and the optional `ms-marco-MiniLM-L12-v2` cross-encoder reranker run on HuggingFace Text Embeddings Inference (TEI) in their own namespaces (`embedding-model` and `reranker-model`) and are reached over the cluster network. The reranker is only invoked on the focus path of `search_memory` and gracefully degrades to plain cosine recall when unreachable, so the system stays usable if the reranker pod is unhealthy. MinIO provides S3-compatible object storage in the `memoryhub-storage` namespace for oversized memory content (>100KB); the service layer stores a prefix in PostgreSQL and spills the full content to S3, hydrating on demand at read time.
 
 ## Data flow
 
@@ -246,8 +246,11 @@ graph TB
             MCP_POD[memory-hub-mcp pod<br/>FastMCP 3]
             UI_POD[memoryhub-ui pod<br/>BFF + oauth-proxy sidecar]
             VK_POD[memoryhub-valkey pod<br/>Valkey 8.0]
-            MINIO_POD[memoryhub-minio pod<br/>S3 object storage]
             FC_JOB[fact-checker CronJob<br/>daily 01:00 UTC]
+        end
+
+        subgraph "memoryhub-storage namespace"
+            MINIO_POD[memoryhub-minio pod<br/>S3 object storage]
         end
 
         subgraph "memoryhub-agents namespace"
@@ -291,7 +294,7 @@ graph TB
     PROM -. future .-> MCP_POD & UI_POD & AUTH_POD
 ```
 
-The MCP server pod, dashboard, Valkey, MinIO, and the Fact Checker CronJob share the `memory-hub-mcp` namespace so they can communicate over the cluster network without crossing namespace boundaries. The Trace Reviewer runs in a separate `memoryhub-agents` namespace because it has a different scaling profile (HPA-eligible, continuous) and accesses Valkey cross-namespace via DNS (`memoryhub-valkey.memory-hub-mcp.svc:6379`). The auth server lives in its own namespace because it has a different release cadence and a smaller blast radius for security incidents. PostgreSQL lives in its own namespace because the OOTB PostgreSQL operator that ships with OpenShift expects it there and because future replica scaling does not need to touch the application namespaces. The embedding and reranker models each run in their own namespace (`embedding-model`, `reranker-model`) on HuggingFace TEI containers.
+The MCP server pod, dashboard, Valkey, and the Fact Checker CronJob share the `memory-hub-mcp` namespace so they can communicate over the cluster network without crossing namespace boundaries. MinIO lives in its own `memoryhub-storage` namespace so that object storage data survives MCP server reinstalls — the same isolation pattern used for PostgreSQL in `memoryhub-db` (#395). The MCP server reaches MinIO cross-namespace via FQDN (`memoryhub-minio.memoryhub-storage.svc:9000`). The Trace Reviewer runs in a separate `memoryhub-agents` namespace because it has a different scaling profile (HPA-eligible, continuous) and accesses Valkey cross-namespace via DNS (`memoryhub-valkey.memory-hub-mcp.svc:6379`). The auth server lives in its own namespace because it has a different release cadence and a smaller blast radius for security incidents. PostgreSQL lives in its own namespace because the OOTB PostgreSQL operator that ships with OpenShift expects it there and because future replica scaling does not need to touch the application namespaces. The embedding and reranker models each run in their own namespace (`embedding-model`, `reranker-model`) on HuggingFace TEI containers.
 
 All containers use Red Hat UBI9 base images. FIPS compliance is inherited from the cluster's FIPS mode -- PostgreSQL delegates crypto to OS-level OpenSSL, the auth server's RSA signing uses the OS crypto provider, and end-to-end FIPS validation is on the roadmap but not yet completed.
 
@@ -314,7 +317,7 @@ External cluster routes:
 - *Surfaces.* MCP as the primary interface with action-dispatch tool profiles (#201/#202); published SDK and CLI at feature parity (#199/#200), including trace-driven extraction (#240) and Obsidian export (#245); dashboard behind oauth-proxy.
 - *Background agents.* Shared curation-agent framework on Valkey queues with leader election (#286); Fact Checker (#287) and Trace Reviewer (#288) deployed.
 - *Storage.* S3-compatible object storage (MinIO) for oversized memory content with prefix-in-PostgreSQL / full-in-S3 split and on-demand hydration; Valkey-backed session focus vectors for cross-encoder reranking.
-- *Deployment.* Six-namespace OpenShift topology (`memory-hub-mcp`, `memoryhub-agents`, `memoryhub-auth`, `memoryhub-db`, `embedding-model`, `reranker-model`), reproducible from `deploy-full.sh`, with backup/restore tooling (#191).
+- *Deployment.* Seven-namespace OpenShift topology (`memory-hub-mcp`, `memoryhub-agents`, `memoryhub-auth`, `memoryhub-db`, `memoryhub-storage`, `embedding-model`, `reranker-model`), reproducible from `deploy-full.sh`, with backup/restore tooling (#191).
 - *Personal edition.* Zero-infrastructure local variant (`memoryhub-local`) backed by SQLite + sqlite-vec + FTS5 with local ONNX embeddings (IBM Granite), exposing the same 4-tool MCP surface as the cluster edition.
 
 **Decided, not yet implemented.** Kubernetes Operator with CRDs (skeleton only). FIPS end-to-end validation. Campaign promotion pipeline (Phase 3+) -- curator-driven cross-project knowledge promotion with HITL approval queue (the promote/graduate service-layer primitives shipped, but the automated curator-driven pipeline with approval queue has not). Emergent domain ontology -- automatic synonym detection and normalization of domain tags. Curator agent (#285) -- deep dedup, staleness, conflict detection. Statistician agent (#289) -- population-level pattern aggregation with SDC safeguards.

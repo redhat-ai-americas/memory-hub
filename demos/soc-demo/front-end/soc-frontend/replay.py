@@ -26,7 +26,8 @@ def post(path, body):
 
 
 post("/reset", {})
-events = json.load(open(args.scenario, encoding="utf-8"))
+with open(args.scenario, encoding="utf-8") as f:
+    events = json.load(f)
 for e in events:
     post("/emit", e)
     print(f"[{e.get('timestamp','--:--')}] {e['type']:<15} {e.get('agent','')}")
