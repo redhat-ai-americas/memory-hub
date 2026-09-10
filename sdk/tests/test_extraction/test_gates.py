@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from memoryhub.extraction.base import Extractor
-from memoryhub.extraction.gates import DreamingGate, GateResult, GateThresholds
+from memoryhub.extraction.gates import DreamingGate, GateThresholds
 from memoryhub.extraction.models import CandidateMemory, TraceEvent, TraceEventType
 from memoryhub.extraction.pipeline import ExtractionPipeline
 

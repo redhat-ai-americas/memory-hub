@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 from memoryhub.extraction.base import Extractor
 from memoryhub.extraction.dedup import DedupFilter
 from memoryhub.extraction.gates import DreamingGate, GateThresholds
-from memoryhub.extraction.models import CandidateMemory, ExtractionResult, TraceEvent, TraceEventType
+from memoryhub.extraction.models import (
+    CandidateMemory,
+    ExtractionResult,
+    TraceEvent,
+    TraceEventType,
+)
 
 if TYPE_CHECKING:
     from memoryhub.client import MemoryHubClient
