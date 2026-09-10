@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from memoryhub.extraction.base import Extractor
 from memoryhub.extraction.models import CandidateMemory, TraceEvent, TraceEventType
 from memoryhub.extraction.pipeline import ExtractionPipeline, infer_trust_level
-from memoryhub.models import CurationInfo, Memory, SearchResult, WriteResult
 
 
 class MockExtractor(Extractor):
