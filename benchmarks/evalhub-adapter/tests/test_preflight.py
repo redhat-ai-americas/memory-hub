@@ -20,6 +20,7 @@ _mod = importlib.util.module_from_spec(_spec)
 sys.modules[_mod.__name__] = _mod
 _spec.loader.exec_module(_mod)
 
+check_retrieval_caps = _mod.check_retrieval_caps
 check_signal_focus = _mod.check_signal_focus
 check_signal_reranker = _mod.check_signal_reranker
 enforce_manifest = _mod.enforce_manifest
@@ -43,6 +44,11 @@ SAMPLE_MANIFEST = {
         "focus": {"active": False, "reason": "benchmark does not call set_focus"},
         "domain": {"active": True, "tagged_count": 500},
         "graph": {"active": False, "edge_count": 0},
+    },
+    "retrieval": {
+        "requested_k": 10,
+        "effective_k": 10,
+        "caps": [],
     },
     "corpus": {
         "tenant_id": "amb-benchmark",
@@ -178,3 +184,155 @@ class TestCheckSignalReranker:
         assert result["active"] is False
         assert result["url"] == "http://192.0.2.1:1"
         assert "reason" in result
+
+
+# ---------------------------------------------------------------------------
+# check_retrieval_caps
+# ---------------------------------------------------------------------------
+
+
+class TestCheckRetrievalCaps:
+    def test_no_caps_applied(self):
+        result = check_retrieval_caps(10)
+        assert result["requested_k"] == 10
+        assert result["effective_k"] == 10
+        assert result["caps"] == []
+
+    def test_harness_cap(self):
+        result = check_retrieval_caps(70, harness_k=50)
+        assert result["requested_k"] == 70
+        assert result["effective_k"] == 50
+        assert len(result["caps"]) == 1
+        assert result["caps"][0]["source"] == "harness"
+
+    def test_sdk_cap(self):
+        result = check_retrieval_caps(70, sdk_max_results=50)
+        assert result["requested_k"] == 70
+        assert result["effective_k"] == 50
+        assert len(result["caps"]) == 1
+        assert result["caps"][0]["source"] == "sdk_config"
+
+    def test_tool_cap(self):
+        result = check_retrieval_caps(300, tool_max_results=200)
+        assert result["requested_k"] == 300
+        assert result["effective_k"] == 200
+        assert len(result["caps"]) == 1
+        assert result["caps"][0]["source"] == "mcp_tool_param"
+
+    def test_multiple_caps_lowest_wins(self):
+        result = check_retrieval_caps(
+            70, harness_k=50, sdk_max_results=30, tool_max_results=200
+        )
+        assert result["requested_k"] == 70
+        assert result["effective_k"] == 30
+        assert len(result["caps"]) == 2
+
+    def test_default_requested_k(self):
+        result = check_retrieval_caps(None)
+        assert result["requested_k"] == 10
+        assert result["effective_k"] == 10
+
+    def test_explicit_zero_not_replaced_with_default(self):
+        """Regression: requested_k=0 must not be swallowed by `or 10`."""
+        result = check_retrieval_caps(0)
+        assert result["requested_k"] == 0
+        assert result["effective_k"] == 0
+        assert result["caps"] == []
+
+    def test_deliberate_cap_k70_cap10(self):
+        """Issue #404: k=70 with cap=10 should clearly show the discrepancy."""
+        result = check_retrieval_caps(70, harness_k=10)
+        assert result["requested_k"] == 70
+        assert result["effective_k"] == 10
+        assert result["caps"][0]["source"] == "harness"
+        assert result["caps"][0]["limit"] == 10
+
+        # Verify this shows up as a mismatch in manifest enforcement
+        # when the expected manifest assumes no cap was applied.
+        manifest_with_cap = {**SAMPLE_MANIFEST, "retrieval": result}
+        expected_no_cap = {
+            "retrieval": {"effective_k": 70}
+        }
+        ok, diff = enforce_manifest(manifest_with_cap, expected_no_cap)
+        assert ok is False
+        assert "retrieval.effective_k" in diff
+        assert "70" in diff
+        assert "10" in diff
+
+
+# ---------------------------------------------------------------------------
+# main() wiring
+# ---------------------------------------------------------------------------
+
+main = _mod.main
+run_preflight = _mod.run_preflight
+
+
+class TestMainWiring:
+    """Verify main() passes the right values to run_preflight."""
+
+    def _run_main(self, monkeypatch, env_overrides=None):
+        """Helper: run main() with mocked run_preflight, return captured kwargs."""
+        env = {
+            "MEMORYHUB_DB_HOST": "localhost",
+            "MEMORYHUB_DB_PORT": "5432",
+            "MEMORYHUB_DB_USER": "test",
+            "MEMORYHUB_DB_PASS": "test",
+            "MEMORYHUB_DB_NAME": "test",
+        }
+        if env_overrides:
+            env.update(env_overrides)
+        for k, v in env.items():
+            monkeypatch.setenv(k, v)
+        monkeypatch.delenv("MEMORYHUB_RERANKER_URL", raising=False)
+        monkeypatch.delenv("MEMORYHUB_TENANT_ID", raising=False)
+        monkeypatch.setattr("sys.argv", ["preflight"])
+
+        captured = {}
+
+        async def fake_run_preflight(db_url, **kwargs):
+            captured.update(kwargs)
+            return {
+                "signals": {},
+                "retrieval": check_retrieval_caps(
+                    kwargs.get("requested_k"),
+                    sdk_max_results=kwargs.get("sdk_max_results"),
+                ),
+                "corpus": {},
+                "versions": {},
+                "timestamp": "",
+            }
+
+        monkeypatch.setattr(_mod, "run_preflight", fake_run_preflight)
+        main()
+        return captured
+
+    def test_memoryhub_k_becomes_requested_k(self, monkeypatch):
+        """MEMORYHUB_K should flow to requested_k, not harness_k."""
+        captured = self._run_main(monkeypatch, {"MEMORYHUB_K": "70"})
+        assert captured["requested_k"] == 70
+        assert captured.get("harness_k") is None
+
+    def test_no_memoryhub_k_yields_none(self, monkeypatch):
+        monkeypatch.delenv("MEMORYHUB_K", raising=False)
+        captured = self._run_main(monkeypatch)
+        assert captured["requested_k"] is None
+
+    def test_sdk_max_results_not_passed_without_sdk(self, monkeypatch):
+        """When memoryhub SDK is not importable, sdk_max_results should be None."""
+        monkeypatch.delenv("MEMORYHUB_K", raising=False)
+        captured = self._run_main(monkeypatch)
+        assert captured.get("sdk_max_results") is None
+
+    def test_harness_k_not_duplicated_from_memoryhub_k(self, monkeypatch):
+        """Regression: main() must not pass the same MEMORYHUB_K as both
+        requested_k and harness_k — the harness overrides UP, not caps DOWN."""
+        captured = self._run_main(monkeypatch, {"MEMORYHUB_K": "70"})
+        assert captured["requested_k"] == 70
+        assert captured.get("harness_k") is None
+
+    def test_memoryhub_k_zero_is_preserved(self, monkeypatch):
+        """Explicit MEMORYHUB_K=0 must reach requested_k as 0, not become None/10."""
+        captured = self._run_main(monkeypatch, {"MEMORYHUB_K": "0"})
+        assert captured["requested_k"] == 0
+        assert captured.get("harness_k") is None
