@@ -72,6 +72,7 @@ class ExtractionPipeline:
         scope: str = "user",
         domains: list[str] | None = None,
         gate_thresholds: GateThresholds | None = None,
+        generating_model: str | None = None,
     ):
         """Initialize the extraction pipeline.
 
@@ -100,6 +101,7 @@ class ExtractionPipeline:
         self._project_id = project_id
         self._scope = scope
         self._domains = domains
+        self._generating_model = generating_model
 
     def on_candidate(self, callback: CandidateCallback) -> CandidateCallback:
         """Decorator to register a review callback.
@@ -249,6 +251,7 @@ class ExtractionPipeline:
                 domains=candidate.domains or self._domains,
                 project_id=self._project_id,
                 upstream_trust_level=candidate.upstream_trust_level,
+                generating_model=candidate.generating_model or self._generating_model,
             )
 
             if write_result.memory is None:

@@ -339,6 +339,7 @@ async def create_fact_children(
     embedding_service: EmbeddingService,
     session: AsyncSession,
     now: datetime | None = None,
+    generating_model: str | None = None,
 ) -> int:
     """Create fact child nodes from extraction results.
 
@@ -392,6 +393,7 @@ async def create_fact_children(
             is_current=True,
             version=1,
             storage_type="inline",
+            generating_model=generating_model,
             created_at=now,
             updated_at=now,
         )

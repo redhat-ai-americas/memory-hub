@@ -84,6 +84,7 @@ class CandidateMemory(BaseModel):
     is_duplicate: bool = False
     duplicate_of: str | None = None
     upstream_trust_level: str = "trusted"
+    generating_model: str | None = None
     recall_count: int = 0
     unique_query_count: int = 0
 
