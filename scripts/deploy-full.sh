@@ -862,14 +862,12 @@ print_summary() {
     cluster_url=$(oc whoami --context "$CONTEXT" --show-server 2>/dev/null || echo "(unavailable)")
     current_user=$(oc whoami --context "$CONTEXT" 2>/dev/null || echo "(unavailable)")
 
-    local ui_route mcp_route auth_route rhoai_route
+    local ui_route mcp_route auth_route
     ui_route=$(oc get route --context "$CONTEXT" memoryhub-ui -n "$UI_NAMESPACE" \
         -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
     mcp_route=$(oc get route --context "$CONTEXT" memory-hub-mcp -n "$MCP_PROJECT" \
         -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
     auth_route=$(oc get route --context "$CONTEXT" auth-server -n "$AUTH_PROJECT" \
-        -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    rhoai_route=$(oc get route --context "$CONTEXT" rhods-dashboard -n "$RHOAI_NAMESPACE" \
         -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 
     echo ""
@@ -895,10 +893,17 @@ print_summary() {
         printf "    %-24s %s\n" "Auth server:" "(route not found — check: oc get route --context "$CONTEXT" auth-server -n $AUTH_PROJECT)"
     fi
 
-    if [ -n "$rhoai_route" ]; then
-        printf "    %-24s %s\n" "RHOAI dashboard:" "https://${rhoai_route}"
+    if oc get namespace --context "$CONTEXT" "$RHOAI_NAMESPACE" &>/dev/null; then
+        local rhoai_route
+        rhoai_route=$(oc get route --context "$CONTEXT" rhods-dashboard -n "$RHOAI_NAMESPACE" \
+            -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+        if [ -n "$rhoai_route" ]; then
+            printf "    %-24s %s\n" "RHOAI dashboard:" "https://${rhoai_route}"
+        else
+            printf "    %-24s %s\n" "RHOAI dashboard:" "(route not found — check: oc get route --context "$CONTEXT" rhods-dashboard -n $RHOAI_NAMESPACE)"
+        fi
     else
-        printf "    %-24s %s\n" "RHOAI dashboard:" "(route not found — check: oc get route --context "$CONTEXT" rhods-dashboard -n $RHOAI_NAMESPACE)"
+        printf "    %-24s %s\n" "RHOAI dashboard:" "(not installed)"
     fi
 
     echo ""
