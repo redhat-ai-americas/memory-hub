@@ -94,6 +94,7 @@ async def promote_memory(
         metadata=promoted_metadata,
         domains=source.domains,
         content_type=source.content_type,
+        upstream_trust_level=source.upstream_trust_level,
     )
 
     promoted_memory, curation_result = await create_memory(

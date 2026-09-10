@@ -189,6 +189,7 @@ async def create_memory(
         domains=data.domains,
         content_type=data.content_type,
         source=data.source or "agent",
+        upstream_trust_level=data.upstream_trust_level or "trusted",
         relevant_until=data.relevant_until,
         embedding=embedding,
         is_current=True,
