@@ -189,6 +189,7 @@ async def create_memory(
         domains=data.domains,
         content_type=data.content_type,
         source=data.source or "agent",
+        upstream_trust_level=data.upstream_trust_level or "trusted",
         relevant_until=data.relevant_until,
         embedding=embedding,
         is_current=True,
@@ -1184,6 +1185,7 @@ async def search_memories(
                     has_rationale=has_rationale,
                     content_type=node.content_type,
                     source=getattr(node, 'source', 'agent'),
+                    upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
                     created_at=node.created_at,
                 ), score))
         return results
@@ -1301,6 +1303,7 @@ async def search_memories(
                 has_rationale=has_rationale,
                 content_type=node.content_type,
                 source=getattr(node, 'source', 'agent'),
+                upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
                 created_at=node.created_at,
             ), rrf_score))
     used_reranker = (
@@ -1903,6 +1906,7 @@ async def search_memories_with_focus(
                         has_rationale=has_rationale,
                         content_type=node.content_type,
                         source=getattr(node, 'source', 'agent'),
+                        upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
                         created_at=node.created_at,
                     ),
                     relevance_score,
@@ -2259,7 +2263,8 @@ def node_to_read(
         tenant_id=node.tenant_id,
         domains=node.domains,
         content_type=node.content_type,
-        source=getattr(node, 'source', 'agent'),
+        source=getattr(node, 'source', None) or 'agent',
+        upstream_trust_level=getattr(node, 'upstream_trust_level', None) or 'trusted',
         content_hash=getattr(node, 'content_hash', None),
         is_current=node.is_current,
         version=node.version,
