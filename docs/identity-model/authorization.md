@@ -260,7 +260,7 @@ deploying on already has tracing and logging infrastructure built in. The
 existing llamastack-integration architecture even flags the gap:
 "MCP-level metrics and access logs are available only through MemoryHub's
 own Prometheus instrumentation, not through a unified platform view"
-(`../../planning/llamastack-integration/architecture.md:322`). Pushing audit events
+([`planning/llamastack-integration/architecture.md:322`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/planning/llamastack-integration/architecture.md)). Pushing audit events
 through LlamaStack telemetry closes that gap *and* avoids duplicating
 infrastructure.
 

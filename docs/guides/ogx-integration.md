@@ -118,7 +118,7 @@ calling `register_session`.
 
 **OAuth 2.1 (production):** Use `client_credentials` grant via the
 MemoryHub auth server. The agent fetches a JWT and includes it in MCP calls.
-See `planning/llamastack-integration/architecture.md` for the token exchange
+See [`planning/llamastack-integration/architecture.md`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/planning/llamastack-integration/architecture.md) for the token exchange
 flow.
 
 ## 6. What the agent sees
@@ -136,6 +136,6 @@ automatically handles dedup, PII blocking, and entity extraction.
 
 ## See also
 
-- `demos/ogx-memory/` -- complete demo with scaffolded agent, gateway, and UI
-- `planning/llamastack-integration/` -- full integration design (phases 1-3)
+- [`demos/ogx-memory/`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/tree/main/demos/ogx-memory) -- complete demo with scaffolded agent, gateway, and UI
+- [`planning/llamastack-integration/`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/tree/main/planning/llamastack-integration) -- full integration design (phases 1-3)
 - `docs/design/mcp-server.md` -- MCP tool surface and parameter reference

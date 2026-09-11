@@ -100,7 +100,7 @@ Use the issue templates (`bug_report`, `feature_request`, `design_proposal`) —
 
 Any collaborator can pick up an open issue. Here's the workflow:
 
-1. **Find an issue.** Browse the [MemoryHub project board](https://github.com/orgs/redhat-ai-americas/projects/1) Backlog column, or filter the issue list by label (`good first issue` is a good starting point). The [stakeholder analysis](planning/open-issues-by-stakeholder.md) groups issues by who they serve if you want to pick something aligned with your interests.
+1. **Find an issue.** Browse the [MemoryHub project board](https://github.com/orgs/redhat-ai-americas/projects/1) Backlog column, or filter the issue list by label (`good first issue` is a good starting point). The [stakeholder analysis](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/planning/open-issues-by-stakeholder.md) groups issues by who they serve if you want to pick something aligned with your interests.
 2. **Assign yourself.** Click "assign yourself" on the issue page. If you want to discuss approach before committing, leave a comment first. Do not start work on an issue that is already assigned to someone else without coordinating with them.
 3. **Move it to In Progress** on the project board when you start work.
 4. **Open a PR** that links the issue (`Closes #NN` in the PR description).
@@ -110,7 +110,7 @@ If you can't finish an issue you've claimed, unassign yourself and leave a comme
 
 ## Submitting pull requests
 
-1. **Read the relevant design doc first.** Most subsystems have one in `docs/`. If you're touching the agent-memory-ergonomics work, read [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md). If you're touching auth, read [`docs/design/governance.md`](docs/design/governance.md). If you're touching the package layout, see the repo-layout section above (historical record of the #55 rename: [`planning/archive/package-layout.md`](planning/archive/package-layout.md)).
+1. **Read the relevant design doc first.** Most subsystems have one in `docs/`. If you're touching the agent-memory-ergonomics work, read [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md). If you're touching auth, read [`docs/design/governance.md`](docs/design/governance.md). If you're touching the package layout, see the repo-layout section above (historical record of the #55 rename: [`planning/archive/package-layout.md`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/planning/archive/package-layout.md)).
 2. **Create a branch off `main`.** We don't use feature flags or long-lived branches. Branch names: `<subsystem>/<short-description>` (e.g. `sdk/fix-focus-param`) or `issue-NN-<short-description>`.
 3. **Keep PRs small and single-purpose.** One issue per PR where possible. If a change grows past ~500 lines of non-generated diff, consider splitting it — small PRs get reviewed faster and reverted more safely.
 4. **Run the relevant test suite locally** before opening the PR. Each subproject's `pytest tests/ -q` is fast (under a second on a recent laptop).
