@@ -2,7 +2,7 @@
 
 Thanks for your interest in MemoryHub. This guide covers how the repo is laid out, how to set up a development environment for each subproject, the conventions we follow, and how to file issues and PRs.
 
-If anything here is unclear, file an issue and tag it `documentation` — that's a good first contribution in itself.
+If anything here is unclear, file an issue and tag it `documentation` -- that's a good first contribution in itself.
 
 ## Repo layout in one paragraph
 
@@ -87,14 +87,29 @@ Most contributions never need to touch the demo OpenShift cluster. Local develop
 
 ## Filing issues
 
-> **Security vulnerabilities are the exception to everything below: do not file a public issue.** Use GitHub's private vulnerability reporting instead — see [`SECURITY.md`](SECURITY.md).
+> **Security vulnerabilities are the exception to everything below: do not file a public issue.** Use GitHub's private vulnerability reporting instead -- see [`SECURITY.md`](SECURITY.md).
 
-Use the issue templates (`bug_report`, `feature_request`, `design_proposal`) — they encode our conventions. Maintainers working with the project's agent tooling can use the `/issue-tracker` slash command, which enforces the same rules automatically. Either way, the rules are:
+Use the issue templates (`bug_report`, `feature_request`, `design_proposal`) -- they encode our conventions. Maintainers working with the project's agent tooling can use the `/issue-tracker` slash command, which enforces the same rules automatically. Either way, the rules are:
 
-- **Every issue references a design document.** For new designs, use the `design_proposal` template. If the design doesn't exist yet, file the design issue first or write a skeleton in `docs/`. We don't accept feature issues without a design pointer.
-- **Every issue starts in the Backlog column** of the MemoryHub project board. Issues flow Backlog → In Progress → Done.
+- **Every issue references a design document.** For new designs, use the `design_proposal` template. If the design doesn't exist yet, file the design issue first or write a skeleton in `docs/design/`. We don't accept feature issues without a design pointer.
+- **Every issue starts in the Backlog column** of the MemoryHub project board. Issues flow Backlog -> In Progress -> Done.
 - **File issues under your own GitHub identity.** Do NOT add AI attribution to issue authors. Other developers need to know who to contact about an issue, and the human owner is the point of contact, not the AI assistant that helped draft the body.
 - **No internal-tooling issues on this public repo.** If something internal to your dev environment is broken, mention it in conversation rather than filing a public issue that reveals private infrastructure details.
+
+### Issue labels
+
+Use these labels consistently. If an issue doesn't fit a category, leave it unlabeled and ask a maintainer.
+
+| Label | When to use | Examples |
+|-------|-------------|---------|
+| `bug` | Something that used to work no longer does, or behavior contradicts the design doc | Search returns stale results after update; migration fails on fresh install |
+| `feature` | New capability that doesn't exist yet | Add MOF export format; per-scope consent toggles |
+| `chore` | Maintenance work that doesn't change user-visible behavior | Dependency updates; CI pipeline fixes; linting cleanup |
+| `design` | A design proposal or design document update | New design doc for context assembly pipeline; revise trust provenance design |
+| `documentation` | Docs-only changes with no code | Fix broken links in ARCHITECTURE.md; add contributor guide section |
+| `good first issue` | Scoped work suitable for someone's first contribution | Issues that touch one file, have a clear design doc to follow, and don't require cluster access |
+
+A single issue can carry multiple labels (e.g., `feature` + `design` for a feature that needs a design doc first). Use your judgment.
 
 ## Working on issues
 
@@ -112,9 +127,9 @@ If you can't finish an issue you've claimed, unassign yourself and leave a comme
 
 1. **Read the relevant design doc first.** Most subsystems have one in `docs/`. If you're touching the agent-memory-ergonomics work, read [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md). If you're touching auth, read [`docs/design/governance.md`](docs/design/governance.md). If you're touching the package layout, see the repo-layout section above (historical record of the #55 rename: [`planning/archive/package-layout.md`](planning/archive/package-layout.md)).
 2. **Create a branch off `main`.** We don't use feature flags or long-lived branches. Branch names: `<subsystem>/<short-description>` (e.g. `sdk/fix-focus-param`) or `issue-NN-<short-description>`.
-3. **Keep PRs small and single-purpose.** One issue per PR where possible. If a change grows past ~500 lines of non-generated diff, consider splitting it — small PRs get reviewed faster and reverted more safely.
+3. **Keep PRs small and single-purpose.** One issue per PR where possible. If a change grows past ~500 lines of non-generated diff, consider splitting it -- small PRs get reviewed faster and reverted more safely.
 4. **Run the relevant test suite locally** before opening the PR. Each subproject's `pytest tests/ -q` is fast (under a second on a recent laptop).
-5. **CI must pass before merge.** GitHub Actions runs the test matrix (`.github/workflows/test.yml`), version-consistency checks, and secret scanning on every PR. Local green is not a substitute — a PR with failing CI will not be merged.
+5. **CI must pass before merge.** GitHub Actions runs the test matrix (`.github/workflows/test.yml`), version-consistency checks, and secret scanning on every PR. Local green is not a substitute -- a PR with failing CI will not be merged.
 6. **Don't commit secrets.** CI runs [gitleaks](https://github.com/gitleaks/gitleaks) on every PR; running it locally before pushing (`gitleaks detect --source .`) saves you a round-trip. We don't depend on git pre-commit hooks. (Maintainers with the project agent tooling can use the `/pre-commit` slash command.)
 7. **Open the PR with a clear description** that links the issue number and references the design doc. Fill in the PR template. Reviewers check the design first, then the diff.
 8. **Expect review from a maintainer.** Every PR requires approval from at least one maintainer who is not the author. The current maintainer list is in [`MAINTAINERS.md`](MAINTAINERS.md).
@@ -140,11 +155,11 @@ Examples from the actual log:
 - `sdk: Add .memoryhub.yaml schema and surface new search params (#59, #73)`
 - `memoryhub-cli: Add 'memoryhub config init' for project setup (#60)`
 
-(You may find older commits in the log using an issue-number prefix like `#58: ...` — that style predates this guide; use the `subsystem:` prefix for new commits.)
+(You may find older commits in the log using an issue-number prefix like `#58: ...` -- that style predates this guide; use the `subsystem:` prefix for new commits.)
 
 Imperative mood: write "Add foo" not "Adds foo" or "Added foo." Body explains why; the diff explains what.
 
-If your commit was assisted by an AI tool, add an `Assisted-by:` trailer (e.g., `Assisted-by: Claude Code (Opus 4.6)`). Do not add `Co-authored-by:` trailers for AI tools — the human author is the author of record. `Co-authored-by:` is fine (and encouraged) for human pairing. This project does not require a DCO sign-off or CLA; contributions are accepted under the inbound=outbound Apache-2.0 terms in the License section below. `Signed-off-by:` trailers are optional — add one manually if your own workflow requires it, but don't let tooling add it for you.
+If your commit was assisted by an AI tool, add an `Assisted-by:` trailer (e.g., `Assisted-by: Claude Code (Opus 4.6)`). Do not add `Co-authored-by:` trailers for AI tools -- the human author is the author of record. `Co-authored-by:` is fine (and encouraged) for human pairing. This project does not require a DCO sign-off or CLA; contributions are accepted under the inbound=outbound Apache-2.0 terms in the License section below. `Signed-off-by:` trailers are optional -- add one manually if your own workflow requires it, but don't let tooling add it for you.
 
 **Commit author identity.** Your commits' `Author` field must be your real Git identity (your name and an email tied to your GitHub account), not an automation or agent tool's identity. If your tooling commits under a bot account by default (for example `bot@ambient-code.local`), set `git config user.name` and `git config user.email` for this repo before pushing. We use the author field for contributor recognition and `git log --author` queries; bot identities break both. If you only notice after pushing, `git commit --amend --reset-author` followed by a force-push fixes it.
 
@@ -162,7 +177,7 @@ These conventions are enforced by review, not by linters (mostly).
 
 ## The same-commit consumer audit rule
 
-When you change the response shape of an MCP tool (rename a field, add a field, remove a field), grep `memoryhub-ui/backend/`, `sdk/`, and `memoryhub-cli/` in the **same commit** that changes the tool. Pydantic's `extra="allow"` masks shape mismatches silently — the consumer doesn't crash, it just sees `None` where data should be. We've been bitten by this twice; the rule exists because of an actual broken-in-production incident.
+When you change the response shape of an MCP tool (rename a field, add a field, remove a field), grep `memoryhub-ui/backend/`, `sdk/`, and `memoryhub-cli/` in the **same commit** that changes the tool. Pydantic's `extra="allow"` masks shape mismatches silently -- the consumer doesn't crash, it just sees `None` where data should be. We've been bitten by this twice; the rule exists because of an actual broken-in-production incident.
 
 The recipe is:
 
@@ -172,7 +187,7 @@ grep -rn 'old_field_name' memoryhub-ui/backend/ sdk/ memoryhub-cli/
 
 If anything matches, update it in the same commit. If nothing matches, the change is safe to land.
 
-Consumer priority order (check in this order): `memoryhub-ui/backend/` (breaks visibly on the dashboard), then `sdk/` (published — breakage reaches external users), then `memoryhub-cli/`. If this order changes, update it here — this file is the source of truth for contributors without access to the project's agent memory.
+Consumer priority order (check in this order): `memoryhub-ui/backend/` (breaks visibly on the dashboard), then `sdk/` (published -- breakage reaches external users), then `memoryhub-cli/`. If this order changes, update it here -- this file is the source of truth for contributors without access to the project's agent memory.
 
 ## Mock-vs-real test discipline
 
@@ -185,8 +200,9 @@ All test data created against a live deployment must be identifiable for automat
 ## Documentation expectations
 
 - **Update docs in the same PR as the code change.** A new feature with a stale design doc is worse than a new feature with no doc.
+- **New features require a design document in `docs/design/`.** The design doc should be included in the PR or already exist. Bug fixes should reference an existing design doc. If reviewers can't understand why a change exists by reading the design doc, the PR is not ready.
 - **`SYSTEMS.md` and `ARCHITECTURE.md` are the repo's front door.** Keep them current. If you add or remove a subsystem, update both.
-- **Per-subsystem docs in `docs/`** are the design source of truth. If implementation drifts from design, update the design first (or file an issue tracking the drift).
+- **Per-subsystem docs in `docs/design/`** are the design source of truth. If implementation drifts from design, update the design first (or file an issue tracking the drift).
 - **Retrospectives.** See the "How we work" section below for when and how to run retros.
 
 ## How we work: epics, sessions, and retros
@@ -224,6 +240,35 @@ Retros (`/retro`) are where institutional knowledge accumulates. They catch recu
 ### Why reconcile
 
 Issues describe a point in time. Sessions can quietly satisfy or decay issues without anyone noticing. `/reconcile` catches this drift before it causes duplicate work or stale issues piling up in the backlog. Run it after a big push, when the backlog feels off, or when you're about to plan the next session and want a clean starting point.
+
+## Project workflows reference
+
+This project uses Claude Code slash commands (skills) for structured workflows. These are available to anyone with Claude Code installed and the repo cloned. They're optional for contributors but required for maintainers.
+
+### Issue and project management
+
+| Workflow | What it does |
+|----------|-------------|
+| `/issue-tracker` | File, update, or close issues with enforced conventions (design doc reference, project board placement, label assignment). Use this instead of manual issue creation. |
+| `/pre-commit` | Scan for secrets before committing. Use this or run `gitleaks detect --source .` directly. |
+
+### MCP server development
+
+These workflows are sequential. Run them in order when adding new MCP tools.
+
+| Workflow | What it does |
+|----------|-------------|
+| `/plan-tools` | Design new tools and update `TOOLS_PLAN.md`. No code generated. |
+| `/create-tools` | Generate scaffolds from the plan and implement the tools. |
+| `/exercise-tools` | Test tool ergonomics by simulating how a consuming agent would use them. |
+| `/deploy-mcp` | Deploy the MCP server to OpenShift with pre-flight checks and post-deploy verification. |
+
+### Quality and review
+
+| Workflow | What it does |
+|----------|-------------|
+| `/code-review` | Review the working diff for bugs, style issues, and security concerns. |
+| `/security-review` | Security-focused review of pending changes on the current branch. |
 
 ## Project conventions reference
 
