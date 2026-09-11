@@ -1,9 +1,0 @@
-bin/
-.git/
-.gitignore
-chart/
-Makefile
-README.md
-CLAUDE.md
-planning/
-.containerignore

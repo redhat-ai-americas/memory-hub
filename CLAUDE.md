@@ -93,7 +93,7 @@ If this is your first session on this project, read [CONTRIBUTING.md](CONTRIBUTI
 Use `/issue-tracker` for all issue operations (filing, updating, closing). Use `/retro` after completing a major feature, fixing a gnarly bug, or finishing a multi-session effort — retros are where the project's institutional knowledge accumulates (see `retrospectives/`).
 
 ## Design Documents
-Shipped architecture and subsystem designs live in docs/. In-flight designs for unimplemented or skeleton-stage features live in planning/. Research investigations live in research/. Demo scripts live in demos/. When implementing a feature, always read the relevant design doc first. If the design doc is a skeleton or has TBD sections, flesh it out before implementing.
+Shipped architecture and subsystem designs live in docs/. In-flight designs, research investigations, and demo scripts have moved to the [memory-hub-scratchpad](https://github.com/redhat-ai-americas/memory-hub-scratchpad) repo (under `planning/`, `research/`, and `demos/` there). When implementing a feature, always read the relevant design doc first. If the design doc is a skeleton or has TBD sections, flesh it out before implementing.
 
 ## Commit Messages
 Use conventional commit format: `subsystem: Description in imperative mood`

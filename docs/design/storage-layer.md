@@ -223,7 +223,7 @@ Neo4j Agent Memory (neo4j-labs/agent-memory) is a strong project that provides r
 
 It's a fair question. The reasoning usually goes: ontologies are graphs, agent memory involves relationships, therefore you need a graph database. Sakhatsky (April 2026) offers a useful counterpoint -- each step in that chain is weaker than it looks.
 
-MemoryHub is a context graph, not a knowledge graph (see `research/surveys/knowledge-and-graph-memory.md`). Context graphs capture decisions, experiences, and institutional memory -- the "why" and "how" of organizational operations. Knowledge graphs capture domain ontologies -- entities, taxonomies, and static relationships. These are different concerns with different access patterns.
+MemoryHub is a context graph, not a knowledge graph (see [`research/surveys/knowledge-and-graph-memory.md`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/research/surveys/knowledge-and-graph-memory.md)). Context graphs capture decisions, experiences, and institutional memory -- the "why" and "how" of organizational operations. Knowledge graphs capture domain ontologies -- entities, taxonomies, and static relationships. These are different concerns with different access patterns.
 
 Context graph access patterns:
 
@@ -266,4 +266,4 @@ The embedding model (currently sentence-transformers/all-MiniLM-L6-v2, 384 dimen
 
 - Michael Sakhatsky, "You Probably Don't Need a Graph Database for Your Knowledge Graph" (April 2026)
 - Gartner, "Context Graphs" research (March 2026)
-- MemoryHub internal: `research/surveys/knowledge-and-graph-memory.md`, `research/surveys/memory-products-landscape.md`, `docs/design/graph-enhanced-memory.md`
+- MemoryHub internal: [`research/surveys/knowledge-and-graph-memory.md`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/research/surveys/knowledge-and-graph-memory.md), [`research/surveys/memory-products-landscape.md`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/research/surveys/memory-products-landscape.md), [`docs/design/graph-enhanced-memory.md`](graph-enhanced-memory.md)

@@ -1,9 +1,0 @@
-# MemoryHub connection for the OGX memory demo agent.
-# The fipsagents memory backend reads server_url and api_key from here,
-# connects at setup time, and injects memories as context before the
-# model sees the user's message.
-server_url: "${MEMORYHUB_MCP_URL}"
-api_key: "${MEMORYHUB_API_KEY}"
-
-memory_loading:
-  pattern: eager

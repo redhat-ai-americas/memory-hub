@@ -88,7 +88,7 @@ The approach was validated against a 200-memory synthetic corpus across four pip
 - **NEW-2** (rejected): focus-augmented query embedding (catastrophic cross-topic recall collapse)
 - **NEW-3** (rejected): cross-encoder only, no focus signal (roughly neutral on short, topic-coherent memories)
 
-NEW-1 strictly dominated on recall, precision, and MRR at `session_focus_weight` between 0.2 and 0.4, with the largest gains on ambiguous and cross-topic queries -- exactly the cases where contextual bias matters most. Full methodology and raw data are in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../../research/agent-memory-ergonomics/two-vector-retrieval.md) and [`benchmarks/`](../../benchmarks).
+NEW-1 strictly dominated on recall, precision, and MRR at `session_focus_weight` between 0.2 and 0.4, with the largest gains on ambiguous and cross-topic queries -- exactly the cases where contextual bias matters most. Full methodology and raw data are in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/research/agent-memory-ergonomics/two-vector-retrieval.md) and [`benchmarks/`](../../benchmarks).
 
 ## Temporal awareness
 

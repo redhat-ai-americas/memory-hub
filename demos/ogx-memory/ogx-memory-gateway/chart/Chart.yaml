@@ -1,5 +1,0 @@
-apiVersion: v2
-name: gateway-template
-version: 0.6.1
-appVersion: "0.6.1"
-description: Go HTTP gateway for AI agents

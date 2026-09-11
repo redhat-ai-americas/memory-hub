@@ -1,5 +1,0 @@
-# Recording files are large and environment-specific -- don't commit
-*.cast
-*.gif
-*.svg
-*.mp4
