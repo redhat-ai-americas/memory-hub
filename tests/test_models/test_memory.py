@@ -105,6 +105,16 @@ class TestMemoryNodeCreate:
         with pytest.raises(ValidationError, match="scope"):
             MemoryNodeCreate(**{**sample_memory_data, "scope": "galactic"})
 
+    def test_generating_model_defaults_to_none(self, sample_memory_data):
+        node = MemoryNodeCreate(**sample_memory_data)
+        assert node.generating_model is None
+
+    def test_generating_model_set_explicitly(self, sample_memory_data):
+        node = MemoryNodeCreate(
+            **{**sample_memory_data, "generating_model": "gemini-2.5-flash"}
+        )
+        assert node.generating_model == "gemini-2.5-flash"
+
 
 # ---------------------------------------------------------------------------
 # MemoryNodeUpdate
@@ -213,6 +223,23 @@ class TestMemoryNodeRead:
         assert node.content_truncated is True
         assert node.full_available is True
 
+    def test_generating_model_defaults_to_none(self):
+        data = _make_read_data()
+        node = MemoryNodeRead(**data)
+        assert node.generating_model is None
+
+    def test_generating_model_set_explicitly(self):
+        data = _make_read_data(generating_model="gemini-2.5-flash")
+        node = MemoryNodeRead(**data)
+        assert node.generating_model == "gemini-2.5-flash"
+
+    def test_generating_model_in_json_round_trip(self):
+        data = _make_read_data(generating_model="claude-sonnet-4")
+        node = MemoryNodeRead(**data)
+        json_str = node.model_dump_json()
+        restored = MemoryNodeRead.model_validate_json(json_str)
+        assert restored.generating_model == "claude-sonnet-4"
+
 
 # ---------------------------------------------------------------------------
 # MemoryNodeStub
@@ -271,6 +298,25 @@ class TestMemoryNodeStub:
         )
         assert stub.content_truncated is False
         assert stub.full_available is False
+
+    def test_stub_generating_model_defaults_to_none(self):
+        stub = MemoryNodeStub(
+            id=uuid.uuid4(),
+            stub="stub text",
+            scope="user",
+            weight=0.7,
+        )
+        assert stub.generating_model is None
+
+    def test_stub_generating_model_set_explicitly(self):
+        stub = MemoryNodeStub(
+            id=uuid.uuid4(),
+            stub="stub text",
+            scope="user",
+            weight=0.7,
+            generating_model="gemini-2.5-flash",
+        )
+        assert stub.generating_model == "gemini-2.5-flash"
 
 
 # ---------------------------------------------------------------------------

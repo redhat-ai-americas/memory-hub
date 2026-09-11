@@ -45,6 +45,7 @@ class ExtractionPipeline:
         project_id: str | None = None,
         scope: str = "user",
         domains: list[str] | None = None,
+        generating_model: str | None = None,
     ):
         """Initialize the extraction pipeline.
 
@@ -70,6 +71,7 @@ class ExtractionPipeline:
         self._project_id = project_id
         self._scope = scope
         self._domains = domains
+        self._generating_model = generating_model
 
     def on_candidate(self, callback: CandidateCallback) -> CandidateCallback:
         """Decorator to register a review callback.
@@ -206,6 +208,7 @@ class ExtractionPipeline:
                 metadata=candidate.metadata,
                 domains=candidate.domains or self._domains,
                 project_id=self._project_id,
+                generating_model=candidate.generating_model or self._generating_model,
             )
 
             if write_result.memory is None:
