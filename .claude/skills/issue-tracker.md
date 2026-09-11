@@ -212,4 +212,4 @@ Present as a numbered list with issue numbers and titles.
 - **Never skip the Backlog step.** Every issue starts in Backlog, even if work begins immediately (move to In Progress as a separate step).
 - **Never move to Done without user confirmation.**
 - **Always apply both a subsystem label and a type label.** If unsure which subsystem, ask the user.
-- **Follow the user's CLAUDE.md rules for issue attribution.** Issues show the human author (rdwj) as submitter. No AI attribution on issues.
+- **Follow the user's CLAUDE.md rules for issue attribution.** Issues show the human author as submitter. No AI attribution on issues.
