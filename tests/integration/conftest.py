@@ -25,8 +25,11 @@ from memoryhub_core.config import DatabaseSettings
 from memoryhub_core.services.embeddings import MockEmbeddingService
 from memoryhub_core.services.valkey_client import ValkeyClient, ValkeySettings, set_valkey_client
 
-# Mark every test in this package as an integration test automatically.
-pytestmark = pytest.mark.integration
+def pytest_collection_modifyitems(config, items):
+    """Auto-mark every test collected under tests/integration/ as 'integration'."""
+    for item in items:
+        if "tests/integration/" in str(item.fspath):
+            item.add_marker(pytest.mark.integration)
 
 
 def _build_db_url() -> str:
