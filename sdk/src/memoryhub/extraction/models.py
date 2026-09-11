@@ -95,3 +95,4 @@ class ExtractionResult(BaseModel):
     written: list[str] = Field(default_factory=list)
     reviewed: list[CandidateMemory] = Field(default_factory=list)
     filtered: list[CandidateMemory] = Field(default_factory=list)
+    deferred: list[CandidateMemory] = Field(default_factory=list)
