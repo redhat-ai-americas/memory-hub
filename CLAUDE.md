@@ -110,6 +110,7 @@ Where credentials live and how to use them. This eliminates "secrets archaeology
 **Local developer machine:**
 - `~/.config/memoryhub/credentials` -- MemoryHub API keys and URLs per cluster context (INI-style, keyed by MEMORYHUB_CONTEXT)
 - `~/.secrets` -- shell-sourceable file with `GEMINI_API_KEY`, `GOOGLE_API_KEY`, etc.
+  - **Use `GEMINI_API_KEY` for all Gemini calls in this project.** `GOOGLE_API_KEY` is on a different account without credit visibility. When both are set, unset `GOOGLE_API_KEY` before running benchmark or extraction workloads.
 
 **Cluster Secrets (mcp-rhoai context):**
 
