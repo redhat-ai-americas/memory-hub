@@ -43,7 +43,7 @@ Annotated list of every URL consulted. Primary sources (papers, official repos, 
   - LifeBench: 71.5%
   - PersonaMem: 86.6%
 - **Four axes they argue matter:** accuracy, speed, cost, usability. Explicit: "90% accuracy at $10/user/day is not better than 82% at $0.10."
-- **Honesty caveat:** the blog only benchmarks Hindsight itself. No competing systems (Mem0, Zep, Letta, Cognee) are run in the post — but the public leaderboard does show Cognee and a "hybrid-search" baseline.
+- **Scope note:** the blog benchmarks Hindsight; other systems (Mem0, Zep, Letta, Cognee) are not run in the post, though the public leaderboard does show Cognee and a "hybrid-search" baseline.
 
 ### 5. agentmemorybenchmark.ai [P — hosts the live leaderboard]
 
@@ -177,7 +177,7 @@ Annotated list of every URL consulted. Primary sources (papers, official repos, 
 - https://github.com/mem0ai/mem0
 - Two variants: base Mem0 and Mem0^g (graph-based).
 - **Benchmark reported on LoCoMo:** 5% / 11% / 7% relative improvements on single-hop / temporal / multi-hop question types over the best prior methods. **91% lower p95 latency** and **>90% token cost reduction** vs full-context baselines. Claims +26% improvement in LLM-as-judge metric over OpenAI baseline.
-- **Controversy noted by Letta** (see below): Mem0's LoCoMo numbers for MemGPT are disputed. The Letta team (MemGPT authors) said they could not reproduce Mem0's MemGPT-on-LoCoMo setup and Mem0 did not respond to clarification requests.
+- **Reproducibility note:** the Letta team (MemGPT authors) reported difficulty reproducing the MemGPT-on-LoCoMo setup described in Mem0's paper. The methodological details remain unresolved between the two teams.
 
 ### Letta Filesystem + Context-Bench (2025–2026) [P, S]
 

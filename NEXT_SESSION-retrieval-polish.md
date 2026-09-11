@@ -36,33 +36,24 @@ older ones with equal similarity scores.
 
 **Parallel-ok:** Yes -- independent of all other phases.
 
-### Phase 2: Search assembly (#397, #389)
+### Phase 2: Hard-stop mode (#397)
 
-Two improvements to how results are assembled and delivered: hard-stop
-mode for small-context models, and S3 hydration for the large-content
-tail.
+Hard-stop mode for small-context models. (S3 hydration #389 shipped and
+was closed 2026-09-09.)
 
 **Work:**
 1. Hard-stop mode (#397): a search mode that returns top-k with full
    content but stops (rather than degrading to stubs) when total tokens
    hit a caller-specified limit. Serves 64K-window models that need
    guaranteed full content.
-2. S3 hydration (#389): complete the read-half of the S3 spill design.
-   For content >100KB, rank on the DB prefix, then hydrate the final
-   top-k from S3 via parallel GETs before returning in `full` mode.
-   Valkey cache is a candidate for hot content. Design reference:
-   `benchmarks/results/h6-content-delivery-audit.md`.
 
 **Definition of done:** Hard-stop mode returns full-content results up to
-a token budget and cleanly stops (no stubs). S3 hydration returns full
-content for oversized memories in `full` mode with parallel fetches.
-Both have tests covering edge cases (zero results, budget exhausted on
-first result, S3 unavailable fallback).
+a token budget and cleanly stops (no stubs). Tests covering edge cases
+(zero results, budget exhausted on first result).
 
 **Dependencies:** None.
 
-**Parallel-ok:** Yes -- independent of all other phases. #397 and #389
-can also be done independently of each other within this phase.
+**Parallel-ok:** Yes -- independent of all other phases.
 
 ### Phase 3: Reimplementation + benchmark (#453, #454, #370)
 
@@ -99,7 +90,7 @@ also be done independently of each other.
 **In scope:**
 - #306 Add time-decay recency bias to search scoring
 - #370 Ablation Matrix B -- focus/domain/graph (post-dreaming)
-- #389 S3 hydration for large-content tail
+- ~~#389 S3 hydration for large-content tail~~ (CLOSED 2026-09-09)
 - #397 Hard-stop mode (truncate vs stubs)
 - #404 Effective-k observability
 - #453 Reimplement disabled_signals for RRF signal toggling
@@ -113,6 +104,9 @@ also be done independently of each other.
 ## What landed last session
 
 (No sessions yet for this epic.)
+
+**Reconciled 2026-09-09:** #389 (S3 hydration) closed. Phase 2 reduced to
+hard-stop mode only. All other issues confirmed still open and valid.
 
 ## Watch out for
 
