@@ -477,7 +477,6 @@ async def test_update_chain_shares_logical_id(async_session, embedding_service):
     assert v1.logical_id == v2.logical_id == v3.logical_id
     assert len({v1.id, v2.id, v3.id}) == 3
 
-
 async def test_chunk_children_have_logical_id(async_session, embedding_service):
     """Chunk children created by two-tier storage have logical_id == id."""
     from sqlalchemy import select as sa_select

@@ -48,8 +48,10 @@ async def _create_memory(
     previous_version_id: uuid.UUID | None = None,
 ) -> MemoryNode:
     """Helper to create a MemoryNode with sensible defaults."""
+    memory_id=uuid.uuid4()
     node = MemoryNode(
-        id=uuid.uuid4(),
+        id=memory_id,
+        logical_id=memory_id,
         content=content,
         stub=generate_stub(content, scope, weight, 0, False),
         embedding=embedding,

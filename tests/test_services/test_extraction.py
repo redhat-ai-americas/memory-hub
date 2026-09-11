@@ -226,6 +226,7 @@ async def test_extract_entities_creates_nodes_and_edges(async_session):
     now = datetime.now(UTC)
     source = MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Alice from Acme Corp visited New York for the AI Summit.",
         stub="Alice from Acme Corp...",
         scope="user",
@@ -306,6 +307,7 @@ async def test_extract_entities_deduplicates_across_memories(async_session):
     for mid in mem_ids:
         async_session.add(MemoryNode(
             id=mid,
+            logical_id=mid,
             content="Alice did something",
             stub="Alice did something...",
             scope="user",
@@ -360,6 +362,7 @@ async def test_extract_entities_handles_no_entities(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="The weather is nice today.",
         stub="The weather...",
         scope="user",
@@ -403,6 +406,7 @@ async def test_extract_entities_survives_individual_failure(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Alice went to New York.",
         stub="Alice went...",
         scope="user",
@@ -663,6 +667,7 @@ async def test_cascade_runs_stage2_when_spacy_coverage_low(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Deployed PostgreSQL 16 with pgvector on OpenShift.",
         stub="Deployed PostgreSQL...",
         scope="user",
@@ -717,6 +722,7 @@ async def test_cascade_always_runs_gliner_alongside_spacy(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Alice from Acme Corp visited New York.",
         stub="Alice from Acme...",
         scope="user",
@@ -780,6 +786,7 @@ async def test_cascade_gliner_runs_despite_spacy_false_positives(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Deployed PostgreSQL with ORM on OpenShift.",
         stub="Deployed PostgreSQL...",
         scope="user",
@@ -835,6 +842,7 @@ async def test_cascade_stage2_failure_falls_back_to_stage1(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Alice went somewhere.",
         stub="Alice went...",
         scope="user",
@@ -885,6 +893,7 @@ async def test_cascade_dedup_between_stages(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Alice went to New York to deploy PostgreSQL.",
         stub="Alice went to New York...",
         scope="user",
@@ -1161,6 +1170,7 @@ async def test_cascade_runs_stage3_when_coverage_low(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="MemoryHub uses PostgreSQL for storage.",
         stub="MemoryHub uses...",
         scope="user",
@@ -1219,6 +1229,7 @@ async def test_cascade_skips_stage3_when_coverage_sufficient(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Alice from Acme Corp visited New York.",
         stub="Alice from Acme...",
         scope="user",
@@ -1280,6 +1291,7 @@ async def test_cascade_skips_stage3_when_no_url(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Something without entities.",
         stub="Something...",
         scope="user",
@@ -1336,6 +1348,7 @@ async def test_cascade_stage3_failure_falls_back(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="Alice went somewhere.",
         stub="Alice went...",
         scope="user",
@@ -1396,6 +1409,7 @@ async def test_stage3_creates_inter_entity_relationships(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="MemoryHub uses PostgreSQL",
         stub="MemoryHub uses...",
         scope="user",
@@ -1468,6 +1482,7 @@ async def test_stage3_skips_relationship_when_entity_missing(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content="MemoryHub uses something",
         stub="MemoryHub...",
         scope="user",
@@ -1952,6 +1967,7 @@ async def test_acronym_discount_triggers_stage3_live_llm(async_session):
     now = datetime.now(UTC)
     async_session.add(MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content=content,
         stub=content[:40] + "...",
         scope="user",

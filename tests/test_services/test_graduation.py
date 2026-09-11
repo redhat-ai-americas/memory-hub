@@ -17,6 +17,7 @@ async def test_graduate_happy_path(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Users often forget to close database connections after queries",
         stub="DB connection leak",
         scope="user",
@@ -75,6 +76,7 @@ async def test_graduate_with_evidence(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="API calls often fail during peak hours",
         stub="API peak failures",
         scope="project",
@@ -125,6 +127,7 @@ async def test_graduate_with_reviewer_note(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Memory leaks in background workers",
         stub="Memory leak",
         scope="user",
@@ -163,6 +166,7 @@ async def test_graduate_creates_derived_from(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="CSS specificity issues with third-party styles",
         stub="CSS specificity",
         scope="user",
@@ -206,6 +210,7 @@ async def test_graduate_rejects_knowledge(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Knowledge memories cannot be graduated",
         stub="Knowledge",
         scope="user",
@@ -241,6 +246,7 @@ async def test_graduate_rejects_behavioral(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Behavioral memories cannot be graduated",
         stub="Behavioral",
         scope="user",
