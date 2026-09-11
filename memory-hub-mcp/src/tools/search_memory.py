@@ -56,6 +56,15 @@ from src.core.authz import (
     get_claims_from_context,
     resolve_tenant,
 )
+from src.tools._context_pipeline import (
+    PipelineState,
+    log_pipeline_summary,
+    run_pre_budget_pipeline,
+    stage_apply_budget,
+    stage_screen_content,
+    stage_stamp_provenance,
+    stage_emit,
+)
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
@@ -117,6 +126,27 @@ def _apply_domain_boost(
     return boosted
 
 
+_TAINTED_LEVELS = frozenset({"untrusted", "mixed"})
+
+
+def _taint_entry(item: MemoryNodeRead | MemoryNodeStub) -> dict[str, Any] | None:
+    """Build taint metadata when the memory's upstream content is not fully trusted."""
+    trust = getattr(item, "upstream_trust_level", "trusted")
+    if trust not in _TAINTED_LEVELS:
+        return None
+    return {
+        "tainted": True,
+        "sources": [getattr(item, "source", "agent")],
+    }
+
+
+def _inject_taint(entry: dict[str, Any], item: MemoryNodeRead | MemoryNodeStub) -> None:
+    """Add taint metadata to a formatted entry dict when applicable."""
+    taint = _taint_entry(item)
+    if taint is not None:
+        entry["taint"] = taint
+
+
 def _estimate_tokens(payload: dict[str, Any]) -> int:
     """Estimate the token cost of a serialized result entry."""
     return max(1, len(json.dumps(payload, default=str)) // _CHARS_PER_TOKEN)
@@ -143,6 +173,7 @@ def _compact_entry(
     entry["content_truncated"] = item.content_truncated
     entry["full_available"] = item.full_available
     entry["source"] = getattr(item, "source", "agent")
+    _inject_taint(entry, item)
     if relevance_score is not None:
         entry["relevance_score"] = round(relevance_score, 4)
     return entry
@@ -178,6 +209,7 @@ def _format_entry(
     entry = item.model_dump(mode="json")
     entry["result_type"] = entry_type
     entry["relevance_score"] = round(relevance_score, 4)
+    _inject_taint(entry, item)
     # Guide agents from chunk hits to the parent memory's full content
     if item.branch_type == "chunk" and item.parent_id is not None:
         entry["parent_hint"] = (
@@ -188,6 +220,7 @@ def _format_entry(
         branch_entries: list[dict[str, Any]] = []
         for branch_item, branch_score in nested_branches:
             branch_entry = branch_item.model_dump(mode="json")
+            _inject_taint(branch_entry, branch_item)
             branch_entry["result_type"] = (
                 "full" if isinstance(branch_item, MemoryNodeRead) else "stub"
             )
@@ -221,6 +254,7 @@ def _format_entry_cached(
     entry = item.model_dump(mode="json")
     entry["result_type"] = entry_type
     entry["is_appendix"] = is_appendix
+    _inject_taint(entry, item)
     if item.branch_type == "chunk" and item.parent_id is not None:
         entry["parent_hint"] = (
             f"This is a chunk of a larger memory. Call "
@@ -230,6 +264,7 @@ def _format_entry_cached(
         branch_entries: list[dict[str, Any]] = []
         for branch_item, _score in nested_branches:
             branch_entry = branch_item.model_dump(mode="json")
+            _inject_taint(branch_entry, branch_item)
             branch_entry["result_type"] = (
                 "full" if isinstance(branch_item, MemoryNodeRead) else "stub"
             )
@@ -442,6 +477,9 @@ async def _backfill_compiled_entries(
                     branch_type=node.branch_type,
                     has_children=has_children,
                     has_rationale=has_rationale,
+                    source=getattr(node, 'source', 'agent'),
+                    upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
+                    generating_model=getattr(node, 'generating_model', None),
                     created_at=node.created_at,
                 ),
                 0.0,
@@ -1056,6 +1094,19 @@ async def search_memory(
         if domains and results and not used_focus_path:
             results = _apply_domain_boost(results, domains)
 
+        # ── Context assembly pipeline (#561) ─────────────────────────
+        # Run the pre-budget pipeline stages: authenticate, validate,
+        # enforce scope, check freshness, deduplicate. These stages
+        # run in a defined order with structured logging.
+        pipeline_state = PipelineState(
+            results=results,
+            authorized_scopes=authorized,
+            tenant=tenant,
+            owner_id=owner_id,
+        )
+        pipeline_state = run_pre_budget_pipeline(pipeline_state)
+        results = pipeline_state.results
+
         if not results:
             response: dict[str, Any] = {
                 "results": [],
@@ -1219,6 +1270,13 @@ async def search_memory(
                 new_branches.append((new_b, bscore))
             return new_item, new_branches, changed
 
+        # Pipeline stages 6-8: budget, screen, provenance
+        pipeline_state = stage_apply_budget(
+            pipeline_state, max_response_tokens=max_response_tokens, mode=mode,
+        )
+        pipeline_state = stage_screen_content(pipeline_state)
+        pipeline_state = stage_stamp_provenance(pipeline_state)
+
         # Token-budget packing. Walk results in order; full-form entries
         # that exceed the remaining budget (and everything after them)
         # are degraded to stub form. Stubs are always included so the
@@ -1309,6 +1367,10 @@ async def search_memory(
                     item, child_branches, budget, budget_exhausted, _format,
                 )
                 formatted.append(entry)
+
+        # Pipeline stage 9: emit
+        stage_emit(pipeline_state, result_count=len(formatted))
+        log_pipeline_summary(pipeline_state)
 
         response = {
             "results": formatted,

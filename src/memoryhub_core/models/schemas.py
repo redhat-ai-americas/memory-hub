@@ -42,6 +42,14 @@ class ContentType(StrEnum):
     BEHAVIORAL = "behavioral"
 
 
+class UpstreamTrustLevel(StrEnum):
+    """Trust level of upstream content that produced this memory (#559)."""
+
+    TRUSTED = "trusted"
+    UNTRUSTED = "untrusted"
+    MIXED = "mixed"
+
+
 class CampaignStatus(StrEnum):
     """Lifecycle states for a campaign."""
 
@@ -83,6 +91,14 @@ class MemoryNodeCreate(BaseModel):
     )
     content_type: ContentType = Field(default=ContentType.EXPERIENTIAL, description="Memory classification type")
     source: str | None = Field(default=None, description="Memory source: agent, dreaming, import")
+    upstream_trust_level: UpstreamTrustLevel = Field(
+        default=UpstreamTrustLevel.TRUSTED,
+        description="Trust level of upstream content: trusted, untrusted, or mixed",
+    )
+    generating_model: str | None = Field(
+        default=None,
+        description="Model identifier that produced this memory via dreaming extraction. NULL for user-stated.",
+    )
     relevant_until: datetime | None = Field(
         default=None,
         description="Semantic expiry timestamp. NULL means evergreen or version-bound.",
@@ -143,6 +159,8 @@ class MemoryNodeRead(BaseModel):
     domains: list[str] | None = None
     content_type: ContentType = ContentType.EXPERIENTIAL
     source: str = Field(default="agent", description="What produced this memory")
+    upstream_trust_level: str = Field(default="trusted", description="Trust level of upstream content")
+    generating_model: str | None = Field(default=None, description="Model that produced this memory via extraction")
     content_hash: str | None = None
     is_current: bool
     version: int
@@ -181,6 +199,8 @@ class MemoryNodeStub(BaseModel):
     domains: list[str] | None = None
     content_type: ContentType | None = None
     source: str = Field(default="agent", description="What produced this memory")
+    upstream_trust_level: str = Field(default="trusted", description="Trust level of upstream content")
+    generating_model: str | None = Field(default=None, description="Model that produced this memory via extraction")
     created_at: datetime | None = None  # needed for cache-optimized sort ordering (#175)
     content_truncated: bool = True
     full_available: bool = True

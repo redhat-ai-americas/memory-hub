@@ -64,6 +64,7 @@ _WRITE_OPTS = frozenset({
     "project_description", "force", "owner_id", "content_type",
     "driver_id", "relevant_until", "tenant_id",
     "chunk_target_tokens", "chunk_overlap_tokens", "extract_facts",
+    "upstream_trust_level", "generating_model",
 })
 _UPDATE_OPTS = frozenset({"weight", "metadata", "domains", "driver_id"})
 _SET_RULE_OPTS = frozenset({

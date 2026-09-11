@@ -83,6 +83,10 @@ class CandidateMemory(BaseModel):
     relate_to: list[str] = Field(default_factory=list)
     is_duplicate: bool = False
     duplicate_of: str | None = None
+    upstream_trust_level: str = "trusted"
+    generating_model: str | None = None
+    recall_count: int = 0
+    unique_query_count: int = 0
 
 
 class ExtractionResult(BaseModel):
@@ -95,3 +99,4 @@ class ExtractionResult(BaseModel):
     written: list[str] = Field(default_factory=list)
     reviewed: list[CandidateMemory] = Field(default_factory=list)
     filtered: list[CandidateMemory] = Field(default_factory=list)
+    deferred: list[CandidateMemory] = Field(default_factory=list)

@@ -53,6 +53,9 @@ medium_article_1.pdf
 specs/
 
 
+# Local scratch (not committed)
+local/
+
 # Terminology audit findings (local scratch)
 findings.md
 COMMIT_PLAN.md

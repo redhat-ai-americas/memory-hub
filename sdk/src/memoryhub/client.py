@@ -829,6 +829,8 @@ class MemoryHubClient:
         chunk_target_tokens: int | None = None,
         chunk_overlap_tokens: int | None = None,
         extract_facts: str | None = None,
+        upstream_trust_level: str | None = None,
+        generating_model: str | None = None,
     ) -> WriteResult:
         """Write a new memory.
 
@@ -884,6 +886,10 @@ class MemoryHubClient:
             opts["chunk_overlap_tokens"] = chunk_overlap_tokens
         if extract_facts is not None:
             opts["extract_facts"] = extract_facts
+        if upstream_trust_level is not None:
+            opts["upstream_trust_level"] = upstream_trust_level
+        if generating_model is not None:
+            opts["generating_model"] = generating_model
         data = await self._call_action(
             "write",
             content=content,

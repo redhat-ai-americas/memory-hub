@@ -51,6 +51,9 @@ class ExtractionCandidate(BaseModel):
     domains: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
+    upstream_trust_level: str = "trusted"
+    generating_model: str | None = None
+
     thread_id: uuid.UUID | None = None
     source_messages: list[int] | None = None
     extraction_model: str | None = None
@@ -167,6 +170,8 @@ async def reconcile_candidate(
                 domains=candidate.domains,
                 content_type=candidate.content_type,
                 source="dreaming",
+                upstream_trust_level=candidate.upstream_trust_level,
+                generating_model=candidate.generating_model,
             )
             if actor_id:
                 data.actor_id = actor_id

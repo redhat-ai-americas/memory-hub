@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING
 
 from memoryhub.extraction.base import Extractor
 from memoryhub.extraction.dedup import DedupFilter
-from memoryhub.extraction.models import CandidateMemory, ExtractionResult, TraceEvent
+from memoryhub.extraction.gates import DreamingGate, GateThresholds
+from memoryhub.extraction.models import (
+    CandidateMemory,
+    ExtractionResult,
+    TraceEvent,
+    TraceEventType,
+)
 
 if TYPE_CHECKING:
     from memoryhub.client import MemoryHubClient
@@ -17,6 +23,26 @@ logger = logging.getLogger(__name__)
 
 # Callback for human review of candidates. Returns True to write, False to skip.
 CandidateCallback = Callable[[CandidateMemory], Awaitable[bool]]
+
+_UNTRUSTED_EVENT_TYPES = frozenset({TraceEventType.TOOL_RESULT})
+
+
+def infer_trust_level(event: TraceEvent) -> str:
+    """Determine trust level from a trace event's type and metadata.
+
+    Explicit metadata takes precedence. Otherwise, tool results are
+    untrusted (web scrapes, external APIs) and direct user/assistant
+    messages are trusted.
+    """
+    if event.metadata:
+        explicit = event.metadata.get("upstream_trust_level") or event.metadata.get("trust_level")
+        if explicit in ("trusted", "untrusted", "mixed"):
+            return explicit
+
+    if event.event_type in _UNTRUSTED_EVENT_TYPES:
+        return "untrusted"
+
+    return "trusted"
 
 
 class ExtractionPipeline:
@@ -45,6 +71,8 @@ class ExtractionPipeline:
         project_id: str | None = None,
         scope: str = "user",
         domains: list[str] | None = None,
+        gate_thresholds: GateThresholds | None = None,
+        generating_model: str | None = None,
     ):
         """Initialize the extraction pipeline.
 
@@ -60,16 +88,20 @@ class ExtractionPipeline:
             project_id: Project identifier for memory writes and searches.
             scope: Default scope for memory writes (default "user").
             domains: Default domain tags for memory writes.
+            gate_thresholds: Thresholds for dreaming gates. Candidates below
+                threshold are deferred, not discarded. None disables gating.
         """
         self._client = client
         self._extractors = extractors or []
         self._dedup = DedupFilter(threshold=dedup_threshold)
+        self._gate = DreamingGate(gate_thresholds) if gate_thresholds else None
         self._callback: CandidateCallback | None = None
         self._confidence_threshold = confidence_threshold
         self._auto_write = auto_write
         self._project_id = project_id
         self._scope = scope
         self._domains = domains
+        self._generating_model = generating_model
 
     def on_candidate(self, callback: CandidateCallback) -> CandidateCallback:
         """Decorator to register a review callback.
@@ -123,6 +155,11 @@ class ExtractionPipeline:
 
         result.candidates = candidates
 
+        # ── 1b. Trust level inference ──────────────────────────────
+        for candidate in candidates:
+            if candidate.upstream_trust_level == "trusted":
+                candidate.upstream_trust_level = infer_trust_level(candidate.source_event)
+
         # ── 2. Relationship enrichment ──────────────────────────────
         for candidate in candidates:
             for enricher in enrichers:
@@ -152,8 +189,15 @@ class ExtractionPipeline:
             if candidate.is_duplicate:
                 result.filtered.append(candidate)
 
-        # ── 4. Routing phase ────────────────────────────────────────
+        # ── 4. Dreaming gates ──────────────────────────────────────
         non_duplicates = [c for c in candidates if not c.is_duplicate]
+
+        if self._gate:
+            gate_result = self._gate.evaluate(non_duplicates)
+            result.deferred = gate_result.deferred
+            non_duplicates = gate_result.passed
+
+        # ── 5. Routing phase ────────────────────────────────────────
 
         for candidate in non_duplicates:
             # Auto-write high-confidence candidates
@@ -206,6 +250,8 @@ class ExtractionPipeline:
                 metadata=candidate.metadata,
                 domains=candidate.domains or self._domains,
                 project_id=self._project_id,
+                upstream_trust_level=candidate.upstream_trust_level,
+                generating_model=candidate.generating_model or self._generating_model,
             )
 
             if write_result.memory is None:

@@ -16,7 +16,8 @@ This directory holds shipped architecture and user-facing reference material, or
 - [`governance.md`](design/governance.md) — Scopes, visibility, ownership, tenant isolation, RBAC.
 - [`mcp-server.md`](design/mcp-server.md) — FastMCP 3 server, tool profiles, transport, session handling.
 - [`curator-agent.md`](design/curator-agent.md) — Inline curation pipeline and rules engine.
-- [`two-vector-retrieval.md`](design/two-vector-retrieval.md) — Query + focus retrieval via RRF, cross-encoder rerank, pivot detection, temporal awareness (#282/#292).
+- [`retrieval-pipeline.md`](design/retrieval-pipeline.md) — Overview of the five-signal hybrid retrieval pipeline: vector, keyword, cross-encoder rerank, session focus, and metadata signals fused via RRF.
+- [`two-vector-retrieval.md`](design/two-vector-retrieval.md) — Focus-vector design, pivot detection, temporal awareness, and the benchmark that selected this approach (#282/#292).
 - [`graph-enhanced-memory.md`](design/graph-enhanced-memory.md) — Entity extraction (POLE+O), relationships, graph queries.
 - [`conversation-persistence.md`](design/conversation-persistence.md) — Governed threads, extraction pipeline, retention (#168).
 - [`context-compaction.md`](design/context-compaction.md) — Governed thread compaction (#169).
