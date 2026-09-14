@@ -794,8 +794,22 @@ PROJECT_ID=$(basename "$PROJECT_ROOT")
 """
 
 HOOK_SCRIPT_NAME = "load-memories.sh"
+REBIAS_HOOK_SCRIPT_NAME = "rebias-memories.sh"
+EXTRACT_HOOK_SCRIPT_NAME = "extract-memories.sh"
 
 _SETTINGS_HOOK_MATCHERS = ("startup", "compact", "clear")
+
+# Turn-level hook definitions (#313)
+_TURN_LEVEL_HOOKS: dict[str, dict[str, Any]] = {
+    "UserPromptSubmit": {
+        "script": REBIAS_HOOK_SCRIPT_NAME,
+        "timeout": 3,
+    },
+    "Stop": {
+        "script": EXTRACT_HOOK_SCRIPT_NAME,
+        "timeout": 5,
+    },
+}
 
 
 def _build_hook_entry(matcher: str) -> dict[str, Any]:
@@ -822,11 +836,21 @@ def _has_memoryhub_hook(entries: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _has_hook_script(entries: list[dict[str, Any]], script_name: str) -> bool:
+    """Check whether any entry references the given script."""
+    for entry in entries:
+        for hook in entry.get("hooks", []):
+            if script_name in hook.get("command", ""):
+                return True
+    return False
+
+
 def merge_settings_hooks(project_dir: Path) -> Path:
     """Merge MemoryHub hook entries into .claude/settings.json.
 
     Read-modify-write with idempotent detection: if load-memories hooks
-    are already present, the file is left unchanged.
+    are already present, the file is left unchanged. Also adds turn-level
+    hooks (UserPromptSubmit, Stop) for rebias and extract (#313).
 
     Returns the path to settings.json (whether modified or not).
     """
@@ -838,16 +862,33 @@ def merge_settings_hooks(project_dir: Path) -> Path:
         settings = json.loads(settings_path.read_text())
 
     hooks = settings.setdefault("hooks", {})
+    changed = False
+
+    # SessionStart hooks
     session_start = hooks.setdefault("SessionStart", [])
+    if not _has_memoryhub_hook(session_start):
+        for matcher in _SETTINGS_HOOK_MATCHERS:
+            session_start.append(_build_hook_entry(matcher))
+        changed = True
 
-    if _has_memoryhub_hook(session_start):
-        return settings_path
+    # Turn-level hooks (#313)
+    for event_name, hook_def in _TURN_LEVEL_HOOKS.items():
+        event_entries = hooks.setdefault(event_name, [])
+        if not _has_hook_script(event_entries, hook_def["script"]):
+            event_entries.append({
+                "matcher": "",
+                "hooks": [{
+                    "type": "command",
+                    "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/" + hook_def["script"],
+                    "timeout": hook_def["timeout"],
+                }],
+            })
+            changed = True
 
-    for matcher in _SETTINGS_HOOK_MATCHERS:
-        session_start.append(_build_hook_entry(matcher))
+    if changed:
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
     return settings_path
 
 
