@@ -2571,6 +2571,187 @@ async def _run_dream(model, url, api_key, thread_id, dry_run, output):
         )
 
 
+# ── Turn-level hooks (#313) ──────────────────────────────────────────────────
+
+
+@app.command()
+def rebias(
+    message: str = typer.Argument(
+        None, help="User message text (reads from stdin if omitted)",
+    ),
+    max_results: int = typer.Option(10, "--max", "-n", help="Maximum memories to return"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.compact, "--output", "-o",
+        help="Output format: compact (default), json, quiet",
+    ),
+):
+    """Search for memories relevant to a user message and print for context injection.
+
+    Designed for pre-turn hooks (e.g., Claude Code UserPromptSubmit).
+    Reads the user's message, runs a relevance search, and outputs
+    results in compact format suitable for additionalContext injection.
+
+    Accepts input as:
+      - A positional argument: memoryhub rebias "the user message"
+      - Piped stdin (plain text): echo "message" | memoryhub rebias
+      - Piped stdin (JSON with 'prompt' field): Claude Code hook payload
+
+    Exits 0 on all failures for graceful degradation.
+    """
+    if message is None:
+        if sys.stdin.isatty():
+            raise typer.Exit(0)
+        raw = sys.stdin.read().strip()
+        if not raw:
+            raise typer.Exit(0)
+        # Try parsing as JSON (Claude Code hook payload has a 'prompt' field)
+        try:
+            import json as json_mod
+            payload = json_mod.loads(raw)
+            message = payload.get("prompt", "") if isinstance(payload, dict) else raw
+        except (json_mod.JSONDecodeError, ValueError):
+            message = raw
+
+    if not message:
+        raise typer.Exit(0)
+
+    _project_id = project_id or _get_project_id_default()
+
+    try:
+        client = _get_client(OutputFormat.quiet)
+
+        async def _do():
+            async with client:
+                return await client.search(
+                    message, max_results=max_results,
+                    project_id=_project_id,
+                )
+
+        result = asyncio.run(_do())
+    except (SystemExit, Exception):
+        raise typer.Exit(0)
+
+    if not result or not result.results:
+        raise typer.Exit(0)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    _print_compact(result.results, _project_id)
+
+
+@app.command()
+def extract(
+    response: str = typer.Argument(
+        None, help="Assistant response text (reads from stdin if omitted)",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID",
+    ),
+    session_id: str | None = typer.Option(
+        None, "--session-id", help="Session ID for provenance tracking",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.quiet, "--output", "-o",
+        help="Output format: quiet (default), json, table",
+    ),
+):
+    """Extract facts, decisions, and preferences from a model response.
+
+    Designed for post-turn hooks (e.g., Claude Code Stop).
+    Reads the model's response, extracts candidate memories via the
+    SDK extraction pipeline, and writes high-confidence candidates
+    automatically. Deduplicates against existing memories.
+
+    Accepts input as:
+      - A positional argument: memoryhub extract "the response text"
+      - Piped stdin (plain text): echo "response" | memoryhub extract
+      - Piped stdin (JSON with 'last_assistant_message' field): Claude Code Stop payload
+
+    Exits 0 on all failures for graceful degradation.
+    """
+    if response is None:
+        if sys.stdin.isatty():
+            raise typer.Exit(0)
+        raw = sys.stdin.read().strip()
+        if not raw:
+            raise typer.Exit(0)
+        try:
+            import json as json_mod
+            payload = json_mod.loads(raw)
+            if isinstance(payload, dict):
+                response = payload.get("last_assistant_message", "") or payload.get("content", "")
+            else:
+                response = raw
+        except (json_mod.JSONDecodeError, ValueError):
+            response = raw
+
+    if not response or len(response) < 20:
+        raise typer.Exit(0)
+
+    _project_id = project_id or _get_project_id_default()
+
+    try:
+        client = _get_client(OutputFormat.quiet)
+
+        async def _do():
+            from memoryhub.extraction.extractors import (
+                DecisionTraceExtractor,
+                PreferenceExtractor,
+                RelationshipExtractor,
+            )
+            from memoryhub.extraction.models import TraceEvent
+            from memoryhub.extraction.pipeline import ExtractionPipeline
+
+            async with client:
+                pipeline = ExtractionPipeline(
+                    client=client,
+                    extractors=[
+                        DecisionTraceExtractor(),
+                        PreferenceExtractor(),
+                        RelationshipExtractor(),
+                    ],
+                    project_id=_project_id,
+                    auto_write=True,
+                    scope="user",
+                )
+
+                event = TraceEvent.assistant_message(
+                    content=response,
+                    metadata={"session_id": session_id} if session_id else None,
+                )
+                return await pipeline.observe(event)
+
+        result = asyncio.run(_do())
+    except (SystemExit, Exception):
+        raise typer.Exit(0)
+
+    if output == OutputFormat.json:
+        json_success({
+            "candidates": len(result.candidates),
+            "written": result.written,
+            "filtered": len(result.filtered),
+            "reviewed": len(result.reviewed),
+        })
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    written = len(result.written)
+    filtered = len(result.filtered)
+    if written or filtered:
+        console.print(  # noqa: T201
+            f"[green]Extracted:[/green] {written} written, "
+            f"{filtered} duplicates filtered"
+        )
+
+
 @app.command()
 def mcp():
     """Start a local MCP server (personal edition).

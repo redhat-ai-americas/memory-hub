@@ -1,7 +1,8 @@
 # Turn-Level Hooks for MemoryHub
 
-Status: Draft
+Status: Implemented (CLI + Claude Code hooks)
 Date: 2026-07-08
+Implemented: 2026-08-21
 
 ## Problem
 
