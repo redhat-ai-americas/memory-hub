@@ -56,6 +56,15 @@ from src.core.authz import (
     get_claims_from_context,
     resolve_tenant,
 )
+from src.tools._context_pipeline import (
+    PipelineState,
+    log_pipeline_summary,
+    run_pre_budget_pipeline,
+    stage_apply_budget,
+    stage_screen_content,
+    stage_stamp_provenance,
+    stage_emit,
+)
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
@@ -1056,6 +1065,19 @@ async def search_memory(
         if domains and results and not used_focus_path:
             results = _apply_domain_boost(results, domains)
 
+        # ── Context assembly pipeline (#561) ─────────────────────────
+        # Run the pre-budget pipeline stages: authenticate, validate,
+        # enforce scope, check freshness, deduplicate. These stages
+        # run in a defined order with structured logging.
+        pipeline_state = PipelineState(
+            results=results,
+            authorized_scopes=authorized,
+            tenant=tenant,
+            owner_id=owner_id,
+        )
+        pipeline_state = run_pre_budget_pipeline(pipeline_state)
+        results = pipeline_state.results
+
         if not results:
             response: dict[str, Any] = {
                 "results": [],
@@ -1219,6 +1241,13 @@ async def search_memory(
                 new_branches.append((new_b, bscore))
             return new_item, new_branches, changed
 
+        # Pipeline stages 6-8: budget, screen, provenance
+        pipeline_state = stage_apply_budget(
+            pipeline_state, max_response_tokens=max_response_tokens, mode=mode,
+        )
+        pipeline_state = stage_screen_content(pipeline_state)
+        pipeline_state = stage_stamp_provenance(pipeline_state)
+
         # Token-budget packing. Walk results in order; full-form entries
         # that exceed the remaining budget (and everything after them)
         # are degraded to stub form. Stubs are always included so the
@@ -1309,6 +1338,10 @@ async def search_memory(
                     item, child_branches, budget, budget_exhausted, _format,
                 )
                 formatted.append(entry)
+
+        # Pipeline stage 9: emit
+        stage_emit(pipeline_state, result_count=len(formatted))
+        log_pipeline_summary(pipeline_state)
 
         response = {
             "results": formatted,
