@@ -294,7 +294,7 @@ Additional wins: (6) No platform dependency (PostgreSQL already deployed as OOTB
 
 **Schema**: Migration 028 creates the `audit_log` table with 11 identity/event columns, 5 indexes for query performance, RLS policies enforcing INSERT-only semantics, and a CHECK constraint on `decision IN ('allowed', 'denied')`. The `FORCE ROW LEVEL SECURITY` directive ensures append-only semantics apply even to the table owner, backing the tamper-evidence claim.
 
-**Session timing is critical**: tools must acquire DB session before authorization checks to ensure both allowed and denied events reach PostgreSQL. Tools that authorize first then get session will only write to logs, not database.
+**Session timing and denied events (v1 limitation)**: Tools acquire the DB session before authorization checks, so the denied audit INSERT reaches the session. However, when ToolError is raised the session context manager rolls back the uncommitted transaction, taking the denied INSERT with it. Denied events are therefore guaranteed only in the JSON log; allowed events commit to PostgreSQL with the main operation. The JSON log is the compliance fallback for denied events. A future hardening pass will use nested transactions (savepoints) to commit denied audit events independently of the outer transaction before raising ToolError.
 
 **Future work**: Monthly partitioning for automated 7-year retention (drop partitions older than 84 months). Optional: cryptographic hash chain in metadata.previous_hash for tamper detection (RLS provides application-enforced immutability; hash chain provides cryptographic proof).
 

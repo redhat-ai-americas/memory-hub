@@ -254,12 +254,12 @@ class TestDeniedOperationAudit:
         import asyncio
         asyncio.run(run_test())
 
-    def test_manage_graph_create_relationship_denied_gap(self, caplog):
-        """manage_graph create_relationship DOES NOT record denied (Gap #2).
+    def test_manage_graph_create_relationship_denied_records_event(self, caplog):
+        """manage_graph create_relationship records denied event (Gap #2 fix).
 
-        This test documents the gap identified in phase0-audit-inventory.md.
-        When authorization fails for source or target node, no audit event
-        is recorded before raising ToolError.
+        Previously, authorization failures for source/target nodes did not emit
+        audit events. This test verifies the gap is closed: a denied event with
+        the expected fields is recorded before ToolError is raised.
         """
         import pytest
         from types import SimpleNamespace
@@ -298,9 +298,15 @@ class TestDeniedOperationAudit:
                         relationship_type="derived_from",
                     )
 
-                # GAP: No audit event was recorded (this assertion documents the bug)
-                assert len(caplog.records) == 0, \
-                    "Gap #2: manage_graph does not record denied audit events"
+                # Gap #2 is fixed: denied event is recorded before ToolError
+                assert len(caplog.records) == 1
+                parsed = json.loads(caplog.records[0].message)
+                assert parsed["event_type"] == "memory.relationship_created"
+                assert parsed["actor_id"] == "user-alice"
+                assert parsed["decision"] == "denied"
+                assert parsed["scope"] == "user"
+                assert parsed["owner_id"] == "user-bob"
+                assert parsed["metadata"]["failed_on"] == "source_id"
 
         import asyncio
         asyncio.run(run_test())

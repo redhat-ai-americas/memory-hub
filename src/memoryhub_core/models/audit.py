@@ -50,19 +50,19 @@ class AuditLog(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
-        index=True,
     )
 
     # Event identification
-    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
 
     # Identity fields (actor = authenticated principal, driver = on behalf of)
-    actor_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=False)
     driver_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Target resource
     scope: Mapped[str] = mapped_column(String(64), nullable=False)
     owner_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Single-column index matches ix_audit_log_memory_id in migration 028
     memory_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )
@@ -71,7 +71,6 @@ class AuditLog(Base):
     decision: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        index=True,
     )
 
     # Optional structured metadata (query params, error details, etc.)
@@ -80,7 +79,7 @@ class AuditLog(Base):
     event_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
 
     # Multi-tenancy
-    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Table-level constraints
     __table_args__ = (

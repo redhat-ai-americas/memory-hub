@@ -23,6 +23,7 @@ def record_event(
     owner_id: str,
     memory_id: str | None,
     decision: str,
+    tenant_id: str | None = None,
     metadata: dict | None = None,
 ) -> None:
     """Emit a structured audit event as JSON to the memoryhub.audit logger.
@@ -45,6 +46,8 @@ def record_event(
         owner_id: Owner of the target memory or resource.
         memory_id: UUID of the target memory, or None for non-memory ops.
         decision: "allowed" or "denied".
+        tenant_id: Tenant this event belongs to (for multi-tenancy parity
+            with the PostgreSQL path).
         metadata: Optional dict with additional context (query terms,
             result counts, etc.).
     """
@@ -58,6 +61,8 @@ def record_event(
         "memory_id": str(memory_id) if memory_id else None,
         "decision": decision,
     }
+    if tenant_id is not None:
+        event["tenant_id"] = tenant_id
     if metadata:
         event["metadata"] = metadata
     logger.info(json.dumps(event, sort_keys=True))

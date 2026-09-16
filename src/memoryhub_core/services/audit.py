@@ -39,6 +39,15 @@ async def record_event(
     The audit event participates in the caller's transaction — if the
     caller's transaction rolls back, the audit event rolls back too.
 
+    Transaction semantics for denied events (v1 limitation):
+    When a tool raises ToolError after a denied audit INSERT, the session
+    context manager rolls back the uncommitted INSERT along with the rest
+    of the transaction. Denied events therefore reach the JSON log (via the
+    stub in _audit_helpers.py) but are NOT guaranteed to reach PostgreSQL.
+    Allowed events are safe because they commit alongside the main operation.
+    A future hardening pass can use savepoints to commit denied audit events
+    independently of the outer transaction.
+
     Args:
         session: SQLAlchemy async session (shared with the operation being audited)
         event_type: Dot-separated event kind (e.g., "memory.write")

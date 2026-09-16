@@ -28,7 +28,7 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "audit_log",
-        sa.Column("id", sa.BigInteger(), nullable=False),
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column(
             "timestamp",
             sa.DateTime(timezone=True),
