@@ -13,7 +13,6 @@ from memoryhub.extraction.models import (
     CandidateMemory,
     ExtractionResult,
     TraceEvent,
-    TraceEventType,
 )
 
 if TYPE_CHECKING:
