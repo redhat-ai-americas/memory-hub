@@ -18,6 +18,16 @@ A portable format also positions MemoryHub to participate in any future interope
 
 ---
 
+## Relationship to the Open Memory Protocol (OMP)
+
+The [Open Memory Protocol](https://github.com/open-memory-protocol) defines a Memory Record Object as part of its draft specification. MOF is not an implementation of the OMP Memory Record Object. It is a MemoryHub-specific design that we control and can ship independently.
+
+The relationship is aspirational: MOF's field set was chosen to be close enough to what OMP is converging on that, if OMP stabilizes a standard memory record schema, we can write a mapping layer between MOF and OMP without redesigning our export format. Several MOF fields (`scope`, `origin_type`, `memory_type`, `status`) already use vocabulary values that overlap with OMP's draft terminology.
+
+If OMP standardizes first, we adopt their schema and MOF becomes the internal-to-standard bridge. If MOF ships first, we have a working format that solves real portability problems now and can be aligned later. Either way, the vocabulary mapping table (see Field Mapping below) is the integration seam. Changing vocabulary translations is cheap; changing the underlying field structure is not.
+
+---
+
 ## Proposal: Two Output Formats
 
 MOF defines a single logical schema with two serializations:
