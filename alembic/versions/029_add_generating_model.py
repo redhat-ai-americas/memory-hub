@@ -6,15 +6,16 @@ user-stated memories have no generating model.
 Part of #566 (OMP-informed improvements).
 
 Revision ID: 029_add_generating_model
-Revises: 028_add_upstream_trust_level
+Revises: 027_add_logical_id
 Create Date: 2026-09-10
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "029_add_generating_model"
-down_revision = "028_add_upstream_trust_level"
+down_revision = "027_add_logical_id"
 branch_labels = None
 depends_on = None
 
