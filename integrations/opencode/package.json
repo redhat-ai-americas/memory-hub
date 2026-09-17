@@ -1,6 +1,6 @@
 {
   "name": "@memory-hub/opencode-mh-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MemoryHub memory plugin for opencode — governed, versioned, graph-aware agent memory with semantic search and multi-scope hierarchy.",
   "type": "module",
   "main": "dist/index.js",

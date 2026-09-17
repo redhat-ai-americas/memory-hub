@@ -177,10 +177,12 @@ if the plugin were not installed. It never throws at load time.
 
 ## Deferred work and rationale
 
-- **npm publish.** The package is publish-ready; distribution under the
-  existing `memory-hub` npm org plus an OIDC release job (mirroring the
-  PyPI packages in `release.yml`) is an ownership/process decision, not
-  a code change, so it ships separately.
+- **Release automation.** The package is published manually to the
+  `memory-hub` npm org as `@memory-hub/opencode-mh-plugin` (alongside
+  `@memory-hub/openclaw-mh-plugin`). The org enforces 2FA on publish, so
+  a CI release job (mirroring the PyPI jobs in `release.yml`) needs npm
+  trusted publishing or a bypass-2FA granular token configured by an org
+  owner — a process decision that ships separately.
 - **Auto-capture.** Deliberately out of V1 (matching the OpenClaw
   plugin). The MemoryHub-native design is not client-side heuristics but
   appending conversation content to a governed thread and letting

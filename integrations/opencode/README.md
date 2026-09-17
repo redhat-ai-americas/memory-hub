@@ -19,8 +19,30 @@ What it does:
 
 ## Install
 
-The package is not on npm yet, so install from a checkout of this repo.
+The plugin is published on npm as
+[`@memory-hub/opencode-mh-plugin`](https://www.npmjs.com/package/@memory-hub/opencode-mh-plugin).
 In the project where you want memory:
+
+```bash
+opencode plugin @memory-hub/opencode-mh-plugin
+```
+
+This installs the package and adds it to your opencode config. Equivalently,
+add it to `opencode.json` by hand — opencode's Bun runtime installs it
+automatically on next start:
+
+```json
+{
+  "plugin": ["@memory-hub/opencode-mh-plugin"]
+}
+```
+
+Put the same entry in `~/.config/opencode/opencode.json` to enable the plugin
+globally. Then [configure](#configure) the server URL and API key.
+
+### Install from source (development)
+
+To run an unreleased checkout, point a project at the local package instead:
 
 ```bash
 mkdir -p .opencode/plugins
@@ -38,17 +60,7 @@ echo 'export { MemoryHubPlugin } from "@memory-hub/opencode-mh-plugin";' \
 ```
 
 Build the plugin once in the checkout (`npm install && npm run build` in
-`integrations/opencode/`). opencode's Bun runtime installs the dependency
-automatically on next start. Put the same two files under
-`~/.config/opencode/` instead to enable it globally.
-
-Once published to npm this collapses to:
-
-```bash
-opencode plugin @memory-hub/opencode-mh-plugin
-```
-
-or `"plugin": ["@memory-hub/opencode-mh-plugin"]` in `opencode.json`.
+`integrations/opencode/`).
 
 ## Configure
 
@@ -105,6 +117,21 @@ All MemoryHub traffic flows through the server's MCP interface
 (`register_session` + the multiplexed `memory(action=...)` tool) over
 streamable HTTP — the same governed path every other MemoryHub surface uses.
 
+## Verify
+
+Start opencode with `MEMORYHUB_DEBUG=1` and check the server log for
+`memoryhub: initialized` followed by `memoryhub: session registered for …`
+on the first message. Then ask the agent something only memory would know,
+or tell it to "search your memory for …" and watch `memoryhub_search` run.
+If the plugin logs `missing server URL or API key`, see
+[Configure](#configure).
+
+## Update
+
+opencode caches installed npm plugins under
+`~/.cache/opencode/node_modules/`. To pick up a new release, remove
+`~/.cache/opencode/node_modules/@memory-hub` and restart opencode.
+
 ## Not yet implemented
 
 - **Auto-capture** (writing memories automatically from conversation content).
@@ -122,15 +149,6 @@ npm run typecheck
 npm run build     # tsup -> dist/
 ```
 
-For a local (unpublished) install, build and point a project at it:
-
-```bash
-npm run build
-mkdir -p ~/.config/opencode/plugins
-cat > ~/.config/opencode/plugins/memoryhub.ts <<'EOF'
-export { MemoryHubPlugin } from "/path/to/memory-hub/integrations/opencode/src/index.ts";
-EOF
-```
-
-(opencode loads plugin files with Bun, so re-exporting the TypeScript source
-directly also works.)
+See [Install from source](#install-from-source-development) to run a
+checkout inside a real opencode project. Design notes live in
+[`docs/design/agent-host-integrations.md`](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/design/agent-host-integrations.md).
