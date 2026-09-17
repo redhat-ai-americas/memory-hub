@@ -150,6 +150,15 @@ For reviewers unfamiliar with opencode's plugin model:
   There is no manifest file, no lifecycle registration, and no
   capability/slot system (unlike OpenClaw's `openclaw.plugin.json` and
   exclusive memory slot) — a plugin is just hooks plus tools.
+- **One runtime export per package entry.** When loading an npm plugin
+  package, opencode invokes *every* runtime export of the entry module
+  as a plugin factory. A stray helper or class export breaks the load —
+  0.1.0 shipped re-exporting an `Error` subclass and failed with "Cannot
+  call a class constructor without |new|". A shim file under
+  `.opencode/plugins/` that re-exports only the factory masks this, so
+  the npm path must be tested directly. The entry now exports only
+  `MemoryHubPlugin` (type-only exports are erased and safe), and a
+  regression test pins the entry's runtime export list.
 - **Failure expectations.** Plugin factories run at host startup;
   throwing breaks the host session. Hence the inert-when-unconfigured
   rule below and the never-throw policy in hooks.

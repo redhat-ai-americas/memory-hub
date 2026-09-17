@@ -86,8 +86,8 @@ export const MemoryHubPlugin: Plugin = async (_input, options) => {
   return hooks;
 };
 
-export { resolveConfig } from "./config.js";
-export { createMcpClient, McpClientError } from "./mcp-client.js";
-export { createSessionManager, isAuthError } from "./session.js";
+// opencode invokes EVERY runtime export of a plugin package's entry module
+// as a plugin factory, so MemoryHubPlugin must be the only one. Type-only
+// exports are erased at build time and are safe.
 export type { MemoryHubConfig } from "./config.js";
 export type { MemoryHubMcpClient, SessionInfo } from "./mcp-client.js";

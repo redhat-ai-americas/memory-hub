@@ -29,6 +29,14 @@ describe("MemoryHubPlugin", () => {
     process.env = { ...savedEnv };
   });
 
+  it("exports exactly one runtime value from the package entry", async () => {
+    // opencode calls every runtime export of a plugin package as a plugin
+    // factory. A stray helper or class export (e.g. an Error subclass)
+    // breaks plugin loading when installed from npm.
+    const entry = await import("../src/index.js");
+    expect(Object.keys(entry)).toEqual(["MemoryHubPlugin"]);
+  });
+
   it("returns empty hooks when unconfigured", async () => {
     const hooks = await MemoryHubPlugin(pluginInput, undefined);
     expect(hooks).toEqual({});

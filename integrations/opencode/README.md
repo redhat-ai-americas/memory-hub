@@ -128,9 +128,10 @@ If the plugin logs `missing server URL or API key`, see
 
 ## Update
 
-opencode caches installed npm plugins under
-`~/.cache/opencode/node_modules/`. To pick up a new release, remove
-`~/.cache/opencode/node_modules/@memory-hub` and restart opencode.
+opencode caches npm plugins by dist-tag (observed on 1.17.9:
+`~/.cache/opencode/packages/@memory-hub/opencode-mh-plugin@latest/`), so a
+new release is **not** picked up automatically. To upgrade, remove
+`~/.cache/opencode/packages/@memory-hub` and restart opencode.
 
 ## Not yet implemented
 
