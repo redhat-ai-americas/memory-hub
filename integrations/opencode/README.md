@@ -135,11 +135,14 @@ new release is **not** picked up automatically. To upgrade, remove
 
 ## Not yet implemented
 
-- **Auto-capture** (writing memories automatically from conversation content).
-  The MemoryHub way to do this is appending to a conversation thread and
-  letting server-side dreaming extract facts — planned, not in V1.
+- **Auto-capture.** Today a memory is saved only when the agent decides to
+  call `memoryhub_write` (the injected memory protocol tells it when).
+  Automatic post-turn capture is planned as an opt-in feature that reuses
+  MemoryHub's shared `memoryhub extract` pipeline — tracked in
+  [#585](https://github.com/redhat-ai-americas/memory-hub/issues/585).
 - OAuth 2.1 auth (API keys only for now).
-- Compaction-time memory re-injection and error-driven prefetch.
+- Compaction-time memory re-injection and error-driven prefetch — ideas
+  from other memory plugins, not on the MemoryHub roadmap yet.
 
 ## Development
 

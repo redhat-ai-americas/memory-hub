@@ -196,7 +196,7 @@ if the plugin were not installed. It never throws at load time.
   plugin). The MemoryHub-native design is not client-side heuristics but
   appending conversation content to a governed thread and letting
   server-side dreaming extract facts with provenance — that work is
-  tracked in the extraction/curation roadmap.
+  tracked in #585, which reuses the shared `memoryhub extract` CLI from the turn-level hooks work rather than forking extraction logic.
 - **Compaction re-injection and error-driven prefetch.** mem0's opencode
   plugin re-injects top memories at `experimental.session.compacting`
   and searches prior error resolutions on failed bash commands. Both are
