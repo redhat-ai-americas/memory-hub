@@ -1,6 +1,6 @@
 # Subsystem Inventory
 
-MemoryHub is composed of the subsystems below (currently eighteen — keep this table, not this sentence, as the source of truth). This document is the map -- each subsystem gets a name, a description, a link to its detailed design doc (where one exists), and an honest status indicator.
+MemoryHub is composed of the subsystems below (currently nineteen — keep this table, not this sentence, as the source of truth). This document is the map -- each subsystem gets a name, a description, a link to its detailed design doc (where one exists), and an honest status indicator.
 
 | Subsystem | Description | Doc | Status |
 |-----------|-------------|-----|--------|
@@ -22,6 +22,7 @@ MemoryHub is composed of the subsystems below (currently eighteen — keep this 
 | observability | Grafana dashboards and Prometheus metrics for memory operations | [planning/observability.md](../planning/observability.md) | TBD |
 | org-ingestion | Pipeline for scanning external sources and ingesting organizational knowledge | [planning/org-ingestion.md](../planning/org-ingestion.md) | TBD |
 | llamastack-integration | Integration with LlamaStack (Meta's agentic API server on RHOAI): MCP tool group, Vector IO provider, distribution template | [planning/llamastack-integration/](../planning/llamastack-integration/) | Design |
+| agent-host-integrations | Native plugins for agent hosts (OpenClaw, opencode) in `integrations/`. Each wraps the MCP client with host-side `register_session` auth (API key never enters model context), auto-recall injection of a marker-guarded `<relevant-memories>` block, and the memory protocol rules file appended to the system prompt | [agent-host-integrations.md](design/agent-host-integrations.md) | Implemented (OpenClaw, opencode) |
 
 ## Status definitions
 

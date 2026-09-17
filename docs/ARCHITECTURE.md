@@ -1,6 +1,6 @@
 # Architecture
 
-MemoryHub is a Kubernetes-native agent memory system for OpenShift AI. It provides centralized, governed memory behind a single service core -- an MCP server backed by PostgreSQL with pgvector and protected by an OAuth 2.1 authorization server with service-layer RBAC. Consumers reach that core through multiple interchangeable **surfaces**; today those are agents over MCP, a typed Python SDK, a CLI, a dashboard UI, and agent-harness hooks, and the set is expected to grow (e.g., agent plugins, platform connectors).
+MemoryHub is a Kubernetes-native agent memory system for OpenShift AI. It provides centralized, governed memory behind a single service core -- an MCP server backed by PostgreSQL with pgvector and protected by an OAuth 2.1 authorization server with service-layer RBAC. Consumers reach that core through multiple interchangeable **surfaces**; today those are agents over MCP, a typed Python SDK, a CLI, a dashboard UI, agent-harness hooks, and native agent-host plugins (OpenClaw, opencode), and the set is expected to grow (e.g., platform connectors).
 
 This document covers the big picture. Subsystem details live in their own docs (see [SYSTEMS.md](SYSTEMS.md)). For the conceptual case -- what agent memory is, when local files suffice, and when you need a governed platform -- read [What Agent Memory Really Is](guides/what-is-agent-memory.md) first.
 
@@ -17,6 +17,7 @@ A *surface* is any way a human or agent reaches MemoryHub. Surfaces are delibera
 | CLI (`memoryhub-cli`) | Humans, scripts, agent harnesses | CLI → SDK → MCP server |
 | Dashboard UI | Administrators | React frontend → BFF → MCP server |
 | Agent-harness hooks | SessionStart / UserPromptSubmit / Stop hooks | Hooks → CLI → SDK → MCP server |
+| Agent-host plugins (`integrations/`) | OpenClaw, opencode | Plugin (host-side auth, auto-recall injection) → MCP protocol → MCP server — see [design/agent-host-integrations.md](design/agent-host-integrations.md) |
 
 Rules for adding a new surface (a plugin, a platform connector, an editor extension, ...):
 
