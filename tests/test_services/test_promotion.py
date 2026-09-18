@@ -16,6 +16,7 @@ async def test_promote_user_to_project(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Use React hooks for state management",
         stub="Use React hooks",
         scope="user",
@@ -78,6 +79,7 @@ async def test_promote_invalid_direction(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Project-level guideline",
         stub="Project guideline",
         scope="project",
@@ -126,6 +128,7 @@ async def test_promote_preserves_content(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Detailed multi-line content\nwith formatting\nand structure",
         stub="Detailed content",
         scope="user",
@@ -161,6 +164,7 @@ async def test_promote_sets_metadata(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Source memory",
         stub="Source",
         scope="user",
@@ -197,6 +201,7 @@ async def test_promote_user_to_organizational(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="Best practice",
         stub="Best practice",
         scope="user",
@@ -229,6 +234,7 @@ async def test_promote_same_scope_raises(async_session, embedding_service):
     source_id = uuid.uuid4()
     source = MemoryNode(
         id=source_id,
+        logical_id=source_id,
         content="User memory",
         stub="User memory",
         scope="user",
