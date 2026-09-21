@@ -368,6 +368,69 @@ async def test_search_explicit_new_params(client):
     assert forwarded["include_branches"] is True
 
 
+async def test_search_current_step_id_is_forwarded_only_when_set(client):
+    """The ranked search payload stays free of current_step_id unless asked."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("any")
+    forwarded = _payload(mock_mcp)
+    assert "current_step_id" not in forwarded
+    assert "max_hops" not in forwarded
+
+    step_id = "12345678-1234-5678-1234-567812345678"
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "results": [
+                {
+                    "id": step_id,
+                    "content": "Check the lockfile.",
+                    "result_type": "guidance",
+                    "guidance_text": "Check the lockfile.",
+                    "hop_count": 1,
+                }
+            ],
+            "total_matching": 1,
+            "has_more": False,
+            "query_ignored": True,
+            "ignored_parameters": ["query"],
+        }
+    )
+    result = await c.search("ignored query", current_step_id=step_id, max_hops=1)
+    forwarded = _payload(mock_mcp)
+    assert forwarded["action"] == "search"
+    assert forwarded["query"] == "ignored query"
+    assert forwarded["current_step_id"] == step_id
+    assert forwarded["max_hops"] == 1
+    assert result.query_ignored is True
+    assert result.ignored_parameters == ["query"]
+    assert result.results[0].result_type == "guidance"
+    assert result.results[0].guidance_text == "Check the lockfile."
+    assert result.results[0].hop_count == 1
+
+
+async def test_get_guidance_calls_the_guidance_action(client):
+    c, mock_mcp = client
+    step_id = "12345678-1234-5678-1234-567812345678"
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "node_id": step_id,
+            "guidance_text": "Promote after the canary holds.",
+            "neighborhood": {"nodes": [], "edges": []},
+            "hop_count": 2,
+        }
+    )
+    result = await c.get_guidance(step_id, max_hops=2)
+    assert _tool_and_action(mock_mcp) == ("memory", "guidance")
+    forwarded = _payload(mock_mcp)
+    assert forwarded["memory_id"] == step_id
+    assert forwarded["max_hops"] == 2
+    assert result.guidance_text == "Promote after the canary holds."
+    assert result.hop_count == 2
+
+
 async def test_search_applies_project_config_retrieval_defaults():
     """Loaded project config fills in unset search() args."""
     pc = ProjectConfig(
