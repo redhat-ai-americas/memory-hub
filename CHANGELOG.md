@@ -116,6 +116,9 @@ memory-hub-mcp and memoryhub-auth; not published as a standalone package.
 
 ### [Unreleased]
 
+- **Procedural retrieval (#553)**: `find_related` requires `tenant_id` and applies it in SQL on the start node, every edge, and every neighbor. Each result hop carries direction and role. `resolve_procedure_entry` uses `metadata_.procedure.entry_step_id` when it names a live in-tenant step, and otherwise the single step with no incoming `precedes` edge.
+- **Procedural guidance (#553)**: `build_localized_subgraph` and `generate_guidance` turn that neighborhood into prose via the Stage-3 LLM settings (`llm_extraction_url` / `llm_extraction_model` / `llm_extraction_timeout`) and `prompts/procedural_guidance.yaml`. Search integration is not in this change; Decisions 5a and 5b in [planning/procedural-graph-retrieval.md](planning/procedural-graph-retrieval.md) are still unsigned.
+
 - **Procedural graph schema, Phase 1 (#552)**: Added `ContentType.PROCEDURAL` and `RelationshipType.precedes`/`.requires`/`.alternative_to`. `ck_memory_nodes_content_type` recreated via Alembic migration 028 and mirrored on the `MemoryNode` ORM model so SQLite test schemas enforce it too. See [planning/procedural-graphs.md](planning/procedural-graphs.md) for the design (adjacency-list membership + `memory_relationships` topology; no new tables).
 
 - Models, services, storage, and RBAC. See
