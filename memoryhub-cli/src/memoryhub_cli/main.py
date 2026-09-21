@@ -294,7 +294,9 @@ def search(
         None, "--domain", help="Domain tags to boost",
     ),
     content_type: str | None = typer.Option(
-        None, "--content-type", help="Filter by content type: declarative or behavioral",
+        None,
+        "--content-type",
+        help="Filter by content type: experiential, knowledge, behavioral, procedural",
     ),
     source: str | None = typer.Option(
         None, "--source", help="Filter by source: agent, dreaming, import",
@@ -367,7 +369,9 @@ def list_memories(
         None, "--project-id", "-p", help="Project ID",
     ),
     content_type: str | None = typer.Option(
-        None, "--content-type", help="Filter by content type: declarative or behavioral",
+        None,
+        "--content-type",
+        help="Filter by content type: experiential, knowledge, behavioral, procedural",
     ),
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet, compact",
@@ -534,7 +538,9 @@ def write(
         None, "--domain", help="Domain tags",
     ),
     content_type: str | None = typer.Option(
-        None, "--content-type", help="Content type: declarative (default) or behavioral",
+        None,
+        "--content-type",
+        help="Content type: experiential (default), knowledge, behavioral, or procedural",
     ),
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
@@ -1255,7 +1261,13 @@ def config_regenerate(
 def graph_relate(
     source_id: str = typer.Argument(..., help="Source memory UUID"),
     target_id: str = typer.Argument(..., help="Target memory UUID"),
-    relationship_type: str = typer.Argument(..., help="Relationship type label"),
+    relationship_type: str = typer.Argument(
+        ...,
+        help=(
+            "Relationship type: derived_from, supersedes, conflicts_with, "
+            "related_to, precedes, requires, alternative_to"
+        ),
+    ),
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
