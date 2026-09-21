@@ -40,6 +40,18 @@ oc login <cluster-api-url>      # cluster-admin required
 make install                    # full stack deploy (~10 min)
 ```
 
+To build application images without rolling out deployments, use:
+
+```bash
+make build                      # MCP, auth, and UI images
+make deploy                     # deploy existing ImageStream images
+make build-mcp                  # build one component
+make deploy-mcp                 # deploy one component without rebuilding
+```
+
+`make install` remains the combined build-and-deploy workflow. The equivalent
+deployment-only option is `scripts/deploy-full.sh --skip-builds`.
+
 The deploy script auto-creates a Python virtualenv, generates API keys, writes the first key to `~/.config/memoryhub/api-key`, and runs a smoke test. See the [cluster install guide](docs/guides/cluster-install.md) for prerequisites, deploy options, troubleshooting, and post-install setup.
 
 ## Why MemoryHub

@@ -1,4 +1,4 @@
-.PHONY: install run-local test test-local deploy clean help
+.PHONY: install run-local test test-local build deploy clean help
 
 # Variables
 VENV ?= .venv
@@ -20,7 +20,8 @@ help:
 	@echo "  make test        - Run pytest suite"
 	@echo ""
 	@echo "OpenShift Deployment (always to namespace: $(NAMESPACE)):"
-	@echo "  make deploy      - Build + deploy via deploy/deploy.sh"
+	@echo "  make build       - Build the image without deploying"
+	@echo "  make deploy      - Deploy the existing ImageStream image"
 	@echo "  make clean       - Remove from OpenShift"
 	@echo ""
 	@echo "Other:"
@@ -49,6 +50,10 @@ test-local:
 test:
 	$(VENV)/bin/pytest tests/ -v
 
+# Build the OpenShift image without changing the Deployment.
+build:
+	./deploy/build.sh
+
 # Deploy to OpenShift (namespace is hardcoded in deploy/deploy.sh)
 deploy:
 	./deploy/deploy.sh
@@ -56,6 +61,7 @@ deploy:
 # Clean up OpenShift deployment
 clean:
 	@echo "Cleaning up namespace: $(NAMESPACE)"
+	@oc delete --context $(MEMORYHUB_CONTEXT) -f deploy/buildconfig.yaml -n $(NAMESPACE) --ignore-not-found=true || echo "Build resources not deployed or already cleaned"
 	@oc delete --context $(MEMORYHUB_CONTEXT) -f deploy/openshift.yaml -n $(NAMESPACE) --ignore-not-found=true || echo "Not deployed or already cleaned"
 	@oc delete --context $(MEMORYHUB_CONTEXT) -f deploy/users-configmap.yaml -n $(NAMESPACE) --ignore-not-found=true || true
 

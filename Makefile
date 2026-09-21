@@ -1,4 +1,4 @@
-.PHONY: help install uninstall dev check-prereqs test test-integration test-auth \
+.PHONY: help install deploy build build-mcp build-auth build-ui dev check-prereqs test test-integration test-auth \
         deploy-all deploy-db deploy-mcp deploy-auth deploy-ui deploy-tile \
         migrate clean-mcp clean-auth
 
@@ -10,6 +10,11 @@ help:
 	@echo "Cluster install (for evaluators and operators):"
 	@echo "  make check-prereqs  - Verify cluster prerequisites without deploying"
 	@echo "  make install        - Full stack install: DB + migrations + MCP + auth + UI + RHOAI tile"
+	@echo "  make deploy         - Deploy existing images without rebuilding"
+	@echo "  make build          - Build all application images without deploying"
+	@echo "  make build-mcp      - Build the MCP server image only"
+	@echo "  make build-auth     - Build the auth server image only"
+	@echo "  make build-ui       - Build the dashboard UI image only"
 	@echo "  make uninstall      - Remove all MemoryHub resources from the cluster"
 	@echo ""
 	@echo "Partial deploys (advanced):"
@@ -39,6 +44,21 @@ help:
 install:
 	scripts/deploy-full.sh $(ARGS)
 
+deploy:
+	scripts/deploy-full.sh --skip-builds $(ARGS)
+
+build:
+	scripts/build-full.sh
+
+build-mcp:
+	MEMORYHUB_CONTEXT=$(or $(MEMORYHUB_CONTEXT),mcp-rhoai) memory-hub-mcp/deploy/build.sh
+
+build-auth:
+	MEMORYHUB_CONTEXT=$(or $(MEMORYHUB_CONTEXT),mcp-rhoai) memoryhub-auth/build.sh memoryhub-auth
+
+build-ui:
+	MEMORYHUB_CONTEXT=$(or $(MEMORYHUB_CONTEXT),mcp-rhoai) memoryhub-ui/deploy/build.sh
+
 uninstall:
 	scripts/uninstall-full.sh $(ARGS)
 
@@ -56,7 +76,7 @@ deploy-db:
 	scripts/deploy-full.sh --skip-migrations --skip-models --skip-mcp --skip-auth --skip-ui --skip-tile
 
 deploy-mcp:
-	scripts/deploy-full.sh --skip-db --skip-migrations --skip-models --skip-auth --skip-ui --skip-tile
+	scripts/deploy-full.sh --skip-db --skip-migrations --skip-models --skip-auth --skip-ui --skip-tile --skip-builds
 
 deploy-auth:
 	cd memoryhub-auth && make deploy PROJECT=memoryhub-auth
