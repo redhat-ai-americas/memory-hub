@@ -1,7 +1,8 @@
 # Procedural Graph Retrieval: Design Doc (#553)
 
-**Status:** Traversal and guidance generation implemented on `feat/procedural-graph-retrieval`.
-Search-path integration is not started: Decisions 5a and 5b are still unsigned.
+**Status:** Implemented on `feat/procedural-graph-retrieval`. Decisions 5a and 5b were
+signed off by the operator on 2026-09-21: short-circuit with a loudly ignored `query`,
+and a flat ranked list when `current_step_id` is absent.
 **Date:** 2026-09-21
 
 ## Problem
@@ -304,9 +305,13 @@ Three candidate semantics, with what each costs:
 the parameter description — rather than raising `ToolError` when both are set.** A hard error
 for supplying a query is hostile given that `query` is currently a required positional; ignoring
 it loudly (in the response, e.g. a `query_ignored: true` marker) is kinder and is reversible if
-(C) later proves worth building. But this is a recommendation, not a settled decision: it
-changes what an existing, widely-used tool means, and it should be signed off by a human before
-implementation, not chosen by whoever picks up the ticket.
+(C) later proves worth building.
+
+**Signed off by the operator on 2026-09-21: (A).** `current_step_id` skips embedding and
+ranking. `query` stays required. The response sets `query_ignored: true` and lists `query`
+in `ignored_parameters`. `graph_depth`, `focus`, `domains`, `entities`, and
+`graph_relationship_types` are not applied; each one the caller actually set is appended
+to that list. (C) was not chosen.
 
 ### 5b. Cold start: what a procedural query does with no `current_step_id` — also needs sign-off
 
@@ -323,9 +328,11 @@ flat memory entries" says on its face — but it changes the return shape of an 
 pattern that works today, which the backward-compatibility contract below otherwise forbids.
 
 **Recommendation: keep the flat list (conservative, additive, no existing behavior changes), and
-revisit once there is a real client.** Again — recommendation, not settled. If the reviewer of
-#553 reads the issue as requiring one-round-trip guidance, that reading is defensible and this
-should flip before implementation, not after.
+revisit once there is a real client.**
+
+**Signed off by the operator on 2026-09-21: flat list.** A search without `current_step_id`
+is unchanged, including `content_type="procedural"`. There is no auto-localization to an
+entry step.
 
 ### 5c. Response shape — implementer's call, once the envelope is in front of them
 
@@ -548,28 +555,42 @@ neighbors" wording would have dropped them; the test plan says every neighbor's 
 pitfalls must reach the prompt, so hop 2 is included. That is a widening, recorded here so
 the prompt and the doc do not disagree.
 
-### Decision 5c, settled; 5a and 5b, not settled
+### Decision 5, signed off and implemented
 
-`_format_entry` and `_compact_entry` in `memory-hub-mcp/src/tools/search_memory.py` both take
-`MemoryNodeRead | MemoryNodeStub` and set `result_type` to `"full"` or `"stub"` from that
-check. A guidance payload is neither, so it must not go through those helpers.
+The operator signed off on 2026-09-21: 5a is the short-circuit (A), 5b is the flat list.
+`search_memory` gained optional `current_step_id` and `max_hops` (default 2, cap 5).
+`manage_graph` gained `get_guidance`. The compact `memory` tool forwards
+`options.current_step_id` on `search` and adds `action="guidance"`, because the SDK
+talks to the compact profile, which does not register `manage_graph`.
 
-When search integration is implemented, return one `results` entry built by the guidance path:
+`_format_entry` and `_compact_entry` both take `MemoryNodeRead | MemoryNodeStub` and set
+`result_type` to `"full"` or `"stub"`. A guidance payload is neither, so the guidance
+path builds its `results` entry directly:
 
 - `result_type: "guidance"`
 - `id`: the current step
-- `content`: the guidance prose (clients that read `content` still have a string)
-- `guidance_text`, `neighborhood` (`neighborhood_payload`: current node first, then neighbors
-  in walk order; edges carry `direction`, `role`, `from_id`, `to_id`), `hop_count`
+- `content`: the guidance prose
+- `guidance_text`, `neighborhood` (`neighborhood_payload`: current node first, then
+  neighbors in walk order; edges carry `direction`, `role`, `from_id`, `to_id`), `hop_count`
 - no `relevance_score`
 
-**5a and 5b are still unsigned recommendations.** `search_memory` has not gained
-`current_step_id`, and `manage_graph` has not gained `get_guidance`, until a human picks
-those semantics. Do not treat the recommendations in Decision 5 as a decision.
+Top-level fields on that response: `query_ignored: true`, `ignored_parameters` (always
+includes `query`), and `omitted_count` when a neighbor was dropped by `authorize_read`.
+`content_mode` is omitted because this path does not apply it.
+
+`get_guidance` returns `GuidanceResult.to_payload()`: `node_id`, `guidance_text`,
+`neighborhood`, `hop_count`, and `omitted_count` when any neighbor was dropped. Both
+tools call `localized_guidance`.
+
+Read checks run before generation. An unreadable current step raises
+`GuidanceAccessDeniedError`, which the tools surface as `ToolError`. An unreadable
+neighbor is dropped, and so is any later node whose path goes through it, so the model
+does not see that content.
+
+Consumer audit: `memoryhub-ui/backend/` has no `search_memory` client. `sdk/` `search()`
+and `get_guidance()`, `memoryhub-cli` `search --current-step-id` and `graph guidance`,
+and `memory-hub-mcp`'s `memory()` dispatcher were updated in the same change.
 
 ## Open questions still requiring a human
 
-Whether `query` is ignored, used to rank inside the neighborhood, or rejected when
-`current_step_id` is set (5a), and whether a procedural query with no `current_step_id`
-keeps returning a flat list or auto-localizes to the entry step (5b). Both change what
-`search_memory` means. The recommendations in Decision 5 are not a sign-off.
+None for #553. 5a and 5b were signed off as recorded above.
