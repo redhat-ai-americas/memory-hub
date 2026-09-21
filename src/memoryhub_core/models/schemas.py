@@ -20,6 +20,9 @@ class RelationshipType(StrEnum):
     conflicts_with = "conflicts_with"
     related_to = "related_to"
     mentions = "mentions"  # Phase 2: memory -> entity (system-managed)
+    precedes = "precedes"  # procedural step ordering (#552)
+    requires = "requires"  # procedural precondition (#552)
+    alternative_to = "alternative_to"  # procedural branching path (#552)
 
 
 class MemoryScope(StrEnum):
@@ -35,11 +38,12 @@ class MemoryScope(StrEnum):
 
 
 class ContentType(StrEnum):
-    """Content classification for behavioral memory (#237)."""
+    """Content classification for memory nodes (#237, #552)."""
 
     EXPERIENTIAL = "experiential"
     KNOWLEDGE = "knowledge"
     BEHAVIORAL = "behavioral"
+    PROCEDURAL = "procedural"
 
 
 class CampaignStatus(StrEnum):

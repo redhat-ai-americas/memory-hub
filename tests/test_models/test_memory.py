@@ -7,12 +7,14 @@ import pytest
 from pydantic import ValidationError
 
 from memoryhub_core.models.schemas import (
+    ContentType,
     MemoryNodeCreate,
     MemoryNodeRead,
     MemoryNodeStub,
     MemoryNodeUpdate,
     MemoryScope,
     MemoryVersionInfo,
+    RelationshipType,
     StorageType,
 )
 from memoryhub_core.models.utils import STUB_CONTENT_LIMIT, generate_stub
@@ -45,6 +47,40 @@ class TestStorageType:
     def test_invalid_type(self):
         with pytest.raises(ValueError):
             StorageType("gcs")
+
+
+class TestContentType:
+    def test_valid_types(self):
+        for value in ("experiential", "knowledge", "behavioral", "procedural"):
+            assert ContentType(value) == value
+
+    def test_procedural_accepted(self):
+        assert ContentType.PROCEDURAL == "procedural"
+        node = MemoryNodeCreate(
+            content="How to deploy to staging",
+            scope="user",
+            owner_id="u1",
+            content_type="procedural",
+        )
+        assert node.content_type == ContentType.PROCEDURAL
+
+    def test_invalid_type(self):
+        with pytest.raises(ValueError):
+            ContentType("declarative")
+
+
+class TestRelationshipType:
+    def test_procedural_types_accepted(self):
+        for value in ("precedes", "requires", "alternative_to"):
+            assert RelationshipType(value) == value
+
+    def test_existing_types_unchanged(self):
+        for value in ("derived_from", "supersedes", "conflicts_with", "related_to", "mentions"):
+            assert RelationshipType(value) == value
+
+    def test_invalid_type(self):
+        with pytest.raises(ValueError):
+            RelationshipType("followed_by")
 
 
 # ---------------------------------------------------------------------------
