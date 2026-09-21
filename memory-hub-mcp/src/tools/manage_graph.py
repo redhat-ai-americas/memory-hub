@@ -40,12 +40,13 @@ from src.core.authz import (
     get_tenant_filter,
 )
 from src.tools._deps import get_db_session, release_db_session, resolve_driver_id
+from src.tools._guidance import run_guidance
 
 logger = logging.getLogger(__name__)
 
 _VALID_TYPES = [t.value for t in RelationshipType]
 _VALID_DIRECTIONS = ("outgoing", "incoming", "both")
-_VALID_ACTIONS = {"create_relationship", "get_relationships", "get_similar"}
+_VALID_ACTIONS = {"create_relationship", "get_guidance", "get_relationships", "get_similar"}
 
 
 def _require_param(action: str, name: str, value: str | None) -> str:
@@ -74,7 +75,8 @@ async def manage_graph(
                 "The graph operation to perform. One of: "
                 "'create_relationship' (link two memory nodes with a typed edge), "
                 "'get_relationships' (query edges for a node, with optional provenance tracing), "
-                "'get_similar' (find near-duplicate memories by cosine similarity)."
+                "'get_similar' (find near-duplicate memories by cosine similarity), "
+                "'get_guidance' (localized procedural guidance for one current step)."
             ),
         ),
     ],
@@ -128,7 +130,10 @@ async def manage_graph(
         Field(
             description=(
                 "action='get_relationships': UUID of the memory node to query "
-                "relationships for. Required for get_relationships."
+                "relationships for. Required for get_relationships. "
+                "action='get_guidance': UUID of the current procedural step. "
+                "Required for get_guidance. This is the step being executed, "
+                "not a procedure root."
             ),
         ),
     ] = None,
@@ -162,6 +167,19 @@ async def manage_graph(
             ),
         ),
     ] = None,
+    max_hops: Annotated[
+        int,
+        Field(
+            description=(
+                "action='get_guidance': Neighborhood size in edges. Default 2, "
+                "the paper's neighborhood. Counts edges from node_id and includes "
+                "distances 1 through this value. Hard cap 5. Traverses precedes, "
+                "requires, and alternative_to."
+            ),
+            ge=0,
+            le=5,
+        ),
+    ] = 2,
     # ── get_similar params ───────────────────────────────────────────────────
     memory_id: Annotated[
         str | None,
@@ -211,9 +229,9 @@ async def manage_graph(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Manage memory graph relationships and similarity.
+    """Manage memory graph relationships, similarity, and procedural guidance.
 
-    Three actions in one tool:
+    Four actions in one tool:
 
     create_relationship — Link two memory nodes with a typed directed edge.
       Requires: source_id, target_id, relationship_type.
@@ -240,6 +258,14 @@ async def manage_graph(
       Use this when write_memory reports similar_count > 0. Page through
       results with offset to avoid context bloat.
       Returns: paged results with memory stubs and similarity scores.
+
+    get_guidance — Localized guidance for the step in node_id.
+      Requires: node_id (the current step, not a procedure root).
+      Optional: max_hops (default 2, cap 5), project_id.
+      Walks precedes, requires, and alternative_to. Neighbors the caller
+      cannot read are omitted and counted in omitted_count. Returns
+      node_id, guidance_text, neighborhood {nodes, edges}, hop_count.
+      The same service path as search_memory(current_step_id=...).
     """
     if action not in _VALID_ACTIONS:
         raise ToolError(
@@ -266,6 +292,11 @@ async def manage_graph(
             return await _handle_get_relationships(
                 ctx, claims, tenant, session,
                 node_id, relationship_type, direction, include_provenance, as_of, project_id,
+            )
+        elif action == "get_guidance":
+            return await _handle_get_guidance(
+                ctx, claims, tenant, session,
+                node_id, max_hops, project_id,
             )
         else:  # get_similar
             return await _handle_get_similar(
@@ -524,6 +555,47 @@ async def _handle_get_relationships(
         result["provenance_chain"] = accessible_steps
 
     return result
+
+
+async def _handle_get_guidance(
+    ctx: Context | None,
+    claims: dict[str, Any],
+    tenant: str,
+    session: Any,
+    node_id: str | None,
+    max_hops: int,
+    project_id: str | None,
+) -> dict[str, Any]:
+    """Localized guidance for one current step. Same service as search_memory."""
+    node_id = _require_param("get_guidance", "node_id", node_id)
+    if ctx:
+        await ctx.info(f"Generating procedural guidance from step {node_id}")
+
+    campaign_ids: set[str] | None = None
+    if project_id:
+        campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
+    project_ids: set[str] = await get_projects_for_user(session, claims["sub"])
+    role_names: set[str] = await get_roles_for_user(
+        session, claims["sub"], tenant, claims=claims,
+    )
+
+    def _can_read(node: Any) -> bool:
+        return authorize_read(
+            claims,
+            node,
+            campaign_ids=campaign_ids,
+            project_ids=project_ids,
+            role_names=role_names,
+        )
+
+    result = await run_guidance(
+        node_id,
+        session,
+        tenant_id=tenant,
+        max_hops=max_hops,
+        authorize=_can_read,
+    )
+    return result.to_payload()
 
 
 async def _handle_get_similar(

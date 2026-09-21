@@ -52,10 +52,12 @@ from src.core.authz import (
     PROJECT_ISOLATION_ENABLED,
     ROLE_ISOLATION_ENABLED,
     AuthenticationError,
+    authorize_read,
     build_authorized_scopes,
     get_claims_from_context,
     resolve_tenant,
 )
+from src.tools._guidance import run_guidance, search_guidance_response
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
@@ -485,7 +487,10 @@ async def search_memory(
             description=(
                 "Natural language search query. Be specific -- "
                 "'container runtime preferences' works better than 'containers'. "
-                "The query is embedded and compared via cosine similarity."
+                "The query is embedded and compared via cosine similarity. "
+                "When current_step_id is set, this text is still required but is "
+                "not embedded or ranked. The response sets query_ignored to true "
+                "and lists it in ignored_parameters."
             ),
         ),
     ],
@@ -624,7 +629,9 @@ async def search_memory(
             description=(
                 "(Advanced) Hop depth for graph-enhanced retrieval. "
                 "When > 0, follows relationships from vector search results to "
-                "surface connected memories. 0 (default) disables graph traversal. Max 3."
+                "surface connected memories. 0 (default) disables graph traversal. Max 3. "
+                "Not applied when current_step_id is set; that path skips ranking. "
+                "A value greater than 0 on that path is listed in ignored_parameters."
             ),
             ge=0,
             le=3,
@@ -779,6 +786,37 @@ async def search_memory(
             ),
         ),
     ] = "stub",
+    current_step_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "UUID of the procedural step the agent is on. When set, skip "
+                "embedding and ranking and return localized guidance for that "
+                "step's neighborhood (default 2 hops over precedes, requires, "
+                "and alternative_to). The id is the current step, not a procedure "
+                "root and not a search hit — pass it explicitly. "
+                "query is still required and is ignored; the response sets "
+                "query_ignored to true. focus, graph_depth, domains, entities, "
+                "and graph_relationship_types are not applied; any of those you "
+                "set are listed in ignored_parameters. "
+                "When omitted, search behaves exactly as before, including "
+                "content_type='procedural', which stays a ranked list of memories."
+            ),
+        ),
+    ] = None,
+    max_hops: Annotated[
+        int,
+        Field(
+            description=(
+                "Neighborhood size in edges for current_step_id. Default 2, "
+                "the paper's neighborhood. Counts edges from the current step "
+                "and includes distances 1 through this value. Hard cap 5. "
+                "Ignored unless current_step_id is set."
+            ),
+            ge=0,
+            le=5,
+        ),
+    ] = 2,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Search memories using semantic similarity.
@@ -787,6 +825,11 @@ async def search_memory(
       search_memory(query="deployment preferences")
     With project filter:
       search_memory(query="deployment preferences", project_id="my-project")
+    Procedural guidance for the step the agent is executing:
+      search_memory(query="deploy the service", current_step_id="<step-uuid>")
+      The query is accepted and ignored (query_ignored: true). Ranking,
+      including graph_depth, does not run. Omit current_step_id to keep
+      the ranked list, including for content_type="procedural".
 
     By default, results are returned in cache-optimized order: a stable,
     deterministic ordering driven by compilation epochs (#175) that maximizes
@@ -929,6 +972,10 @@ async def search_memory(
             f"Valid scopes: {', '.join(sorted(VALID_SCOPES))}."
         )
 
+    event_metadata: dict[str, Any] = {"query": query[:200], "max_results": max_results}
+    if current_step_id is not None:
+        event_metadata["current_step_id"] = current_step_id
+        event_metadata["query_ignored"] = True
     record_event(
         event_type="memory.search",
         actor_id=claims["sub"],
@@ -937,7 +984,7 @@ async def search_memory(
         owner_id=owner_id or claims["sub"],
         memory_id=None,
         decision="allowed",
-        metadata={"query": query[:200], "max_results": max_results},
+        metadata=event_metadata,
     )
 
     # mode='full_only' overrides weight_threshold so the service never stubs.
@@ -945,6 +992,35 @@ async def search_memory(
 
     session, gen = await get_db_session()
     try:
+        if current_step_id is not None:
+            if ctx:
+                await ctx.info(f"Generating procedural guidance from step {current_step_id}")
+
+            def _can_read(node: Any) -> bool:
+                return authorize_read(
+                    claims,
+                    node,
+                    campaign_ids=campaign_ids,
+                    project_ids=project_ids,
+                    role_names=role_names,
+                )
+
+            guidance = await run_guidance(
+                current_step_id,
+                session,
+                tenant_id=tenant,
+                max_hops=max_hops,
+                authorize=_can_read,
+            )
+            return search_guidance_response(
+                guidance,
+                graph_depth=graph_depth,
+                focus=focus,
+                domains=domains,
+                entities=entities,
+                graph_relationship_types=graph_relationship_types,
+            )
+
         if ctx:
             await ctx.info(f"Searching memories: '{query}'")
 
