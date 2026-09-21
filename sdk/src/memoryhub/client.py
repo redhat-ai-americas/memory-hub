@@ -538,9 +538,9 @@ class MemoryHubClient:
             raw_results: When True, bypass cache-optimized assembly and return raw
                 per-request results. Default False lets the server return the
                 stable compiled block (see #175, cache-optimized memory assembly).
-            content_type: Filter by content type. "declarative" for facts and
-                preferences (default search scope), "behavioral" for demonstrated
-                patterns. Omit to search all types.
+            content_type: Filter by content type. "knowledge" for facts and
+                preferences, "behavioral" for demonstrated patterns,
+                "procedural" for directed-graph runbooks. Omit to search all types.
             disabled_signals: RRF signals to disable for ablation testing.
                 Valid names: reranker, focus, keyword, domain, graph.
                 Vector similarity is always active.
@@ -755,8 +755,9 @@ class MemoryHubClient:
             cursor: Pagination cursor from a previous list response.
             include_branches: If True, include branch memories.
             current_only: If True, only current versions.
-            content_type: Filter by content type. "declarative" for facts and
-                preferences, "behavioral" for demonstrated patterns. Omit to list all types.
+            content_type: Filter by content type. "knowledge" for facts and
+                preferences, "behavioral" for demonstrated patterns,
+                "procedural" for directed-graph runbooks. Omit to list all types.
             tenant_id: Optional tenant identifier.
         """
         opts: dict[str, Any] = {
@@ -840,10 +841,12 @@ class MemoryHubClient:
             domains: Domain tags for the memory, e.g. ['React', 'Spring Boot'].
             force: When True, bypass near-duplicate and exact-duplicate similarity
                 gates. Regex rules (secrets, PII) are never bypassed.
-            content_type: Memory content type. "declarative" (default) for facts
-                and preferences, "behavioral" for demonstrated patterns and
-                successful approaches. Behavioral memories are not injected by
-                default -- use the reconstruct action to retrieve them.
+            content_type: Memory content type. Defaults to "experiential".
+                Use "knowledge" for facts and preferences, "behavioral" for
+                demonstrated patterns, "procedural" for directed-graph runbooks.
+                Behavioral memories are not injected by default -- use
+                reconstruct to retrieve them. Procedural graphs are not
+                returned by reconstruct.
             tenant_id: Optional tenant identifier.
             extract_facts: Fact extraction mode. "eager" extracts via MCP
                 sampling during the write. "background" defers to the
@@ -1325,8 +1328,10 @@ class MemoryHubClient:
             source_id: ID of the source memory node.
             target_id: ID of the target memory node.
             relationship_type: One of: derived_from, supersedes, conflicts_with,
-                related_to. The mentions type is system-managed by entity
-                extraction and cannot be created manually.
+                related_to, precedes, requires, alternative_to. The mentions
+                type is system-managed by entity extraction and cannot be
+                created manually. precedes/requires/alternative_to encode
+                procedural-graph step topology.
             metadata: Arbitrary metadata for the relationship edge.
             project_id: Project identifier for campaign enrollment verification.
         """
