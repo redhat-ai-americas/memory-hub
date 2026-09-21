@@ -402,7 +402,7 @@ async def test_find_related_one_hop(async_session, embedding_service):
         _make_relationship_data(source_id=node_a.id, target_id=node_b.id), async_session
     )
 
-    results = await find_related(node_a.id, async_session, max_hops=1)
+    results = await find_related(node_a.id, async_session, tenant_id=_TEST_TENANT_ID, max_hops=1)
 
     assert len(results) == 1
     assert results[0]["node"].id == node_b.id
@@ -423,7 +423,7 @@ async def test_find_related_two_hops(async_session, embedding_service):
         _make_relationship_data(source_id=node_b.id, target_id=node_c.id), async_session
     )
 
-    results = await find_related(node_a.id, async_session, max_hops=2)
+    results = await find_related(node_a.id, async_session, tenant_id=_TEST_TENANT_ID, max_hops=2)
 
     found_ids = {r["node"].id for r in results}
     assert node_b.id in found_ids
@@ -439,7 +439,7 @@ async def test_find_related_two_hops(async_session, embedding_service):
 async def test_find_related_no_relationships(async_session, embedding_service):
     node = await _create_node(async_session, embedding_service, content="isolated node")
 
-    results = await find_related(node.id, async_session)
+    results = await find_related(node.id, async_session, tenant_id=_TEST_TENANT_ID)
 
     assert results == []
 

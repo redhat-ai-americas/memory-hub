@@ -24,6 +24,7 @@ from memoryhub_core.models.schemas import (
 )
 from memoryhub_core.services.exceptions import (
     CrossTenantRelationshipError,
+    EntryStepResolutionError,
     MemoryNotFoundError,
     RelationshipNotFoundError,
 )
@@ -31,6 +32,15 @@ from memoryhub_core.services.memory import node_to_read
 
 _MAX_DEPTH_CAP = 10
 _MAX_HOPS_CAP = 5
+
+# Procedural localization walks only these edges. ``find_related`` itself
+# stays unfiltered unless the caller passes a list — general graph walks
+# must still see ``related_to`` and the other pre-existing types.
+PROCEDURAL_RELATIONSHIP_TYPES: tuple[str, ...] = (
+    "precedes",
+    "requires",
+    "alternative_to",
+)
 
 
 def _active_edges_filter(as_of: datetime | None = None):
@@ -85,9 +95,7 @@ async def collect_graph_neighbors(
             "tenant_id": tenant_id,
         }
     else:
-        temporal_clause = (
-            "mr.valid_from <= :as_of AND (mr.valid_until IS NULL OR mr.valid_until > :as_of)"
-        )
+        temporal_clause = "mr.valid_from <= :as_of AND (mr.valid_until IS NULL OR mr.valid_until > :as_of)"
         params = {
             "seed_ids": [str(sid) for sid in seed_ids],
             "max_depth": max_depth,
@@ -140,11 +148,7 @@ async def collect_graph_neighbors(
     rows = result.all()
 
     seed_set = set(seed_ids)
-    return {
-        uuid.UUID(str(row.node_id)): row.min_depth
-        for row in rows
-        if uuid.UUID(str(row.node_id)) not in seed_set
-    }
+    return {uuid.UUID(str(row.node_id)): row.min_depth for row in rows if uuid.UUID(str(row.node_id)) not in seed_set}
 
 
 async def invalidate_relationship(
@@ -222,8 +226,7 @@ async def create_relationship(
     except IntegrityError as exc:
         await session.rollback()
         raise ValueError(
-            f"Relationship ({data.source_id} --[{data.relationship_type}]--> "
-            f"{data.target_id}) already exists"
+            f"Relationship ({data.source_id} --[{data.relationship_type}]--> {data.target_id}) already exists"
         ) from exc
 
     await session.refresh(rel)
@@ -310,8 +313,7 @@ async def get_relationships(
     stubs = await _load_stubs(referenced_ids, session, tenant_id=tenant_id)
 
     return [
-        _relationship_to_read(r, source_stub=stubs.get(r.source_id), target_stub=stubs.get(r.target_id))
-        for r in rels
+        _relationship_to_read(r, source_stub=stubs.get(r.source_id), target_stub=stubs.get(r.target_id)) for r in rels
     ]
 
 
@@ -366,17 +368,13 @@ async def get_subtree(
     def _build_subtree(nid: uuid.UUID) -> dict:
         node = nodes_by_id[nid]
         child_ids = children_by_parent.get(nid, [])
-        has_rationale = any(
-            nodes_by_id[c].branch_type == "rationale" for c in child_ids if c in nodes_by_id
-        )
+        has_rationale = any(nodes_by_id[c].branch_type == "rationale" for c in child_ids if c in nodes_by_id)
         node_read = node_to_read(node, has_children=bool(child_ids), has_rationale=has_rationale)
         child_entries = [_build_subtree(c) for c in child_ids if c in nodes_by_id]
         return {"node": node_read, "children": child_entries, "depth": depth_by_id[nid]}
 
     root_children = children_by_parent.get(node_id, [])
-    has_rationale_root = any(
-        nodes_by_id[c].branch_type == "rationale" for c in root_children if c in nodes_by_id
-    )
+    has_rationale_root = any(nodes_by_id[c].branch_type == "rationale" for c in root_children if c in nodes_by_id)
     root_read = node_to_read(root, has_children=bool(root_children), has_rationale=has_rationale_root)
 
     return {
@@ -445,27 +443,82 @@ async def trace_provenance(
     return steps
 
 
+def _neighbor_role(relationship_type: str, *, current_is_source: bool) -> str:
+    """Role of the other endpoint, relative to the node being expanded.
+
+    The role is not collapsed across a multi-hop path. At hop 2 it
+    describes the new node relative to the intermediate node, and the
+    path keeps every hop so the caller can render the chain.
+    """
+    rel_type = str(relationship_type)
+    if rel_type == "precedes":
+        return "successor" if current_is_source else "predecessor"
+    if rel_type == "requires":
+        return "prerequisite" if current_is_source else "dependent"
+    if rel_type == "alternative_to":
+        return "alternative"
+    # Non-procedural types stay labeled as themselves so a general walk
+    # cannot be mistaken for a predecessor or a next step.
+    return rel_type
+
+
 async def find_related(
     node_id: uuid.UUID,
     session: AsyncSession,
+    *,
+    tenant_id: str,
     max_hops: int = 2,
     relationship_types: list[str] | None = None,
 ) -> list[dict]:
-    """BFS traversal from node_id following edges up to max_hops.
+    """Bounded BFS from ``node_id`` over active edges in ``tenant_id``.
 
-    Returns:
-      [{"node": MemoryNodeRead, "path": list[RelationshipRead], "distance": int}]
+    ``tenant_id`` is required. The starting-node lookup, every edge
+    query, and every neighbor hydration are filtered in SQL. A node or
+    edge in another tenant is indistinguishable from a missing row.
 
-    Visited nodes are deduplicated; the starting node is not included in results.
+    ``distance`` counts edges from the start. ``max_hops=2`` returns
+    nodes at distance 1 and 2 and does not follow edges out of a node
+    already at distance 2. Values below 0 are treated as 0. Values
+    above ``_MAX_HOPS_CAP`` (5) are clamped. The start node is distance
+    0 and is not a result — callers that need it as the subject of
+    guidance load it separately.
+
+    The walk is bidirectional. Each path hop records how it was
+    traversed:
+
+    - ``relationship``: the edge
+    - ``direction``: ``outgoing`` when the expanded node is the source,
+      ``incoming`` when it is the target
+    - ``role``: the neighbor's role relative to that expanded node
+      (see ``_neighbor_role``), not a label collapsed against the start
+    - ``from_id`` / ``to_id``: the expanded node and the neighbor
+
+    ``relationship_types=None`` does not filter. Procedural guidance
+    passes ``PROCEDURAL_RELATIONSHIP_TYPES`` so ``related_to`` and
+    other general edges stay out of an execution prompt. An empty list
+    matches nothing.
+
+    Ordering is contractual. Results are BFS discovery order. At each
+    node, edges are expanded in ``(relationship_type, id)`` order. A
+    node is emitted once, along the shortest path; a same-length tie
+    takes the earlier edge in that order. Further edges to a visited
+    node are not returned. Cycles terminate because of the visited set.
+
+    A missing or soft-deleted neighbor ends that branch. The start node
+    must be current and not deleted, or this raises
+    ``MemoryNotFoundError``.
+
+    Returns a list of ``{"node", "path", "distance"}``.
     """
-    max_hops = min(max_hops, _MAX_HOPS_CAP)
+    max_hops = min(max(max_hops, 0), _MAX_HOPS_CAP)
 
-    # Verify root exists
-    await _fetch_current_node(node_id, session)
+    await _fetch_current_node(node_id, session, tenant_id=tenant_id)
+
+    if relationship_types is not None and len(relationship_types) == 0:
+        return []
 
     visited: set[uuid.UUID] = {node_id}
-    # Queue entries: (current_node_id, path_so_far, distance)
-    queue: deque[tuple[uuid.UUID, list[RelationshipRead], int]] = deque()
+    queue: deque[tuple[uuid.UUID, list[dict], int]] = deque()
     queue.append((node_id, [], 0))
     results: list[dict] = []
 
@@ -475,28 +528,30 @@ async def find_related(
         if distance >= max_hops:
             continue
 
-        # Fetch all active edges from/to current node
         filters = [
             or_(
                 MemoryRelationship.source_id == current_id,
                 MemoryRelationship.target_id == current_id,
             ),
+            MemoryRelationship.tenant_id == tenant_id,
             _active_edges_filter(),
         ]
-        if relationship_types:
+        if relationship_types is not None:
             filters.append(MemoryRelationship.relationship_type.in_(relationship_types))
 
         stmt = select(MemoryRelationship).where(and_(*filters))
         rel_result = await session.execute(stmt)
-        rels = rel_result.scalars().all()
+        rels = list(rel_result.scalars().all())
+        rels.sort(key=lambda rel: (rel.relationship_type, str(rel.id)))
 
         for rel in rels:
-            neighbor_id = rel.target_id if rel.source_id == current_id else rel.source_id
+            current_is_source = rel.source_id == current_id
+            neighbor_id = rel.target_id if current_is_source else rel.source_id
             if neighbor_id in visited:
                 continue
 
             visited.add(neighbor_id)
-            neighbor_node = await _fetch_node_by_id(neighbor_id, session)
+            neighbor_node = await _fetch_node_by_id(neighbor_id, session, tenant_id=tenant_id)
             if neighbor_node is None:
                 continue
 
@@ -506,11 +561,89 @@ async def find_related(
                 source_stub=neighbor_node.stub if rel.target_id == neighbor_id else None,
                 target_stub=neighbor_node.stub if rel.source_id == neighbor_id else None,
             )
-            new_path = path + [rel_read]
+            hop = {
+                "relationship": rel_read,
+                "direction": "outgoing" if current_is_source else "incoming",
+                "role": _neighbor_role(rel.relationship_type, current_is_source=current_is_source),
+                "from_id": current_id,
+                "to_id": neighbor_id,
+            }
+            new_path = [*path, hop]
             results.append({"node": neighbor_read, "path": new_path, "distance": distance + 1})
             queue.append((neighbor_id, new_path, distance + 1))
 
     return results
+
+
+def _explicit_entry_step_id(node: MemoryNode) -> uuid.UUID | None:
+    """Return ``metadata_.procedure.entry_step_id`` when it is a UUID.
+
+    ``None`` means the field is absent, null, or blank — the caller may
+    fall back to the single-entry heuristic. A present value that is
+    not a UUID is an error, not an invitation to guess.
+    """
+    metadata = node.metadata_ or {}
+    if not isinstance(metadata, dict):
+        return None
+    procedure = metadata.get("procedure")
+    if not isinstance(procedure, dict) or "entry_step_id" not in procedure:
+        return None
+    raw = procedure.get("entry_step_id")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    text_id = raw.strip() if isinstance(raw, str) else str(raw)
+    try:
+        return uuid.UUID(text_id)
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise EntryStepResolutionError(
+            node.id,
+            [],
+            detail=(
+                f"Procedure {node.id} has metadata_.procedure.entry_step_id "
+                f"{raw!r}, which is not a UUID. Pass current_step_id explicitly."
+            ),
+        ) from exc
+
+
+async def resolve_procedure_entry(
+    procedure_id: uuid.UUID,
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+) -> uuid.UUID:
+    """Resolve the step a caller should pass as ``current_step_id``.
+
+    Uses ``metadata_.procedure.entry_step_id`` when it names a current
+    node in ``tenant_id``. When that field is absent, returns the only
+    ``procedure_step`` child with no incoming active ``precedes`` edge
+    from a live in-tenant source. ``requires`` edges do not count.
+
+    Zero candidates (a cycle, or no steps) and more than one candidate
+    both raise ``EntryStepResolutionError`` naming the candidates.
+    Nothing is chosen by creation time, UUID order, or a model.
+    """
+    root = await _fetch_current_node(procedure_id, session, tenant_id=tenant_id)
+    explicit = _explicit_entry_step_id(root)
+    if explicit is not None:
+        await _fetch_current_node(explicit, session, tenant_id=tenant_id)
+        return explicit
+
+    steps = await _procedure_steps(procedure_id, session, tenant_id=tenant_id)
+    if not steps:
+        raise EntryStepResolutionError(
+            procedure_id,
+            [],
+            detail=(
+                f"Procedure {procedure_id} has no procedure_step children and no "
+                "entry_step_id. Pass current_step_id explicitly."
+            ),
+        )
+
+    incoming = await _incoming_precedes_targets({step.id for step in steps}, session, tenant_id=tenant_id)
+    candidates = sorted((step.id for step in steps if step.id not in incoming), key=str)
+    if len(candidates) != 1:
+        raise EntryStepResolutionError(procedure_id, candidates)
+    return candidates[0]
 
 
 # -- Internal helpers --
@@ -567,19 +700,78 @@ async def _fetch_current_node(
     return node
 
 
-async def _fetch_node_by_id(node_id: uuid.UUID, session: AsyncSession) -> MemoryNode | None:
-    """Load a memory node by ID regardless of is_current status, but excluding deleted.
+async def _fetch_node_by_id(
+    node_id: uuid.UUID,
+    session: AsyncSession,
+    *,
+    tenant_id: str | None = None,
+) -> MemoryNode | None:
+    """Load a memory node by ID regardless of is_current status, excluding deleted.
 
     Returns None for missing or soft-deleted nodes. Used by traversal helpers
-    (trace_provenance, find_related) where hitting a deleted memory should
-    gracefully terminate the walk rather than raise.
+    where hitting a deleted memory should end the walk rather than raise.
+
+    ``tenant_id`` is optional on purpose. ``find_related`` always passes it.
+    ``trace_provenance`` does not: that walk is unchanged by this work and
+    still relies on the caller's post-filter. New call sites should pass it.
     """
-    stmt = select(MemoryNode).where(
+    conditions = [
         MemoryNode.id == node_id,
         MemoryNode.deleted_at.is_(None),
-    )
+    ]
+    if tenant_id is not None:
+        conditions.append(MemoryNode.tenant_id == tenant_id)
+    stmt = select(MemoryNode).where(*conditions)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def _procedure_steps(
+    procedure_id: uuid.UUID,
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+) -> list[MemoryNode]:
+    """Current, non-deleted ``procedure_step`` children of a procedure root."""
+    stmt = select(MemoryNode).where(
+        MemoryNode.parent_id == procedure_id,
+        MemoryNode.tenant_id == tenant_id,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
+        MemoryNode.branch_type == "procedure_step",
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def _incoming_precedes_targets(
+    step_ids: set[uuid.UUID],
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+) -> set[uuid.UUID]:
+    """Step ids that are the target of a live in-tenant ``precedes`` edge.
+
+    The source must itself be a current, non-deleted node in the same
+    tenant. A dangling or cross-tenant predecessor does not disqualify
+    a step from being the entry.
+    """
+    if not step_ids:
+        return set()
+    alive_sources = select(MemoryNode.id).where(
+        MemoryNode.tenant_id == tenant_id,
+        MemoryNode.deleted_at.is_(None),
+        MemoryNode.is_current.is_(True),
+    )
+    stmt = select(MemoryRelationship.target_id).where(
+        MemoryRelationship.target_id.in_(step_ids),
+        MemoryRelationship.relationship_type == "precedes",
+        MemoryRelationship.tenant_id == tenant_id,
+        MemoryRelationship.source_id.in_(alive_sources),
+        _active_edges_filter(),
+    )
+    result = await session.execute(stmt)
+    return set(result.scalars().all())
 
 
 async def _fetch_both_nodes(

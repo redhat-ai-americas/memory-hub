@@ -279,13 +279,16 @@ async def test_find_related_filters_to_procedural_edges(async_session, embedding
     related = await find_related(
         procedure_graph.smoke.id,
         async_session,
+        tenant_id=_TEST_TENANT_ID,
         relationship_types=_PROCEDURAL_REL_TYPES,
     )
     related_ids = {item["node"].id for item in related}
     assert outsider.id not in related_ids
     assert procedure_graph.promote.id in related_ids or procedure_graph.rollback.id in related_ids
 
-    unfiltered = await find_related(procedure_graph.smoke.id, async_session)
+    unfiltered = await find_related(
+        procedure_graph.smoke.id, async_session, tenant_id=_TEST_TENANT_ID
+    )
     unfiltered_ids = {item["node"].id for item in unfiltered}
     assert outsider.id in unfiltered_ids
 
@@ -296,6 +299,7 @@ async def test_three_node_cycle_does_not_loop_forever(async_session, procedure_g
     related = await find_related(
         procedure_graph.smoke.id,
         async_session,
+        tenant_id=_TEST_TENANT_ID,
         max_hops=5,
         relationship_types=["precedes"],
     )
