@@ -228,8 +228,10 @@ async def _seed_corpus(
     t0 = time.perf_counter()
     for mem in corpus:
         embedding = await embedding_service.embed(mem["content"])
+        node_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"{tenant_id}-{mem['id']}")
         node = MemoryNode(
-            id=uuid.uuid5(uuid.NAMESPACE_DNS, f"{tenant_id}-{mem['id']}"),
+            id=node_id,
+            logical_id=node_id,
             content=mem["content"],
             stub=mem["content"][:100],
             scope="user",

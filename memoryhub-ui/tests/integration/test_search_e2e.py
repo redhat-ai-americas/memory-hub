@@ -44,14 +44,15 @@ async def _seed_memory(
     await db_session.execute(
         text("""
             INSERT INTO memory_nodes
-                (id, content, stub, scope, owner_id, weight, tenant_id,
+                (id, logical_id, content, stub, scope, owner_id, weight, tenant_id,
                  is_current, version, embedding, storage_type)
             VALUES
-                (:id, :content, :stub, :scope, :owner_id, :weight, :tenant_id,
+                (:id, :logical_id, :content, :stub, :scope, :owner_id, :weight, :tenant_id,
                  true, 1, CAST(:embedding AS vector), 'inline')
         """),
         {
             "id": memory_id,
+            "logical_id": memory_id,
             "content": content,
             "stub": content[:120],
             "scope": scope,
