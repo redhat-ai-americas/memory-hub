@@ -25,6 +25,7 @@ from memoryhub_core.models.schemas import (
     StorageType,
 )
 from memoryhub_core.services.exceptions import (
+    GuidanceAccessDeniedError,
     LLMExtractionServiceError,
     LLMExtractionServiceUnavailableError,
 )
@@ -36,8 +37,10 @@ from memoryhub_core.services.procedural_guidance import (
     build_localized_subgraph,
     generate_guidance,
     hop_count,
+    localized_guidance,
     neighborhood_payload,
     render_subgraph_context,
+    restrict_subgraph,
 )
 
 _TENANT = "tenant_a"
@@ -469,3 +472,112 @@ async def test_generate_guidance_without_url_raises_and_does_not_call():
         finally:
             await generator.aclose()
     mock_post.assert_not_awaited()
+
+
+class _FakeGenerator:
+    def __init__(self) -> None:
+        self.seen = None
+
+    async def generate(self, subgraph):
+        self.seen = subgraph
+        return "Run the smoke tests, then promote the image."
+
+    async def aclose(self) -> None:
+        return None
+
+
+def test_restrict_subgraph_drops_unreadable_intermediate_and_what_it_reaches():
+    current = _memory_node("current")
+    mid = _memory_node("secret intermediate")
+    far = _memory_node("reached through the secret")
+    direct = _memory_node("visible successor")
+    mid_edge = _edge(current.id, mid.id, RelationshipType.precedes)
+    far_edge = _edge(mid.id, far.id, RelationshipType.precedes)
+    direct_edge = _edge(current.id, direct.id, RelationshipType.precedes)
+    subgraph = _subgraph(
+        current,
+        [
+            {
+                "node": mid,
+                "path": [_hop(mid_edge, direction="outgoing", role="successor", from_id=current.id, to_id=mid.id)],
+                "distance": 1,
+            },
+            {
+                "node": far,
+                "path": [
+                    _hop(mid_edge, direction="outgoing", role="successor", from_id=current.id, to_id=mid.id),
+                    _hop(far_edge, direction="outgoing", role="successor", from_id=mid.id, to_id=far.id),
+                ],
+                "distance": 2,
+            },
+            {
+                "node": direct,
+                "path": [
+                    _hop(direct_edge, direction="outgoing", role="successor", from_id=current.id, to_id=direct.id)
+                ],
+                "distance": 1,
+            },
+        ],
+    )
+
+    visible = restrict_subgraph(subgraph, {direct.id})
+    assert visible.current.id == current.id
+    assert [item["node"].id for item in visible.neighbors] == [direct.id]
+    rendered = render_subgraph_context(visible)
+    assert "secret intermediate" not in rendered
+    assert "reached through the secret" not in rendered
+    assert "visible successor" in rendered
+
+
+@pytest.mark.asyncio
+async def test_localized_guidance_omits_unreadable_neighbor_before_generation(async_session, embedding_service):
+    current = await _create_node(async_session, embedding_service, content="Run the smoke tests")
+    hidden = await _create_node(async_session, embedding_service, content="secret prerequisite")
+    visible = await _create_node(async_session, embedding_service, content="Promote the image")
+    await create_relationship(
+        _rel(hidden.id, current.id, RelationshipType.requires),
+        async_session,
+    )
+    await create_relationship(
+        _rel(current.id, visible.id, RelationshipType.precedes),
+        async_session,
+    )
+    fake = _FakeGenerator()
+
+    result = await localized_guidance(
+        current.id,
+        async_session,
+        tenant_id=_TENANT,
+        authorize=lambda node: node.id != hidden.id,
+        generator=fake,
+    )
+
+    assert result.guidance_text.startswith("Run the smoke tests")
+    assert result.omitted_count == 1
+    assert fake.seen is result.subgraph
+    assert {item["node"].id for item in result.subgraph.neighbors} == {visible.id}
+    rendered = render_subgraph_context(result.subgraph)
+    assert "secret prerequisite" not in rendered
+    payload = result.to_payload()
+    assert payload["node_id"] == str(current.id)
+    assert payload["hop_count"] == 1
+    assert payload["omitted_count"] == 1
+    assert payload["neighborhood"]["nodes"][0]["id"] == str(current.id)
+
+
+@pytest.mark.asyncio
+async def test_localized_guidance_denies_unreadable_current_without_calling_the_model(
+    async_session,
+    embedding_service,
+):
+    current = await _create_node(async_session, embedding_service, content="Run the smoke tests")
+    fake = _FakeGenerator()
+    with pytest.raises(GuidanceAccessDeniedError, match="Not authorized"):
+        await localized_guidance(
+            current.id,
+            async_session,
+            tenant_id=_TENANT,
+            authorize=lambda _node: False,
+            generator=fake,
+        )
+    assert fake.seen is None

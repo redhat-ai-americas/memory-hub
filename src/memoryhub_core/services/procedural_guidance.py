@@ -12,6 +12,7 @@ output plus the system prompt.
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from memoryhub_core.config import AppSettings
 from memoryhub_core.models.schemas import MemoryNodeRead, RelationshipRead
 from memoryhub_core.services.exceptions import (
+    GuidanceAccessDeniedError,
     LLMExtractionServiceError,
     LLMExtractionServiceUnavailableError,
 )
@@ -59,6 +61,32 @@ class LocalizedSubgraph:
     neighbors: list[dict[str, Any]]
     max_hops: int
     relationship_types: list[str]
+
+
+@dataclass(frozen=True)
+class GuidanceResult:
+    """Prose plus the subgraph the model actually saw.
+
+    ``omitted_count`` is neighbors dropped because the caller cannot read
+    them (or because the path to them crosses such a neighbor). It is 0
+    when no read check was applied.
+    """
+
+    subgraph: LocalizedSubgraph
+    guidance_text: str
+    omitted_count: int = 0
+
+    def to_payload(self) -> dict[str, Any]:
+        """The ``manage_graph`` / ``get_guidance`` response body."""
+        payload = {
+            "node_id": str(self.subgraph.current.id),
+            "guidance_text": self.guidance_text,
+            "neighborhood": neighborhood_payload(self.subgraph),
+            "hop_count": hop_count(self.subgraph),
+        }
+        if self.omitted_count:
+            payload["omitted_count"] = self.omitted_count
+        return payload
 
 
 def hop_count(subgraph: LocalizedSubgraph) -> int:
@@ -374,3 +402,68 @@ async def generate_guidance(
         return await owned.generate(localized_subgraph)
     finally:
         await owned.aclose()
+
+
+def restrict_subgraph(
+    subgraph: LocalizedSubgraph,
+    readable_ids: set[uuid.UUID],
+) -> LocalizedSubgraph:
+    """Drop neighbors the caller cannot read, and anything reached through them.
+
+    The current node is left in place. A hop-2 neighbor stays only when
+    every ``to_id`` on its path is still readable, so an unreadable
+    intermediate cannot leak into the prompt as a path step.
+    """
+    allowed = {uuid.UUID(str(node_id)) for node_id in readable_ids}
+    blocked = {item["node"].id for item in subgraph.neighbors if item["node"].id not in allowed}
+    kept: list[dict[str, Any]] = []
+    for item in subgraph.neighbors:
+        if item["node"].id in blocked:
+            continue
+        if {hop["to_id"] for hop in item["path"]} & blocked:
+            continue
+        kept.append(item)
+    return LocalizedSubgraph(
+        current=subgraph.current,
+        neighbors=kept,
+        max_hops=subgraph.max_hops,
+        relationship_types=list(subgraph.relationship_types),
+    )
+
+
+async def localized_guidance(
+    node_id: uuid.UUID,
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    max_hops: int = 2,
+    relationship_types: list[str] | None = None,
+    authorize: Callable[[MemoryNodeRead], bool] | None = None,
+    generator: _GuidanceGenerator | None = None,
+) -> GuidanceResult:
+    """Build a neighborhood, drop unreadable neighbors, and generate prose.
+
+    Both retrieval surfaces call this. ``authorize`` is the tool-layer
+    read check. When it rejects the current step this raises
+    ``GuidanceAccessDeniedError`` and does not call the model. When it
+    is omitted, every tenant-visible neighbor is kept — service tests
+    use that. The model sees only the subgraph returned in
+    ``GuidanceResult.subgraph``.
+    """
+    subgraph = await build_localized_subgraph(
+        node_id,
+        session,
+        tenant_id=tenant_id,
+        max_hops=max_hops,
+        relationship_types=relationship_types,
+    )
+    omitted = 0
+    if authorize is not None:
+        if not authorize(subgraph.current):
+            raise GuidanceAccessDeniedError(subgraph.current.id)
+        before = len(subgraph.neighbors)
+        readable = {item["node"].id for item in subgraph.neighbors if authorize(item["node"])}
+        subgraph = restrict_subgraph(subgraph, readable)
+        omitted = before - len(subgraph.neighbors)
+    text = await generate_guidance(subgraph, generator=generator)
+    return GuidanceResult(subgraph=subgraph, guidance_text=text, omitted_count=omitted)

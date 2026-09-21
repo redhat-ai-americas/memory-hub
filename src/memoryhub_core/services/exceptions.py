@@ -11,6 +11,18 @@ class MemoryNotFoundError(Exception):
         super().__init__(f"Memory node {memory_id} not found")
 
 
+class GuidanceAccessDeniedError(Exception):
+    """The caller cannot read the current step of a guidance request.
+
+    Neighbors the caller cannot read are omitted instead. The current
+    step is the subject of the guidance, so a denial here stops the call.
+    """
+
+    def __init__(self, node_id: uuid.UUID) -> None:
+        self.node_id = node_id
+        super().__init__(f"Not authorized to read memory {node_id}.")
+
+
 class EntryStepResolutionError(Exception):
     """Raised when a procedure has no single step to enter on.
 
