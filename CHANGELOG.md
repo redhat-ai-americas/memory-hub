@@ -16,6 +16,8 @@ Published to PyPI as [`memoryhub`](https://pypi.org/project/memoryhub/). Lives i
 
 ### [Unreleased]
 
+- **Procedural graph content type (#552)**: `content_type` accepts `"procedural"` for directed-graph runbooks (procedure root + `procedure_step` children). `create_relationship()` accepts three new topology edge types: `precedes`, `requires`, `alternative_to`. Docstrings for `search()`/`list()`/`write()` corrected from the stale `"declarative"` label to the actual `"knowledge"` value.
+
 ### [0.6.0] — 2026-04-23
 
 - **Stub result compatibility (#205)**: Default `content` and `owner_id` to
@@ -74,6 +76,8 @@ Published to PyPI as [`memoryhub-cli`](https://pypi.org/project/memoryhub-cli/).
 
 ### [Unreleased]
 
+- **Procedural content type (#552)**: `--content-type` on `search`, `list`, and `write` now documents `procedural` alongside `experiential`/`knowledge`/`behavioral`. `memoryhub graph relate` lists the three new edge types (`precedes`, `requires`, `alternative_to`) in its help text.
+
 ### [0.3.0] — 2026-04-09
 
 - **Campaign & domain parameter support (#164)**: Added `--project-id` to
@@ -101,6 +105,8 @@ OpenShift; not published as a package.
 
 ### [Unreleased]
 
+- **Procedural graph content type, Phase 1 (#552)**: `write`/`list`/`search` accept `content_type="procedural"`; `relate` accepts `precedes`/`requires`/`alternative_to` edge types (`mentions` remains system-managed). `reconstruct` is unchanged and still scoped to `behavioral` only — procedural graphs are not returned by it. Retrieval/traversal support is #553, not this change.
+
 - FastMCP 3 server exposing the 13 MemoryHub tools over streamable-HTTP.
 
 ## memoryhub-core (server-side library)
@@ -109,6 +115,8 @@ Lives at the repo root in [`src/memoryhub_core/`](src/memoryhub_core/). Consumed
 memory-hub-mcp and memoryhub-auth; not published as a standalone package.
 
 ### [Unreleased]
+
+- **Procedural graph schema, Phase 1 (#552)**: Added `ContentType.PROCEDURAL` and `RelationshipType.precedes`/`.requires`/`.alternative_to`. `ck_memory_nodes_content_type` recreated via Alembic migration 028 and mirrored on the `MemoryNode` ORM model so SQLite test schemas enforce it too. See [planning/procedural-graphs.md](planning/procedural-graphs.md) for the design (adjacency-list membership + `memory_relationships` topology; no new tables).
 
 - Models, services, storage, and RBAC. See
   [planning/archive/package-layout.md](planning/archive/package-layout.md) for the split between
