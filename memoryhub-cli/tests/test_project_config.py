@@ -455,6 +455,32 @@ def test_search_accepts_project_id_option():
     assert "--project-id" in text, f"--project-id not in: {text}"
 
 
+def test_search_accepts_current_step_option():
+    """--current-step-id is recognized by the search command."""
+    from typer.testing import CliRunner
+
+    from memoryhub_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["search", "--help"])
+    assert result.exit_code == 0
+    text = _strip_ansi(result.stdout)
+    assert "--current-step-id" in text, f"--current-step-id not in: {text}"
+
+
+def test_graph_guidance_command_is_registered():
+    """memoryhub graph guidance is the lower-level guidance entry."""
+    from typer.testing import CliRunner
+
+    from memoryhub_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["graph", "guidance", "--help"])
+    assert result.exit_code == 0
+    text = _strip_ansi(result.stdout)
+    assert "--max-hops" in text
+
+
 def test_search_accepts_domain_option():
     """--domain is recognized by the search command."""
     from typer.testing import CliRunner
