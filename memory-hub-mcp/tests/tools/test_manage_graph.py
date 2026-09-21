@@ -204,6 +204,50 @@ async def test_create_relationship_success():
     assert result["relationship_type"] == "related_to"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rel_type", ["precedes", "requires", "alternative_to"])
+async def test_create_relationship_accepts_procedural_types(rel_type):
+    """#552: precedes/requires/alternative_to are user-creatable (not system-managed)."""
+    from src.tools.manage_graph import _VALID_TYPES
+
+    assert rel_type in _VALID_TYPES
+
+    mock_result = MagicMock()
+    mock_result.model_dump.return_value = {
+        "id": str(uuid.uuid4()),
+        "source_id": str(uuid.uuid4()),
+        "target_id": str(uuid.uuid4()),
+        "relationship_type": rel_type,
+    }
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    mock_memory = SimpleNamespace(scope="user", owner_id="test-user", tenant_id="default")
+
+    with (
+        patch("src.tools.manage_graph.get_db_session", return_value=(mock_session, mock_gen)),
+        patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.manage_graph.read_memory_service", new_callable=AsyncMock, return_value=mock_memory),
+        patch("src.tools.manage_graph.create_relationship_service", new_callable=AsyncMock, return_value=mock_result),
+    ):
+        result = await manage_graph(
+            action="create_relationship",
+            source_id=str(uuid.uuid4()),
+            target_id=str(uuid.uuid4()),
+            relationship_type=rel_type,
+        )
+    assert "error" not in result
+    assert result["relationship_type"] == rel_type
+
+
+def test_valid_types_include_procedural_and_mentions():
+    from src.tools.manage_graph import _VALID_TYPES
+
+    assert "precedes" in _VALID_TYPES
+    assert "requires" in _VALID_TYPES
+    assert "alternative_to" in _VALID_TYPES
+    assert "mentions" in _VALID_TYPES
+
+
 # ── get_relationships tests ───────────────────────────────────────────────────
 
 @pytest.mark.asyncio

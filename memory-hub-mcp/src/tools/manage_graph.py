@@ -102,7 +102,10 @@ async def manage_graph(
         Field(
             description=(
                 "action='create_relationship': Type of relationship. Must be one of: "
-                "derived_from, supersedes, conflicts_with, related_to. "
+                "derived_from, supersedes, conflicts_with, related_to, "
+                "precedes, requires, alternative_to. "
+                "'mentions' is system-managed by entity extraction and cannot "
+                "be created via this tool. "
                 "Required for create_relationship. "
                 "action='get_relationships': Filter by this type; omit to return all types."
             ),

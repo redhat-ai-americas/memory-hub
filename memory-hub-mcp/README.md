@@ -167,7 +167,10 @@ Relationships are immutable (create or delete, never update).
 
 **Parameters:** `source_id` (UUID str), `target_id` (UUID str),
 `relationship_type` (`derived_from` | `supersedes` | `conflicts_with` |
-`related_to`), `metadata` (dict, optional).
+`related_to` | `precedes` | `requires` | `alternative_to`). `mentions` is
+system-managed and cannot be created here. `precedes` / `requires` /
+`alternative_to` encode procedural-graph step topology (#552). `metadata`
+(dict, optional).
 
 ##### `get_relationships`
 

@@ -267,10 +267,14 @@ async def write_memory(
         Field(
             description=(
                 "(Advanced) Memory content type. Defaults to 'experiential' "
-                "(agent-created memories). Use 'declarative' for facts and "
+                "(agent-created memories). Use 'knowledge' for facts and "
                 "preferences, 'behavioral' for demonstrated patterns and "
-                "successful approaches. Behavioral memories are not injected "
-                "by default -- use the reconstruct action to retrieve them."
+                "successful approaches, 'procedural' for directed-graph "
+                "runbooks (procedure root + procedure_step children). "
+                "Behavioral memories are not injected by default -- use the "
+                "reconstruct action to retrieve them. Procedural graphs are "
+                "not returned by reconstruct; retrieve them by content_type "
+                "filter or by walking the procedure subtree."
             ),
         ),
     ] = None,
@@ -631,6 +635,9 @@ async def write_memory(
                 session=session,
             )
 
+        # Full MemoryNodeRead dump, including content_type. Keep that field if
+        # this ever shrinks to a compact subset — local _do_write returns it
+        # on the same path so agents can confirm procedural vs the default.
         result = {
             "memory": memory.model_dump(mode="json"),
             "curation": {

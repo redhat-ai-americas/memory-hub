@@ -1974,3 +1974,286 @@ class TestCompactEntryHonestyFlags:
         assert "content_truncated" in entry
         assert "full_available" in entry
         assert entry["relevance_score"] == 0.85
+
+
+# ---------------------------------------------------------------------------
+# #552 follow-up — content_type must propagate to the count and backfill
+# paths, not just the main similarity search
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_memory_forwards_content_type_to_count():
+    """Regression: count_search_matches must receive the same content_type
+    (and source/exclude_source) filter as search_memories, or total_matching
+    and has_more are computed over an unfiltered set. Pre-existing bug
+    (not introduced by #552's schema work) surfaced by adding a fourth
+    content_type value; affects any content_type- or source-filtered
+    search, not just content_type="procedural"."""
+    from unittest.mock import MagicMock
+
+    mock_session = MagicMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "tenant_a",
+        "scopes": ["memory:read:user", "memory:write:user"],
+    }
+
+    with (
+        patch(
+            "src.tools.search_memory.get_claims_from_context",
+            return_value=fake_claims,
+        ),
+        patch(
+            "src.tools.search_memory.get_db_session",
+            return_value=(mock_session, mock_gen),
+        ),
+        patch(
+            "src.tools.search_memory.release_db_session",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.tools.search_memory.get_embedding_service",
+            return_value=fake_embedding_service,
+        ),
+        patch(
+            "src.tools.search_memory.search_memories",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as mock_search,
+        patch(
+            "src.tools.search_memory.count_search_matches",
+            new_callable=AsyncMock,
+            return_value=0,
+        ) as mock_count,
+    ):
+        await search_memory(
+            query="deploy runbook",
+            content_type="procedural",
+            source="agent",
+            exclude_source="dreaming",
+        )
+
+    _, search_kwargs = mock_search.call_args
+    assert search_kwargs.get("content_type") == "procedural", (
+        f"Expected content_type='procedural' in search_memories kwargs, got {search_kwargs}"
+    )
+    _, count_kwargs = mock_count.call_args
+    assert count_kwargs.get("content_type") == "procedural", (
+        "Expected content_type='procedural' forwarded into count_search_matches "
+        f"kwargs, got {count_kwargs}"
+    )
+    assert count_kwargs.get("source") == "agent", (
+        f"Expected source='agent' forwarded into count_search_matches kwargs, got {count_kwargs}"
+    )
+    assert count_kwargs.get("exclude_source") == "dreaming", (
+        "Expected exclude_source='dreaming' forwarded into count_search_matches "
+        f"kwargs, got {count_kwargs}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_memory_backfill_receives_content_type_filter():
+    """Regression: _backfill_compiled_entries must receive content_type too,
+    or a compiled entry of a different content_type (e.g. behavioral) can be
+    backfilled into a content_type-filtered result set (e.g. procedural),
+    since the cache-optimized path loads compiled epoch entries by ID
+    independent of the similarity query's own content_type filter."""
+    similarity_hits = [_fake_full_result("procedural-hit", score=0.9)]
+
+    mock_session = AsyncMock()
+    mock_gen = AsyncMock()
+    fake_embedding_service = AsyncMock()
+
+    auth_mod._current_session = {
+        "user_id": "wjackson",
+        "scopes": ["user"],
+        "identity_type": "user",
+    }
+    try:
+        with (
+            patch(
+                "src.tools.search_memory.get_db_session",
+                return_value=(mock_session, mock_gen),
+            ),
+            patch("src.tools.search_memory.release_db_session", new_callable=AsyncMock),
+            patch(
+                "src.tools.search_memory.get_embedding_service",
+                return_value=fake_embedding_service,
+            ),
+            patch(
+                "src.tools.search_memory.search_memories",
+                new_callable=AsyncMock,
+                return_value=similarity_hits,
+            ),
+            patch(
+                "src.tools.search_memory.count_search_matches",
+                new_callable=AsyncMock,
+                return_value=1,
+            ),
+            patch(
+                "src.tools.search_memory._backfill_compiled_entries",
+                new_callable=AsyncMock,
+                return_value=similarity_hits,
+            ) as mock_backfill,
+            patch(
+                "src.tools.search_memory._apply_cache_optimized_ordering",
+                new_callable=AsyncMock,
+                return_value={
+                    "ordered_results": [(item, score, False) for item, score in similarity_hits],
+                    "compilation_hash": "deadbeef",
+                    "compilation_epoch": 1,
+                    "appendix_count": 0,
+                },
+            ),
+            patch("src.tools.search_memory.ROLE_ISOLATION_ENABLED", False),
+            patch("src.tools.search_memory.PROJECT_ISOLATION_ENABLED", False),
+        ):
+            await search_memory(query="deploy runbook", content_type="procedural")
+    finally:
+        auth_mod._current_session = None
+
+    _, backfill_kwargs = mock_backfill.call_args
+    assert backfill_kwargs.get("content_type") == "procedural", (
+        "Expected content_type='procedural' forwarded into _backfill_compiled_entries "
+        f"kwargs, got {backfill_kwargs}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_memory_token_budget_stub_preserves_content_type_and_source():
+    """Regression: degrading a full result to stub form under token-budget
+    trimming must preserve content_type/source, not silently drop them to
+    the MemoryNodeStub schema defaults (content_type=None, source="agent").
+
+    `_to_stub()` builds the stub from an already-populated MemoryNodeRead,
+    so the real values are available -- omitting them was a pure oversight,
+    not a case of the data being unavailable."""
+    from src.tools.search_memory import _format_entry
+
+    from memoryhub_core.models.schemas import ContentType
+
+    big_content = "x" * 4000
+    full1, score1 = _fake_full_result(big_content, weight=0.9, score=0.95)
+    full2, score2 = _fake_full_result(big_content, weight=0.9, score=0.85)
+    # Force the field values we're checking survive the full->stub projection.
+    full1.content_type = ContentType.PROCEDURAL
+    full1.source = "dreaming"
+    full2.content_type = ContentType.PROCEDURAL
+    full2.source = "dreaming"
+
+    one_entry_cost = _format_entry(full1, score1, [])[1]
+    budget = one_entry_cost + (one_entry_cost // 2)
+    assert budget < 2 * one_entry_cost  # sanity: second entry must overflow into stub form
+
+    result = await _patched_search_call(
+        page_results=[(full1, score1), (full2, score2)],
+        total_matching=2,
+        max_response_tokens=budget,
+    ).run()
+
+    assert result["results"][0]["result_type"] == "full"
+    assert result["results"][1]["result_type"] == "stub"
+    assert result["results"][1]["content_type"] == "procedural", (
+        "Expected content_type='procedural' preserved on a degraded stub, "
+        f"got {result['results'][1].get('content_type')!r}"
+    )
+    assert result["results"][1]["source"] == "dreaming", (
+        "Expected source='dreaming' preserved on a degraded stub, "
+        f"got {result['results'][1].get('source')!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_backfill_compiled_entries_low_weight_stub_preserves_content_type():
+    """Regression: the low-weight branch of _backfill_compiled_entries builds
+    a MemoryNodeStub directly from the ORM node it just loaded from the DB.
+    That node already has the real content_type/source -- failing to copy
+    them into the MemoryNodeStub silently returned content_type=None for any
+    backfilled compiled entry below weight_threshold, independent of (and in
+    addition to) the content_type *filter* propagation fixed separately."""
+    import uuid as _uuid
+    from dataclasses import dataclass
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock
+
+    from src.tools.search_memory import _backfill_compiled_entries
+
+    from memoryhub_core.models.schemas import MemoryScope
+
+    @dataclass
+    class _FakeNode:
+        id: _uuid.UUID
+        parent_id: _uuid.UUID | None
+        stub: str
+        scope: MemoryScope
+        weight: float
+        branch_type: str | None
+        content_type: str
+        source: str
+        created_at: datetime
+
+    node_id = _uuid.uuid4()
+    fake_node = _FakeNode(
+        id=node_id,
+        parent_id=None,
+        stub="check staging health before deploy",
+        scope=MemoryScope.USER,
+        weight=0.1,  # below weight_threshold -> low-weight MemoryNodeStub branch
+        branch_type="procedure_step",
+        content_type="procedural",
+        source="dreaming",
+        created_at=datetime.now(UTC),
+    )
+
+    mock_valkey = AsyncMock()
+    mock_valkey.read_compilation = AsyncMock(
+        return_value={
+            "epoch": "1",
+            "ordered_ids": str(node_id),
+            "compilation_hash": "deadbeef",
+            "compiled_at": datetime.now(UTC).isoformat(),
+        }
+    )
+
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [fake_node]
+    mock_execute_result = MagicMock()
+    mock_execute_result.scalars.return_value = mock_scalars
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_execute_result)
+
+    with (
+        patch(
+            "src.tools.search_memory.get_valkey_client",
+            return_value=mock_valkey,
+        ),
+        patch(
+            "src.tools.search_memory._bulk_branch_flags",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+    ):
+        results = await _backfill_compiled_entries(
+            results=[],
+            session=mock_session,
+            tenant_id="default",
+            owner_id="wjackson",
+            weight_threshold=0.5,
+            content_type="procedural",
+        )
+
+    assert len(results) == 1
+    stub, score = results[0]
+    assert score == 0.0
+    assert stub.content_type == "procedural", (
+        f"Expected backfilled low-weight stub to carry content_type='procedural', "
+        f"got {stub.content_type!r}"
+    )
+    assert stub.source == "dreaming", (
+        f"Expected backfilled low-weight stub to carry source='dreaming', "
+        f"got {stub.source!r}"
+    )
