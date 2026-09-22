@@ -263,7 +263,7 @@ neighborhood travelling alongside the generated text so a caller inspecting the 
 forced into a second `get_relationships` call per neighbor. Both surfaces call the same service
 function; neither reimplements the other.
 
-### 5a. What `query` means alongside `current_step_id` — NOT settled, needs a human decision
+### 5a. What `query` means alongside `current_step_id` — SIGNED OFF 2026-09-21: (A), short-circuit
 
 **This is the one decision in this doc that an implementer must not make silently.** An earlier
 revision asserted the answer (short-circuit; `ToolError` if both are set) without weighing it
@@ -313,7 +313,7 @@ in `ignored_parameters`. `graph_depth`, `focus`, `domains`, `entities`, and
 `graph_relationship_types` are not applied; each one the caller actually set is appended
 to that list. (C) was not chosen.
 
-### 5b. Cold start: what a procedural query does with no `current_step_id` — also needs sign-off
+### 5b. Cold start: what a procedural query does with no `current_step_id` — SIGNED OFF 2026-09-21: flat list
 
 An earlier revision asserted "flat ranked list, unchanged" in a parenthetical. That is the
 conservative answer and it is probably right, but it has a cost worth stating out loud: it means
@@ -586,6 +586,75 @@ Read checks run before generation. An unreadable current step raises
 `GuidanceAccessDeniedError`, which the tools surface as `ToolError`. An unreadable
 neighbor is dropped, and so is any later node whose path goes through it, so the model
 does not see that content.
+
+### Amendment to Decision 5: the search response sends a compact neighborhood
+
+Decision 5 says the raw neighborhood travels alongside the generated text, "so a caller
+inspecting the generation, or rendering the graph itself, isn't forced into a second
+`get_relationships` call per neighbor." That reasoning was written for
+`manage_graph(action="get_guidance")` — an inspection surface — and was then applied to the
+`search_memory` response without being re-examined. Review caught it.
+
+Measured on a realistic 2-hop neighborhood: seven full `MemoryNodeRead` dumps are ~8.2 KB
+against ~128 bytes of guidance prose, roughly 64x. Every node carries its whole `content`,
+`metadata_`, timestamps and version fields. The `search_memory` path is the one whose output
+reaches an agent's context, so shipping that is the full-graph injection this whole design
+exists to avoid — the paper's 71% token reduction, spent on the wire.
+
+Amended: the two surfaces now send different projections.
+
+- `search_memory(current_step_id=...)` sends `compact_neighborhood_payload`: per node `id`,
+  `stub`, `branch_type`, `content_type`; per edge `id`, both endpoint ids, `relationship_type`,
+  `direction`, `role`, `from_id`, `to_id`. Enough to name a step or draw the graph, nothing
+  worth injecting. Marked `neighborhood_detail: "compact"`, with
+  `full_neighborhood_via` naming the other surface.
+- `manage_graph(action="get_guidance")` is unchanged and still returns the whole subgraph,
+  marked `neighborhood_detail: "full"`. This is the debugging and rendering path, and the
+  original justification holds there.
+
+This changed one existing assertion in
+`memory-hub-mcp/tests/tools/test_procedural_search.py`, which checked the search entry's
+neighborhood for node `content`. That test encoded the behavior being corrected, so it was
+updated rather than preserved — the "existing tests pass unmodified" bar in the
+backward-compatibility contract is about not disturbing paths this work does not own, and the
+guidance response shape is one it does. Nothing outside #553 changed.
+
+### Two defects found in review, both fixed
+
+- **The SDK dropped guidance entirely.** `MemoryHubClient.get_injection_block()` — the helper
+  whose only job is turning a `SearchResult` into prompt text — branched on
+  `result_type == "full"` then fell back to `stub`. A guidance entry is neither and has no
+  stub, so it rendered as the empty string: the feature's entire output, silently discarded on
+  the SDK's main injection path. The server had already mirrored the prose into `content` for
+  compatibility, but the `result_type` gate rejected the entry before `content` was read.
+  Fixed by handling `guidance` first and injecting `guidance_text` (falling back to `content`).
+  Only the prose is injected; the neighborhood is not, which is the same principle as the
+  compact projection above.
+- **`source_stub` and `target_stub` were inverted** in `find_related`: the neighbor's stub was
+  written to the opposite end of the edge. Pre-existing — byte-identical on the #552 branch —
+  and harmless while the function had no callers. #553 made those edges part of an API
+  response, which turned a dormant bug into an incorrect public field. Fixed, with a
+  regression test that was confirmed to fail against the old orientation.
+
+### Divergence from this doc's test plan: where the search-path integration test lives
+
+The test plan asks for an integration test asserting that localized guidance comes back
+*through the `search_memory` path*. It is not in `tests/integration/test_procedural_guidance.py`.
+That file lives in the core package and imports only `memoryhub_core`; reaching
+`src.tools.search_memory` from it would mean installing `memory-hub-mcp` into the core test
+environment, and `memory-hub-mcp/tests/` has no Postgres fixtures to host the test from the
+other side. Neither is worth the plumbing for #553.
+
+What covers it instead: `memory-hub-mcp/tests/tools/test_procedural_search.py` has the pair the
+plan actually cares about —
+`test_search_with_current_step_returns_guidance_and_skips_ranking` and
+`test_search_without_current_step_still_ranks` — at the mocked-unit level, which is where the
+response envelope is decided anyway. The Postgres file checks the thing mocks cannot: that the
+neighborhood those unit tests assume is what a real graph produces, bounded to 2 hops,
+procedural edges only, with cross-tenant rows invisible.
+
+The gap that remains is that no single test exercises `search_memory` against real Postgres
+end to end. If the MCP package ever gains Postgres fixtures, that is where this belongs.
 
 Consumer audit: `memoryhub-ui/backend/` has no `search_memory` client. `sdk/` `search()`
 and `get_guidance()`, `memoryhub-cli` `search --current-step-id` and `graph guidance`,
