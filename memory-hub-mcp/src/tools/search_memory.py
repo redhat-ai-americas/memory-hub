@@ -57,7 +57,6 @@ from src.core.authz import (
     get_claims_from_context,
     resolve_tenant,
 )
-from src.tools._guidance import run_guidance, search_guidance_response
 from src.tools._deps import (
     get_db_session,
     get_embedding_service,
@@ -65,6 +64,7 @@ from src.tools._deps import (
     get_s3_adapter,
     release_db_session,
 )
+from src.tools._guidance import run_guidance, search_guidance_response
 
 logger = logging.getLogger(__name__)
 

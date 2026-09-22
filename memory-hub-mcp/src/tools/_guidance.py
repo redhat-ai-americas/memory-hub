@@ -22,9 +22,9 @@ from memoryhub_core.services.exceptions import (
 )
 from memoryhub_core.services.procedural_guidance import (
     GuidanceResult,
+    compact_neighborhood_payload,
     hop_count,
     localized_guidance,
-    neighborhood_payload,
 )
 
 _MAX_HOPS = 5
@@ -91,14 +91,23 @@ def search_guidance_response(
 
     ``query`` is always listed in ``ignored_parameters``. Other ranking
     inputs are listed only when the caller actually set them.
+
+    The neighborhood here is the compact projection: ids, stubs and the
+    typed edges, without node content or metadata. This is the path whose
+    output reaches an agent's context, and shipping the full subgraph
+    alongside the prose would reinstate the full-graph injection that
+    localized retrieval exists to avoid. Callers that need the whole
+    subgraph use ``manage_graph(action="get_guidance")``.
     """
     entry = {
         "id": str(result.subgraph.current.id),
         "content": result.guidance_text,
         "result_type": "guidance",
         "guidance_text": result.guidance_text,
-        "neighborhood": neighborhood_payload(result.subgraph),
+        "neighborhood": compact_neighborhood_payload(result.subgraph),
         "hop_count": hop_count(result.subgraph),
+        "neighborhood_detail": "compact",
+        "full_neighborhood_via": 'manage_graph(action="get_guidance")',
     }
     ignored = ["query"]
     if graph_depth > 0:

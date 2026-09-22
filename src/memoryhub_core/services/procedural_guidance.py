@@ -83,6 +83,9 @@ class GuidanceResult:
             "guidance_text": self.guidance_text,
             "neighborhood": neighborhood_payload(self.subgraph),
             "hop_count": hop_count(self.subgraph),
+            # This is the inspection surface, so the subgraph stays whole.
+            # search_memory sends the compact projection instead (#553).
+            "neighborhood_detail": "full",
         }
         if self.omitted_count:
             payload["omitted_count"] = self.omitted_count
@@ -129,6 +132,46 @@ def neighborhood_payload(subgraph: LocalizedSubgraph) -> dict[str, Any]:
             edges.append(edge)
 
     return {"nodes": nodes, "edges": edges}
+
+
+def compact_neighborhood_payload(subgraph: LocalizedSubgraph) -> dict[str, Any]:
+    """Structure without bulk, for the response that feeds an agent's context.
+
+    ``neighborhood_payload`` dumps every field of every node, which for a
+    2-hop neighborhood runs to kilobytes — dozens of times the guidance
+    prose it accompanies. Shipping that on the ``search_memory`` path
+    undoes the token saving the localized-retrieval design exists for
+    (#553, Decision 5), so search sends this instead: enough to render
+    the graph or name a step, nothing an agent would be tempted to inject.
+
+    Node content, ``metadata_``, timestamps and version fields are
+    omitted here. ``manage_graph(action="get_guidance")`` is the
+    inspection surface and still returns the full payload.
+    """
+    full = neighborhood_payload(subgraph)
+    nodes = [
+        {
+            "id": node["id"],
+            "stub": node.get("stub"),
+            "branch_type": node.get("branch_type"),
+            "content_type": node.get("content_type"),
+        }
+        for node in full["nodes"]
+    ]
+    edges = [
+        {
+            "id": edge["id"],
+            "source_id": edge["source_id"],
+            "target_id": edge["target_id"],
+            "relationship_type": edge["relationship_type"],
+            "direction": edge["direction"],
+            "role": edge["role"],
+            "from_id": edge["from_id"],
+            "to_id": edge["to_id"],
+        }
+        for edge in full["edges"]
+    ]
+    return {"nodes": nodes, "edges": edges, "detail": "compact"}
 
 
 async def build_localized_subgraph(
@@ -388,20 +431,41 @@ async def _backoff_sleep(delay: float) -> None:
     await asyncio.sleep(delay)
 
 
+_guidance_generator: _GuidanceGenerator | None = None
+
+
+def _get_guidance_generator() -> _GuidanceGenerator:
+    """Lazy-initialize and return the module-level guidance generator.
+
+    Mirrors ``_get_llm_extractor()`` in ``extraction.py``. Building one
+    per call re-read the YAML prompt from disk and opened a fresh
+    ``httpx.AsyncClient`` — a new connection pool and TLS handshake to
+    the model — on every guidance request. Settings are read once, at
+    first use, which is the same tradeoff Stage-3 extraction already
+    makes. Tests construct their own generator and pass it to
+    ``generate_guidance``, so they are unaffected by this cache.
+    """
+    global _guidance_generator
+    if _guidance_generator is None:
+        _guidance_generator = _GuidanceGenerator()
+    return _guidance_generator
+
+
 async def generate_guidance(
     localized_subgraph: LocalizedSubgraph,
     *,
     generator: _GuidanceGenerator | None = None,
 ) -> str:
-    """Generate prose guidance for an already-localized subgraph."""
+    """Generate prose guidance for an already-localized subgraph.
+
+    With no ``generator``, the shared module-level one is used and is
+    deliberately not closed: its client is reused across requests.
+    A caller that passes its own generator owns closing it.
+    """
     if generator is not None:
         return await generator.generate(localized_subgraph)
 
-    owned = _GuidanceGenerator()
-    try:
-        return await owned.generate(localized_subgraph)
-    finally:
-        await owned.aclose()
+    return await _get_guidance_generator().generate(localized_subgraph)
 
 
 def restrict_subgraph(

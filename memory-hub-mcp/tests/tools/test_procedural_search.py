@@ -15,7 +15,13 @@ from fastmcp.exceptions import ToolError
 from src.tools.manage_graph import manage_graph
 from src.tools.search_memory import search_memory
 
-from memoryhub_core.models.schemas import ContentType, MemoryNodeRead, MemoryScope, StorageType
+from memoryhub_core.models.schemas import (
+    ContentType,
+    MemoryNodeRead,
+    MemoryScope,
+    RelationshipRead,
+    StorageType,
+)
 from memoryhub_core.services.exceptions import (
     LLMExtractionServiceUnavailableError,
     MemoryNotFoundError,
@@ -112,7 +118,12 @@ async def test_search_with_current_step_returns_guidance_and_skips_ranking():
     assert entry["content"] == "Check the lockfile, then install."
     assert entry["guidance_text"] == entry["content"]
     assert entry["hop_count"] == 0
-    assert entry["neighborhood"]["nodes"][0]["content"] == "Install dependencies"
+    # Search sends the compact projection now (#553, Decision 5 amendment):
+    # stubs and typed edges, no node content. manage_graph(get_guidance) is
+    # the surface that still returns the whole subgraph.
+    assert entry["neighborhood_detail"] == "compact"
+    assert entry["neighborhood"]["nodes"][0]["stub"] == "Install dependencies"
+    assert "content" not in entry["neighborhood"]["nodes"][0]
     assert entry["id"] == entry["neighborhood"]["nodes"][0]["id"]
 
     own = _node("mine", owner_id="wjackson", tenant_id="tenant_a")
@@ -204,3 +215,110 @@ async def test_get_guidance_returns_the_service_payload():
     assert "nodes" in result["neighborhood"]
     assert "edges" in result["neighborhood"]
     assert result["node_id"]
+
+
+def _result_with_neighbor(text: str = "Run the smoke suite, then promote.") -> GuidanceResult:
+    """A guidance result whose neighborhood actually has something in it."""
+    current = _node("Run the pre-deploy smoke test suite")
+    neighbor = _node("Promote the image to staging")
+    edge = RelationshipRead(
+        id=uuid.uuid4(),
+        source_id=current.id,
+        target_id=neighbor.id,
+        relationship_type="precedes",
+        metadata_={"condition": "smoke tests green", "guidance": "promote only after green"},
+        created_at=datetime.now(UTC),
+        created_by="test",
+        tenant_id="tenant_a",
+        target_stub=neighbor.stub,
+    )
+    hop = {
+        "relationship": edge,
+        "direction": "outgoing",
+        "role": "successor",
+        "from_id": current.id,
+        "to_id": neighbor.id,
+    }
+    return GuidanceResult(
+        subgraph=LocalizedSubgraph(
+            current=current,
+            neighbors=[{"node": neighbor, "distance": 1, "path": [hop]}],
+            max_hops=2,
+            relationship_types=["precedes", "requires", "alternative_to"],
+        ),
+        guidance_text=text,
+        omitted_count=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_guidance_neighborhood_is_compact():
+    """search ships structure, not the full subgraph (#553, Decision 5).
+
+    The search response is the one that reaches an agent's context.
+    Sending every node's content alongside the prose would reinstate the
+    full-graph injection that localized retrieval exists to avoid.
+    """
+    result = _result_with_neighbor()
+    fake = AsyncMock(return_value=result)
+    with _search_stack(fake):
+        response = await search_memory(
+            query="deploy the service",
+            current_step_id=str(result.subgraph.current.id),
+        )
+
+    entry = response["results"][0]
+    assert entry["result_type"] == "guidance"
+    assert entry["neighborhood_detail"] == "compact"
+    assert entry["neighborhood"]["detail"] == "compact"
+
+    nodes = entry["neighborhood"]["nodes"]
+    assert [node["stub"] for node in nodes] == [
+        "Run the pre-deploy smoke test suite",
+        "Promote the image to staging",
+    ]
+    for node in nodes:
+        assert "content" not in node
+        assert "metadata" not in node
+
+    edges = entry["neighborhood"]["edges"]
+    assert edges[0]["role"] == "successor"
+    assert edges[0]["relationship_type"] == "precedes"
+    assert "metadata_" not in edges[0]
+
+    # The prose itself is untouched and still carries the substance.
+    assert entry["guidance_text"] == "Run the smoke suite, then promote."
+    assert entry["content"] == entry["guidance_text"]
+
+
+@pytest.mark.asyncio
+async def test_get_guidance_neighborhood_stays_full():
+    """The inspection surface keeps the whole subgraph.
+
+    This is the counterpart to the compact search response: a caller
+    debugging what the model saw, or rendering the graph, gets everything.
+    """
+    result = _result_with_neighbor()
+    fake = AsyncMock(return_value=result)
+    stack = ExitStack()
+    stack.enter_context(patch("src.tools.manage_graph.get_claims_from_context", return_value=_CLAIMS))
+    stack.enter_context(patch("src.tools.manage_graph.get_db_session", return_value=(AsyncMock(), AsyncMock())))
+    stack.enter_context(patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock))
+    stack.enter_context(
+        patch("src.tools.manage_graph.get_projects_for_user", new_callable=AsyncMock, return_value=set())
+    )
+    stack.enter_context(
+        patch("src.tools.manage_graph.get_roles_for_user", new_callable=AsyncMock, return_value=set())
+    )
+    stack.enter_context(patch("src.tools._guidance.localized_guidance", fake))
+    with stack:
+        response = await manage_graph(
+            action="get_guidance",
+            node_id=str(result.subgraph.current.id),
+        )
+
+    assert response["neighborhood_detail"] == "full"
+    nodes = response["neighborhood"]["nodes"]
+    assert nodes[0]["content"] == "Run the pre-deploy smoke test suite"
+    assert nodes[1]["content"] == "Promote the image to staging"
+    assert response["neighborhood"]["edges"][0]["metadata"]["condition"] == "smoke tests green"

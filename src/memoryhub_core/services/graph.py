@@ -556,10 +556,14 @@ async def find_related(
                 continue
 
             neighbor_read = node_to_read(neighbor_node, has_children=False, has_rationale=False)
+            # The neighbor's stub belongs to the end it actually sits on.
+            # This was inverted in the original (uncalled) implementation of
+            # this function and only became visible when #553 started
+            # returning these edges through the API.
             rel_read = _relationship_to_read(
                 rel,
-                source_stub=neighbor_node.stub if rel.target_id == neighbor_id else None,
-                target_stub=neighbor_node.stub if rel.source_id == neighbor_id else None,
+                source_stub=neighbor_node.stub if rel.source_id == neighbor_id else None,
+                target_stub=neighbor_node.stub if rel.target_id == neighbor_id else None,
             )
             hop = {
                 "relationship": rel_read,

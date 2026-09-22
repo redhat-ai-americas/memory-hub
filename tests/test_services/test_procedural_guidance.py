@@ -35,6 +35,7 @@ from memoryhub_core.services.procedural_guidance import (
     LocalizedSubgraph,
     _GuidanceGenerator,
     build_localized_subgraph,
+    compact_neighborhood_payload,
     generate_guidance,
     hop_count,
     localized_guidance,
@@ -284,6 +285,60 @@ def test_neighborhood_payload_includes_current_and_dedups_edges():
     assert payload["edges"][0]["role"] == "successor"
     assert payload["edges"][0]["from_id"] == str(current.id)
     assert hop_count(subgraph) == 2
+
+
+def test_compact_payload_keeps_structure_and_drops_bulk():
+    """The search-path projection: enough to render the graph, nothing to inject.
+
+    The full payload dumps every MemoryNodeRead field, which for a 2-hop
+    neighborhood is orders of magnitude larger than the prose it
+    accompanies. That is the full-graph injection localized retrieval
+    exists to avoid, so search sends this instead (#553, Decision 5).
+    """
+    current = _memory_node("current step")
+    mid = _memory_node("middle step")
+    first = _edge(current.id, mid.id, RelationshipType.precedes)
+    hop = _hop(first, direction="outgoing", role="successor", from_id=current.id, to_id=mid.id)
+    subgraph = _subgraph(current, [{"node": mid, "distance": 1, "path": [hop]}])
+
+    compact = compact_neighborhood_payload(subgraph)
+
+    assert compact["detail"] == "compact"
+    assert [node["id"] for node in compact["nodes"]] == [str(current.id), str(mid.id)]
+    # Structure survives: a client can still name a step and draw the edge.
+    assert compact["nodes"][1]["stub"] == mid.stub
+    assert compact["edges"][0]["role"] == "successor"
+    assert compact["edges"][0]["direction"] == "outgoing"
+    assert compact["edges"][0]["relationship_type"] == "precedes"
+    # Bulk does not.
+    for node in compact["nodes"]:
+        assert "content" not in node
+        assert "metadata" not in node
+        assert "created_at" not in node
+    for edge in compact["edges"]:
+        assert "metadata_" not in edge
+        assert "metadata" not in edge
+
+
+def test_compact_payload_is_much_smaller_than_the_full_one():
+    """The size difference is the whole reason the projection exists."""
+    import json
+
+    current = _memory_node("current step with a realistic amount of recorded detail")
+    neighbors = []
+    for index in range(5):
+        node = _memory_node(f"neighbor step {index} with its own recorded detail")
+        edge = _edge(current.id, node.id, RelationshipType.precedes)
+        hop = _hop(edge, direction="outgoing", role="successor", from_id=current.id, to_id=node.id)
+        neighbors.append({"node": node, "distance": 1, "path": [hop]})
+    subgraph = _subgraph(current, neighbors)
+
+    full_size = len(json.dumps(neighborhood_payload(subgraph)))
+    compact_size = len(json.dumps(compact_neighborhood_payload(subgraph)))
+
+    assert compact_size * 3 < full_size, (
+        f"compact payload {compact_size}B should be far smaller than full {full_size}B"
+    )
 
 
 # -- subgraph loading --

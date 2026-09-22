@@ -631,3 +631,41 @@ async def test_resolve_entry_unknown_procedure_raises(async_session):
     with pytest.raises(MemoryNotFoundError) as exc_info:
         await resolve_procedure_entry(missing, async_session, tenant_id=_TENANT_A)
     assert exc_info.value.memory_id == missing
+
+
+@pytest.mark.asyncio
+async def test_find_related_puts_each_stub_on_the_end_it_belongs_to(async_session, embedding_service):
+    """Regression: the neighbor's stub went to the opposite end of the edge.
+
+    ``RelationshipRead.source_stub`` is the stub of the node at
+    ``source_id`` and ``target_stub`` the one at ``target_id``. The
+    original implementation of this function inverted both. Nothing
+    caught it because the function had no callers; #553 started
+    returning these edges through the MCP and SDK responses, which made
+    a dormant bug an incorrect API field.
+
+    Checks both orientations: a neighbor reached as the edge's target
+    (outgoing) and one reached as its source (incoming).
+    """
+    current = await _create_node(async_session, embedding_service, content="current step")
+    successor = await _create_node(async_session, embedding_service, content="successor step")
+    predecessor = await _create_node(async_session, embedding_service, content="predecessor step")
+    await _link(async_session, current.id, successor.id, RelationshipType.precedes)
+    await _link(async_session, predecessor.id, current.id, RelationshipType.precedes)
+
+    results = await find_related(current.id, async_session, tenant_id=_TENANT_A, max_hops=1)
+    by_id = {item["node"].id: item for item in results}
+    assert set(by_id) == {successor.id, predecessor.id}
+
+    # Neighbor is the target: its stub is the target_stub, and the source
+    # end (the start node, which this walk does not hydrate) stays unset.
+    out_edge = by_id[successor.id]["path"][0]["relationship"]
+    assert out_edge.target_id == successor.id
+    assert out_edge.target_stub == successor.stub
+    assert out_edge.source_stub is None
+
+    # Neighbor is the source: mirror image.
+    in_edge = by_id[predecessor.id]["path"][0]["relationship"]
+    assert in_edge.source_id == predecessor.id
+    assert in_edge.source_stub == predecessor.stub
+    assert in_edge.target_stub is None
