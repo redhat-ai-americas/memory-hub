@@ -635,6 +635,12 @@ class MemoryHubClient:
 
         When there are no appendix entries, the ``===`` separator is omitted.
 
+        A ``result_type="guidance"`` entry (#553) renders as its
+        ``guidance_text`` alone. The neighborhood that produced it is not
+        injected — the point of localized retrieval is that the prose
+        replaces the subgraph in the agent's context, not that it
+        accompanies it.
+
         Returns empty string for empty results.
         """
         if not results.results:
@@ -645,7 +651,14 @@ class MemoryHubClient:
 
         for memory in results.results:
             text = None
-            if memory.result_type == "full" and memory.content:
+            if memory.result_type == "guidance":
+                # Localized procedural guidance (#553). The prose is the whole
+                # point of that response, and it carries no stub, so without
+                # this branch the result_type check below drops it silently.
+                # Only the prose is injected: the neighborhood that produced
+                # it stays out of the prompt.
+                text = memory.guidance_text or memory.content
+            elif memory.result_type == "full" and memory.content:
                 text = memory.content
             elif memory.stub:
                 text = memory.stub

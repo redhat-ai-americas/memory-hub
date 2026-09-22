@@ -2059,3 +2059,92 @@ class TestThreadOperations:
         payload = _payload(mock_mcp)
         assert payload.get("cascade") == "orphan"
         assert result.status == "deleted"
+
+
+# ── get_injection_block: localized procedural guidance (#553) ─────────────────
+
+
+def _make_guidance_memory(
+    *,
+    guidance_text: str = "You are on the smoke-test step. Staging must be healthy first.",
+    content: str | None = None,
+) -> Memory:
+    """A result_type='guidance' entry as search_memory(current_step_id=...) returns it.
+
+    The server mirrors the prose into ``content`` as well, and sends a
+    compact neighborhood. Neither the neighborhood nor hop_count belongs
+    in an injected prompt.
+    """
+    return Memory(
+        id="33333333-3333-3333-3333-333333333333",
+        content=guidance_text if content is None else content,
+        stub=None,
+        result_type="guidance",
+        guidance_text=guidance_text,
+        hop_count=2,
+        neighborhood={
+            "nodes": [{"id": "n1", "stub": "Promote the image to staging"}],
+            "edges": [{"id": "e1", "relationship_type": "precedes", "role": "successor"}],
+            "detail": "compact",
+        },
+        scope="user",
+        owner_id="wjackson",
+    )
+
+
+def test_get_injection_block_renders_guidance():
+    """Regression: guidance was dropped entirely (#553).
+
+    ``result_type`` is neither 'full' nor 'stub', and a guidance entry has
+    no stub, so the original two-branch check fell through and returned an
+    empty block — the SDK's main prompt-injection path silently discarded
+    the one thing the feature produces.
+    """
+    result = SearchResult(
+        results=[_make_guidance_memory()], total_matching=1, has_more=False
+    )
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert block == "You are on the smoke-test step. Staging must be healthy first."
+
+
+def test_get_injection_block_guidance_omits_the_neighborhood():
+    """Only the prose is injected. The subgraph that produced it is not.
+
+    Localized retrieval exists so the prose *replaces* the subgraph in the
+    agent's context. Injecting both would reinstate the full-graph
+    injection the design avoids.
+    """
+    result = SearchResult(
+        results=[_make_guidance_memory()], total_matching=1, has_more=False
+    )
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert "Promote the image to staging" not in block
+    assert "precedes" not in block
+    assert "successor" not in block
+    assert "compact" not in block
+
+
+def test_get_injection_block_guidance_falls_back_to_content():
+    """An older server that sets only ``content`` still injects."""
+    memory = _make_guidance_memory()
+    memory.guidance_text = None
+    memory.content = "Roll back before retrying the deploy."
+    result = SearchResult(results=[memory], total_matching=1, has_more=False)
+
+    assert MemoryHubClient.get_injection_block(result) == "Roll back before retrying the deploy."
+
+
+def test_get_injection_block_guidance_mixed_with_ranked_results():
+    """A guidance entry renders alongside ordinary results, not instead of them."""
+    memories = [
+        _make_memory(id="m1", content="Use Podman, not Docker.", result_type="full"),
+        _make_guidance_memory(guidance_text="Check staging health before promoting."),
+    ]
+    result = SearchResult(results=memories, total_matching=2, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert "Use Podman, not Docker." in block
+    assert "Check staging health before promoting." in block
+    assert "\n---\n" in block
