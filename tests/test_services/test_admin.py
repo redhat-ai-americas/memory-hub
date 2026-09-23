@@ -29,8 +29,10 @@ def _make_memory(
     weight: float = 0.8,
 ) -> MemoryNode:
     now = datetime.now(UTC)
+    memory_id = uuid.uuid4()
     return MemoryNode(
-        id=uuid.uuid4(),
+        id=memory_id,
+        logical_id=memory_id,
         content=content,
         stub=content[:50],
         scope=scope,

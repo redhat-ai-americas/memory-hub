@@ -101,6 +101,7 @@ class SearchResult(BaseModel):
     results: list[Memory]
     total_matching: int = 0
     has_more: bool = False
+    effective_k: int | None = None
     pivot_suggested: bool | None = None
     pivot_reason: str | None = None
     focus_fallback_reason: str | None = None

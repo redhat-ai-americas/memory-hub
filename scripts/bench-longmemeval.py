@@ -185,6 +185,7 @@ async def run_longmemeval_benchmark(
                     embedding = await embedding_service.embed(embed_text)
                     node = MemoryNode(
                         id=node_id,
+                        logical_id=node_id,
                         content=content[:10000],
                         stub=content[:200],
                         scope="user",

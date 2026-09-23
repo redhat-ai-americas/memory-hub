@@ -30,6 +30,7 @@ async def create_memory_node(
     memory_id = uuid.uuid4()
     memory_node = MemoryNode(
         id=memory_id,
+        logical_id=memory_id,
         content=content,
         stub=generate_stub(content, "user", 0.7, 0, False),
         scope="user",

@@ -39,6 +39,11 @@ SAMPLE_ROTATED = {
     "api_key": "mh-dev-rotated789",
 }
 
+SAMPLE_API_KEY_ROTATED = {
+    "client_id": "test-agent",
+    "api_key": "mh-dev-newkey456",
+}
+
 
 def _mock_response(data, status_code=200):
     """Build a mock httpx.Response."""
@@ -277,6 +282,67 @@ class TestRotateSecret:
         with patch.dict("os.environ", _env_with_admin_key(), clear=False):
             with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
                 result = runner.invoke(app, ["admin", "rotate-secret", "ghost"])
+
+        assert result.exit_code == 1
+        assert "not_found" in result.output
+
+
+# ── rotate-api-key ──────────────────────────────────────────────────────────
+
+
+class TestRotateApiKey:
+    def test_happy_path(self):
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(
+            return_value=_mock_response(SAMPLE_API_KEY_ROTATED)
+        )
+
+        with patch.dict("os.environ", _env_with_admin_key(), clear=False):
+            with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
+                result = runner.invoke(
+                    app, ["admin", "rotate-api-key", "test-agent"]
+                )
+
+        assert result.exit_code == 0
+        assert "mh-dev-newkey456" in result.output
+        assert "Save this key" in result.output
+        assert "rotated" in result.output.lower()
+
+    def test_json_output(self):
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(
+            return_value=_mock_response(SAMPLE_API_KEY_ROTATED)
+        )
+
+        with patch.dict("os.environ", _env_with_admin_key(), clear=False):
+            with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
+                result = runner.invoke(
+                    app, ["admin", "rotate-api-key", "test-agent", "--output", "json"]
+                )
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["data"]["client_id"] == "test-agent"
+        assert parsed["data"]["api_key"] == "mh-dev-newkey456"
+
+    def test_not_found(self):
+        error_resp = _mock_error_response(404, "Client 'ghost' not found")
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "not found", request=error_resp.request, response=error_resp
+            )
+        )
+
+        with patch.dict("os.environ", _env_with_admin_key(), clear=False):
+            with patch("memoryhub_cli.admin.httpx.AsyncClient", return_value=mock_client):
+                result = runner.invoke(app, ["admin", "rotate-api-key", "ghost"])
 
         assert result.exit_code == 1
         assert "not_found" in result.output

@@ -15,6 +15,8 @@ from sqlalchemy import select
 
 from memoryhub_core.models.memory import MemoryNode
 
+pytestmark = pytest.mark.integration
+
 
 def _load_backfill():
     """Load the backfill script as a module despite hyphen in filename."""

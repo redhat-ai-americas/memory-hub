@@ -2,7 +2,7 @@
 
 MemoryHub is a Kubernetes-native agent memory component for OpenShift AI. See the [root README](../README.md) for the project overview.
 
-This directory holds shipped architecture and user-facing reference material, organized as: `design/` (subsystem designs — the source of truth for shipped architecture), `guides/` (integrator and user guides), plus topic folders for auth, admin, identity, UI, and runbooks. In-flight designs live in [`../planning/`](../planning/), research in [`../research/`](../research/).
+This directory holds shipped architecture and user-facing reference material, organized as: `design/` (subsystem designs — the source of truth for shipped architecture), `guides/` (integrator and user guides), plus topic folders for auth, admin, identity, UI, and runbooks. In-flight designs and research have moved to the [memory-hub-scratchpad](https://github.com/redhat-ai-americas/memory-hub-scratchpad) repo (under [`planning/`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/tree/main/planning) and [`research/`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/tree/main/research) there).
 
 ## Start here
 
@@ -37,15 +37,15 @@ This directory holds shipped architecture and user-facing reference material, or
 - [`auth/`](auth/README.md) — OAuth 2.1 auth service, LibreChat integration, OpenShift broker.
 - [`admin/`](admin/README.md) — Agent/user management, content moderation, filter rules, contributor cluster access, build/deploy hardening.
 - [`identity-model/`](identity-model/README.md) — Owner/actor/driver triple, authorization, data model.
-- [`agent-memory-ergonomics/`](agent-memory-ergonomics/design.md) — The ergonomics design cluster (search shape, focus vector, loading patterns); research half in [`../research/agent-memory-ergonomics/`](../research/agent-memory-ergonomics/).
+- [`agent-memory-ergonomics/`](agent-memory-ergonomics/design.md) — The ergonomics design cluster (search shape, focus vector, loading patterns); research half in [`research/agent-memory-ergonomics/`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/tree/main/research/agent-memory-ergonomics).
 - [`ui/`](ui/design.md) — Dashboard design.
 - [`runbooks/`](runbooks/) — Operational runbooks (e.g. adding an MCP API user).
 - `public/` — GitHub Pages artifact (`discovery.json` endpoint discovery); not documentation.
 
 ## Related directories
 
-- [`../planning/`](../planning/) — In-flight designs (see its README for the active/archive split).
-- [`../research/`](../research/) — Consolidated research with status index.
-- [`../demos/`](../demos/) — Demo scripts and scenario material.
+- [`planning/`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/tree/main/planning) — In-flight designs (moved to scratchpad repo; see its README for the active/archive split).
+- [`research/`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/tree/main/research) — Consolidated research with status index (moved to scratchpad repo).
+- [`demos/`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/tree/main/demos) — Demo scripts and scenario material (moved to scratchpad repo).
 - [`../retrospectives/`](../retrospectives/) — Session retros; the project's institutional memory.
-- Historical: [`../ideas/memoryhub-inception.md`](../ideas/memoryhub-inception.md) (origin document), [`../planning/archive/package-layout.md`](../planning/archive/package-layout.md) (#55 rename record).
+- Historical: [`../ideas/memoryhub-inception.md`](../ideas/memoryhub-inception.md) (origin document), [`planning/archive/package-layout.md`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/planning/archive/package-layout.md) (#55 rename record).

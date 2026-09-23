@@ -93,7 +93,7 @@ If this is your first session on this project, read [CONTRIBUTING.md](CONTRIBUTI
 Use `/issue-tracker` for all issue operations (filing, updating, closing). Use `/retro` after completing a major feature, fixing a gnarly bug, or finishing a multi-session effort — retros are where the project's institutional knowledge accumulates (see `retrospectives/`).
 
 ## Design Documents
-Shipped architecture and subsystem designs live in docs/. In-flight designs for unimplemented or skeleton-stage features live in planning/. Research investigations live in research/. Demo scripts live in demos/. When implementing a feature, always read the relevant design doc first. If the design doc is a skeleton or has TBD sections, flesh it out before implementing.
+Shipped architecture and subsystem designs live in docs/. In-flight designs, research investigations, and demo scripts have moved to the [memory-hub-scratchpad](https://github.com/redhat-ai-americas/memory-hub-scratchpad) repo (under `planning/`, `research/`, and `demos/` there). When implementing a feature, always read the relevant design doc first. If the design doc is a skeleton or has TBD sections, flesh it out before implementing.
 
 ## Commit Messages
 Use conventional commit format: `subsystem: Description in imperative mood`
@@ -110,6 +110,7 @@ Where credentials live and how to use them. This eliminates "secrets archaeology
 **Local developer machine:**
 - `~/.config/memoryhub/credentials` -- MemoryHub API keys and URLs per cluster context (INI-style, keyed by MEMORYHUB_CONTEXT)
 - `~/.secrets` -- shell-sourceable file with `GEMINI_API_KEY`, `GOOGLE_API_KEY`, etc.
+  - **Use `GEMINI_API_KEY` for all Gemini calls in this project.** `GOOGLE_API_KEY` is on a different account without credit visibility. When both are set, unset `GOOGLE_API_KEY` before running benchmark or extraction workloads.
 
 **Cluster Secrets (mcp-rhoai context):**
 

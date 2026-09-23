@@ -2,7 +2,7 @@
 
 **Status:** Implemented (OpenClaw, opencode)
 **Code:** `integrations/openclaw/`, `integrations/opencode/`
-**Related:** [mcp-server.md](mcp-server.md), [two-vector-retrieval.md](two-vector-retrieval.md), `planning/openclaw-memory-provider.md` (OpenClaw design precedent)
+**Related:** [mcp-server.md](mcp-server.md), [two-vector-retrieval.md](two-vector-retrieval.md), [planning/openclaw-memory-provider.md](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/planning/openclaw-memory-provider.md) (OpenClaw design precedent, in the scratchpad repo)
 
 MemoryHub's agent surface is its MCP server. Agent hosts that support MCP
 natively can attach it directly — but a raw MCP attachment gives an agent

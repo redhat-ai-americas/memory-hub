@@ -176,10 +176,62 @@ def get_version_shas() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def check_retrieval_caps(
+    requested_k: int | None = None,
+    *,
+    harness_k: int | None = None,
+    sdk_max_results: int | None = None,
+    tool_max_results: int = 200,
+) -> dict:
+    """Compute the effective_k after all caps in the retrieval chain.
+
+    Each layer in the chain (harness env, SDK config, MCP tool param)
+    may clamp the requested k.  Returns a dict with ``requested_k``,
+    ``effective_k``, and ``caps`` (list of caps that reduced k).
+
+    Logs one warning per request when any cap is triggered.
+    """
+    # `or 10` would silently rewrite an explicit 0 (falsy) back to 10 —
+    # the same silent-capping class #404 is meant to kill.
+    resolved_requested = requested_k if requested_k is not None else 10
+    k = resolved_requested
+    caps: list[dict[str, object]] = []
+
+    if harness_k is not None and k > harness_k:
+        caps.append({"source": "harness", "limit": harness_k})
+        k = harness_k
+
+    if sdk_max_results is not None and k > sdk_max_results:
+        caps.append({"source": "sdk_config", "limit": sdk_max_results})
+        k = sdk_max_results
+
+    if k > tool_max_results:
+        caps.append({"source": "mcp_tool_param", "limit": tool_max_results})
+        k = tool_max_results
+
+    if caps:
+        sources = ", ".join(c["source"] for c in caps)
+        logger.warning(
+            "effective_k capped: requested_k=%d effective_k=%d cap_sources=[%s]",
+            resolved_requested, k, sources,
+        )
+
+    return {
+        "requested_k": resolved_requested,
+        "effective_k": k,
+        "caps": caps,
+    }
+
+
 async def run_preflight(
     db_url: str,
     tenant_id: str = "amb-benchmark",
     reranker_url: str | None = None,
+    *,
+    requested_k: int | None = None,
+    harness_k: int | None = None,
+    sdk_max_results: int | None = None,
+    tool_max_results: int = 200,
 ) -> dict:
     """Execute all preflight checks and return the manifest dict."""
     conn = await asyncpg.connect(db_url)
@@ -193,6 +245,12 @@ async def run_preflight(
                 "domain": await check_signal_domain(conn, tenant_id),
                 "graph": await check_signal_graph(conn, tenant_id),
             },
+            "retrieval": check_retrieval_caps(
+                requested_k,
+                harness_k=harness_k,
+                sdk_max_results=sdk_max_results,
+                tool_max_results=tool_max_results,
+            ),
             "corpus": await check_corpus(conn, tenant_id),
             "versions": get_version_shas(),
             "timestamp": datetime.now(UTC).isoformat(),
@@ -287,8 +345,28 @@ def main() -> None:
     reranker_url = os.environ.get("MEMORYHUB_RERANKER_URL")
     tenant_id = os.environ.get("MEMORYHUB_TENANT_ID", "amb-benchmark")
 
+    # MEMORYHUB_K is the desired k (what the operator wants), not a cap.
+    # The harness _resolve_k overrides UP (None/10 → MEMORYHUB_K), so
+    # there is no harness cap to pass here.
+    raw_requested_k = os.environ.get("MEMORYHUB_K", "").strip()
+    requested_k = int(raw_requested_k) if raw_requested_k else None
+
+    sdk_max_results: int | None = None
+    try:
+        from memoryhub.config import load_project_config
+
+        sdk_max_results = load_project_config().retrieval_defaults.max_results
+    except ImportError:
+        logger.debug("memoryhub SDK not installed; skipping SDK config for preflight")
+
     manifest = asyncio.run(
-        run_preflight(db_url, tenant_id=tenant_id, reranker_url=reranker_url)
+        run_preflight(
+            db_url,
+            tenant_id=tenant_id,
+            reranker_url=reranker_url,
+            requested_k=requested_k,
+            sdk_max_results=sdk_max_results,
+        )
     )
     print(json.dumps(manifest, indent=2))
 

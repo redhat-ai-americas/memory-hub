@@ -103,12 +103,20 @@ class HttpEmbeddingService(EmbeddingService):
         self._client = httpx.AsyncClient(timeout=timeout)
         self._max_tokens: int | None = None
         self._info_fetched = False
+        max_tokens_override = os.environ.get("MEMORYHUB_EMBEDDING_MAX_TOKENS")
+        self._fallback_max_tokens_value: int = (
+            int(max_tokens_override) if max_tokens_override is not None else _DEFAULT_MAX_TOKENS
+        )
 
     @property
     def max_tokens(self) -> int:
         if self._max_tokens is not None:
             return self._max_tokens
-        return self._fallback_max_tokens()
+        return self._fallback_max_tokens_value
+
+    async def initialize(self) -> None:
+        """Eagerly discover model limits. Call at startup."""
+        await self._fetch_info()
 
     async def _fetch_info(self) -> None:
         """Query TEI /info once to discover max_input_length."""
@@ -134,37 +142,30 @@ class HttpEmbeddingService(EmbeddingService):
                 logger.warning(
                     "TEI /info response missing max_input_length; "
                     "falling back to %d tokens",
-                    self._fallback_max_tokens(),
+                    self._fallback_max_tokens_value,
                 )
         except httpx.ConnectError:
             logger.warning(
                 "Could not connect to TEI /info at %s; "
                 "using fallback max_tokens=%d",
                 info_url,
-                self._fallback_max_tokens(),
+                self._fallback_max_tokens_value,
             )
         except httpx.TimeoutException:
             logger.warning(
                 "TEI /info request timed out (%s); "
                 "using fallback max_tokens=%d",
                 info_url,
-                self._fallback_max_tokens(),
+                self._fallback_max_tokens_value,
             )
         except Exception:
             logger.warning(
                 "Failed to query TEI /info at %s; "
                 "using fallback max_tokens=%d",
                 info_url,
-                self._fallback_max_tokens(),
+                self._fallback_max_tokens_value,
                 exc_info=True,
             )
-
-    @staticmethod
-    def _fallback_max_tokens() -> int:
-        env = os.environ.get("MEMORYHUB_EMBEDDING_MAX_TOKENS")
-        if env is not None:
-            return int(env)
-        return _DEFAULT_MAX_TOKENS
 
     async def embed(self, text: str) -> list[float]:
         await self._fetch_info()

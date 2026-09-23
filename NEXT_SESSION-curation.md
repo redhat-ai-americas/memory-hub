@@ -8,8 +8,8 @@ class and a concrete NoOpSweep that discovers candidate memories, logs
 skip decisions, and exits cleanly. Code and tests only; deployment is a
 follow-up session.
 
-Branch off `feat/dreaming-ablation-results` as
-`feat/curation/350-curator-scaffold`.
+Branch off `main` as `feat/curation/350-curator-scaffold`.
+(`feat/dreaming-ablation-results` merged to main via PR #449 on 2026-07-21.)
 
 1. **Read the design doc first**
    `planning/autonomous-curation-agents.md` sections 4 (architecture),
@@ -57,8 +57,7 @@ everything else -- don't skip it.
 
 **Constraints for the session:**
 - Code only, no cluster deployment. Tests run locally against SQLite.
-- Branch from `feat/dreaming-ablation-results`, not main (PR #448 is
-  still open).
+- Branch from `main` (parent branch merged via PR #449 on 2026-07-21).
 - Follow existing patterns: `retention_sweep.py` for CLI entry point,
   `services/dreaming.py` for service-layer async patterns.
 - `actor_id` column already exists on `memory_nodes` and
@@ -67,8 +66,8 @@ everything else -- don't skip it.
   Phase 2 work. This session builds the harness they plug into.
 
 **Session start protocol:**
-- Premise checks: verify `feat/dreaming-ablation-results` is current
-  (`git log -1`); verify `actor_id` column exists in models
+- Premise checks: verify on `main` (parent branch merged via PR #449);
+  verify `actor_id` column exists in models
   (`grep actor_id src/memoryhub_core/models/memory.py`); read
   `planning/autonomous-curation-agents.md` sections 4, 5.2, 9
 - Rules with history: all pushes through PRs; MCP tool creation uses
@@ -77,8 +76,7 @@ everything else -- don't skip it.
 - Stop-and-ask before: adding new MCP tools (not planned, but if it
   comes up, use `/plan-tools` workflow); changing existing model
   schemas (shouldn't be needed)
-- Close ritual: session summary; PR targeting
-  `feat/dreaming-ablation-results`
+- Close ritual: session summary; PR targeting `main`
 
 **Exit predicate:**
 - `AgentPlugin` base class with abstract lifecycle methods exists and
@@ -87,7 +85,7 @@ everything else -- don't skip it.
   produces a `SweepReport` with all-skip decisions
 - CLI entry point works: `python -m memoryhub_core.cli.curator --sweep noop`
 - All new tests pass; no regressions in existing suite
-- PR opened targeting `feat/dreaming-ablation-results`
+- PR opened targeting `main`
 
 ## Remaining epic phases
 
@@ -100,25 +98,11 @@ improves memory quality without user intervention.
 Design references: `planning/autonomous-curation-agents.md` (Curator Agent
 sections), `planning/memory-extraction-pipeline.md` (Layer 3 reflection).
 
-### Phase 0: Housekeeping (start of first session)
+### ~~Phase 0: Housekeeping~~ (DONE)
 
-Land `feat/dreaming-ablation-results` branch (tenant fix, source ablation
-results, retrieval-unit routing design doc). Close #349 (Layer 2
-validation) and #336 (extraction pipeline epic -- Layers 1-2 shipped,
-remaining work moves to this epic).
-
-**Work:**
-1. Merge current branch via PR
-2. Close #349 with final ablation summary
-3. Close #336 with note that Curator (#350-353) and reflection (#345) are
-   tracked under this epic
-
-**Definition of done:** #349 and #336 closed on GitHub. Current branch
-merged to main.
-
-**Dependencies:** None.
-
-**Parallel-ok:** Can bundle with Phase 1 in a single session.
+Landed via PR #449 on 2026-07-21. `feat/dreaming-ablation-results`
+merged to main. Check whether #349 and #336 were closed as part of
+that merge; if not, close them at the start of the next session.
 
 ### Phase 1: Curator scaffold (#350)
 
@@ -279,8 +263,14 @@ to point here for Phases 6-7.
 
 **Context from dreaming epic:** Layers 1-2 shipped. Source ablation showed
 dreaming adds +0.1pp without retrieval-unit routing. Autonomous curation
-is the next quality lever. PR #448 (ablation results + tenant fix) is
-open on `feat/dreaming-ablation-results`.
+is the next quality lever. PR #449 (ablation results + tenant fix)
+merged 2026-07-21.
+
+**Reconciled 2026-09-09:** Parent branch `feat/dreaming-ablation-results`
+merged via PR #449. All branch references updated to target `main`.
+Phase 0 marked done. #350 still open and valid. Design doc current.
+15 open curation-labeled issues, including 2 new procedural-graph
+issues (#554, #555) that extend the curation framework.
 
 ## Watch out for
 
@@ -305,15 +295,12 @@ open on `feat/dreaming-ablation-results`.
   `concurrencyPolicy: Forbid` is the simpler starting point. Move to a
   long-running Deployment with leader election only if sweep duration
   exceeds the cron interval.
-- **Branch topology.** This epic branches from
-  `feat/dreaming-ablation-results` (not main) until PR #448 merges.
-  Sub-branches target the parent feature branch per project convention.
+- **Branch topology.** Parent branch merged (PR #449, 2026-07-21).
+  Branch from `main` for all remaining phases.
 
 ## If blocked
 
-- If PR #448 hasn't merged and you need main: the scaffold code is
-  independent of the ablation work. You could branch from main instead,
-  but the epic file assumes the feature branch. Check with the user.
+- Parent branch merged (PR #449). Branch from main for all work.
 - If the design doc is unclear on a specific sweep interface: the
   no-op sweep is intentionally minimal. Don't over-design the base
   class for sweep types that don't exist yet. Keep the interface thin

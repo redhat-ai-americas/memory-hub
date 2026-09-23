@@ -578,7 +578,7 @@ async def update_memory(
 
     new_node = MemoryNode(
         id=new_id,
-        logical_id=old_node.logical_id or old_node.id,
+        logical_id=old_node.logical_id,
         content=db_content,
         stub=stub,
         scope=old_node.scope,
@@ -646,7 +646,7 @@ async def update_memory(
         copied_id = uuid.uuid4()
         copied_child = MemoryNode(
             id=copied_id,
-            logical_id=child.logical_id or copied_id,
+            logical_id=child.logical_id,
             content=child.content,
             stub=child.stub,
             scope=child.scope,
