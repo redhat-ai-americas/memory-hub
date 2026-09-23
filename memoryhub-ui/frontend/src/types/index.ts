@@ -74,6 +74,15 @@ export interface VersionEntry {
   created_at: string;
 }
 
+export interface RuleVersionEntry {
+  id: string;
+  version: number;
+  is_current: boolean;
+  name: string;
+  edited_by: string | null;
+  created_at: string;
+}
+
 export interface SearchMatch {
   id: string;
   score: number;
@@ -152,6 +161,10 @@ export interface CurationRule {
   override: boolean;
   enabled: boolean;
   priority: number;
+  version: number;
+  is_current: boolean;
+  previous_version_id: string | null;
+  edited_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -173,17 +186,18 @@ export interface CreateRulePayload {
 
 export interface UpdateRulePayload {
   name?: string;
-  description?: string;
+  description?: string | null;
   trigger?: string;
   tier?: string;
   config?: Record<string, unknown>;
   action?: string;
-  scope_filter?: string;
+  scope_filter?: string | null;
   layer?: string;
   owner_id?: string;
   override?: boolean;
   enabled?: boolean;
   priority?: number;
+  edited_by?: string;
 }
 
 // --- Contradiction Reports ---

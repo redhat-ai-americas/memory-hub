@@ -3,11 +3,14 @@
 CuratorRule rows define how the curation engine evaluates memory writes and reads.
 Rules are layered (system → organizational → user) and the engine applies them in
 priority order, stopping at the first rule whose action is terminal (block, reject).
+
+Each edit creates a new row (copy-on-write). is_current=True identifies the active
+version; previous_version_id chains versions for audit history.
 """
 
 import uuid
 
-from sqlalchemy import Boolean, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -80,8 +83,31 @@ class CuratorRule(TimestampMixin, Base):
     # Lower number = evaluated first
     priority: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    # Versioning — same pattern as memory_nodes
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    previous_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("curator_rules.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    is_current: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+        index=True,
+    )
+    # Who made the edit that produced this version (null for system-seeded rules)
+    edited_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     __table_args__ = (
-        UniqueConstraint("layer", "owner_id", "name", name="uq_curator_rules_layer_owner_name"),
+        # Partial unique index: only one current rule per (layer, owner_id, name)
+        Index(
+            "uq_curator_rules_current_layer_owner_name",
+            "layer", "owner_id", "name",
+            unique=True,
+            postgresql_where=text("is_current = true"),
+        ),
         Index("ix_curator_rules_layer_owner", "layer", "owner_id"),
         Index("ix_curator_rules_trigger", "trigger"),
         Index(
@@ -95,5 +121,5 @@ class CuratorRule(TimestampMixin, Base):
     def __repr__(self) -> str:
         return (
             f"<CuratorRule id={self.id!s:.8} layer={self.layer} "
-            f"trigger={self.trigger} action={self.action} priority={self.priority}>"
+            f"trigger={self.trigger} action={self.action} priority={self.priority} v{self.version}>"
         )

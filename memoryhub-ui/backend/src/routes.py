@@ -34,6 +34,7 @@ from src.schemas import (
     MemoryDetail,
     PublicConfigResponse,
     RecentActivity,
+    RuleVersionEntry,
     ScopeCount,
     SearchMatch,
     SecretRotatedResponse,
@@ -733,6 +734,10 @@ def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
         override=rule.override,
         enabled=rule.enabled,
         priority=rule.priority,
+        version=rule.version,
+        is_current=rule.is_current,
+        previous_version_id=str(rule.previous_version_id) if rule.previous_version_id else None,
+        edited_by=rule.edited_by,
         created_at=rule.created_at,
         updated_at=rule.updated_at,
     )
@@ -755,7 +760,7 @@ async def list_rules(
     tenant_id = settings.ui_tenant_id
     stmt = (
         select(CuratorRule)
-        .where(CuratorRule.tenant_id == tenant_id)
+        .where(CuratorRule.tenant_id == tenant_id, CuratorRule.is_current.is_(True))
         .order_by(CuratorRule.priority)
     )
     if tier:
@@ -791,6 +796,8 @@ async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep)
         override=body.override,
         enabled=body.enabled,
         priority=body.priority,
+        version=1,
+        is_current=True,
     )
     db.add(rule)
     await db.commit()
@@ -828,10 +835,13 @@ async def update_rule(
     db: DbDep,
     settings: SettingsDep,
 ):
-    """Update a curation rule (toggle enabled, change priority, etc.).
+    """Create a new version of a curation rule (copy-on-write).
 
-    Phase 6 (#46): cross-tenant updates return 404 -- an operator cannot
-    mutate another tenant's rule via this BFF even by guessing the UUID.
+    Marks the existing row as is_current=False and inserts a new row with
+    version+1 and previous_version_id pointing to the old row. This preserves
+    the full audit trail of every change.
+
+    Phase 6 (#46): cross-tenant updates return 404.
     """
     tenant_id = settings.ui_tenant_id
     try:
@@ -842,22 +852,121 @@ async def update_rule(
         select(CuratorRule).where(
             CuratorRule.id == parsed_id,
             CuratorRule.tenant_id == tenant_id,
+        ).with_for_update()
+    )
+    old_rule = result.scalar_one_or_none()
+    if old_rule is None:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
+    if not old_rule.is_current:
+        raise HTTPException(status_code=409, detail=f"Rule {rule_id!r} is not the current version")
+
+    update_data = body.model_dump(exclude_unset=True)
+    edited_by = update_data.pop("edited_by", None)
+
+    if not update_data:
+        return _rule_to_response(old_rule)
+
+    new_rule = CuratorRule(
+        tenant_id=tenant_id,
+        name=update_data.get("name", old_rule.name),
+        description=update_data.get("description", old_rule.description),
+        trigger=update_data.get("trigger", old_rule.trigger),
+        tier=update_data.get("tier", old_rule.tier),
+        config=update_data.get("config", old_rule.config),
+        action=update_data.get("action", old_rule.action),
+        scope_filter=update_data.get("scope_filter", old_rule.scope_filter),
+        layer=update_data.get("layer", old_rule.layer),
+        owner_id=update_data.get("owner_id", old_rule.owner_id),
+        override=update_data.get("override", old_rule.override),
+        enabled=update_data.get("enabled", old_rule.enabled),
+        priority=update_data.get("priority", old_rule.priority),
+        version=old_rule.version + 1,
+        previous_version_id=old_rule.id,
+        is_current=True,
+        edited_by=edited_by,
+    )
+
+    old_rule.is_current = False
+    db.add(new_rule)
+    await db.commit()
+    await db.refresh(new_rule)
+    return _rule_to_response(new_rule)
+
+
+@router.get("/api/rules/{rule_id}/history", response_model=list[RuleVersionEntry])
+async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep):
+    """Return the full version chain for a rule, newest first.
+
+    Accepts any version's UUID — walks backward via previous_version_id
+    and forward to find all versions in the chain.
+
+    Phase 6 (#46): tenant-scoped; cross-tenant lookups return 404.
+    """
+    tenant_id = settings.ui_tenant_id
+    try:
+        parsed_id = uuid.UUID(rule_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}") from None
+
+    # 404 check — also gates the CTE below to this tenant's data
+    seed_result = await db.execute(
+        select(CuratorRule).where(
+            CuratorRule.id == parsed_id,
+            CuratorRule.tenant_id == tenant_id,
         )
     )
-    rule = result.scalar_one_or_none()
-    if rule is None:
+    if seed_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
-    update_data = body.model_dump(exclude_none=True)
-    for field, value in update_data.items():
-        setattr(rule, field, value)
-    await db.commit()
-    await db.refresh(rule)
-    return _rule_to_response(rule)
+
+    # Single recursive CTE: walk backward to the oldest ancestor, then forward
+    # through all descendants — replaces the previous O(N) per-version loop.
+    chain_result = await db.execute(
+        text("""
+            WITH RECURSIVE
+              ancestors(id, previous_version_id) AS (
+                SELECT id, previous_version_id FROM curator_rules WHERE id = :seed_id
+                UNION ALL
+                SELECT r.id, r.previous_version_id FROM curator_rules r
+                JOIN ancestors a ON r.id = a.previous_version_id
+              ),
+              root AS (SELECT id FROM ancestors WHERE previous_version_id IS NULL),
+              chain AS (
+                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at
+                FROM curator_rules r JOIN root ON r.id = root.id
+                UNION ALL
+                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at
+                FROM curator_rules r
+                JOIN chain c ON r.previous_version_id = c.id
+              )
+            SELECT id, version, is_current, name, edited_by, created_at
+            FROM chain
+            ORDER BY version DESC
+        """),
+        {"seed_id": parsed_id},
+    )
+    return [
+        RuleVersionEntry(
+            id=str(row.id),
+            version=row.version,
+            is_current=row.is_current,
+            name=row.name,
+            edited_by=row.edited_by,
+            created_at=row.created_at,
+        )
+        for row in chain_result.fetchall()
+    ]
 
 
 @router.delete("/api/rules/{rule_id}", status_code=204)
 async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep):
     """Delete a curation rule.
+
+    Only the current version can be deleted (non-current → 409). Historical
+    versions (is_current=False) are retained as a permanent audit trail — they
+    become permanently orphaned with no current anchor. If a new rule with the
+    same (layer, owner_id, name) is later created it starts at version 1 with
+    no chain connection to the prior history. There is no bulk-delete endpoint
+    for the orphaned chain; storage must be reclaimed via DB maintenance.
 
     Phase 6 (#46): cross-tenant deletes return 404.
     """
@@ -875,6 +984,8 @@ async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep):
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
+    if not rule.is_current:
+        raise HTTPException(status_code=409, detail=f"Rule {rule_id!r} is not the current version; only current rules can be deleted")
     await db.delete(rule)
     await db.commit()
 

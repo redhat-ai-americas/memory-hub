@@ -44,6 +44,7 @@ async def load_rules(
         .where(
             and_(
                 CuratorRule.enabled.is_(True),
+                CuratorRule.is_current.is_(True),
                 CuratorRule.trigger == trigger,
                 CuratorRule.tenant_id == tenant_id,
                 or_(
@@ -128,6 +129,8 @@ async def create_rule(
         override=data.override,
         enabled=data.enabled,
         priority=data.priority,
+        version=1,
+        is_current=True,
     )
     session.add(rule)
     await session.commit()
@@ -158,6 +161,7 @@ async def seed_default_rules(
         .where(
             CuratorRule.layer == "system",
             CuratorRule.tenant_id == tenant_id,
+            CuratorRule.is_current.is_(True),
         )
         .limit(1)
     )
@@ -181,6 +185,8 @@ async def seed_default_rules(
             override=True,
             enabled=True,
             priority=0,
+            version=1,
+            is_current=True,
         ),
         CuratorRule(
             id=uuid.uuid4(),
@@ -197,6 +203,8 @@ async def seed_default_rules(
             override=True,
             enabled=True,
             priority=1,
+            version=1,
+            is_current=True,
         ),
         CuratorRule(
             id=uuid.uuid4(),
@@ -213,6 +221,8 @@ async def seed_default_rules(
             override=False,
             enabled=True,
             priority=0,
+            version=1,
+            is_current=True,
         ),
         CuratorRule(
             id=uuid.uuid4(),
@@ -229,6 +239,8 @@ async def seed_default_rules(
             override=False,
             enabled=True,
             priority=1,
+            version=1,
+            is_current=True,
         ),
         CuratorRule(
             id=uuid.uuid4(),
@@ -245,6 +257,8 @@ async def seed_default_rules(
             override=False,
             enabled=True,
             priority=0,
+            version=1,
+            is_current=True,
         ),
     ]
 

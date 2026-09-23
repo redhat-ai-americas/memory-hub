@@ -81,6 +81,15 @@ class VersionEntry(BaseModel):
     created_at: datetime
 
 
+class RuleVersionEntry(BaseModel):
+    id: str
+    version: int
+    is_current: bool
+    name: str
+    edited_by: str | None
+    created_at: datetime
+
+
 class SearchMatch(BaseModel):
     id: str
     score: float
@@ -154,6 +163,10 @@ class CurationRuleResponse(BaseModel):
     override: bool
     enabled: bool
     priority: int
+    version: int
+    is_current: bool
+    previous_version_id: str | None
+    edited_by: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -186,6 +199,7 @@ class UpdateRuleRequest(BaseModel):
     override: bool | None = None
     enabled: bool | None = None
     priority: int | None = None
+    edited_by: str | None = None
 
 
 # --- Contradiction Reports ---

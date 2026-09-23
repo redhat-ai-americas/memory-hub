@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert, Button, Content, DescriptionList, DescriptionListDescription,
-  DescriptionListGroup, DescriptionListTerm, Divider, Flex, Form, FormGroup,
-  FormSelect, FormSelectOption, Label, Modal, ModalBody, ModalFooter, ModalHeader,
-  NumberInput, Radio, Spinner, Stack, StackItem, Switch, TextArea, TextInput,
-  Title, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
+  DescriptionListGroup, DescriptionListTerm, Divider, ExpandableSection, Flex,
+  Form, FormGroup, FormSelect, FormSelectOption, Label, Modal, ModalBody,
+  ModalFooter, ModalHeader, NumberInput, Radio, Spinner, Stack, StackItem,
+  Switch, TextArea, TextInput, Title, ToggleGroup, ToggleGroupItem, Toolbar,
+  ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
-import type { CurationRule, CreateRulePayload } from '@/types';
-import { createRule, deleteRule, fetchRules, updateRule } from '@/api/client';
+import type { CurationRule, CreateRulePayload, RuleVersionEntry } from '@/types';
+import { createRule, deleteRule, fetchRuleHistory, fetchRules, updateRule } from '@/api/client';
 import { formatDate } from '@/utils/time';
 
 const ACTION_COLORS: Record<string, 'red' | 'orange' | 'yellow' | 'blue' | 'grey'> = {
@@ -75,6 +76,8 @@ function describeConfig(rule: CurationRule): string | null {
   return null;
 }
 
+const EDITOR_IDENTITY = 'dashboard-operator';
+
 const CurationRules: React.FC = () => {
   const [rules, setRules] = useState<CurationRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,8 +102,29 @@ const CurationRules: React.FC = () => {
   const [formPriority, setFormPriority] = useState(100);
   const [formConfig, setFormConfig] = useState('{}');
 
-  // Detail view state
+  // Detail / edit modal state
   const [selectedRule, setSelectedRule] = useState<CurationRule | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Edit form fields (pre-populated from selectedRule when entering edit mode)
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editTier, setEditTier] = useState<'regex' | 'embedding'>('regex');
+  const [editAction, setEditAction] = useState('block');
+  const [editTrigger, setEditTrigger] = useState('on_write');
+  const [editScopeFilter, setEditScopeFilter] = useState('');
+  const [editLayer, setEditLayer] = useState('system');
+  const [editPriority, setEditPriority] = useState(100);
+  const [editConfig, setEditConfig] = useState('{}');
+  const [editEnabled, setEditEnabled] = useState(true);
+  const [editOverride, setEditOverride] = useState(false);
+
+  // Version history state
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [ruleHistory, setRuleHistory] = useState<RuleVersionEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<CurationRule | null>(null);
@@ -134,6 +158,31 @@ const CurationRules: React.FC = () => {
     setFormPriority(100);
     setFormConfig('{}');
     setCreateError(null);
+  };
+
+  const openDetailModal = (rule: CurationRule) => {
+    setSelectedRule(rule);
+    setEditMode(false);
+    setSaveError(null);
+    setHistoryOpen(false);
+    setRuleHistory([]);
+    setHistoryError(null);
+  };
+
+  const enterEditMode = (rule: CurationRule) => {
+    setEditName(rule.name);
+    setEditDescription(rule.description ?? '');
+    setEditTier(rule.tier);
+    setEditAction(rule.action);
+    setEditTrigger(rule.trigger);
+    setEditScopeFilter(rule.scope_filter ?? '');
+    setEditLayer(rule.layer);
+    setEditPriority(rule.priority);
+    setEditConfig(JSON.stringify(rule.config, null, 2));
+    setEditEnabled(rule.enabled);
+    setEditOverride(rule.override);
+    setSaveError(null);
+    setEditMode(true);
   };
 
   const handleCreate = async () => {
@@ -170,10 +219,52 @@ const CurationRules: React.FC = () => {
     }
   };
 
+  const handleSaveEdit = async () => {
+    if (!selectedRule) return;
+    let parsedConfig: Record<string, unknown>;
+    try {
+      parsedConfig = JSON.parse(editConfig);
+    } catch {
+      setSaveError('Config must be valid JSON');
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await updateRule(selectedRule.id, {
+        name: editName,
+        description: editDescription !== '' ? editDescription : null,
+        tier: editTier,
+        action: editAction,
+        trigger: editTrigger,
+        scope_filter: editScopeFilter !== '' ? editScopeFilter : null,
+        layer: editLayer,
+        priority: editPriority,
+        config: parsedConfig,
+        enabled: editEnabled,
+        override: editOverride,
+        edited_by: EDITOR_IDENTITY,
+      });
+      setSelectedRule(updated);
+      setEditMode(false);
+      setHistoryOpen(false);
+      setRuleHistory([]);
+      await loadRules();
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save rule');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleToggleEnabled = async (rule: CurationRule) => {
     setActionError(null);
     try {
-      await updateRule(rule.id, { enabled: !rule.enabled });
+      const updated = await updateRule(rule.id, { enabled: !rule.enabled, edited_by: EDITOR_IDENTITY });
+      if (selectedRule?.id === rule.id) {
+        setSelectedRule(updated);
+        setRuleHistory([]);
+      }
       await loadRules();
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : 'Failed to toggle rule');
@@ -190,6 +281,22 @@ const CurationRules: React.FC = () => {
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : 'Failed to delete rule');
       setDeleteTarget(null);
+    }
+  };
+
+  const handleHistoryToggle = async (isExpanded: boolean) => {
+    setHistoryOpen(isExpanded);
+    if (isExpanded && selectedRule && ruleHistory.length === 0) {
+      setHistoryLoading(true);
+      setHistoryError(null);
+      try {
+        const history = await fetchRuleHistory(selectedRule.id);
+        setRuleHistory(history);
+      } catch (err: unknown) {
+        setHistoryError(err instanceof Error ? err.message : 'Failed to load history');
+      } finally {
+        setHistoryLoading(false);
+      }
     }
   };
 
@@ -271,7 +378,7 @@ const CurationRules: React.FC = () => {
               rules.map((rule) => (
                 <Tr key={rule.id}>
                   <Td dataLabel="Name">
-                    <Button variant="link" isInline onClick={() => setSelectedRule(rule)}>
+                    <Button variant="link" isInline onClick={() => openDetailModal(rule)}>
                       {rule.name}
                     </Button>
                   </Td>
@@ -381,154 +488,316 @@ const CurationRules: React.FC = () => {
         </ModalFooter>
       </Modal>
 
-      {/* Rule Detail Modal */}
+      {/* Rule Detail / Edit Modal */}
       <Modal
         isOpen={selectedRule !== null}
-        onClose={() => setSelectedRule(null)}
+        onClose={() => { setSelectedRule(null); setEditMode(false); }}
         variant="medium"
         aria-label="Rule details"
       >
         <ModalHeader title={selectedRule?.name ?? 'Rule Details'} />
         {selectedRule && (
           <ModalBody>
-            <Stack hasGutter>
-              {/* What this rule does — auto-generated summary */}
-              <StackItem>
-                <Content component="p" style={{
-                  backgroundColor: 'var(--pf-v6-global--BackgroundColor--200)',
-                  padding: '0.75rem 1rem',
-                  borderRadius: '4px',
-                  borderLeft: '3px solid var(--pf-v6-global--primary-color--100)',
-                  fontStyle: 'italic',
-                }}>
-                  {describeRule(selectedRule)}
-                </Content>
-              </StackItem>
-
-              {/* Description */}
-              {selectedRule.description && (
+            {editMode ? (
+              /* Edit Form */
+              <Stack hasGutter>
+                {saveError && (
+                  <StackItem>
+                    <Alert variant="danger" isInline isPlain title={saveError} />
+                  </StackItem>
+                )}
                 <StackItem>
+                  <Form>
+                    <FormGroup label="Name" isRequired fieldId="edit-rule-name">
+                      <TextInput id="edit-rule-name" value={editName} onChange={(_e, val) => setEditName(val)} />
+                    </FormGroup>
+                    <FormGroup label="Description" fieldId="edit-rule-desc">
+                      <TextInput id="edit-rule-desc" value={editDescription} onChange={(_e, val) => setEditDescription(val)} placeholder="Optional description" />
+                    </FormGroup>
+                    <FormGroup label="Tier" isRequired fieldId="edit-rule-tier">
+                      <Radio id="edit-tier-regex" name="edit-tier" label="Regex" value="regex" isChecked={editTier === 'regex'} onChange={() => setEditTier('regex')} />
+                      <Radio id="edit-tier-embedding" name="edit-tier" label="Embedding" value="embedding" isChecked={editTier === 'embedding'} onChange={() => setEditTier('embedding')} />
+                    </FormGroup>
+                    <FormGroup label="Action" isRequired fieldId="edit-rule-action">
+                      <FormSelect id="edit-rule-action" value={editAction} onChange={(_e, val) => setEditAction(val)}>
+                        {ACTION_OPTIONS.map((a) => <FormSelectOption key={a} value={a} label={a} />)}
+                      </FormSelect>
+                    </FormGroup>
+                    <FormGroup label="Trigger" fieldId="edit-rule-trigger">
+                      <FormSelect id="edit-rule-trigger" value={editTrigger} onChange={(_e, val) => setEditTrigger(val)}>
+                        {TRIGGER_OPTIONS.map((t) => <FormSelectOption key={t} value={t} label={t} />)}
+                      </FormSelect>
+                    </FormGroup>
+                    <FormGroup label="Scope Filter" fieldId="edit-rule-scope">
+                      <TextInput id="edit-rule-scope" value={editScopeFilter} onChange={(_e, val) => setEditScopeFilter(val)} placeholder="e.g. user" />
+                    </FormGroup>
+                    <FormGroup label="Layer" fieldId="edit-rule-layer">
+                      <FormSelect id="edit-rule-layer" value={editLayer} onChange={(_e, val) => setEditLayer(val)}>
+                        {LAYER_OPTIONS.map((l) => <FormSelectOption key={l} value={l} label={l} />)}
+                      </FormSelect>
+                    </FormGroup>
+                    <FormGroup label="Priority" fieldId="edit-rule-priority">
+                      <NumberInput
+                        id="edit-rule-priority"
+                        value={editPriority}
+                        onMinus={() => setEditPriority((p) => Math.max(0, p - 1))}
+                        onPlus={() => setEditPriority((p) => p + 1)}
+                        onChange={(e) => {
+                          const val = Number((e.target as HTMLInputElement).value);
+                          if (!isNaN(val)) setEditPriority(val);
+                        }}
+                        min={0}
+                      />
+                    </FormGroup>
+                    <FormGroup label="Config (JSON)" fieldId="edit-rule-config">
+                      <TextArea id="edit-rule-config" value={editConfig} onChange={(_e, val) => setEditConfig(val)} rows={4} />
+                    </FormGroup>
+                    <FormGroup label="Enabled" fieldId="edit-rule-enabled">
+                      <Switch
+                        id="edit-rule-enabled"
+                        isChecked={editEnabled}
+                        onChange={(_e, checked) => setEditEnabled(checked)}
+                        label="Enabled"
+                        labelOff="Disabled"
+                      />
+                    </FormGroup>
+                    <FormGroup label="Override" fieldId="edit-rule-override">
+                      <Switch
+                        id="edit-rule-override"
+                        isChecked={editOverride}
+                        onChange={(_e, checked) => setEditOverride(checked)}
+                        label="Can override higher-layer rules"
+                        labelOff="Cannot override"
+                      />
+                    </FormGroup>
+                  </Form>
+                </StackItem>
+              </Stack>
+            ) : (
+              /* Read-only Detail View */
+              <Stack hasGutter>
+                {/* What this rule does — auto-generated summary */}
+                <StackItem>
+                  <Content component="p" style={{
+                    backgroundColor: 'var(--pf-v6-global--BackgroundColor--200)',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '4px',
+                    borderLeft: '3px solid var(--pf-v6-global--primary-color--100)',
+                    fontStyle: 'italic',
+                  }}>
+                    {describeRule(selectedRule)}
+                  </Content>
+                </StackItem>
+
+                {/* Description */}
+                {selectedRule.description && (
+                  <StackItem>
+                    <DescriptionList isCompact isHorizontal>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>Description</DescriptionListTerm>
+                        <DescriptionListDescription>{selectedRule.description}</DescriptionListDescription>
+                      </DescriptionListGroup>
+                    </DescriptionList>
+                  </StackItem>
+                )}
+
+                <Divider />
+
+                {/* Behavior */}
+                <StackItem>
+                  <Content><h4>Behavior</h4></Content>
                   <DescriptionList isCompact isHorizontal>
                     <DescriptionListGroup>
-                      <DescriptionListTerm>Description</DescriptionListTerm>
-                      <DescriptionListDescription>{selectedRule.description}</DescriptionListDescription>
+                      <DescriptionListTerm>Trigger</DescriptionListTerm>
+                      <DescriptionListDescription>{selectedRule.trigger}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Tier</DescriptionListTerm>
+                      <DescriptionListDescription>
+                        <Label color={selectedRule.tier === 'regex' ? 'blue' : 'purple'} isCompact>
+                          {selectedRule.tier}
+                        </Label>
+                      </DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Action</DescriptionListTerm>
+                      <DescriptionListDescription>
+                        <Label color={ACTION_COLORS[selectedRule.action] ?? 'grey'} isCompact>
+                          {selectedRule.action}
+                        </Label>
+                      </DescriptionListDescription>
                     </DescriptionListGroup>
                   </DescriptionList>
                 </StackItem>
-              )}
 
-              <Divider />
+                {/* Config */}
+                <StackItem>
+                  <Content><h4>Config</h4></Content>
+                  {describeConfig(selectedRule) && (
+                    <Content component="p" style={{ marginBottom: '0.5rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      {describeConfig(selectedRule)}
+                    </Content>
+                  )}
+                  <pre style={{
+                    backgroundColor: 'var(--pf-v6-global--BackgroundColor--200)',
+                    padding: '0.75rem',
+                    borderRadius: '4px',
+                    fontSize: '0.875rem',
+                    overflow: 'auto',
+                    maxHeight: '200px',
+                    margin: 0,
+                  }}>
+                    {JSON.stringify(selectedRule.config, null, 2)}
+                  </pre>
+                </StackItem>
 
-              {/* Behavior */}
-              <StackItem>
-                <Content><h4>Behavior</h4></Content>
-                <DescriptionList isCompact isHorizontal>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Trigger</DescriptionListTerm>
-                    <DescriptionListDescription>{selectedRule.trigger}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Tier</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      <Label color={selectedRule.tier === 'regex' ? 'blue' : 'purple'} isCompact>
-                        {selectedRule.tier}
-                      </Label>
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Action</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      <Label color={ACTION_COLORS[selectedRule.action] ?? 'grey'} isCompact>
-                        {selectedRule.action}
-                      </Label>
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                </DescriptionList>
-              </StackItem>
+                <Divider />
 
-              {/* Config */}
-              <StackItem>
-                <Content><h4>Config</h4></Content>
-                {describeConfig(selectedRule) && (
-                  <Content component="p" style={{ marginBottom: '0.5rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                    {describeConfig(selectedRule)}
-                  </Content>
-                )}
-                <pre style={{
-                  backgroundColor: 'var(--pf-v6-global--BackgroundColor--200)',
-                  padding: '0.75rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  maxHeight: '200px',
-                  margin: 0,
-                }}>
-                  {JSON.stringify(selectedRule.config, null, 2)}
-                </pre>
-              </StackItem>
+                {/* Scope */}
+                <StackItem>
+                  <Content><h4>Scope</h4></Content>
+                  <DescriptionList isCompact isHorizontal>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Layer</DescriptionListTerm>
+                      <DescriptionListDescription>{selectedRule.layer}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Scope Filter</DescriptionListTerm>
+                      <DescriptionListDescription>{selectedRule.scope_filter ?? 'All scopes'}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Owner</DescriptionListTerm>
+                      <DescriptionListDescription>{selectedRule.owner_id ?? 'None (system)'}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Override</DescriptionListTerm>
+                      <DescriptionListDescription>
+                        <Label color={selectedRule.override ? 'orange' : 'grey'} isCompact>
+                          {selectedRule.override ? 'Yes' : 'No'}
+                        </Label>
+                      </DescriptionListDescription>
+                    </DescriptionListGroup>
+                  </DescriptionList>
+                </StackItem>
 
-              <Divider />
+                <Divider />
 
-              {/* Scope */}
-              <StackItem>
-                <Content><h4>Scope</h4></Content>
-                <DescriptionList isCompact isHorizontal>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Layer</DescriptionListTerm>
-                    <DescriptionListDescription>{selectedRule.layer}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Scope Filter</DescriptionListTerm>
-                    <DescriptionListDescription>{selectedRule.scope_filter ?? 'All scopes'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Owner</DescriptionListTerm>
-                    <DescriptionListDescription>{selectedRule.owner_id ?? 'None (system)'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Override</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      <Label color={selectedRule.override ? 'orange' : 'grey'} isCompact>
-                        {selectedRule.override ? 'Yes' : 'No'}
-                      </Label>
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                </DescriptionList>
-              </StackItem>
+                {/* Status */}
+                <StackItem>
+                  <Content><h4>Status</h4></Content>
+                  <DescriptionList isCompact isHorizontal>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Enabled</DescriptionListTerm>
+                      <DescriptionListDescription>
+                        <Label color={selectedRule.enabled ? 'green' : 'red'} isCompact>
+                          {selectedRule.enabled ? 'Enabled' : 'Disabled'}
+                        </Label>
+                      </DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Priority</DescriptionListTerm>
+                      <DescriptionListDescription>{selectedRule.priority}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Version</DescriptionListTerm>
+                      <DescriptionListDescription>v{selectedRule.version}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                    {selectedRule.edited_by && (
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>Last edited by</DescriptionListTerm>
+                        <DescriptionListDescription>{selectedRule.edited_by}</DescriptionListDescription>
+                      </DescriptionListGroup>
+                    )}
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Created</DescriptionListTerm>
+                      <DescriptionListDescription>{formatDate(selectedRule.created_at)}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Updated</DescriptionListTerm>
+                      <DescriptionListDescription>{formatDate(selectedRule.updated_at)}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                  </DescriptionList>
+                </StackItem>
 
-              <Divider />
+                <Divider />
 
-              {/* Admin */}
-              <StackItem>
-                <Content><h4>Status</h4></Content>
-                <DescriptionList isCompact isHorizontal>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Enabled</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      <Label color={selectedRule.enabled ? 'green' : 'red'} isCompact>
-                        {selectedRule.enabled ? 'Enabled' : 'Disabled'}
-                      </Label>
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Priority</DescriptionListTerm>
-                    <DescriptionListDescription>{selectedRule.priority}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Created</DescriptionListTerm>
-                    <DescriptionListDescription>{formatDate(selectedRule.created_at)}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Updated</DescriptionListTerm>
-                    <DescriptionListDescription>{formatDate(selectedRule.updated_at)}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                </DescriptionList>
-              </StackItem>
-            </Stack>
+                {/* Version History */}
+                <StackItem>
+                  <ExpandableSection
+                    toggleText={historyOpen ? 'Hide version history' : 'Show version history'}
+                    onToggle={(_e, isExp) => handleHistoryToggle(isExp)}
+                    isExpanded={historyOpen}
+                  >
+                    {historyLoading && <Spinner size="md" />}
+                    {historyError && (
+                      <Alert variant="warning" isInline isPlain title={historyError} />
+                    )}
+                    {!historyLoading && !historyError && ruleHistory.length > 0 && (
+                      <Table aria-label="Version history" variant="compact" style={{ marginTop: '0.5rem' }}>
+                        <Thead>
+                          <Tr>
+                            <Th>Version</Th>
+                            <Th>Name</Th>
+                            <Th>Edited by</Th>
+                            <Th>Date</Th>
+                            <Th>Status</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {ruleHistory.map((entry) => (
+                            <Tr key={entry.id}>
+                              <Td>v{entry.version}</Td>
+                              <Td>{entry.name}</Td>
+                              <Td>{entry.edited_by ?? '—'}</Td>
+                              <Td>{formatDate(entry.created_at)}</Td>
+                              <Td>
+                                {entry.is_current ? (
+                                  <Label color="green" isCompact>Current</Label>
+                                ) : (
+                                  <Label color="grey" isCompact>Superseded</Label>
+                                )}
+                              </Td>
+                            </Tr>
+                          ))}
+                        </Tbody>
+                      </Table>
+                    )}
+                    {!historyLoading && !historyError && ruleHistory.length === 0 && historyOpen && (
+                      <Content component="small" style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                        No history available.
+                      </Content>
+                    )}
+                  </ExpandableSection>
+                </StackItem>
+              </Stack>
+            )}
           </ModalBody>
         )}
         <ModalFooter>
-          <Button variant="link" onClick={() => setSelectedRule(null)}>Close</Button>
+          {editMode ? (
+            <>
+              <Button
+                variant="primary"
+                onClick={handleSaveEdit}
+                isDisabled={saving || !editName}
+                isLoading={saving}
+              >
+                Save
+              </Button>
+              <Button variant="link" onClick={() => { setEditMode(false); setSaveError(null); }}>
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => selectedRule && enterEditMode(selectedRule)}>
+                Edit
+              </Button>
+              <Button variant="link" onClick={() => { setSelectedRule(null); setEditMode(false); }}>
+                Close
+              </Button>
+            </>
+          )}
         </ModalFooter>
       </Modal>
 
