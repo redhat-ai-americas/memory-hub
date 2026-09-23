@@ -226,6 +226,60 @@ describe("recall engine — onMessagesTransform", () => {
     expect(output.messages[0].parts).toHaveLength(1);
   });
 
+  it("never copies image/file fields onto the injected part", async () => {
+    const engine = await primedEngine();
+    const last: LooseMessage = {
+      info: { role: "user" },
+      parts: [
+        {
+          id: "prt_file",
+          sessionID: "ses_1",
+          messageID: "msg_1",
+          type: "file",
+          mime: "image/png",
+          url: "data:image/png;base64,AAAA",
+          filename: "shot.png",
+        },
+        { id: "prt_txt", sessionID: "ses_1", messageID: "msg_1", type: "text", text: "what is this?" },
+      ],
+    };
+
+    engine.onMessagesTransform({ messages: [last] });
+
+    const injected = last.parts[0];
+    expect(injected).toEqual({
+      type: "text",
+      text: expect.stringContaining("recalled fact"),
+      synthetic: true,
+      id: "prt_txt",
+      sessionID: "ses_1",
+      messageID: "msg_1",
+    });
+    expect(injected).not.toHaveProperty("mime");
+    expect(injected).not.toHaveProperty("url");
+    expect(injected).not.toHaveProperty("filename");
+  });
+
+  it("falls back to any part's identity fields when the message has no text part", async () => {
+    const engine = await primedEngine();
+    const last: LooseMessage = {
+      info: { role: "user" },
+      parts: [
+        { id: "prt_file", sessionID: "ses_1", messageID: "msg_1", type: "file", mime: "image/png", url: "x" },
+      ],
+    };
+
+    engine.onMessagesTransform({ messages: [last] });
+
+    const injected = last.parts[0];
+    expect(injected.type).toBe("text");
+    expect(injected.id).toBe("prt_file");
+    expect(injected.sessionID).toBe("ses_1");
+    expect(injected.messageID).toBe("msg_1");
+    expect(injected).not.toHaveProperty("mime");
+    expect(injected).not.toHaveProperty("url");
+  });
+
   it("is idempotent when the marker is already present", async () => {
     const engine = await primedEngine();
     const last = userMessage("what did we decide?");

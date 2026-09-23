@@ -102,9 +102,12 @@ opencode has no memory-provider concept: the plugin is purely additive
    the *pending block*; no results or any failure clears it.
 3. `experimental.chat.messages.transform` runs on every LLM request. If
    a pending block exists, it finds the last user message and unshifts a
-   synthetic text part cloned from an existing part (inheriting the
-   host's required identity fields — the same technique mem0's official
-   opencode plugin uses). A marker check makes injection idempotent:
+   fresh synthetic text part. Only the host-required identity fields
+   (`id`, `sessionID`, `messageID`) are copied from a sibling part —
+   preferring a text part — so an image or file attachment at the head
+   of the message can never leak its type-specific fields (`mime`,
+   `url`, `filename`) onto the injected part. A marker check makes
+   injection idempotent:
    transform output is per-request, so the block is re-applied on each
    request of a turn but never duplicated within a message.
 

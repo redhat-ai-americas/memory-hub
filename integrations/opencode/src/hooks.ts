@@ -5,6 +5,9 @@ import type { Logger } from "./logger.js";
 const AUTO_RECALL_TIMEOUT_MS = 15_000;
 const MIN_QUERY_LENGTH = 5;
 
+/** Host-required part identity fields carried onto injected parts. */
+const PART_IDENTITY_FIELDS = ["id", "sessionID", "messageID"] as const;
+
 /** Marker used both as the injected block opener and for dedup checks. */
 export const MEMORY_BLOCK_MARKER = "<relevant-memories>";
 
@@ -19,7 +22,7 @@ interface SearchResultItem {
 
 /**
  * Loosely-typed message part. The real opencode `Part` union is wider; we
- * only touch text parts and preserve unknown fields via spread.
+ * only read text parts and only ever copy identity fields off any other.
  */
 export interface LoosePart {
   type?: string;
@@ -168,15 +171,15 @@ export function createRecallEngine(
       return;
     }
 
-    // Clone an existing part so host-required fields (id, sessionID,
-    // messageID) carry over — the same pattern mem0's plugin uses.
-    const ref = target.parts[0];
-    target.parts.unshift({
-      ...ref,
-      type: "text",
-      text: pending,
-      synthetic: true,
-    });
+    // Build a fresh text part; copy only the host-required identity fields
+    // from a sibling (preferring a text part) so no type-specific fields of
+    // an image/file part leak onto it.
+    const ref = target.parts.find((p) => p.type === "text") ?? target.parts[0];
+    const injected: LoosePart = { type: "text", text: pending, synthetic: true };
+    for (const field of PART_IDENTITY_FIELDS) {
+      if (ref[field] !== undefined) injected[field] = ref[field];
+    }
+    target.parts.unshift(injected);
   }
 
   return {
