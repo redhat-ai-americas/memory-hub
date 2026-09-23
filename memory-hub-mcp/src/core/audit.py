@@ -1,9 +1,9 @@
 """Structured audit logging for MemoryHub MCP operations.
 
-Every tool invocation that touches authorization or data mutation emits
-a JSON event via the ``memoryhub.audit`` logger. This stub writes to the
-standard Python logging pipeline; a future phase will persist events to
-a durable store (PostgreSQL audit table or external SIEM).
+Stub implementation that writes JSON to the memoryhub.audit logger.
+Tools should use memoryhub_core.services.audit.record_event() for
+PostgreSQL persistence; this stub remains for backward compatibility
+and local development without a database.
 
 Events are fire-and-forget: audit failures never block the tool operation.
 """
@@ -23,9 +23,18 @@ def record_event(
     owner_id: str,
     memory_id: str | None,
     decision: str,
+    tenant_id: str | None = None,
     metadata: dict | None = None,
 ) -> None:
     """Emit a structured audit event as JSON to the memoryhub.audit logger.
+
+    DEPRECATED: This is the stub implementation (logger-only).
+    Use memoryhub_core.services.audit.record_event() for PostgreSQL persistence.
+
+    This function remains for:
+    - Local development without PostgreSQL
+    - register_session (which has no DB session available)
+    - Backward compatibility during migration
 
     Args:
         event_type: Dot-separated event kind (e.g. "memory.write",
@@ -37,6 +46,8 @@ def record_event(
         owner_id: Owner of the target memory or resource.
         memory_id: UUID of the target memory, or None for non-memory ops.
         decision: "allowed" or "denied".
+        tenant_id: Tenant this event belongs to (for multi-tenancy parity
+            with the PostgreSQL path).
         metadata: Optional dict with additional context (query terms,
             result counts, etc.).
     """
@@ -50,6 +61,8 @@ def record_event(
         "memory_id": str(memory_id) if memory_id else None,
         "decision": decision,
     }
+    if tenant_id is not None:
+        event["tenant_id"] = tenant_id
     if metadata:
         event["metadata"] = metadata
     logger.info(json.dumps(event, sort_keys=True))

@@ -76,6 +76,7 @@ _TRUNCATE_TABLES = [
     "memory_relationships",
     "curator_rules",
     "memory_nodes",
+    "audit_log",
 ]
 
 
