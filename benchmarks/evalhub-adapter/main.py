@@ -1,7 +1,6 @@
 """EvalHub adapter entrypoint for Kubernetes and local job execution."""
 
 import logging
-import time
 
 logging.basicConfig(
     level=logging.INFO,
@@ -9,13 +8,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("memoryhub-evalhub")
 
-SIDECAR_DRAIN_SECONDS = 5
-
 
 def main() -> None:
     from evalhub.adapter.callbacks import DefaultCallbacks
     from evalhub.adapter import get_job_spec_path
     from memoryhub_evalhub.adapter import AMBAdapter
+    from memoryhub_evalhub.sidecar_drain import report_results_and_drain
 
     spec_path = get_job_spec_path()
     logger.info("Loading job spec from %s", spec_path)
@@ -46,15 +44,20 @@ def main() -> None:
         results.mlflow_run_id = mlflow_run_id
         logger.info("MLflow run saved: %s", mlflow_run_id)
 
-    callbacks.report_results(results)
+    # DefaultCallbacks.report_results() swallows sidecar HTTP errors, then the
+    # process would exit and Kubernetes would SIGTERM the sidecar mid-forward
+    # (#364/#426). Retry until the sidecar ACKs, then drain before exit.
+    reported = report_results_and_drain(callbacks, results)
+    if not reported:
+        logger.error(
+            "Results were not acknowledged by the sidecar; "
+            "EvalHub may show score=N/A for job %s",
+            job.id,
+        )
 
     logger.info("Job complete: score=%.4f, examples=%d, duration=%.1fs",
                 results.overall_score, results.num_examples_evaluated,
                 results.duration_seconds)
-
-    # Give the sidecar time to forward results to the EvalHub server
-    # before the container exits and the pod is terminated.
-    time.sleep(SIDECAR_DRAIN_SECONDS)
 
 
 if __name__ == "__main__":
