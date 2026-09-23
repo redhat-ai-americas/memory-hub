@@ -10,6 +10,7 @@ import type {
   GraphResponse,
   MemoryDetail,
   PublicConfig,
+  RuleVersionEntry,
   SearchMatch,
   SecretRotatedResponse,
   StatsResponse,
@@ -142,6 +143,10 @@ export async function deleteRule(ruleId: string): Promise<void> {
     const detail = await response.text();
     throw new Error(`API error ${response.status}: ${detail}`);
   }
+}
+
+export async function fetchRuleHistory(ruleId: string): Promise<RuleVersionEntry[]> {
+  return apiFetch<RuleVersionEntry[]>(`/rules/${encodeURIComponent(ruleId)}/history`);
 }
 
 // --- Contradiction Reports ---

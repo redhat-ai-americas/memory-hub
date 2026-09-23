@@ -68,6 +68,14 @@ def _scalars_result(items):
     return r
 
 
+def _fetchall_result(rows):
+    """Mock that returns rows from fetchall() — used for raw SQL / CTE results."""
+    r = MagicMock()
+    r.fetchall.return_value = rows
+    r.scalar_one_or_none.return_value = None
+    return r
+
+
 def _make_db_session(execute_side_effects: list):
     """Build an async DB session mock with a queue of execute() return values.
 
@@ -530,6 +538,10 @@ def _make_rule(**kwargs) -> MagicMock:
         "override": False,
         "enabled": True,
         "priority": 100,
+        "version": 1,
+        "is_current": True,
+        "previous_version_id": None,
+        "edited_by": None,
         "created_at": datetime(2026, 1, 1, tzinfo=UTC),
         "updated_at": datetime(2026, 1, 2, tzinfo=UTC),
     }
@@ -1115,10 +1127,20 @@ class TestCurationRulesEndpoints:
             app.dependency_overrides.clear()
 
     async def test_update_rule_modifies_fields(self, test_settings):
-        rule = _make_rule(enabled=True, priority=100)
+        old_rule = _make_rule(enabled=True, priority=100)
+
+        # capture the new rule passed to db.add() (add is synchronous in SQLAlchemy)
+        captured_new_rule: list = []
+
+        def capture_add(obj):
+            captured_new_rule.append(obj)
+            # Populate timestamps so _rule_to_response can serialise the new rule
+            obj.created_at = datetime(2026, 1, 3, tzinfo=UTC)
+            obj.updated_at = datetime(2026, 1, 3, tzinfo=UTC)
 
         db_session = AsyncMock()
-        db_session.execute = AsyncMock(return_value=_scalar_result(rule))
+        db_session.execute = AsyncMock(return_value=_scalar_result(old_rule))
+        db_session.add = capture_add
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -1128,14 +1150,21 @@ class TestCurationRulesEndpoints:
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
-                    f"/api/rules/{rule.id}",
+                    f"/api/rules/{old_rule.id}",
                     json={"enabled": False, "priority": 5},
                 )
 
             assert response.status_code == 200
-            # The route mutates the rule in place, so we can check the mock.
-            assert rule.enabled is False
-            assert rule.priority == 5
+            # Old rule must be retired
+            assert old_rule.is_current is False
+            # A new rule must have been added
+            assert len(captured_new_rule) == 1
+            new_rule = captured_new_rule[0]
+            assert new_rule.enabled is False
+            assert new_rule.priority == 5
+            assert new_rule.version == 2
+            assert new_rule.previous_version_id == old_rule.id
+            assert new_rule.is_current is True
             db_session.commit.assert_awaited()
         finally:
             app.dependency_overrides.clear()
@@ -1194,6 +1223,155 @@ class TestCurationRulesEndpoints:
                 response = await ac.delete(f"/api/rules/{uuid.uuid4()}")
 
             assert response.status_code == 404
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_delete_rule_returns_409_for_non_current(self, test_settings):
+        """DELETE on a superseded (is_current=False) version must return 409."""
+        rule = _make_rule(is_current=False)
+
+        db_session = AsyncMock()
+        db_session.execute = AsyncMock(return_value=_scalar_result(rule))
+        db_session.delete = AsyncMock()
+        db_session.commit = AsyncMock()
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.delete(f"/api/rules/{rule.id}")
+
+            assert response.status_code == 409
+            db_session.delete.assert_not_called()
+            db_session.commit.assert_not_awaited()
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_update_rule_noop_returns_200_without_new_version(self, test_settings):
+        """PATCH with only edited_by (no content fields) must not create a new version."""
+        old_rule = _make_rule(enabled=True)
+
+        db_session = AsyncMock()
+        db_session.execute = AsyncMock(return_value=_scalar_result(old_rule))
+        db_session.add = MagicMock()
+        db_session.commit = AsyncMock()
+        db_session.refresh = AsyncMock()
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    f"/api/rules/{old_rule.id}",
+                    json={"edited_by": "someone"},
+                )
+
+            assert response.status_code == 200
+            # No new version created
+            db_session.add.assert_not_called()
+            db_session.commit.assert_not_awaited()
+            # is_current flag on old rule must be untouched
+            assert old_rule.is_current is True
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_update_rule_returns_409_for_non_current(self, test_settings):
+        """PATCH on a superseded version must return 409."""
+        old_rule = _make_rule(is_current=False)
+
+        db_session = AsyncMock()
+        db_session.execute = AsyncMock(return_value=_scalar_result(old_rule))
+        db_session.commit = AsyncMock()
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    f"/api/rules/{old_rule.id}", json={"enabled": False}
+                )
+
+            assert response.status_code == 409
+            db_session.commit.assert_not_awaited()
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_get_rule_history_returns_version_chain(self, test_settings):
+        """GET /api/rules/{id}/history returns versions newest-first."""
+        v1 = _make_rule(version=1, is_current=False, previous_version_id=None, edited_by=None)
+        v2_id = uuid.uuid4()
+        v2 = _make_rule(
+            id=v2_id,
+            version=2,
+            is_current=True,
+            previous_version_id=v1.id,
+            edited_by="dashboard-operator",
+        )
+
+        # Build row-like objects that match the CTE's SELECT columns.
+        class _Row:
+            def __init__(self, rule):
+                self.id = rule.id
+                self.version = rule.version
+                self.is_current = rule.is_current
+                self.name = rule.name
+                self.edited_by = rule.edited_by
+                self.created_at = rule.created_at
+
+        execute_calls = [
+            # Call 1: seed check (scalar_one_or_none)
+            _scalar_result(v2),
+            # Call 2: recursive CTE returns the full chain, newest-first
+            _fetchall_result([_Row(v2), _Row(v1)]),
+        ]
+
+        db_session = _make_db_session(execute_calls)
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get(f"/api/rules/{v2_id}/history")
+
+            assert response.status_code == 200
+            body = response.json()
+            assert len(body) == 2
+            # newest first
+            assert body[0]["version"] == 2
+            assert body[0]["is_current"] is True
+            assert body[0]["edited_by"] == "dashboard-operator"
+            assert body[1]["version"] == 1
+            assert body[1]["is_current"] is False
+            assert body[1]["edited_by"] is None
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_get_rule_history_returns_404_for_missing(self, test_settings):
+        db_session = _make_db_session([_scalar_result(None)])
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get(f"/api/rules/{uuid.uuid4()}/history")
+
+            assert response.status_code == 404
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_get_rule_history_returns_422_for_invalid_uuid(self, test_settings):
+        db_session = _make_db_session([])
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/api/rules/not-a-uuid/history")
+
+            assert response.status_code == 422
         finally:
             app.dependency_overrides.clear()
 
