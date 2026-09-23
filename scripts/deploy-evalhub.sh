@@ -148,19 +148,45 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# EvalHub database Secret (PostgreSQL on shared memoryhub-pg)
+# EvalHub database (PostgreSQL on shared memoryhub-pg)
 # ---------------------------------------------------------------------------
 banner "EvalHub database"
+
+PG_NAMESPACE="memoryhub-db"
+PG_POD_LABEL="app.kubernetes.io/name=memoryhub-pg"
+PG_CONTAINER="postgresql"
+
+PG_ADMIN_USER=$(oc get secret memoryhub-pg-credentials --context "$CONTEXT" -n "$PG_NAMESPACE" \
+    -o jsonpath='{.data.POSTGRES_USER}' 2>/dev/null | base64 -d || true)
+MEMORYHUB_DB_PASSWORD=$(oc get secret memoryhub-pg-credentials --context "$CONTEXT" -n "$PG_NAMESPACE" \
+    -o jsonpath='{.data.POSTGRES_PASSWORD}' 2>/dev/null | base64 -d || true)
+if [ -z "$PG_ADMIN_USER" ] || [ -z "$MEMORYHUB_DB_PASSWORD" ]; then
+    die "Cannot read memoryhub-pg-credentials from $PG_NAMESPACE namespace"
+fi
+
+PG_POD=$(oc get pod --context "$CONTEXT" -n "$PG_NAMESPACE" -l "$PG_POD_LABEL" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "$PG_POD" ]; then
+    die "No pod found matching label '$PG_POD_LABEL' in namespace '$PG_NAMESPACE'"
+fi
+
+DB_EXISTS=$(oc exec --context "$CONTEXT" "$PG_POD" -n "$PG_NAMESPACE" -c "$PG_CONTAINER" \
+    -- env PGPASSWORD="$MEMORYHUB_DB_PASSWORD" \
+    psql -U "$PG_ADMIN_USER" -tAc "SELECT 1 FROM pg_database WHERE datname='evalhub'" 2>/dev/null || true)
+if [ "$DB_EXISTS" = "1" ]; then
+    info "Database evalhub already exists"
+else
+    info "Creating database evalhub..."
+    oc exec --context "$CONTEXT" "$PG_POD" -n "$PG_NAMESPACE" -c "$PG_CONTAINER" \
+        -- env PGPASSWORD="$MEMORYHUB_DB_PASSWORD" \
+        psql -U "$PG_ADMIN_USER" -c "CREATE DATABASE evalhub OWNER memoryhub;"
+    info "Database evalhub created"
+fi
 
 if oc get secret evalhub-db-credentials --context "$CONTEXT" -n "$NS" &>/dev/null; then
     info "Secret evalhub-db-credentials already exists"
 else
-    info "Creating evalhub database and secret..."
-    MEMORYHUB_DB_PASSWORD=$(oc get secret memoryhub-pg-credentials --context "$CONTEXT" -n memoryhub-db \
-        -o jsonpath='{.data.POSTGRES_PASSWORD}' 2>/dev/null | base64 -d || true)
-    if [ -z "$MEMORYHUB_DB_PASSWORD" ]; then
-        die "Cannot read memoryhub-pg-credentials from memoryhub-db namespace"
-    fi
+    info "Creating evalhub-db-credentials secret..."
     DB_URL="postgresql://memoryhub:${MEMORYHUB_DB_PASSWORD}@memoryhub-pg.memoryhub-db.svc.cluster.local:5432/evalhub"
     oc create secret generic evalhub-db-credentials \
         --from-literal=db-url="$DB_URL" \
