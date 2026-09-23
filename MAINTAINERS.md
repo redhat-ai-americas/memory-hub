@@ -4,7 +4,7 @@
 
 | Name | GitHub | Areas |
 |---|---|---|
-| Wes Jackson | [@rdwj](https://github.com/rdwj) | All |
+| Wes Jackson | [@rdwj](https://github.com/rdwj), [@wjatx](https://github.com/wjatx) | All |
 | Sanjay Rampal | [@srampal](https://github.com/srampal) | All |
 | Katya Romashko | [@KatyaRomashko](https://github.com/KatyaRomashko) | All |
 | Ray Carroll | [@raycarroll](https://github.com/raycarroll) | All |
