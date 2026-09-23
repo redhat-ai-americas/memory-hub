@@ -253,6 +253,7 @@ async def _extract_window(
             source_messages=source_seqs,
             extraction_model=model,
             extraction_prompt_hash=prompt_hash,
+            generating_model=model,
         )
 
         decision = await reconcile_candidate(

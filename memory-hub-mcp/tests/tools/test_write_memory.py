@@ -168,7 +168,7 @@ async def test_write_memory_forwards_tenant_id_to_service():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch(
             "src.tools.write_memory.create_memory",
@@ -230,7 +230,7 @@ async def test_write_memory_gated_returns_structured_response():
             return_value=(MagicMock(), AsyncMock()),
         ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock(max_tokens=512)),
         patch(
             "src.tools.write_memory.create_memory",
             new_callable=AsyncMock,
@@ -282,7 +282,7 @@ async def test_write_memory_regex_block_still_raises_tool_error():
             return_value=(MagicMock(), AsyncMock()),
         ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock(max_tokens=512)),
         patch(
             "src.tools.write_memory.create_memory",
             new_callable=AsyncMock,
@@ -350,7 +350,7 @@ async def test_write_memory_force_forwarded_to_create_memory():
             return_value=(MagicMock(), AsyncMock()),
         ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock(max_tokens=512)),
         patch(
             "src.tools.write_memory.create_memory",
             new_callable=AsyncMock,

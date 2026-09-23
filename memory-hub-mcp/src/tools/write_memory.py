@@ -338,6 +338,25 @@ async def write_memory(
             ),
         ),
     ] = None,
+    upstream_trust_level: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Trust level of upstream content: trusted, untrusted, or mixed. "
+                "Defaults to 'trusted'. Dreaming extraction infers from source events."
+            ),
+        ),
+    ] = None,
+    generating_model: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Model identifier that produced this memory via extraction. "
+                "Null for user-stated memories. Set automatically by the "
+                "dreaming pipeline."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Create a new memory node or branch in the memory tree.
@@ -527,6 +546,10 @@ async def write_memory(
         create_kwargs["chunk_target_tokens"] = chunk_target_tokens
     if chunk_overlap_tokens is not None:
         create_kwargs["chunk_overlap_tokens"] = chunk_overlap_tokens
+    if upstream_trust_level is not None:
+        create_kwargs["upstream_trust_level"] = upstream_trust_level
+    if generating_model is not None:
+        create_kwargs["generating_model"] = generating_model
     try:
         node_create = MemoryNodeCreate(**create_kwargs)
     except ValidationError as exc:
