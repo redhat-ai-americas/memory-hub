@@ -88,6 +88,7 @@ async def graduate_memory(
         metadata=graduated_metadata,
         domains=source.domains,
         content_type="knowledge",
+        upstream_trust_level=source.upstream_trust_level,
     )
 
     graduated_memory, curation_result = await create_memory(

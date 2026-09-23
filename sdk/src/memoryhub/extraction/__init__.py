@@ -14,7 +14,7 @@ from memoryhub.extraction.models import (
     TraceEvent,
     TraceEventType,
 )
-from memoryhub.extraction.pipeline import ExtractionPipeline
+from memoryhub.extraction.pipeline import ExtractionPipeline, infer_trust_level
 
 __all__ = [
     "CandidateMemory",
@@ -28,4 +28,5 @@ __all__ = [
     "RelationshipExtractor",
     "TraceEvent",
     "TraceEventType",
+    "infer_trust_level",
 ]
