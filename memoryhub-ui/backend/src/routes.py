@@ -91,15 +91,26 @@ async def _admin_request(
     tenant_id: str | None = None,
 ) -> httpx.Response:
     """Make an authenticated request to the auth service admin API."""
+    if not settings.auth_service_url:
+        raise HTTPException(
+            status_code=503,
+            detail="The auth service is not configured for this local deployment.",
+        )
     url = f"{settings.auth_service_url}{path}"
     headers = {"X-Admin-Key": settings.admin_key}
     params: dict[str, str] = {}
     if tenant_id is not None:
         params["tenant_id"] = tenant_id
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.request(
-            method, url, headers=headers, json=json_body, params=params
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.request(
+                method, url, headers=headers, json=json_body, params=params
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The auth service is unavailable for this local deployment.",
+        ) from exc
     if response.status_code >= 400:
         try:
             detail = response.json().get("detail", response.text)

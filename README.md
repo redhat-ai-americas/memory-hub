@@ -29,6 +29,21 @@ claude mcp add memoryhub -- memoryhub mcp
 
 Start a new Claude Code session and your agent has persistent memory. See [`memoryhub-local/README.md`](memoryhub-local/README.md) for configuration, dreaming (offline fact extraction), and how it works under the hood.
 
+### Local full-stack development
+
+The cluster edition can also run locally for development without OpenShift.
+This mode uses PostgreSQL + pgvector, an HTTP MCP server, and the dashboard
+UI. It is a development mode of the cluster edition, not a third edition.
+
+```bash
+make local-install
+make local-up
+make local-down
+```
+
+See [`docs/guides/local-development.md`](docs/guides/local-development.md) for
+the Compose, Vite, optional auth-service, and integration-test workflows.
+
 ### Cluster edition
 
 Full governed stack on OpenShift AI: PostgreSQL + pgvector, OAuth 2.1, embedding + reranker models, dashboard UI.

@@ -6,7 +6,7 @@ the numpy.float32 class of bug where unit tests pass but real pgvector
 returns unexpected types.
 
 Run with the compose stack active:
-    podman-compose -f tests/integration/compose.yaml up -d
+podman compose -f tests/integration/compose.yaml up -d
     pytest tests/integration/test_focused_search.py
 """
 

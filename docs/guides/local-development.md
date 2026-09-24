@@ -1,151 +1,152 @@
 # Local Development
 
-Get MemoryHub's MCP server running on your machine for development and testing. No cluster access required.
+MemoryHub has two shipped editions and three useful development paths:
+
+1. **Personal edition** — SQLite-backed, no infrastructure, and stdio MCP.
+2. **Local full-stack mode** — the cluster edition's governed PostgreSQL stack
+   running on a laptop with Compose, an HTTP MCP server, and the dashboard UI.
+3. **Cluster edition** — the complete OpenShift deployment described in the
+   [cluster install guide](cluster-install.md).
+
+Local full-stack mode is a development mode of the cluster edition. It is not
+a third product edition.
 
 ## Prerequisites
 
-- Python 3.11+ (if you don't have it, `uv` will fetch it automatically)
+- Python 3.11+
 - Git
-- Podman (optional, for production-like PostgreSQL testing)
+- Docker Compose or Podman Compose
+- Node.js 20+ and npm when using the Vite development server
 
-## Quick start with uv (recommended)
+## Personal edition
 
-[uv](https://docs.astral.sh/uv/) handles Python version management, venv creation, and dependency installation in one tool. If you don't have Python 3.11, uv downloads it for you.
-
-```bash
-# Install uv if you don't have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-cd memory-hub-mcp
-uv venv --python 3.11
-uv pip install -r requirements.txt
-source .venv/bin/activate
-make run-local
-```
-
-## Quick start with venv
-
-If you already have Python 3.11+ and prefer not to use uv:
+Use the personal edition when you need a lightweight, single-user setup:
 
 ```bash
-cd memory-hub-mcp
-make install
-make run-local
+pip install "memoryhub[local]"
+claude mcp add memoryhub -- memoryhub mcp
 ```
 
-`make install` creates a `.venv` and installs dependencies. `make run-local` starts the server with `MCP_TRANSPORT=stdio` and hot-reload enabled. The server uses the compact tool profile by default (3 tools: `register_session`, `memory`, `thread`).
+This edition stores memories in SQLite and runs MCP over stdio. It does not
+start PostgreSQL, the dashboard, or the governed cluster services.
 
-The `dev-users.json` file ships two users:
+## Local full-stack mode
 
-| user_id | API key | Scopes |
-|---------|---------|--------|
-| `wjackson` | `mh-dev-a76811f5d871a3ee` | all five tiers |
-| `dev-test` | `mh-dev-test-01e80abf` | user, project |
-
-The server loads this file automatically when `MEMORYHUB_USERS_FILE` is set (which `make run-local` does via the `MCP_TRANSPORT=stdio` path in `src/main.py`). No database is needed for tool listing and basic auth testing; service-layer calls that touch PostgreSQL will fail until you set up a database (see "With PostgreSQL" below).
-
-## Testing with cmcp
-
-With the server running, open a second terminal:
+The root Makefile manages a persistent PostgreSQL + pgvector database, the MCP
+server in streamable-HTTP mode, and the dashboard BFF serving the built React
+frontend.
 
 ```bash
-cmcp ".venv/bin/python -m src.main" tools/list
+make local-install
 ```
 
-This lists all registered tools. To call a tool:
+The command:
+
+1. Creates the root Python environment when needed.
+2. Prepares the MCP and UI build contexts.
+3. Starts PostgreSQL with a persistent named volume.
+4. Runs the Alembic migrations.
+5. Builds and starts the MCP HTTP service.
+6. Builds and starts the UI BFF and frontend.
+
+The services are available at:
+
+| Service | URL |
+| --- | --- |
+| Dashboard | http://localhost:8080 |
+| MCP | http://localhost:18080/mcp/ |
+| PostgreSQL | localhost:5432 |
+
+After the first setup, use:
 
 ```bash
-cmcp ".venv/bin/python -m src.main" tools/call register_session \
-  '{"api_key": "mh-dev-a76811f5d871a3ee"}'
+make local-up
+make local-logs
+make local-down
 ```
 
-Install cmcp with `pip install cmcp` if you don't have it.
+`make local-down` removes the containers but preserves the
+`memoryhub-local-postgres` volume. Data therefore survives an up/down cycle.
 
-## Pointing Claude Code at the local server
+The local Compose file is `compose.yaml`. The stack uses the example user
+configuration at `memory-hub-mcp/dev-users.example.json`; it is suitable for
+development only.
 
-Add the server to your project's `.claude/settings.json` (or use `claude mcp add`):
-
-```json
-{
-  "mcpServers": {
-    "memoryhub-local": {
-      "command": "/path/to/memory-hub/memory-hub-mcp/.venv/bin/python",
-      "args": ["-m", "src.main"],
-      "cwd": "/path/to/memory-hub/memory-hub-mcp",
-      "env": {
-        "MCP_TRANSPORT": "stdio",
-        "MEMORYHUB_USERS_FILE": "/path/to/memory-hub/memory-hub-mcp/dev-users.json"
-      }
-    }
-  }
-}
-```
-
-Replace `/path/to/memory-hub` with your actual checkout path. Claude Code will start the server as a child process using STDIO transport.
-
-## Running tests
-
-The MCP server's test suite mocks the service layer and does not require a running database:
+When running the MCP process directly, copy the example file first if you want
+to use your own local API keys:
 
 ```bash
-cd memory-hub-mcp
-make test
+cp memory-hub-mcp/dev-users.example.json memory-hub-mcp/dev-users.json
 ```
 
-The server-side library tests (in the repo root) use an in-memory SQLite database:
+### Optional local auth service
+
+The default local stack does not require OAuth SSO. The dashboard remains
+usable without the auth service, while the Clients panel reports that auth is
+not configured.
+
+To start the optional auth container:
 
 ```bash
-cd memory-hub    # repo root
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest tests/ -q
+make local-auth-up
 ```
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for per-subproject test commands.
+This runs the auth migrations and starts the service at `http://localhost:18081`.
 
-## With PostgreSQL + pgvector
-
-For production-like testing where service-layer calls actually persist data, run PostgreSQL with pgvector in a Podman container:
+Valkey is also available as an optional Compose profile for queue and
+notification development:
 
 ```bash
-podman run -d --name memoryhub-pg \
-  -e POSTGRES_DB=memoryhub \
-  -e POSTGRES_USER=memoryhub \
-  -e POSTGRES_PASSWORD=devpassword \
-  -p 5432:5432 \
-  pgvector/pgvector:pg16
-
-# Wait for PostgreSQL to be ready
-podman exec memoryhub-pg pg_isready -U memoryhub
+podman compose --profile valkey -f compose.yaml up -d valkey
 ```
 
-Run Alembic migrations from the repo root:
+### Vite development mode
+
+For frontend development with hot reload, keep the local BFF running on port
+8080 and start Vite separately:
 
 ```bash
-cd memory-hub    # repo root
-source .venv/bin/activate
-export MEMORYHUB_DB_HOST=localhost MEMORYHUB_DB_PORT=5432
-export MEMORYHUB_DB_NAME=memoryhub MEMORYHUB_DB_USER=memoryhub
-export MEMORYHUB_DB_PASSWORD=devpassword
-alembic upgrade head
+cd memoryhub-ui/frontend
+npm install
+npm run dev
 ```
 
-Then start the MCP server with `run_local.py` (which wires up the database connection):
+Vite listens on port 3000 and proxies `/api` to the local BFF at
+`http://localhost:8080`.
+
+The default Compose UI service uses the pre-built frontend served by the BFF.
+This is the single-process mode used when no Vite development server is
+needed.
+
+### Local MCP HTTP mode without Compose
+
+The MCP project also exposes a direct local HTTP target:
 
 ```bash
 cd memory-hub-mcp
-export MEMORYHUB_DB_PASSWORD=devpassword
-.venv/bin/python run_local.py
+make run-local-http
 ```
 
-`run_local.py` sets `MEMORYHUB_DB_*` env vars pointing at localhost and loads `dev-users.json` for API key auth.
+Set the normal `MEMORYHUB_DB_*` variables first if the database is not being
+provided by the local Compose stack.
 
-To stop and remove the database container:
+## Integration tests
+
+The integration test Compose file remains intentionally ephemeral: it uses
+tmpfs for PostgreSQL and Valkey so test runs do not retain state.
 
 ```bash
-podman stop memoryhub-pg && podman rm memoryhub-pg
+podman compose -f tests/integration/compose.yaml up -d
+make test-integration
+podman compose -f tests/integration/compose.yaml down
 ```
 
-## With the full stack on OpenShift
+Use `docker compose` instead when Docker is the local container runtime.
+Development uses the persistent root `compose.yaml`; integration tests use a
+separate disposable database.
 
-For a complete deployment (MCP server, auth service, dashboard UI, PostgreSQL, MinIO, Valkey), see the cluster install section in the [README](../../README.md). The entry point is `make install` from the repo root. Most contributors do not need this -- local PostgreSQL testing covers the vast majority of development scenarios.
+## Cluster edition
+
+For the full OpenShift deployment, see the [cluster install guide](cluster-install.md).
+The cluster path includes PostgreSQL, MinIO, Valkey, embedding and reranker
+models, the auth service, the MCP server, and the dashboard UI.

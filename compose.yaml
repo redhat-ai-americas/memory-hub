@@ -1,0 +1,109 @@
+# Local development stack for the governed (PostgreSQL-backed) edition.
+#
+# The application build contexts are prepared by scripts/local-stack.sh before
+# Compose starts. This keeps the existing OpenShift build-context staging logic
+# as the source of truth for the MCP and UI images.
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg16
+    environment:
+      POSTGRES_DB: memoryhub
+      POSTGRES_USER: memoryhub
+      POSTGRES_PASSWORD: memoryhub-local
+    ports:
+      - "5432:5432"
+    volumes:
+      - memoryhub-local-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoryhub -d memoryhub"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  mcp:
+    build:
+      context: ./memory-hub-mcp/.build-context
+      dockerfile: Containerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MEMORYHUB_DB_HOST: postgres
+      MEMORYHUB_DB_PORT: 5432
+      MEMORYHUB_DB_NAME: memoryhub
+      MEMORYHUB_DB_USER: memoryhub
+      MEMORYHUB_DB_PASSWORD: memoryhub-local
+      MEMORYHUB_VALKEY_URL: redis://valkey:6379/0
+      MEMORYHUB_USERS_FILE: /config/dev-users.json
+      MCP_TRANSPORT: http
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: 8080
+      MCP_HTTP_PATH: /mcp/
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./memory-hub-mcp/dev-users.example.json:/config/dev-users.json:ro
+
+  ui:
+    build:
+      context: ./memoryhub-ui/.build-context
+      dockerfile: Containerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mcp:
+        condition: service_started
+    environment:
+      MEMORYHUB_DB_HOST: postgres
+      MEMORYHUB_DB_PORT: 5432
+      MEMORYHUB_DB_NAME: memoryhub
+      MEMORYHUB_DB_USER: memoryhub
+      MEMORYHUB_DB_PASSWORD: memoryhub-local
+      MEMORYHUB_MCP_SERVER_URL: http://mcp:8080/mcp/
+      MEMORYHUB_AUTH_SERVICE_URL: http://auth:8081
+      MEMORYHUB_ADMIN_KEY: memoryhub-local-admin
+      MEMORYHUB_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+
+  # Optional: start with `docker compose --profile auth up -d` or
+  # `podman compose --profile auth up -d`. The default local stack does not
+  # require OAuth SSO; this service is provided for Clients-panel development.
+  auth:
+    profiles: ["auth"]
+    build:
+      context: ./memoryhub-auth
+      dockerfile: Containerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AUTH_HOST: 0.0.0.0
+      AUTH_PORT: 8081
+      AUTH_DB_HOST: postgres
+      AUTH_DB_PORT: 5432
+      AUTH_DB_NAME: memoryhub
+      AUTH_DB_USER: memoryhub
+      AUTH_DB_PASSWORD: memoryhub-local
+      AUTH_ISSUER: http://localhost:18081
+      AUTH_ADMIN_KEY: memoryhub-local-admin
+      AUTH_TOKEN_EXCHANGE_ENABLED: "false"
+    ports:
+      - "18081:8081"
+
+  valkey:
+    profiles: ["valkey"]
+    image: docker.io/valkey/valkey:8.0-alpine
+    ports:
+      - "16379:6379"
+    volumes:
+      - memoryhub-local-valkey:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  memoryhub-local-postgres:
+  memoryhub-local-valkey:

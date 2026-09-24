@@ -186,7 +186,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR=$(mktemp -d)
 trap "rm -rf $BUILD_DIR" EXIT
 
-cp Containerfile requirements.txt "$BUILD_DIR/"
+cp Containerfile requirements.txt alembic.ini "$BUILD_DIR/"
+cp -R alembic "$BUILD_DIR/"
 cp conftest.py "$BUILD_DIR/" 2>/dev/null || true
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' --exclude='.mypy_cache' src/ "$BUILD_DIR/src/"
 

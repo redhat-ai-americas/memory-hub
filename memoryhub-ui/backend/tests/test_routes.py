@@ -741,6 +741,30 @@ _SAMPLE_CLIENT = {
 
 @pytest.mark.asyncio
 class TestClientEndpoints:
+    async def test_list_clients_degrades_when_auth_is_not_configured(self, test_settings):
+        local_settings = Settings(
+            db_host=test_settings.db_host,
+            db_port=test_settings.db_port,
+            db_name=test_settings.db_name,
+            db_user=test_settings.db_user,
+            db_password=test_settings.db_password,
+            embedding_url=test_settings.embedding_url,
+            mcp_server_url=test_settings.mcp_server_url,
+            auth_service_url="",
+            ui_tenant_id=test_settings.ui_tenant_id,
+        )
+        app.dependency_overrides[get_settings] = lambda: local_settings
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as ac:
+                response = await ac.get("/api/clients")
+
+            assert response.status_code == 503
+            assert "auth service is not configured" in response.json()["detail"]
+        finally:
+            app.dependency_overrides.clear()
+
     async def test_list_clients_returns_proxied_response(self, test_settings):
         upstream = _mock_httpx_response(200, [_SAMPLE_CLIENT])
         patcher, _ = _patch_admin_httpx(upstream)
