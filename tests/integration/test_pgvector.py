@@ -9,7 +9,7 @@ These tests exercise paths that SQLite cannot cover:
   - Graph relationship queries with PostgreSQL UUID handling
 
 Run these with the compose stack active:
-    podman-compose -f tests/integration/compose.yaml up -d
+podman compose -f tests/integration/compose.yaml up -d
     pytest tests/integration/test_pgvector.py
 """
 

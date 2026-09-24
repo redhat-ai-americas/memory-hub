@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.config import get_settings
 from src.routes import router
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,11 @@ FRONTEND_DIST = _default_dist if _default_dist.is_dir() else _local_dist
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
+    cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    if not cors_origins:
+        cors_origins = ["*"]
+
     app = FastAPI(
         title="MemoryHub UI BFF",
         description="Read-only BFF API for the MemoryHub dashboard",
@@ -31,9 +37,9 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins,
         allow_credentials=False,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 

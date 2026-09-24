@@ -9,3 +9,5 @@ cryptography
 bcrypt
 python-multipart
 httpx
+alembic
+psycopg2-binary

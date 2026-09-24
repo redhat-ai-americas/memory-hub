@@ -1,4 +1,4 @@
-.PHONY: help install uninstall dev check-prereqs test test-integration test-auth \
+.PHONY: help install uninstall dev local-install local-up local-down local-logs local-auth-up check-prereqs test test-integration test-auth \
         deploy-all deploy-db deploy-mcp deploy-auth deploy-ui deploy-tile \
         migrate clean-mcp clean-auth
 
@@ -24,6 +24,11 @@ help:
 	@echo ""
 	@echo "Local development:"
 	@echo "  make dev            - Set up .venv and install core + dev deps"
+	@echo "  make local-install  - Start the local PostgreSQL + MCP HTTP + UI stack"
+	@echo "  make local-up       - Start the existing local full stack"
+	@echo "  make local-down     - Stop the local stack and preserve its data volume"
+	@echo "  make local-logs     - Show local stack logs"
+	@echo "  make local-auth-up  - Start the optional local auth service"
 	@echo "  make test           - Run all tests (core + MCP server)"
 	@echo "  make test-integration - Run integration tests against real PostgreSQL"
 	@echo "  make test-auth      - Run auth service tests"
@@ -85,6 +90,21 @@ dev:
 	.venv/bin/pip install --upgrade pip
 	.venv/bin/pip install -e '.[dev]'
 	@echo "Activate with: source .venv/bin/activate"
+
+local-install:
+	scripts/local-stack.sh install
+
+local-up:
+	scripts/local-stack.sh up
+
+local-down:
+	scripts/local-stack.sh down
+
+local-logs:
+	scripts/local-stack.sh logs $(ARGS)
+
+local-auth-up:
+	scripts/local-stack.sh auth-up
 
 test:
 	.venv/bin/pytest tests/ -q -m "not integration"
