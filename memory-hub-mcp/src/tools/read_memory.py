@@ -229,6 +229,14 @@ async def read_memory(
 
         result = node.model_dump(mode="json")
 
+        # Taint metadata for untrusted/mixed upstream content (#563)
+        trust = getattr(node, "upstream_trust_level", "trusted")
+        if trust in ("untrusted", "mixed"):
+            result["taint"] = {
+                "tainted": True,
+                "sources": [getattr(node, "source", "agent")],
+            }
+
         # Hydrate S3 content when requested
         if hydrate and node.storage_type == "s3" and node.content_ref:
             s3 = get_s3_adapter()

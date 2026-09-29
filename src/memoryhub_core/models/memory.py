@@ -93,6 +93,11 @@ class MemoryNode(TimestampMixin, Base):
     # Provenance: what produced this memory (#349)
     source: Mapped[str] = mapped_column(String(20), nullable=False, server_default="agent")
 
+    # Trust level of upstream content that produced this memory (#559)
+    upstream_trust_level: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="trusted",
+    )
+
     # Content-addressed entity IDs for deduplication (#247)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -177,6 +182,7 @@ class MemoryNode(TimestampMixin, Base):
         Index("ix_memory_nodes_domains", "domains", postgresql_using="gin"),
         Index("ix_memory_nodes_search_vector", "search_vector", postgresql_using="gin"),
         Index("ix_memory_nodes_source", "source"),
+        Index("ix_memory_nodes_upstream_trust_level", "upstream_trust_level"),
         Index(
             "ix_memory_nodes_expires_at",
             "expires_at",
