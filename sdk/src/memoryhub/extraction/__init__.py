@@ -8,6 +8,7 @@ from memoryhub.extraction.extractors import (
     PreferenceExtractor,
     RelationshipExtractor,
 )
+from memoryhub.extraction.gates import DreamingGate, GateResult, GateThresholds
 from memoryhub.extraction.models import (
     CandidateMemory,
     ExtractionResult,
@@ -20,10 +21,13 @@ __all__ = [
     "CandidateMemory",
     "DecisionTraceExtractor",
     "DedupFilter",
+    "DreamingGate",
     "EntityExtractor",
     "ExtractionPipeline",
     "ExtractionResult",
     "Extractor",
+    "GateResult",
+    "GateThresholds",
     "PreferenceExtractor",
     "RelationshipExtractor",
     "TraceEvent",
