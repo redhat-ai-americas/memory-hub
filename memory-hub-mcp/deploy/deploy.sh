@@ -8,17 +8,15 @@
 # docs/admin and the retros first.
 #
 # Steps:
-#   1. Prepare build context (MCP server + memoryhub_core library)
-#   2. Create namespace if needed
-#   3. Apply manifests (configmap, secret, imagestream, buildconfig,
-#      deployment, service, route)
-#   4. Run a binary build from the staged context
-#   5. Force a rollout restart (the new image has the same :latest tag,
+#   1. Create namespace if needed
+#   2. Apply manifests (configmap, secret, deployment, service, route)
+#   3. Re-resolve the existing ImageStream tag to a concrete digest
+#   4. Force a rollout restart (the selected image has the same :latest tag,
 #      so without an explicit restart Kubernetes will not always pick up
 #      the new digest — this has bitten us repeatedly)
-#   6. Wait for deployment rollout
-#   7. Verify exactly one ready pod
-#   8. Print the route URL
+#   5. Wait for deployment rollout
+#   6. Verify exactly one ready pod
+#   7. Print the route URL
 set -euo pipefail
 
 NAMESPACE="memory-hub-mcp"
@@ -48,83 +46,7 @@ if ! oc whoami --context "$CONTEXT" &>/dev/null; then
     exit 1
 fi
 
-# Step 0: Preflight — tool registration sanity check.
-#
-# main.py uses static tool registration (the dynamic loader is not used —
-# see memory-hub-mcp/CLAUDE.md for the history). Every tool file in
-# src/tools/ must be both imported AND added to the mcp.add_tool list.
-# Forgetting either is a silent failure: the file deploys but the tool
-# does not appear in list_tools, with no error in the pod logs. This
-# bit us during the delete_memory work (see retrospectives/
-# 2026-04-06_memory-deletion-cli-client/RETRO.md).
-#
-# Catch it before building, not after deploying.
-echo ""
-echo "Preflight: tool registration check..."
-TOOLS_DIR="$PROJECT_ROOT/src/tools" \
-MAIN_PY="$PROJECT_ROOT/src/main.py" \
-python3 - <<'PYEOF' || exit 1
-import os, re, sys
-
-main_py = os.environ["MAIN_PY"]
-tools_dir = os.environ["TOOLS_DIR"]
-
-with open(main_py) as f:
-    src = f.read()
-
-# Files in src/tools/ that are tool implementations (exclude __init__,
-# private/dunder modules, and the known auth helper utility module).
-NON_TOOL_FILES = {"auth.py", "backfill_entities.py"}
-files = {
-    f[:-3]
-    for f in os.listdir(tools_dir)
-    if f.endswith(".py") and not f.startswith("_") and f not in NON_TOOL_FILES
-}
-
-# Tools imported into main.py via `from src.tools.NAME import NAME`.
-imports = set(re.findall(r"^from src\.tools\.([a-z_][a-z_0-9]*) import", src, re.M))
-
-# Tools registered — supports both the old single-list format:
-#   for tool_fn in [register_session, write_memory, ...]:
-# and the new profile-based format with _TOOLS_* lists:
-#   _TOOLS_COMPACT = [register_session, memory]
-#   _TOOLS_FULL = [register_session, write_memory, ...]
-loop = re.search(r"for tool_fn in \[(.*?)\]:", src, re.DOTALL)
-profile_lists = re.findall(r"_TOOLS_\w+\s*=\s*\[(.*?)\]", src, re.DOTALL)
-if not loop and not profile_lists:
-    sys.exit("ERROR: could not find tool registration list(s) in src/main.py")
-all_registered_text = (loop.group(1) if loop else "") + " ".join(profile_lists)
-registered = set(re.findall(r"[a-z_][a-z_0-9]*", all_registered_text))
-
-errors = []
-missing_imports = files - imports
-if missing_imports:
-    errors.append(f"  files NOT imported in main.py: {sorted(missing_imports)}")
-extra_imports = imports - files
-if extra_imports:
-    errors.append(f"  imports without a corresponding file: {sorted(extra_imports)}")
-missing_reg = files - registered
-if missing_reg:
-    errors.append(f"  files NOT in the mcp.add_tool list: {sorted(missing_reg)}")
-
-if errors:
-    print("ERROR: tool registration mismatch in src/main.py")
-    for line in errors:
-        print(line)
-    print()
-    print("The MCP server uses static tool registration. Every file in")
-    print("src/tools/ must be imported AND added to the mcp.add_tool list")
-    print("in src/main.py. See memory-hub-mcp/CLAUDE.md (Adding a new tool).")
-    sys.exit(1)
-
-print(f"OK: {len(files)} tools registered")
-PYEOF
-
-# Step 1: Prepare build context
-"$SCRIPT_DIR/build-context.sh"
-BUILD_DIR="$PROJECT_ROOT/.build-context"
-
-# Step 2: Create namespace
+# Step 1: Create namespace
 if oc get namespace --context "$CONTEXT" "$NAMESPACE" &>/dev/null; then
     echo "Using existing namespace: $NAMESPACE"
 else
@@ -132,7 +54,7 @@ else
     oc create namespace --context "$CONTEXT" "$NAMESPACE"
 fi
 
-# Step 3: Apply manifests
+# Step 2: Apply manifests
 echo ""
 echo "Applying manifests..."
 # users-configmap.yaml is per-operator and gitignored; it holds real api_keys.
@@ -244,12 +166,7 @@ fi
 
 apply_manifest
 
-# Step 4: Start binary build
-echo ""
-echo "Starting build..."
-oc start-build --context "$CONTEXT" "$DEPLOYMENT" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
-
-# Step 4.5: Re-resolve the :latest ImageStream tag.
+# Step 3: Re-resolve the :latest ImageStream tag.
 #
 # The Deployment uses `image: memory-hub-mcp:latest` and the
 # `alpha.image.policy.openshift.io/resolve-names` annotation. That annotation
@@ -266,17 +183,17 @@ echo ""
 echo "Re-applying manifest to re-resolve image digest..."
 apply_manifest
 
-# Step 5: Force rollout restart so the new image digest is picked up
+# Step 4: Force rollout restart so the selected image digest is picked up
 echo ""
 echo "Restarting rollout..."
 oc rollout restart --context "$CONTEXT" "deployment/$DEPLOYMENT" -n "$NAMESPACE"
 
-# Step 6: Wait for rollout
+# Step 5: Wait for rollout
 echo ""
 echo "Waiting for rollout..."
 oc rollout status --context "$CONTEXT" "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout=300s
 
-# Step 7: Verify single Deployment + one available replica.
+# Step 6: Verify single Deployment + one available replica.
 # Counting Running pods directly is unreliable: terminating pods stay in
 # Running phase until they exit, so right after a rollout you briefly see
 # 2 Running pods (new + terminating old). Check the Deployment status
@@ -308,9 +225,9 @@ else
     exit 1
 fi
 
-# Step 7.5: Verify the running pod is on the just-pushed digest (#88).
+# Step 6.5: Verify the running pod is on the selected digest (#88).
 # The Deployment spec carries the resolved digest after re-apply; the
-# imagestream's :latest tag carries the canonical "what was just pushed"
+# ImageStream's :latest tag carries the canonical selected image
 # digest. They MUST match. If they don't, the build pushed but the
 # Deployment is still pinned to an older digest, which is exactly the
 # failure family this verification closes.
@@ -335,7 +252,7 @@ if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ]; then
 fi
 echo "  OK: running digest matches imagestream :latest"
 
-# Step 8: Print route URL.
+# Step 7: Print route URL.
 #
 # Tool-count regression check is performed OUT-OF-BAND by the operator
 # via mcp-test-mcp after this script completes. mcp-test-mcp is itself an
@@ -365,6 +282,3 @@ else
     echo "ERROR: Could not retrieve route URL"
     exit 1
 fi
-
-# Cleanup build context
-rm -rf "$BUILD_DIR"

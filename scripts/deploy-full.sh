@@ -3,6 +3,7 @@
 # Usage: scripts/deploy-full.sh [--skip-prereqs] [--skip-data]
 #                                [--skip-migrations] [--skip-mcp] [--skip-auth]
 #                                [--skip-ui] [--skip-tile] [--skip-models] [--gpu-models]
+#                                [--skip-builds]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,6 +29,7 @@ SKIP_AUTH=false
 SKIP_UI=false
 SKIP_TILE=false
 SKIP_MODELS=false
+SKIP_BUILDS=false
 GPU_MODELS=false
 SKIP_SMOKE_TEST=false
 RESTORE_FROM=""
@@ -115,6 +117,7 @@ parse_args() {
             --skip-ui)         SKIP_UI=true ;;
             --skip-tile)       SKIP_TILE=true ;;
             --skip-models)     SKIP_MODELS=true ;;
+            --skip-builds)     SKIP_BUILDS=true ;;
             --gpu-models)      GPU_MODELS=true ;;
             --skip-smoke-test) SKIP_SMOKE_TEST=true ;;
             --restore-from)
@@ -139,6 +142,7 @@ parse_args() {
                 echo "  --skip-ui          Skip UI deployment"
                 echo "  --skip-tile        Skip RHOAI OdhApplication tile"
                 echo "  --skip-models      Skip embedding + reranker model deployment"
+                echo "  --skip-builds      Skip application image builds; use existing ImageStream images"
                 echo "  --gpu-models       Use GPU model manifests instead of CPU (default: CPU)"
                 echo "  --skip-smoke-test  Skip post-deploy write/search/read verification"
                 echo "  --restore-from F   Restore database from a pg_dump file after DB deploy"
@@ -207,6 +211,7 @@ preflight() {
     echo "    MinIO:       $([ "$SKIP_DATA" = true ] && echo "skip" || echo "deploy")"
     echo "    Valkey:      $([ "$SKIP_MCP" = true ] && echo "skip" || echo "deploy")"
     echo "    Models:      $([ "$SKIP_MODELS" = true ] && echo "skip" || ([ "$GPU_MODELS" = true ] && echo "deploy (GPU)" || echo "deploy (CPU)"))"
+    echo "    Builds:      $([ "$SKIP_BUILDS" = true ] && echo "skip" || echo "build")"
     echo "    Auth server: $([ "$SKIP_AUTH" = true ] && echo "skip" || echo "deploy")"
     echo "    UI:          $([ "$SKIP_UI" = true ] && echo "skip" || echo "deploy")"
     echo "    RHOAI tile:  $([ "$SKIP_TILE" = true ] && echo "skip" || echo "apply (if RHOAI installed)")"
@@ -493,6 +498,36 @@ deploy_retention_cronjob() {
 }
 
 # ---------------------------------------------------------------------------
+# Section 3e: Application image builds
+# ---------------------------------------------------------------------------
+build_components() {
+    banner "3e. Application Image Builds"
+
+    if [ "$SKIP_BUILDS" = true ]; then
+        skipped "Application image builds (--skip-builds)"
+        return 0
+    fi
+
+    if [ "$SKIP_MCP" = false ]; then
+        info "Building MCP server image..."
+        bash "$REPO_ROOT/memory-hub-mcp/deploy/build.sh"
+    fi
+
+    if [ "$SKIP_AUTH" = false ]; then
+        info "Building auth server image..."
+        bash "$REPO_ROOT/memoryhub-auth/build.sh" "$AUTH_PROJECT"
+    fi
+
+    if [ "$SKIP_UI" = false ]; then
+        info "Building UI image..."
+        bash "$REPO_ROOT/memoryhub-ui/deploy/build.sh"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}Application image builds complete${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # Section 4: MCP Server
 # ---------------------------------------------------------------------------
 deploy_mcp() {
@@ -503,7 +538,7 @@ deploy_mcp() {
         return 0
     fi
 
-    info "Building and deploying MCP server (project: $MCP_PROJECT)..."
+    info "Deploying MCP server (project: $MCP_PROJECT)..."
     pushd "$REPO_ROOT/memory-hub-mcp" > /dev/null
     make deploy PROJECT="$MCP_PROJECT"
     popd > /dev/null
@@ -605,7 +640,7 @@ print(f'  Generated {len(clients)} OAuth clients from users ConfigMap.')
     fi
     "$REPO_ROOT/scripts/run-seed-oauth-clients.sh"
 
-    info "Building and deploying Auth server (project: $AUTH_PROJECT)..."
+    info "Deploying Auth server (project: $AUTH_PROJECT)..."
     pushd "$REPO_ROOT/memoryhub-auth" > /dev/null
     if [ ! -d .venv ] || ! .venv/bin/alembic --version &>/dev/null; then
         info "Creating memoryhub-auth .venv..."
@@ -938,10 +973,11 @@ main() {
     deploy_models             # Embedding + Reranker before MCP
     deploy_retention_cronjob  # Retention sweep after DB
     prepare_auth_infra        # Secrets before auth
+    prepare_ui_infra          # Namespace and Secrets before UI image/deploy
+    build_components          # Build images unless --skip-builds was supplied
     deploy_auth               # Auth BEFORE MCP (so auth route exists)
     deploy_mcp                # MCP (auth route now available for JWKS URL)
     configure_local_client    # Write API key for CLI/SDK
-    prepare_ui_infra          # SA + Secrets before UI
     deploy_ui
     print_summary
     smoke_test

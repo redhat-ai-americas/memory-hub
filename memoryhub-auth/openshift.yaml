@@ -1,29 +1,4 @@
 ---
-apiVersion: build.openshift.io/v1
-kind: BuildConfig
-metadata:
-  name: auth-server
-spec:
-  runPolicy: Serial
-  output:
-    to:
-      kind: ImageStreamTag
-      name: auth-server:latest
-  source:
-    type: Binary
-    binary: {}
-  strategy:
-    type: Docker
-    dockerStrategy:
-      dockerfilePath: Containerfile
-      noCache: true
-  triggers: []
----
-apiVersion: image.openshift.io/v1
-kind: ImageStream
-metadata:
-  name: auth-server
----
 # Secrets are managed out-of-band by deploy.sh, NOT defined in this manifest.
 # This is intentional: the manifest must be safe to `oc apply -f openshift.yaml`
 # repeatedly without clobbering generated values.

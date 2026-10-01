@@ -4,18 +4,16 @@
 # Conforms to docs/build-deploy-hardening.md (#88).
 #
 # Steps:
-#   1. Prepare build context (frontend + backend + memoryhub_core)
-#   2. Ensure namespace exists
-#   3. Apply manifests (imagestream, buildconfig, deployment, service, route)
-#   4. Run binary build from the staged context
-#   5. Re-apply manifest to re-resolve the imagestream tag against the
-#      just-pushed digest (resolve-names rewrites at apply time, not pod
+#   1. Ensure namespace exists
+#   2. Apply manifests (deployment, service, route)
+#   3. Re-apply manifest to re-resolve the ImageStream tag against the
+#      selected digest (resolve-names rewrites at apply time, not pod
 #      creation time -- see retro #18)
-#   6. Force rollout restart so the new digest takes effect even when the
+#   4. Force rollout restart so the selected digest takes effect even when the
 #      manifest is byte-identical
-#   7. Wait for rollout
-#   8. Verify the running pod is on the just-pushed digest (fail if not)
-#   9. Print the route URL
+#   5. Wait for rollout
+#   6. Verify the running pod is on the selected digest (fail if not)
+#   7. Print the route URL
 set -euo pipefail
 
 NAMESPACE="${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}"
@@ -45,11 +43,7 @@ if ! oc whoami --context "$CONTEXT" &>/dev/null; then
     exit 1
 fi
 
-# Step 1: Prepare build context
-"$SCRIPT_DIR/build-context.sh"
-BUILD_DIR="$PROJECT_ROOT/.build-context"
-
-# Step 2: Ensure namespace exists
+# Step 1: Ensure namespace exists
 if oc get namespace "$NAMESPACE" --context "$CONTEXT" &>/dev/null; then
     echo "Using existing namespace: $NAMESPACE"
 else
@@ -57,18 +51,13 @@ else
     oc create namespace "$NAMESPACE" --context "$CONTEXT"
 fi
 
-# Step 3: Apply manifests
+# Step 2: Apply manifests
 echo ""
 echo "Applying manifests..."
 oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
 
-# Step 4: Start binary build
-echo ""
-echo "Starting build..."
-oc start-build "$IMAGESTREAM" --context "$CONTEXT" --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
-
-# Step 5: Re-apply manifest to re-resolve the :latest imagestream tag
-# against the digest the build just pushed. The Deployment carries
+# Step 3: Re-apply manifest to re-resolve the :latest ImageStream tag
+# against the selected digest. The Deployment carries
 # `alpha.image.policy.openshift.io/resolve-names: '*'`, which rewrites the
 # tag to a concrete digest at apply time and never re-resolves on its own.
 # Without this re-apply, the next rollout restart would spin up a pod on
@@ -77,7 +66,7 @@ echo ""
 echo "Re-applying manifest to re-resolve image digest..."
 oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
 
-# Step 5b: Populate the public-facing route URLs used by the Client
+# Step 3b: Populate the public-facing route URLs used by the Client
 # Management welcome-email renderer. The openshift.yaml manifest ships
 # with example.com placeholders so the UI renders an obviously wrong URL
 # if this step is skipped; real values come from the actual cluster Routes.
@@ -123,19 +112,19 @@ else
     echo "  auth-server are deployed."
 fi
 
-# Step 6: Force rollout restart so the new image digest is picked up.
+# Step 4: Force rollout restart so the selected image digest is picked up.
 echo ""
 echo "Restarting rollout..."
 oc rollout restart "deployment/$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE"
 
-# Step 7: Wait for rollout
+# Step 5: Wait for rollout
 echo ""
 echo "Waiting for rollout..."
 oc rollout status "deployment/$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" --timeout=300s
 
-# Step 8: Verify the running pod is on the just-pushed digest.
+# Step 6: Verify the running pod is on the selected digest.
 # The Deployment spec carries the resolved digest after re-apply; the
-# imagestream's :latest tag carries the canonical "what was just pushed"
+# ImageStream's :latest tag carries the canonical selected image
 # digest. They MUST match. If they don't, the build pushed but the
 # Deployment is still pinned to an older digest, which is exactly the
 # failure family #88 closes.
@@ -162,7 +151,7 @@ if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ]; then
 fi
 echo "  OK: running digest matches imagestream :latest"
 
-# Steps 9-10: RHOAI dashboard integration (proxy route + tile).
+# Steps 7-8: RHOAI dashboard integration (proxy route + tile).
 # Skipped when RHOAI is not installed or --skip-tile is passed.
 if [ "$SKIP_TILE" = true ]; then
     echo ""
@@ -249,7 +238,7 @@ else
     echo "RHOAI not installed ($RHOAI_NS namespace not found) — skipping proxy route and tile."
 fi
 
-# Step 11: Print route URL
+# Step 9: Print route URL
 ROUTE=$(oc get route "$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 echo ""
 echo "=== Deployment Complete ==="
@@ -258,6 +247,3 @@ if [ -n "$ROUTE" ]; then
 else
     echo "Warning: Could not retrieve route URL"
 fi
-
-# Cleanup build context
-rm -rf "$BUILD_DIR"

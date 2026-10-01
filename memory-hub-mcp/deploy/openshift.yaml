@@ -1,29 +1,4 @@
 ---
-apiVersion: build.openshift.io/v1
-kind: BuildConfig
-metadata:
-  name: memory-hub-mcp
-spec:
-  runPolicy: Serial
-  output:
-    to:
-      kind: ImageStreamTag
-      name: memory-hub-mcp:latest
-  source:
-    type: Binary
-    binary: {}
-  strategy:
-    type: Docker
-    dockerStrategy:
-      dockerfilePath: Containerfile
-      noCache: true
-  triggers: []
----
-apiVersion: image.openshift.io/v1
-kind: ImageStream
-metadata:
-  name: memory-hub-mcp
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
