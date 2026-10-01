@@ -11,6 +11,25 @@ MemoryHub has two shipped editions and three useful development paths:
 Local full-stack mode is a development mode of the cluster edition. It is not
 a third product edition.
 
+## Feature comparison
+
+| Component or feature | Personal edition | Local full-stack mode | Cluster edition |
+| --- | --- | --- | --- |
+| Database | SQLite | PostgreSQL + pgvector | PostgreSQL + pgvector |
+| MCP transport | stdio | Streamable HTTP | Streamable HTTP |
+| Dashboard UI | No | Yes | Yes |
+| Authentication and multi-tenancy | No | Optional local auth; single local stack | Yes |
+| MinIO object storage | No | No | Yes |
+| Valkey queues and notifications | No | Optional Compose profile | Yes |
+| Embedding model | Local ONNX model | Not included in the local stack | Cluster model service |
+| Reranker model | No | Not included in the local stack | Cluster model service |
+| OpenShift deployment | No | No | Yes |
+
+The local Compose defaults are intended for development only. To override the
+database password or admin keys, export `MEMORYHUB_DB_PASSWORD`,
+`MEMORYHUB_ADMIN_KEY`, or `AUTH_ADMIN_KEY` before running `make local-install`
+or `make local-auth-up`.
+
 ## Prerequisites
 
 - Python 3.11+

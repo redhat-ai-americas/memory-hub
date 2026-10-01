@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_DB: memoryhub
       POSTGRES_USER: memoryhub
-      POSTGRES_PASSWORD: memoryhub-local
+      POSTGRES_PASSWORD: ${MEMORYHUB_DB_PASSWORD:-memoryhub-local}
     ports:
       - "5432:5432"
     volumes:
@@ -32,7 +32,7 @@ services:
       MEMORYHUB_DB_PORT: 5432
       MEMORYHUB_DB_NAME: memoryhub
       MEMORYHUB_DB_USER: memoryhub
-      MEMORYHUB_DB_PASSWORD: memoryhub-local
+      MEMORYHUB_DB_PASSWORD: ${MEMORYHUB_DB_PASSWORD:-memoryhub-local}
       MEMORYHUB_VALKEY_URL: redis://valkey:6379/0
       MEMORYHUB_USERS_FILE: /config/dev-users.json
       MCP_TRANSPORT: http
@@ -58,10 +58,10 @@ services:
       MEMORYHUB_DB_PORT: 5432
       MEMORYHUB_DB_NAME: memoryhub
       MEMORYHUB_DB_USER: memoryhub
-      MEMORYHUB_DB_PASSWORD: memoryhub-local
+      MEMORYHUB_DB_PASSWORD: ${MEMORYHUB_DB_PASSWORD:-memoryhub-local}
       MEMORYHUB_MCP_SERVER_URL: http://mcp:8080/mcp/
       MEMORYHUB_AUTH_SERVICE_URL: http://auth:8081
-      MEMORYHUB_ADMIN_KEY: memoryhub-local-admin
+      MEMORYHUB_ADMIN_KEY: ${MEMORYHUB_ADMIN_KEY:-memoryhub-local-admin}
       MEMORYHUB_CORS_ORIGINS: http://localhost:3000
     ports:
       - "8080:8080"
@@ -84,9 +84,9 @@ services:
       AUTH_DB_PORT: 5432
       AUTH_DB_NAME: memoryhub
       AUTH_DB_USER: memoryhub
-      AUTH_DB_PASSWORD: memoryhub-local
+      AUTH_DB_PASSWORD: ${MEMORYHUB_DB_PASSWORD:-memoryhub-local}
       AUTH_ISSUER: http://localhost:18081
-      AUTH_ADMIN_KEY: memoryhub-local-admin
+      AUTH_ADMIN_KEY: ${AUTH_ADMIN_KEY:-memoryhub-local-admin}
       AUTH_TOKEN_EXCHANGE_ENABLED: "false"
     ports:
       - "18081:8081"

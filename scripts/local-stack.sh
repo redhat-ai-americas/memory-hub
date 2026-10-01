@@ -60,11 +60,13 @@ wait_for_postgres() {
 }
 
 run_migrations() {
+    local db_password="${MEMORYHUB_DB_PASSWORD:-memoryhub-local}"
+
     MEMORYHUB_DB_HOST=localhost \
     MEMORYHUB_DB_PORT=5432 \
     MEMORYHUB_DB_NAME=memoryhub \
     MEMORYHUB_DB_USER=memoryhub \
-    MEMORYHUB_DB_PASSWORD=memoryhub-local \
+    MEMORYHUB_DB_PASSWORD="$db_password" \
         "$REPO_ROOT/.venv/bin/alembic" -c "$REPO_ROOT/alembic.ini" upgrade head
 }
 
