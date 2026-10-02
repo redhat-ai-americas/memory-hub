@@ -1,4 +1,4 @@
-.PHONY: install run-local test test-local deploy clean help
+.PHONY: install run-local run-local-http test test-local deploy clean help
 
 # Variables
 VENV ?= .venv
@@ -16,6 +16,7 @@ help:
 	@echo "Local Development:"
 	@echo "  make install     - Install dependencies"
 	@echo "  make run-local   - Run server locally (STDIO mode)"
+	@echo "  make run-local-http - Run server locally over streamable HTTP"
 	@echo "  make test-local  - Test with cmcp locally"
 	@echo "  make test        - Run pytest suite"
 	@echo ""
@@ -38,6 +39,11 @@ run-local: install
 	@echo "Starting MCP server in STDIO mode..."
 	@echo "Test with: cmcp '$(VENV)/bin/python -m src.main' tools/list"
 	MCP_TRANSPORT=stdio MCP_HOT_RELOAD=1 $(VENV)/bin/python -m src.main
+
+# Run locally over streamable HTTP for the dashboard and SDK development.
+run-local-http: install
+	@echo "Starting MCP server in streamable HTTP mode on http://localhost:8080/mcp/..."
+	MCP_TRANSPORT=http MCP_HTTP_HOST=0.0.0.0 MCP_HTTP_PORT=8080 MCP_HTTP_PATH=/mcp/ $(VENV)/bin/python run_local.py
 
 # Test locally with cmcp
 test-local:

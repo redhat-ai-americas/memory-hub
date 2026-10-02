@@ -1,6 +1,6 @@
 # MemoryHub Edition Comparison
 
-MemoryHub ships in two editions. The **personal edition** (`memoryhub-local`) runs entirely on your laptop with no infrastructure. The **cluster edition** deploys to OpenShift with PostgreSQL, multi-tenant auth, and horizontal scaling. Both editions expose the same MCP tool surface -- agents cannot tell which one they're talking to.
+MemoryHub ships in two editions. The **personal edition** (`memoryhub-local`) runs entirely on your laptop with no infrastructure. The **cluster edition** deploys to OpenShift with PostgreSQL, multi-tenant auth, and horizontal scaling. The cluster edition also has a local full-stack development mode (`make local-install`) that runs PostgreSQL, the HTTP MCP server, and the dashboard with Compose; this is not a third edition. Both shipped editions expose the same MCP tool surface -- agents cannot tell which one they're talking to.
 
 ## Storage and Search
 

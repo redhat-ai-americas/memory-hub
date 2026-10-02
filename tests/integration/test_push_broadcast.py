@@ -5,7 +5,7 @@ focus vector storage, cosine-filtered delivery, and queue roundtrip. They
 exercise the mock-vs-real boundary that unit tests with fakeredis cannot cover.
 
 Run with the compose stack active:
-    podman-compose -f tests/integration/compose.yaml up -d
+podman compose -f tests/integration/compose.yaml up -d
     pytest tests/integration/test_push_broadcast.py
 """
 

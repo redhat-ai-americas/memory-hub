@@ -122,8 +122,7 @@ tools, instructions = _PROFILE_MAP[TOOL_PROFILE]
 async def lifespan(server):
     from src.tools._deps import get_embedding_service
     svc = get_embedding_service()
-    if hasattr(svc, "initialize"):
-        await svc.initialize()
+    await svc.initialize()
     yield {}
 
 
