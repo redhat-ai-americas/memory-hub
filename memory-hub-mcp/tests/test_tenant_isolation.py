@@ -313,7 +313,7 @@ async def test_write_as_a_read_as_b_returns_not_found():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -383,7 +383,7 @@ async def test_same_tenant_write_read_roundtrip_works():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -461,7 +461,7 @@ async def test_search_as_b_does_not_see_a_memories():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -562,7 +562,7 @@ async def test_search_as_a_finds_own_memories():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -663,7 +663,7 @@ async def test_update_as_b_fails_on_tenant_a_memory():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -733,7 +733,7 @@ async def test_update_as_same_tenant_succeeds():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -838,7 +838,7 @@ async def test_delete_as_b_fails_on_tenant_a_memory():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -930,7 +930,7 @@ async def test_get_memory_history_as_b_fails_on_tenant_a_memory():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1000,7 +1000,7 @@ async def test_get_memory_history_same_tenant_succeeds():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1084,7 +1084,7 @@ async def test_get_relationships_cross_tenant_returns_not_found():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1166,7 +1166,7 @@ async def test_get_relationships_same_tenant_returns_edges():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1286,7 +1286,7 @@ async def test_get_similar_memories_cross_tenant_returns_not_found():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1364,7 +1364,7 @@ async def test_get_similar_memories_does_not_see_cross_tenant_candidates():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1403,7 +1403,7 @@ async def test_get_similar_memories_does_not_see_cross_tenant_candidates():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1500,7 +1500,7 @@ async def test_report_contradiction_cross_tenant_fails():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1580,7 +1580,7 @@ async def test_report_contradiction_same_tenant_succeeds():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
@@ -1770,7 +1770,7 @@ async def test_cross_tenant_error_does_not_mention_tenant():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=512),
         ),
         patch("src.tools.write_memory.create_memory", new=fake_create),
         patch(
