@@ -36,8 +36,12 @@ dev = [
     "ruff",
     "aiosqlite",
     "greenlet",
-    "fakeredis>=2.20",
+    # 2.39 is the first release whose decode_responses=True reaches dict-shaped
+    # replies. Under redis-py 8 and fakeredis < 2.39, HGETALL comes back with
+    # bytes keys while GET decodes fine, so hash assertions fail with KeyError.
+    "fakeredis>=2.39",
     "memoryhub-local>=0.1.0",
+    "pytest-timeout",
 ]
 
 [tool.setuptools.packages.find]
