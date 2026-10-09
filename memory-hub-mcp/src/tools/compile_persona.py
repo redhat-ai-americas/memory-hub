@@ -22,7 +22,7 @@ from pydantic import Field
 
 from memoryhub_core.services.persona import compile_persona_synopsis
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context
+from src.core.authz import AuthenticationError, get_claims_from_context
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session
 
 logger = logging.getLogger(__name__)
@@ -70,9 +70,10 @@ async def compile_persona(
 
     Returns: synopsis content, version, fact count, pin count, and provenance metadata.
     """
-    claims = get_claims_from_context(ctx)
-    if claims is None:
-        raise ToolError("Not authenticated. Call register_session first.")
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc)) from exc
 
     resolved_user_id = user_id or claims.get("sub")
     if not resolved_user_id:

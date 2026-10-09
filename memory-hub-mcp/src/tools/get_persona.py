@@ -21,7 +21,7 @@ from pydantic import Field
 
 from memoryhub_core.services.persona import get_current_synopsis, get_persona_status
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context
+from src.core.authz import AuthenticationError, get_claims_from_context
 from src.tools._deps import get_db_session, release_db_session
 
 logger = logging.getLogger(__name__)
@@ -70,9 +70,10 @@ async def get_persona(
     Returns synopsis=None when no profile has been compiled yet.
     Run: memoryhub persona compile --user <id>
     """
-    claims = get_claims_from_context(ctx)
-    if claims is None:
-        raise ToolError("Not authenticated. Call register_session first.")
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc)) from exc
 
     resolved_user_id = user_id or claims.get("sub")
     if not resolved_user_id:

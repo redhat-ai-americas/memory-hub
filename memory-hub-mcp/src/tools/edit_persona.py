@@ -16,9 +16,9 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from memoryhub_core.services.persona import add_user_pin, get_user_pins
+from memoryhub_core.services.persona import add_user_pin, get_current_synopsis, get_user_pins
 from src.core.app import mcp
-from src.core.authz import get_claims_from_context
+from src.core.authz import AuthenticationError, get_claims_from_context
 from src.tools._deps import get_db_session, release_db_session
 
 logger = logging.getLogger(__name__)
@@ -65,9 +65,10 @@ async def edit_persona(
     Call compile_persona() to incorporate it immediately, or wait for the
     next scheduled compile.
     """
-    claims = get_claims_from_context(ctx)
-    if claims is None:
-        raise ToolError("Not authenticated. Call register_session first.")
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc)) from exc
 
     resolved_user_id = user_id or claims.get("sub")
     if not resolved_user_id:
@@ -83,10 +84,13 @@ async def edit_persona(
         session, gen = await get_db_session()
 
         if action == "list_pins":
-            pins = await get_user_pins(resolved_user_id, tenant_id, session)
+            current = await get_current_synopsis(resolved_user_id, tenant_id, session)
+            synopsis_id = current.id if current is not None else None
+            pins = await get_user_pins(resolved_user_id, tenant_id, session, synopsis_id=synopsis_id)
             return {
                 "pins": pins,
                 "user_id": resolved_user_id,
+                "synopsis_id": str(synopsis_id) if synopsis_id else None,
                 "count": len(pins),
             }
 

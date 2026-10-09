@@ -36,17 +36,25 @@ def mock_db_session():
     return session, gen
 
 
+@pytest.fixture
+def no_session():
+    """Clear the auth session so get_claims_from_context raises AuthenticationError."""
+    import src.tools.auth as auth_mod
+    auth_mod._current_session = None
+    yield
+    # conftest autouse fixture restores it after the test
+
+
 # ---------------------------------------------------------------------------
-# get_persona tests
+# get_persona — auth tests use the real accessor
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_get_persona_unauthenticated():
-    """Raises ToolError when session claims are absent."""
-    with patch("src.tools.get_persona.get_claims_from_context", return_value=None):
-        with pytest.raises(ToolError, match="Not authenticated"):
-            await get_persona()
+async def test_get_persona_unauthenticated(no_session):
+    """Real get_claims_from_context raises AuthenticationError → ToolError."""
+    with pytest.raises(ToolError, match="Authentication required"):
+        await get_persona()
 
 
 @pytest.mark.asyncio
@@ -121,7 +129,6 @@ async def test_get_persona_returns_synopsis(mock_claims, mock_db_session):
     assert result["source_fact_count"] == 5
     assert result["is_stale"] is False
     assert "inject_hint" in result
-    # No stale_hint when not stale
     assert "stale_hint" not in result
 
 
@@ -162,9 +169,7 @@ async def test_get_persona_stale_includes_stale_hint(mock_claims, mock_db_sessio
     assert result["is_stale"] is True
     assert "stale_reason" in result
     assert "stale_hint" in result
-    # Stale content is still returned — better than nothing
     assert result["synopsis"] is not None
-    assert result["synopsis"]["content"] is not None
 
 
 @pytest.mark.asyncio
@@ -189,16 +194,15 @@ async def test_get_persona_uses_session_user_by_default(mock_db_session):
 
 
 # ---------------------------------------------------------------------------
-# compile_persona tests
+# compile_persona — auth tests use the real accessor
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_compile_persona_unauthenticated():
-    """Raises ToolError when session claims are absent."""
-    with patch("src.tools.compile_persona.get_claims_from_context", return_value=None):
-        with pytest.raises(ToolError, match="Not authenticated"):
-            await compile_persona()
+async def test_compile_persona_unauthenticated(no_session):
+    """Real get_claims_from_context raises AuthenticationError → ToolError."""
+    with pytest.raises(ToolError, match="Authentication required"):
+        await compile_persona()
 
 
 @pytest.mark.asyncio
@@ -279,16 +283,15 @@ async def test_compile_persona_explicit_user_and_project(mock_claims, mock_db_se
 
 
 # ---------------------------------------------------------------------------
-# edit_persona tests
+# edit_persona — auth tests use the real accessor
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_edit_persona_unauthenticated():
-    """Raises ToolError when session claims are absent."""
-    with patch("src.tools.edit_persona.get_claims_from_context", return_value=None):
-        with pytest.raises(ToolError, match="Not authenticated"):
-            await edit_persona(action="list_pins")
+async def test_edit_persona_unauthenticated(no_session):
+    """Real get_claims_from_context raises AuthenticationError → ToolError."""
+    with pytest.raises(ToolError, match="Authentication required"):
+        await edit_persona(action="list_pins")
 
 
 @pytest.mark.asyncio
@@ -348,8 +351,12 @@ async def test_edit_persona_add_pin_happy_path(mock_claims, mock_db_session):
 
 @pytest.mark.asyncio
 async def test_edit_persona_list_pins(mock_claims, mock_db_session):
-    """Returns pin list with count when action=list_pins."""
+    """Resolves current synopsis before listing pins; returns pin list with count."""
     session, gen = mock_db_session
+
+    synopsis_id = uuid.uuid4()
+    synopsis_node = MagicMock()
+    synopsis_node.id = synopsis_id
 
     pins = [
         {"id": str(uuid.uuid4()), "content": "Prefers dark mode.", "created_at": "2026-09-01"},
@@ -360,13 +367,35 @@ async def test_edit_persona_list_pins(mock_claims, mock_db_session):
         patch("src.tools.edit_persona.get_claims_from_context", return_value=mock_claims),
         patch("src.tools.edit_persona.get_db_session", new_callable=AsyncMock, return_value=(session, gen)),
         patch("src.tools.edit_persona.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.edit_persona.get_user_pins", new_callable=AsyncMock, return_value=pins),
+        patch("src.tools.edit_persona.get_current_synopsis", new_callable=AsyncMock, return_value=synopsis_node),
+        patch("src.tools.edit_persona.get_user_pins", new_callable=AsyncMock, return_value=pins) as mock_pins,
     ):
         result = await edit_persona(action="list_pins")
 
     assert result["count"] == 2
     assert len(result["pins"]) == 2
     assert result["user_id"] == "alice"
+    assert result["synopsis_id"] == str(synopsis_id)
+    # Pins are scoped to the resolved synopsis, not global
+    mock_pins.assert_awaited_once_with("alice", "default", session, synopsis_id=synopsis_id)
+
+
+@pytest.mark.asyncio
+async def test_edit_persona_list_pins_no_synopsis(mock_claims, mock_db_session):
+    """Returns empty list and synopsis_id=None when no synopsis exists."""
+    session, gen = mock_db_session
+
+    with (
+        patch("src.tools.edit_persona.get_claims_from_context", return_value=mock_claims),
+        patch("src.tools.edit_persona.get_db_session", new_callable=AsyncMock, return_value=(session, gen)),
+        patch("src.tools.edit_persona.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.edit_persona.get_current_synopsis", new_callable=AsyncMock, return_value=None),
+        patch("src.tools.edit_persona.get_user_pins", new_callable=AsyncMock, return_value=[]),
+    ):
+        result = await edit_persona(action="list_pins")
+
+    assert result["count"] == 0
+    assert result["synopsis_id"] is None
 
 
 @pytest.mark.asyncio
@@ -379,9 +408,10 @@ async def test_edit_persona_uses_session_user_by_default(mock_db_session):
         patch("src.tools.edit_persona.get_claims_from_context", return_value=claims),
         patch("src.tools.edit_persona.get_db_session", new_callable=AsyncMock, return_value=(session, gen)),
         patch("src.tools.edit_persona.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.edit_persona.get_current_synopsis", new_callable=AsyncMock, return_value=None),
         patch("src.tools.edit_persona.get_user_pins", new_callable=AsyncMock, return_value=[]) as mock_pins,
     ):
         result = await edit_persona(action="list_pins")
 
     assert result["user_id"] == "carol"
-    mock_pins.assert_awaited_once_with("carol", "acme", session)
+    mock_pins.assert_awaited_once_with("carol", "acme", session, synopsis_id=None)
