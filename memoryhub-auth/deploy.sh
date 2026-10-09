@@ -180,7 +180,27 @@ echo "  Migrations complete."
 echo "→ Applying OpenShift resources..."
 apply_manifest
 
-# Resolve AUTH_ISSUER_URL now that the Route exists (created by the first apply).
+
+# Build
+echo "→ Building container image..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR=$(mktemp -d)
+trap "rm -rf $BUILD_DIR" EXIT
+
+cp Containerfile requirements.txt alembic.ini "$BUILD_DIR/"
+cp -R alembic "$BUILD_DIR/"
+cp conftest.py "$BUILD_DIR/" 2>/dev/null || true
+rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' --exclude='.mypy_cache' src/ "$BUILD_DIR/src/"
+
+# Fix permissions
+FIXED_COUNT=$(find "$BUILD_DIR" -name "*.py" -perm 600 2>/dev/null | wc -l | tr -d ' ')
+if [ "$FIXED_COUNT" -gt "0" ]; then
+    echo "  Fixing $FIXED_COUNT file(s) with 600 permissions..."
+    find "$BUILD_DIR" -name "*.py" -perm 600 -exec chmod 644 {} \;
+fi
+
+oc start-build --context "$CONTEXT" auth-server --from-dir="$BUILD_DIR" --follow -n "$PROJECT"
+
 ROUTE_HOST=$(oc get route --context "$CONTEXT" auth-server -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 if [ -n "$ROUTE_HOST" ]; then
     AUTH_ISSUER_URL="https://${ROUTE_HOST}"

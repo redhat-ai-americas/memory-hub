@@ -557,8 +557,7 @@ const CurationRules: React.FC = () => {
                         id="edit-rule-enabled"
                         isChecked={editEnabled}
                         onChange={(_e, checked) => setEditEnabled(checked)}
-                        label="Enabled"
-                        labelOff="Disabled"
+                        label={editEnabled ? "Enabled" : "Disabled"}
                       />
                     </FormGroup>
                     <FormGroup label="Override" fieldId="edit-rule-override">
@@ -566,8 +565,7 @@ const CurationRules: React.FC = () => {
                         id="edit-rule-override"
                         isChecked={editOverride}
                         onChange={(_e, checked) => setEditOverride(checked)}
-                        label="Can override higher-layer rules"
-                        labelOff="Cannot override"
+                        label={editOverride ? "Can override higher-layer rules" : "Cannot override"}
                       />
                     </FormGroup>
                   </Form>

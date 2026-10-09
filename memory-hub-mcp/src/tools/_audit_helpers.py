@@ -6,7 +6,9 @@ falls back to the stub logger if DB is unavailable.
 
 import uuid
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.audit import record_event as record_event_stub
+
 from memoryhub_core.services.audit import record_event as record_event_db
 
 
@@ -40,7 +42,10 @@ async def record_audit_event(
         session: SQLAlchemy async session (optional)
     """
     # Try persistent audit if session available
-    if session is not None:
+    # Test doubles and local adapters sometimes provide only the session
+    # protocol's surface. Persistent audit writes require a real async SQL
+    # session; otherwise use the logger-only compatibility path.
+    if isinstance(session, AsyncSession):
         await record_event_db(
             session=session,
             event_type=event_type,

@@ -58,6 +58,20 @@ _active_subscribers: dict[
 ] = {}
 
 
+class _ResourceUpdatedNotification(mt.ResourceUpdatedNotification):
+    """Compatibility wrapper for MCP releases with a union type alias.
+
+    Older MCP releases expose ``ServerNotification`` as a Pydantic root model,
+    while newer releases expose it as a typing union. The latter cannot be
+    instantiated, but the wire notification itself is still the same typed
+    ``ResourceUpdatedNotification``.
+    """
+
+    @property
+    def root(self) -> _ResourceUpdatedNotification:
+        return self
+
+
 def _reconstruct_notification(notification_dict: dict[str, Any]) -> Any:
     """Turn a BRPOPed notification dict back into a Pydantic model.
 
@@ -74,12 +88,13 @@ def _reconstruct_notification(notification_dict: dict[str, Any]) -> Any:
     params = notification_dict.get("params", {})
 
     if method == "notifications/resources/updated":
-        return mt.ServerNotification(
-            mt.ResourceUpdatedNotification(
-                method="notifications/resources/updated",
-                params=mt.ResourceUpdatedNotificationParams(uri=params.get("uri", "")),
-            )
+        resource_updated = mt.ResourceUpdatedNotification(
+            method="notifications/resources/updated",
+            params=mt.ResourceUpdatedNotificationParams(uri=params.get("uri", "")),
         )
+        if callable(mt.ServerNotification):
+            return mt.ServerNotification(resource_updated)
+        return _ResourceUpdatedNotification.model_validate(resource_updated.model_dump())
 
     # Custom notifications/$vendor/$method path. Unknown-method notifications
     # are valid per the MCP spec; clients that don't recognize the method

@@ -45,7 +45,7 @@ Recommended for production-ready deployments.
 
 ### Red Hat UBI Base Images
 
-Start with `registry.redhat.io/ubi9/python-311:latest`. UBI (Universal Base Image) provides enterprise support, security updates, and compatibility with OpenShift's security model. Required if your environment has FIPS compliance requirements.
+Start with `registry.access.redhat.com/ubi9/python-311:latest`. This is the unauthenticated public registry endpoint for Red Hat UBI (Universal Base Image), which provides enterprise support, security updates, and compatibility with OpenShift's security model. UBI is also suitable when your environment has FIPS compliance requirements.
 
 ### OpenShift-Native Builds
 

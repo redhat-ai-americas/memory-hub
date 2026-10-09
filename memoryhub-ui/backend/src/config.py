@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     mcp_server_url: str = "http://memory-hub-mcp:8080/mcp/"
     auth_service_url: str = "http://auth-server.memoryhub-auth.svc:8081"
     admin_key: str = ""
+    cors_origins: str = ""
     # Public-facing route URLs used in the contributor welcome email.
     # These are the URLs an external agent or SDK would connect to from
     # outside the cluster. They differ from mcp_server_url and

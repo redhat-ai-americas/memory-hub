@@ -2,7 +2,7 @@
 
 All integration tests require the compose stack to be running:
 
-    podman-compose -f tests/integration/compose.yaml up -d
+podman compose -f tests/integration/compose.yaml up -d
 
 Or use the helper script which handles lifecycle automatically:
 
@@ -27,9 +27,16 @@ from memoryhub_core.services.valkey_client import ValkeyClient, ValkeySettings, 
 
 def pytest_collection_modifyitems(config, items):
     """Auto-mark every test collected under tests/integration/ as 'integration'."""
+    from pathlib import Path
+
+    integration_dir = Path(__file__).parent
     for item in items:
-        if "tests/integration/" in str(item.fspath):
+        item_path = Path(item.fspath)
+        try:
+            item_path.relative_to(integration_dir)
             item.add_marker(pytest.mark.integration)
+        except ValueError:
+            pass
 
 
 def _build_db_url() -> str:

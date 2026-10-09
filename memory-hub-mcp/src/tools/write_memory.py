@@ -11,6 +11,25 @@ import yaml
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel, Field, ValidationError
+from src.core.app import mcp
+from src.core.authz import (
+    PROJECT_ISOLATION_ENABLED,
+    ROLE_ISOLATION_ENABLED,
+    AuthenticationError,
+    authorize_write,
+    get_claims_from_context,
+    resolve_tenant,
+)
+from src.tools._audit_helpers import record_audit_event
+from src.tools._deps import (
+    get_db_session,
+    get_embedding_service,
+    get_s3_adapter,
+    release_db_session,
+    resolve_driver_id,
+)
+from src.tools._push_helpers import broadcast_after_write
+from src.tools.auth import get_current_user
 
 from memoryhub_core.models.schemas import MemoryNodeCreate
 from memoryhub_core.services.campaign import get_campaigns_for_project
@@ -26,25 +45,6 @@ from memoryhub_core.services.memory import create_fact_children, create_memory
 from memoryhub_core.services.project import ensure_project_membership
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
-from src.core.app import mcp
-from src.core.authz import (
-    PROJECT_ISOLATION_ENABLED,
-    ROLE_ISOLATION_ENABLED,
-    AuthenticationError,
-    authorize_write,
-    get_claims_from_context,
-    resolve_tenant,
-)
-from src.tools._audit_helpers import record_audit_event
-from src.tools.auth import get_current_user
-from src.tools._deps import (
-    get_db_session,
-    get_embedding_service,
-    get_s3_adapter,
-    release_db_session,
-    resolve_driver_id,
-)
-from src.tools._push_helpers import broadcast_after_write
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +367,8 @@ async def write_memory(
         owner_id = claims["sub"]
 
     write_tenant_id = resolve_tenant(claims, tenant_id)
+    actor_id = claims["sub"]
+    resolved_driver = resolve_driver_id(driver_id, claims)
 
     # Resolve campaign membership when writing to campaign scope.
     campaign_ids: set[str] | None = None
@@ -397,6 +399,32 @@ async def write_memory(
             )
         scope_id_value = project_id
         if PROJECT_ISOLATION_ENABLED:
+            # Reject callers without project-write permission before doing a
+            # membership lookup. The project ID is supplied only for this
+            # permission preflight; actual membership/open-enrollment checks
+            # still run below for authorized callers.
+            if not authorize_write(
+                claims,
+                scope,
+                owner_id,
+                write_tenant_id,
+                project_ids={project_id},
+                scope_id=project_id,
+            ):
+                await record_audit_event(
+                    event_type="memory.write",
+                    actor_id=actor_id,
+                    driver_id=resolved_driver,
+                    scope=scope,
+                    owner_id=owner_id,
+                    memory_id=None,
+                    decision="denied",
+                    tenant_id=write_tenant_id,
+                    session=None,
+                )
+                raise ToolError(
+                    f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
+                )
             session_for_project, gen_for_project = await get_db_session()
             try:
                 project_ids, was_auto_enrolled = await ensure_project_membership(
@@ -428,10 +456,6 @@ async def write_memory(
             )
         finally:
             await release_db_session(gen_for_roles)
-
-    # Resolve actor/driver identity for audit trail.
-    actor_id = claims["sub"]
-    resolved_driver = resolve_driver_id(driver_id, claims)
 
     # Acquire DB session early so it's available for audit events
     session = None
@@ -601,7 +625,13 @@ async def write_memory(
         # Eager fact extraction via MCP sampling. Non-fatal -- the write
         # never fails on extraction failure.
         facts_extracted = None
-        embedding_max_chars = embedding_service.max_tokens * 4
+        # Real embedding services expose an integer max_tokens. Keep the
+        # default path usable with lightweight test/dry-run doubles that do
+        # not implement that optional attribute.
+        max_tokens = getattr(embedding_service, "max_tokens", 512)
+        if not isinstance(max_tokens, int) or max_tokens <= 0:
+            max_tokens = 512
+        embedding_max_chars = max_tokens * 4
         is_oversized = len(content) > embedding_max_chars
 
         valid_extract_modes = {"eager", "off", "background", None}

@@ -1,7 +1,7 @@
 """Integration tests for keyword recall in the non-focus search_memories() path.
 
 Requires the compose stack (PostgreSQL + pgvector + tsvector):
-    podman-compose -f tests/integration/compose.yaml up -d
+podman compose -f tests/integration/compose.yaml up -d
     pytest tests/integration/test_keyword_recall.py
 """
 

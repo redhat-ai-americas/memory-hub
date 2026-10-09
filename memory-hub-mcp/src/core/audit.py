@@ -10,6 +10,7 @@ Events are fire-and-forget: audit failures never block the tool operation.
 
 import json
 import logging
+from contextlib import suppress
 from datetime import UTC, datetime
 
 logger = logging.getLogger("memoryhub.audit")
@@ -65,4 +66,5 @@ def record_event(
         event["tenant_id"] = tenant_id
     if metadata:
         event["metadata"] = metadata
-    logger.info(json.dumps(event, sort_keys=True))
+    with suppress(Exception):
+        logger.info(json.dumps(event, sort_keys=True))

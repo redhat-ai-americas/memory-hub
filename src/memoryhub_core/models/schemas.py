@@ -40,6 +40,7 @@ class ContentType(StrEnum):
     EXPERIENTIAL = "experiential"
     KNOWLEDGE = "knowledge"
     BEHAVIORAL = "behavioral"
+    SYNOPSIS = "synopsis"
 
 
 class CampaignStatus(StrEnum):
@@ -107,6 +108,8 @@ class MemoryNodeUpdate(BaseModel):
     weight: float | None = Field(default=None, ge=0.0, le=1.0)
     metadata: dict[str, Any] | None = None
     domains: list[str] | None = Field(default=None, description="Updated domain tags")
+    content_type: ContentType | None = None
+    source: str | None = None
 
 
 # -- Output schemas --

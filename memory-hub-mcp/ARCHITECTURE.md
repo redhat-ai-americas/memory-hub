@@ -97,7 +97,7 @@ Both paths flow through `core/authz.py`, which builds SQL-level scope filters so
 
 ## Build and deploy
 
-- **Base image:** `registry.redhat.io/ubi9/python-311:latest`
+- **Base image:** `registry.access.redhat.com/ubi9/python-311:latest`
 - **FastMCP version:** Pinned to 3.4.2 (3.4.3 returns 421 on all streamable-HTTP requests)
 - **Container user:** UID 1001 (arbitrary non-root, OpenShift-compatible)
 - **Permission fix:** Containerfile runs `chmod 644` on all Python files because Claude Code's Write tool creates files with 600 permissions
