@@ -142,7 +142,7 @@ async def test_get_user_pins_returns_pin_list():
         id=uuid.UUID("cccccccc-0000-0000-0000-000000000003"),
         content="I prefer Rust for systems code.",
         source="user",
-        branch_type="fact",
+        branch_type="persona_pin",
         created_at=datetime(2026, 9, 15, tzinfo=UTC),
     )
     mock_result = MagicMock()
@@ -373,7 +373,7 @@ async def test_add_user_pin_anchors_to_current_synopsis():
     session.add.assert_called_once()
     pin_node = session.add.call_args[0][0]
     assert pin_node.source == "user"
-    assert pin_node.branch_type == "fact"
+    assert pin_node.branch_type == "persona_pin"
     assert pin_node.parent_id == synopsis_id
     assert pin_node.content == "I prefer dark mode."
 

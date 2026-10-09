@@ -43,7 +43,7 @@ _SYNOPSIS_CONTENT_TYPE = "behavioral"
 _SYNOPSIS_SCOPE = "user"
 _SYNOPSIS_WEIGHT = 1.0
 _PIN_SOURCE = "user"
-_PIN_BRANCH_TYPE = "fact"
+_PIN_BRANCH_TYPE = "persona_pin"
 
 _COMPILER_SYSTEM_PROMPT = """\
 You are a persona compiler. Synthesize a standing user profile from the facts below.
@@ -209,10 +209,11 @@ async def get_user_pins(
     *,
     synopsis_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
-    """Return user-declared pinned facts for a synopsis node.
+    """Return user-declared pinned facts anchored to a synopsis node.
 
-    Pins are children of the synopsis node (branch_type="fact", source="user").
-    When synopsis_id is None, returns global pins not tied to a specific synopsis.
+    Pins are children of the synopsis node (branch_type="persona_pin", source="user").
+    synopsis_id should always be provided; omitting it returns no results because
+    pins without a parent are not yet supported.
     """
     filters = [
         MemoryNode.tenant_id == tenant_id,

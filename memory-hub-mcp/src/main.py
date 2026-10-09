@@ -71,10 +71,10 @@ _INSTRUCTIONS_COMPACT = (
     "operations — search, read, write, update, delete, and more. "
     "Use thread(action=...) for conversation persistence — create, "
     "append, get, list, and archive governed conversation threads. "
-    "PERSONA: Call get_persona() at session start BEFORE search_memory — it loads "
-    "the user's standing profile (preferences, working style, current focus) "
-    "unconditionally. Use compile_persona() to refresh the profile after new "
-    "conversations. "
+    "PERSONA: If register_session returns a non-null persona_synopsis_id, call "
+    "get_persona() before search_memory to load the user's standing profile "
+    "(preferences, working style, current focus). Use compile_persona() to "
+    "refresh the profile when is_stale=True. "
     "See each tool's docstring for the full action reference."
 )
 
@@ -114,7 +114,7 @@ _TOOLS_FULL = [
     admin_memory, thread, get_persona, compile_persona, edit_persona,
 ]
 
-_TOOLS_MINIMAL = [register_session, search_memory, write_memory, read_memory, thread, get_persona]
+_TOOLS_MINIMAL = [register_session, search_memory, write_memory, read_memory, thread]
 
 _PROFILE_MAP = {
     "compact": (_TOOLS_COMPACT, _INSTRUCTIONS_COMPACT),
