@@ -303,6 +303,15 @@ async def _extract_window(
     if committed_ids:
         await session.commit()
 
+        # Mark the user's persona synopsis stale when behavioral facts land.
+        # Non-fatal: a stale synopsis just means the next compile will refresh it.
+        if thread.scope == "user":
+            try:
+                from memoryhub_core.services.persona import mark_synopsis_stale
+                await mark_synopsis_stale(thread.owner_id, thread.tenant_id, session)
+            except Exception as exc:
+                logger.debug("persona stale mark failed for %s: %s", thread.owner_id, exc)
+
     return decisions
 
 
