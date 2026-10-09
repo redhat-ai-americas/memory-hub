@@ -183,9 +183,17 @@ def show_cmd(
     subtitle = (
         f"node={synopsis.get('id', '?')[:8]}… · "
         f"compiled {synopsis.get('updated_at', 'unknown')[:10]} · "
-        f"{result.get('compiled_fact_count', '?')} facts / {result.get('source_fact_count', '?')} current"
+        f"{result.get('compiled_fact_count', '?')} facts"
+        f" / {result.get('source_fact_count', '?')} current"
     )
-    console.print(Panel(Markdown(synopsis.get("content", "(no content)")), title=title, subtitle=subtitle, border_style="blue"))
+    console.print(
+        Panel(
+            Markdown(synopsis.get("content", "(no content)")),
+            title=title,
+            subtitle=subtitle,
+            border_style="blue",
+        )
+    )
 
     if is_stale:
         console.print(
@@ -238,7 +246,8 @@ def status_cmd(
     if synopsis:
         table.add_row("Synopsis ID", f"{synopsis.get('id', '?')[:12]}…")
         table.add_row("Version", str(synopsis.get("version", "?")))
-        table.add_row("Last compiled", synopsis.get("updated_at", "unknown")[:19].replace("T", " "))
+        compiled_ts = synopsis.get("updated_at", "unknown")[:19].replace("T", " ")
+        table.add_row("Last compiled", compiled_ts)
         table.add_row("Compiled from", f"{compiled_count} fact(s)")
     else:
         table.add_row("Synopsis", "[dim]none — run 'persona compile' first[/dim]")

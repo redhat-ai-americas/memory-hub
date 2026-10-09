@@ -25,7 +25,6 @@ from memoryhub.exceptions import (
 from rich.table import Table
 
 from memoryhub_cli.admin import admin_app
-from memoryhub_cli.persona import persona_app
 from memoryhub_cli.config import (
     get_api_key,
     get_connection_params,
@@ -44,6 +43,7 @@ from memoryhub_cli.output import (
     handle_error,
     json_success,
 )
+from memoryhub_cli.persona import persona_app
 from memoryhub_cli.project_config import (
     FocusSource,
     InitChoices,
@@ -96,7 +96,9 @@ config_app = typer.Typer(
 )
 app.add_typer(config_app, name="config")
 app.add_typer(admin_app, name="admin", help="Manage agents and OAuth clients")
-app.add_typer(persona_app, name="persona", help="Persona compilation and standing profile management")
+app.add_typer(
+    persona_app, name="persona", help="Persona compilation and standing profile management"
+)
 app.add_typer(export_app, name="export", help="Export memories to external formats")
 
 graph_app = typer.Typer(
@@ -1763,12 +1765,13 @@ def session_status(
     # Persist user_id so load-persona.sh can auto-detect it.
     if user_id and user_id != "-":
         try:
+            import os
+
             from memoryhub_cli.config import (
                 MEMORYHUB_CONTEXT_ENV,
                 read_credentials_section,
                 write_credentials_section,
             )
-            import os
             section = os.environ.get(MEMORYHUB_CONTEXT_ENV, "").strip() or "default"
             creds = read_credentials_section() or {}
             if creds.get("api_key") and creds.get("user_id") != user_id:
