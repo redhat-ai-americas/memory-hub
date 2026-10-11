@@ -43,6 +43,8 @@ class Memory(BaseModel):
     is_appendix: bool | None = None  # True when result is cache-stable appendix (#175)
     content_type: str | None = None  # "declarative" or "behavioral"
     source: str = "agent"  # "agent", "dreaming", or "import"
+    upstream_trust_level: str = "trusted"
+    taint: dict[str, Any] | None = None
     content_truncated: bool = False
     full_available: bool = False
 
