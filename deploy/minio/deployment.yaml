@@ -4,6 +4,17 @@
 # "anyuid" SCC, scoping the grant to just this workload rather than the
 # namespace's default SA. See README.md for the prerequisite oc adm command.
 #
+# IMAGE SOURCE: MinIO removed anonymous pulls from both docker.io/minio/minio
+# and quay.io/minio/minio in September 2026, so the previous
+# quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z pin fails with
+# "unauthorized" on every fresh install. We use the Chainguard rebuild, which
+# is still anonymously pullable, pinned by digest because Chainguard's free
+# tier only serves the :latest tag.
+#
+# The digest needs a periodic bump as Chainguard rebuilds. This is a stopgap;
+# see the tracking issue for replacing MinIO with a project that has a
+# dependable public distribution story.
+#
 # Uses strategy.Recreate because the PVC is ReadWriteOnce -- a rolling update
 # would hit a multi-attach error when the old pod still holds the volume.
 apiVersion: apps/v1
@@ -34,7 +45,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: minio
-          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          image: cgr.dev/chainguard/minio@sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
           args:
             - "server"
             - "/data"

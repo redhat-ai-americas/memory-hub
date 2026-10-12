@@ -8,7 +8,7 @@ reinstalls (see #395).
 ## What This Deploys
 
 - **Namespace**: `memoryhub-storage` (dedicated storage namespace)
-- **Deployment**: Single MinIO pod (`quay.io/minio/minio:latest`)
+- **Deployment**: Single MinIO pod (`cgr.dev/chainguard/minio`, digest-pinned)
 - **PVC**: 10Gi persistent volume for object data
 - **Service**: ClusterIP service on port 9000 (S3 API)
 - **Secret**: Root credentials for dev use (`memoryhub` / `memoryhub-dev-password`)
