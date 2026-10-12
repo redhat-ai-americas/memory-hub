@@ -9,6 +9,12 @@ reinstalls (see #395).
 
 - **Namespace**: `memoryhub-storage` (dedicated storage namespace)
 - **Deployment**: Single MinIO pod (`cgr.dev/chainguard/minio`, digest-pinned)
+  - `minio/minio` is archived upstream and its images are no longer
+    anonymously pullable. The Chainguard image is still public and builds
+    `pgsty/silo`, a maintained AGPLv3 fork, so it carries fixes the archived
+    upstream never got. Digest-pinned because Chainguard's free tier serves
+    only `:latest`; the pin needs a periodic bump. See the tracking issue for
+    replacing MinIO outright.
 - **PVC**: 10Gi persistent volume for object data
 - **Service**: ClusterIP service on port 9000 (S3 API)
 - **Secret**: Root credentials for dev use (`memoryhub` / `memoryhub-dev-password`)

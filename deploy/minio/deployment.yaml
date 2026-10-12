@@ -7,13 +7,21 @@
 # IMAGE SOURCE: MinIO removed anonymous pulls from both docker.io/minio/minio
 # and quay.io/minio/minio in September 2026, so the previous
 # quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z pin fails with
-# "unauthorized" on every fresh install. We use the Chainguard rebuild, which
-# is still anonymously pullable, pinned by digest because Chainguard's free
-# tier only serves the :latest tag.
+# "unauthorized" on every fresh install. The underlying cause is bigger than a
+# registry change: github.com/minio/minio is archived (last push 2026-04-24,
+# last release RELEASE.2025-10-15T17-29-55Z) and MinIO development moved to the
+# closed-source AIStor line.
 #
-# The digest needs a periodic bump as Chainguard rebuilds. This is a stopgap;
-# see the tracking issue for replacing MinIO with a project that has a
-# dependable public distribution story.
+# cgr.dev/chainguard/minio is still anonymously pullable, and despite the stale
+# upstream_url in Chainguard's image metadata it does not build the archived
+# repo. It builds pgsty/silo, a maintained AGPLv3 fork, so the binary reports
+# release dates past the archive date and carries security fixes the archived
+# upstream never got. Verify with: oc exec deploy/memoryhub-minio -- minio --version
+#
+# Pinned by digest because Chainguard's free tier serves only the :latest tag,
+# so the digest needs a periodic bump. This is a stopgap on two counts: a
+# third-party free tier for distribution, and a community fork for maintenance.
+# See the tracking issue for replacing MinIO outright.
 #
 # Uses strategy.Recreate because the PVC is ReadWriteOnce -- a rolling update
 # would hit a multi-attach error when the old pod still holds the volume.
