@@ -21,7 +21,7 @@
 # Pinned by digest because Chainguard's free tier serves only the :latest tag,
 # so the digest needs a periodic bump. This is a stopgap on two counts: a
 # third-party free tier for distribution, and a community fork for maintenance.
-# See the tracking issue for replacing MinIO outright.
+# See #611 for replacing MinIO outright.
 #
 # Uses strategy.Recreate because the PVC is ReadWriteOnce -- a rolling update
 # would hit a multi-attach error when the old pod still holds the volume.

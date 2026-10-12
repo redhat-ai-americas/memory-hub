@@ -13,8 +13,8 @@ reinstalls (see #395).
     anonymously pullable. The Chainguard image is still public and builds
     `pgsty/silo`, a maintained AGPLv3 fork, so it carries fixes the archived
     upstream never got. Digest-pinned because Chainguard's free tier serves
-    only `:latest`; the pin needs a periodic bump. See the tracking issue for
-    replacing MinIO outright.
+    only `:latest`; the pin needs a periodic bump. See #611 for replacing
+    MinIO outright.
 - **PVC**: 10Gi persistent volume for object data
 - **Service**: ClusterIP service on port 9000 (S3 API)
 - **Secret**: Root credentials for dev use (`memoryhub` / `memoryhub-dev-password`)
