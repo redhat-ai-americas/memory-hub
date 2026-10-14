@@ -6,6 +6,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/load-persona.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/load-memories.sh",
             "timeout": 5
           }
@@ -16,6 +21,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/load-persona.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/load-memories.sh",
             "timeout": 5
           }
@@ -24,6 +34,11 @@
       {
         "matcher": "clear",
         "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/load-persona.sh",
+            "timeout": 5
+          },
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/load-memories.sh",

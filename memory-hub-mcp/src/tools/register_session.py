@@ -49,6 +49,8 @@ from src.tools.auth import (
 logger = logging.getLogger(__name__)
 
 _QUICK_START = [
+    "Call get_persona() FIRST to load the standing user profile — always inject "
+    "it before search results. Check is_stale; if True, call compile_persona().",
     "Call search_memory(query='...') to load context relevant to your task.",
     "Pass project_id='<name>' in search_memory and write_memory to scope "
     "memories to a project.",
@@ -169,6 +171,30 @@ async def _fetch_user_projects(
             await release_db_session(gen)
 
 
+async def _fetch_persona_synopsis_id(
+    user_id: str, tenant_id: str,
+) -> str | None:
+    """Return the current persona synopsis node ID, or None.
+
+    Non-fatal: returns None on any failure so registration is never blocked.
+    Gives agents a fast path: read_memory(persona_synopsis_id) instead of
+    calling get_persona() separately.
+    """
+    gen = None
+    try:
+        from memoryhub_core.services.persona import get_current_synopsis
+
+        session, gen = await get_db_session()
+        node = await get_current_synopsis(user_id, tenant_id, session)
+        return str(node.id) if node is not None else None
+    except Exception as exc:
+        logger.debug("Failed to fetch persona synopsis for %s: %s", user_id, exc)
+        return None
+    finally:
+        if gen is not None:
+            await release_db_session(gen)
+
+
 async def _resolve_project_memberships(
     user: dict[str, Any],
 ) -> list[str]:
@@ -262,6 +288,7 @@ async def register_session(
         tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
         projects = await _fetch_user_projects(user_id, tenant)
+        persona_synopsis_id = await _fetch_persona_synopsis_id(user_id, tenant)
 
         # Resolve project memberships from DB for JWT users.
         jwt_user_stub = {
@@ -289,6 +316,7 @@ async def register_session(
             "auth_method": "jwt",
             "default_driver_id": default_driver_id,
             "projects": projects,
+            "persona_synopsis_id": persona_synopsis_id,
             "quick_start": _QUICK_START,
             "message": (
                 f"JWT authentication active for {user_id}. "
@@ -343,6 +371,7 @@ async def register_session(
         {"sub": user["user_id"], "tenant_id": user.get("tenant_id", DEFAULT_TENANT_ID)}
     )
     projects = await _fetch_user_projects(user["user_id"], tenant)
+    persona_synopsis_id = await _fetch_persona_synopsis_id(user["user_id"], tenant)
 
     record_event(
         event_type="session.registered",
@@ -365,6 +394,7 @@ async def register_session(
         "session_ttl_seconds": ttl,
         "default_driver_id": default_driver_id,
         "projects": projects,
+        "persona_synopsis_id": persona_synopsis_id,
         "quick_start": _QUICK_START,
         "message": (
             f"Session {session_id} registered for {user['name']} ({user['user_id']}). "

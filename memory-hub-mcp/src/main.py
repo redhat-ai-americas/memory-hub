@@ -28,7 +28,10 @@ from contextlib import asynccontextmanager
 from fastmcp import FastMCP
 
 from src.tools.admin_memory import admin_memory
+from src.tools.compile_persona import compile_persona
 from src.tools.delete_memory import delete_memory
+from src.tools.edit_persona import edit_persona
+from src.tools.get_persona import get_persona
 from src.tools.list_memory import list_memory
 from src.tools.manage_curation import manage_curation
 from src.tools.manage_graph import manage_graph
@@ -68,6 +71,10 @@ _INSTRUCTIONS_COMPACT = (
     "operations — search, read, write, update, delete, and more. "
     "Use thread(action=...) for conversation persistence — create, "
     "append, get, list, and archive governed conversation threads. "
+    "PERSONA: If register_session returns a non-null persona_synopsis_id, call "
+    "get_persona() before search_memory to load the user's standing profile "
+    "(preferences, working style, current focus). Use compile_persona() to "
+    "refresh the profile when is_stale=True. "
     "See each tool's docstring for the full action reference."
 )
 
@@ -98,13 +105,13 @@ _INSTRUCTIONS_MINIMAL = (
 
 # ── Profile-specific tool sets ─────────────────────────────────────────────
 
-_TOOLS_COMPACT = [register_session, memory, admin_memory, thread]
+_TOOLS_COMPACT = [register_session, memory, admin_memory, thread, get_persona, compile_persona, edit_persona]
 
 _TOOLS_FULL = [
     register_session, write_memory, read_memory, update_memory,
     delete_memory, search_memory, list_memory,
     manage_session, manage_graph, manage_curation, manage_project,
-    admin_memory, thread,
+    admin_memory, thread, get_persona, compile_persona, edit_persona,
 ]
 
 _TOOLS_MINIMAL = [register_session, search_memory, write_memory, read_memory, thread]

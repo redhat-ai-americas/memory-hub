@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 
+MEMORYHUB_CONTEXT_ENV = "MEMORYHUB_CONTEXT"
+
 CONFIG_DIR = Path.home() / ".config" / "memoryhub"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 API_KEY_FILE = CONFIG_DIR / "api-key"
@@ -51,7 +53,7 @@ def read_credentials_section(context: str | None = None) -> dict[str, str] | Non
         return None
 
     result = {}
-    for key in ("api_key", "url"):
+    for key in ("api_key", "url", "user_id"):
         val = cp.get(section, key, fallback=None)
         if val:
             result[key] = val
@@ -59,7 +61,7 @@ def read_credentials_section(context: str | None = None) -> dict[str, str] | Non
 
 
 def write_credentials_section(
-    context: str, api_key: str, url: str | None = None,
+    context: str, api_key: str, url: str | None = None, user_id: str | None = None,
 ) -> None:
     """Write or update a section in the credentials file."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -75,6 +77,8 @@ def write_credentials_section(
         cp.set(context, "url", url)
     elif cp.has_option(context, "url"):
         cp.remove_option(context, "url")
+    if user_id:
+        cp.set(context, "user_id", user_id)
 
     buf = io.StringIO()
     cp.write(buf)
@@ -120,6 +124,17 @@ def get_api_key() -> str | None:
                 return stripped
 
     return load_config().get("api_key") or None
+
+
+def get_user_id() -> str | None:
+    """Resolve user ID: env var > credentials file."""
+    user_id = os.environ.get("MEMORYHUB_USER_ID", "").strip()
+    if user_id:
+        return user_id
+    creds = read_credentials_section()
+    if creds and creds.get("user_id"):
+        return creds["user_id"]
+    return None
 
 
 def get_server_url() -> str | None:
