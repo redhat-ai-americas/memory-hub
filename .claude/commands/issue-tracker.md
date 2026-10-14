@@ -56,42 +56,69 @@ When the user wants to create a new issue:
 
 4. **Add to project board and set status to Backlog.**
 
-   Add the issue:
+   Add the issue. `--format json` returns the new item's ID, so capture it here
+   rather than searching for it afterwards:
    ```bash
-   gh project item-add 1 --owner redhat-ai-americas --url <issue-url>
-   ```
-
-   Find the project item ID by matching on the issue number (more reliable than title matching):
-   ```bash
-   gh project item-list 1 --owner redhat-ai-americas --format json | python3 -c "
-   import json, sys
-   data = json.load(sys.stdin)
-   for item in data.get('items', []):
-       url = item.get('content', {}).get('url', '')
-       if url.endswith('/<issue-number>'):
-           print(item['id'])
-           break
-   else:
-       print('ERROR: item not found', file=sys.stderr)
-       sys.exit(1)
-   "
+   ITEM_ID=$(gh project item-add 1 --owner redhat-ai-americas \
+     --url <issue-url> --format json --jq '.id')
    ```
 
    Set the status:
    ```bash
    gh project item-edit --project-id PVT_kwDODErzuc4BUFze \
-     --id <item-id> \
+     --id "$ITEM_ID" \
      --field-id PVTSSF_lADODErzuc4BUFzezhBQT0U \
      --single-select-option-id 5af61e02
    ```
 
 5. **Report** the issue URL and confirm it's in Backlog.
 
+### Finding the item ID of an issue already on the board
+
+Needed by Move and Close. Query the issue directly rather than listing the
+board and searching it:
+
+```bash
+RESP=$(gh api graphql -f query='
+query($owner:String!, $repo:String!, $num:Int!) {
+  repository(owner:$owner, name:$repo) {
+    issue(number:$num) {
+      projectItems(first:10) {
+        nodes { id project { number } }
+      }
+    }
+  }
+}' -f owner=redhat-ai-americas -f repo=memory-hub -F num=<issue-number>)
+
+jq -e '.errors' >/dev/null 2>&1 <<<"$RESP" \
+  && { jq -r '"GraphQL error: " + .errors[0].message' <<<"$RESP" >&2; exit 1; }
+
+ITEM_ID=$(jq -r '.data.repository.issue.projectItems.nodes[]
+                 | select(.project.number == 1) | .id' <<<"$RESP")
+case "$ITEM_ID" in
+  PVTI_*) ;;
+  "")     echo "issue is not on the board; add it first" >&2; exit 1 ;;
+  *)      echo "unexpected item id: $ITEM_ID" >&2; exit 1 ;;
+esac
+```
+
+Check the errors explicitly. With `--jq`, `gh` prints the GraphQL error
+body to stdout and still exits 0, so a rate-limited query yields a JSON
+error blob that a bare non-empty test would pass to `item-edit` as if it
+were an item ID.
+
+Do not use `gh project item-list` for this. It defaults to 30 items and
+returns them oldest-first, so a recently created issue is never in the
+default page. Raising `--limit` past the board size works but pages the
+entire board on every lookup, which trips GitHub's secondary rate limit
+during a run of several issue operations. The query above is one request
+and cannot truncate.
+
 ### Move Issue
 
 When the user wants to change an issue's status (e.g., "move #19 to In Progress"):
 
-1. Find the project item ID using the issue number lookup pattern above.
+1. Find the project item ID with the GraphQL query above.
 2. Set the status using the option IDs from Project Details.
 3. If moving to **Done**, also close the GitHub issue:
    ```bash
@@ -124,10 +151,15 @@ gh issue view <number>
 
 When the user wants to see issues (e.g., "what's in backlog?", "show me all issues"):
 
-1. List project items, optionally filtered by status:
+1. List project items, optionally filtered by status. This is the one case that
+   genuinely needs the whole board, so `--limit` is required here; the default of
+   30 would silently show a fraction of it:
    ```bash
-   gh project item-list 1 --owner redhat-ai-americas --format json
+   gh project item-list 1 --owner redhat-ai-americas --limit 1000 --format json
    ```
+   Check `totalCount` against the number of items returned and raise `--limit` if
+   they differ. Avoid running this in a loop, since paging the full board
+   repeatedly trips GitHub's secondary rate limit.
 2. Format as a readable table with: number, title, status, labels.
 3. If the user asked for a specific status (e.g., "what's in backlog?"), filter the output accordingly.
 
