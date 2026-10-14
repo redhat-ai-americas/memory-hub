@@ -368,6 +368,69 @@ async def test_search_explicit_new_params(client):
     assert forwarded["include_branches"] is True
 
 
+async def test_search_current_step_id_is_forwarded_only_when_set(client):
+    """The ranked search payload stays free of current_step_id unless asked."""
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={"results": [], "total_matching": 0, "has_more": False}
+    )
+
+    await c.search("any")
+    forwarded = _payload(mock_mcp)
+    assert "current_step_id" not in forwarded
+    assert "max_hops" not in forwarded
+
+    step_id = "12345678-1234-5678-1234-567812345678"
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "results": [
+                {
+                    "id": step_id,
+                    "content": "Check the lockfile.",
+                    "result_type": "guidance",
+                    "guidance_text": "Check the lockfile.",
+                    "hop_count": 1,
+                }
+            ],
+            "total_matching": 1,
+            "has_more": False,
+            "query_ignored": True,
+            "ignored_parameters": ["query"],
+        }
+    )
+    result = await c.search("ignored query", current_step_id=step_id, max_hops=1)
+    forwarded = _payload(mock_mcp)
+    assert forwarded["action"] == "search"
+    assert forwarded["query"] == "ignored query"
+    assert forwarded["current_step_id"] == step_id
+    assert forwarded["max_hops"] == 1
+    assert result.query_ignored is True
+    assert result.ignored_parameters == ["query"]
+    assert result.results[0].result_type == "guidance"
+    assert result.results[0].guidance_text == "Check the lockfile."
+    assert result.results[0].hop_count == 1
+
+
+async def test_get_guidance_calls_the_guidance_action(client):
+    c, mock_mcp = client
+    step_id = "12345678-1234-5678-1234-567812345678"
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        structured_content={
+            "node_id": step_id,
+            "guidance_text": "Promote after the canary holds.",
+            "neighborhood": {"nodes": [], "edges": []},
+            "hop_count": 2,
+        }
+    )
+    result = await c.get_guidance(step_id, max_hops=2)
+    assert _tool_and_action(mock_mcp) == ("memory", "guidance")
+    forwarded = _payload(mock_mcp)
+    assert forwarded["memory_id"] == step_id
+    assert forwarded["max_hops"] == 2
+    assert result.guidance_text == "Promote after the canary holds."
+    assert result.hop_count == 2
+
+
 async def test_search_applies_project_config_retrieval_defaults():
     """Loaded project config fills in unset search() args."""
     pc = ProjectConfig(
@@ -1996,3 +2059,92 @@ class TestThreadOperations:
         payload = _payload(mock_mcp)
         assert payload.get("cascade") == "orphan"
         assert result.status == "deleted"
+
+
+# ── get_injection_block: localized procedural guidance (#553) ─────────────────
+
+
+def _make_guidance_memory(
+    *,
+    guidance_text: str = "You are on the smoke-test step. Staging must be healthy first.",
+    content: str | None = None,
+) -> Memory:
+    """A result_type='guidance' entry as search_memory(current_step_id=...) returns it.
+
+    The server mirrors the prose into ``content`` as well, and sends a
+    compact neighborhood. Neither the neighborhood nor hop_count belongs
+    in an injected prompt.
+    """
+    return Memory(
+        id="33333333-3333-3333-3333-333333333333",
+        content=guidance_text if content is None else content,
+        stub=None,
+        result_type="guidance",
+        guidance_text=guidance_text,
+        hop_count=2,
+        neighborhood={
+            "nodes": [{"id": "n1", "stub": "Promote the image to staging"}],
+            "edges": [{"id": "e1", "relationship_type": "precedes", "role": "successor"}],
+            "detail": "compact",
+        },
+        scope="user",
+        owner_id="wjackson",
+    )
+
+
+def test_get_injection_block_renders_guidance():
+    """Regression: guidance was dropped entirely (#553).
+
+    ``result_type`` is neither 'full' nor 'stub', and a guidance entry has
+    no stub, so the original two-branch check fell through and returned an
+    empty block — the SDK's main prompt-injection path silently discarded
+    the one thing the feature produces.
+    """
+    result = SearchResult(
+        results=[_make_guidance_memory()], total_matching=1, has_more=False
+    )
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert block == "You are on the smoke-test step. Staging must be healthy first."
+
+
+def test_get_injection_block_guidance_omits_the_neighborhood():
+    """Only the prose is injected. The subgraph that produced it is not.
+
+    Localized retrieval exists so the prose *replaces* the subgraph in the
+    agent's context. Injecting both would reinstate the full-graph
+    injection the design avoids.
+    """
+    result = SearchResult(
+        results=[_make_guidance_memory()], total_matching=1, has_more=False
+    )
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert "Promote the image to staging" not in block
+    assert "precedes" not in block
+    assert "successor" not in block
+    assert "compact" not in block
+
+
+def test_get_injection_block_guidance_falls_back_to_content():
+    """An older server that sets only ``content`` still injects."""
+    memory = _make_guidance_memory()
+    memory.guidance_text = None
+    memory.content = "Roll back before retrying the deploy."
+    result = SearchResult(results=[memory], total_matching=1, has_more=False)
+
+    assert MemoryHubClient.get_injection_block(result) == "Roll back before retrying the deploy."
+
+
+def test_get_injection_block_guidance_mixed_with_ranked_results():
+    """A guidance entry renders alongside ordinary results, not instead of them."""
+    memories = [
+        _make_memory(id="m1", content="Use Podman, not Docker.", result_type="full"),
+        _make_guidance_memory(guidance_text="Check staging health before promoting."),
+    ]
+    result = SearchResult(results=memories, total_matching=2, has_more=False)
+    block = MemoryHubClient.get_injection_block(result)
+
+    assert "Use Podman, not Docker." in block
+    assert "Check staging health before promoting." in block
+    assert "\n---\n" in block

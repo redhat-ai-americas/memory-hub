@@ -33,6 +33,7 @@ from memoryhub.models import (
     CurationRuleResult,
     DeleteResult,
     ExtractionResult,
+    GuidanceResult,
     HistoryResult,
     ListEntitiesResult,
     Memory,
@@ -490,6 +491,8 @@ class MemoryHubClient:
         retrieval_unit: str | None = None,
         source: str | None = None,
         exclude_source: str | None = None,
+        current_step_id: str | None = None,
+        max_hops: int = 2,
     ) -> SearchResult:
         """Search memories using semantic similarity.
 
@@ -541,6 +544,13 @@ class MemoryHubClient:
             content_type: Filter by content type. "knowledge" for facts and
                 preferences, "behavioral" for demonstrated patterns,
                 "procedural" for directed-graph runbooks. Omit to search all types.
+                A procedural filter without ``current_step_id`` stays a ranked list.
+            current_step_id: UUID of the procedural step being executed.
+                When set, the server skips embedding and ranking and returns
+                one guidance result. ``query`` is still required and is
+                ignored; ``SearchResult.query_ignored`` is true.
+            max_hops: Neighborhood size in edges when ``current_step_id`` is
+                set. Default 2, cap 5. Not sent unless ``current_step_id`` is set.
             disabled_signals: RRF signals to disable for ablation testing.
                 Valid names: reranker, focus, keyword, domain, graph.
                 Vector similarity is always active.
@@ -598,6 +608,9 @@ class MemoryHubClient:
             opts["source"] = source
         if exclude_source is not None:
             opts["exclude_source"] = exclude_source
+        if current_step_id is not None:
+            opts["current_step_id"] = current_step_id
+            opts["max_hops"] = max_hops
 
         data = await self._call_action(
             "search",
@@ -626,6 +639,12 @@ class MemoryHubClient:
 
         When there are no appendix entries, the ``===`` separator is omitted.
 
+        A ``result_type="guidance"`` entry (#553) renders as its
+        ``guidance_text`` alone. The neighborhood that produced it is not
+        injected — the point of localized retrieval is that the prose
+        replaces the subgraph in the agent's context, not that it
+        accompanies it.
+
         Returns empty string for empty results.
         """
         if not results.results:
@@ -636,7 +655,14 @@ class MemoryHubClient:
 
         for memory in results.results:
             text = None
-            if memory.result_type == "full" and memory.content:
+            if memory.result_type == "guidance":
+                # Localized procedural guidance (#553). The prose is the whole
+                # point of that response, and it carries no stub, so without
+                # this branch the result_type check below drops it silently.
+                # Only the prose is injected: the neighborhood that produced
+                # it stays out of the prompt.
+                text = memory.guidance_text or memory.content
+            elif memory.result_type == "full" and memory.content:
                 text = memory.content
             elif memory.stub:
                 text = memory.stub
@@ -1317,6 +1343,28 @@ class MemoryHubClient:
         )
         return RelationshipsResult.model_validate(data)
 
+    async def get_guidance(
+        self,
+        node_id: str,
+        *,
+        max_hops: int = 2,
+        project_id: str | None = None,
+    ) -> GuidanceResult:
+        """Localized procedural guidance for one current step.
+
+        Args:
+            node_id: UUID of the step being executed, not a procedure root.
+            max_hops: Neighborhood size in edges. Default 2, cap 5.
+            project_id: Project identifier for campaign enrollment verification.
+        """
+        data = await self._call_action(
+            "guidance",
+            memory_id=node_id,
+            project_id=project_id,
+            options={"max_hops": max_hops},
+        )
+        return GuidanceResult.model_validate(data)
+
     async def create_relationship(
         self,
         source_id: str,
@@ -1656,7 +1704,10 @@ class MemoryHubClient:
         if metadata is not None:
             opts["metadata"] = metadata
         data = await self._call_thread_action(
-            "append", thread_id=thread_id, role=role, content=content,
+            "append",
+            thread_id=thread_id,
+            role=role,
+            content=content,
             options=opts or None,
         )
         return ConversationMessage.model_validate(data)

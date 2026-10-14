@@ -70,7 +70,8 @@ class TestActionValidation:
         assert "write" in msg
 
     def test_valid_actions_count(self):
-        assert len(_VALID_ACTIONS) == 28
+        assert "guidance" in _VALID_ACTIONS
+        assert len(_VALID_ACTIONS) == 29
 
 
 # ── Required param validation ──────────────────────────────────────────────
@@ -536,6 +537,36 @@ class TestCompactDefault:
         )
         kw = mock_search.call_args[1]
         assert kw["verbose"] is True
+
+    @pytest.mark.asyncio
+    @patch("src.tools.search_memory.search_memory", new_callable=AsyncMock)
+    async def test_search_forwards_current_step_id(self, mock_search):
+        """current_step_id reaches search_memory through the compact tool."""
+        mock_search.return_value = {"results": [], "query_ignored": True}
+        step_id = "12345678-1234-5678-1234-567812345678"
+        await memory(
+            action="search",
+            query="deploy",
+            options={"current_step_id": step_id, "max_hops": 2},
+        )
+        kw = mock_search.call_args[1]
+        assert kw["current_step_id"] == step_id
+        assert kw["max_hops"] == 2
+
+    @pytest.mark.asyncio
+    @patch("src.tools.manage_graph.manage_graph", new_callable=AsyncMock)
+    async def test_guidance_forwards_node_and_hops(self, mock_graph):
+        mock_graph.return_value = {"guidance_text": "next"}
+        step_id = "12345678-1234-5678-1234-567812345678"
+        await memory(
+            action="guidance",
+            memory_id=step_id,
+            options={"max_hops": 1},
+        )
+        kw = mock_graph.call_args[1]
+        assert kw["action"] == "get_guidance"
+        assert kw["node_id"] == step_id
+        assert kw["max_hops"] == 1
 
     @pytest.mark.asyncio
     @patch("src.tools.list_memory.list_memory", new_callable=AsyncMock)

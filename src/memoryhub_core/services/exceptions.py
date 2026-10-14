@@ -11,6 +11,55 @@ class MemoryNotFoundError(Exception):
         super().__init__(f"Memory node {memory_id} not found")
 
 
+class GuidanceAccessDeniedError(Exception):
+    """The caller cannot read the current step of a guidance request.
+
+    Neighbors the caller cannot read are omitted instead. The current
+    step is the subject of the guidance, so a denial here stops the call.
+    """
+
+    def __init__(self, node_id: uuid.UUID) -> None:
+        self.node_id = node_id
+        super().__init__(f"Not authorized to read memory {node_id}.")
+
+
+class EntryStepResolutionError(Exception):
+    """Raised when a procedure has no single step to enter on.
+
+    ``candidates`` is empty when nothing qualifies (a cycle, or a
+    procedure with no steps) and lists every qualifying step when more
+    than one does. The caller passes ``current_step_id``; this error
+    never picks a step.
+    """
+
+    def __init__(
+        self,
+        procedure_id: uuid.UUID,
+        candidates: list[uuid.UUID],
+        *,
+        detail: str | None = None,
+    ) -> None:
+        self.procedure_id = procedure_id
+        self.candidates = list(candidates)
+        self.detail = detail
+        if detail is not None:
+            message = detail
+        elif not self.candidates:
+            message = (
+                f"Procedure {procedure_id} has no unambiguous entry step: "
+                "no step lacks an incoming precedes edge. "
+                "Pass current_step_id explicitly."
+            )
+        else:
+            listed = ", ".join(str(candidate) for candidate in self.candidates)
+            message = (
+                f"Procedure {procedure_id} has {len(self.candidates)} steps with "
+                f"no incoming precedes edge: {listed}. "
+                "Pass current_step_id explicitly."
+            )
+        super().__init__(message)
+
+
 class MemoryNotCurrentError(Exception):
     """Raised when attempting to update a non-current memory version."""
 
@@ -57,10 +106,7 @@ class ProjectInviteOnlyError(Exception):
 
     def __init__(self, project_id: str) -> None:
         self.project_id = project_id
-        super().__init__(
-            f"Project '{project_id}' requires an invitation. "
-            "Contact a project admin to be added."
-        )
+        super().__init__(f"Project '{project_id}' requires an invitation. Contact a project admin to be added.")
 
 
 class ProjectNotFoundError(Exception):

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _VALID_ACTIONS = frozenset({
     # Read path
-    "search", "read", "list", "similar", "relationships",
+    "search", "read", "list", "similar", "relationships", "guidance",
     "status", "focus_history", "list_projects", "describe_project",
     "reconstruct",
     # Write path
@@ -42,8 +42,9 @@ _SEARCH_OPTS = frozenset({
     "graph_relationship_types", "graph_boost_weight", "entities",
     "content_type", "verbose", "temporal_status", "disabled_signals",
     "tenant_id", "content_mode", "return_chunks", "retrieval_unit",
-    "source", "exclude_source",
+    "source", "exclude_source", "current_step_id", "max_hops",
 })
+_GUIDANCE_OPTS = frozenset({"max_hops"})
 _LIST_OPTS = frozenset({
     "max_results", "cursor", "include_branches", "current_only",
     "content_type", "verbose", "tenant_id",
@@ -124,12 +125,16 @@ async def memory(
         str | None,
         Field(description=(
             "UUID of target memory. "
-            "Required for: read, update, delete, similar, relationships, report."
+            "Required for: read, update, delete, similar, relationships, guidance, report."
         )),
     ] = None,
     query: Annotated[
         str | None,
-        Field(description="Natural language search text. Required for: search."),
+        Field(description=(
+            "Natural language search text. Required for: search. "
+            "When options.current_step_id is set, the text is still required "
+            "but the server ignores it and returns localized guidance."
+        )),
     ] = None,
     content: Annotated[
         str | None,
@@ -164,6 +169,14 @@ async def memory(
     Read actions:
       search(query, [scope, project_id, options: max_results, focus, domains, ...])
         Semantic search. Returns cache-optimized stable ordering by default.
+        options.current_step_id switches to localized procedural guidance for
+        that step and ignores the query (response query_ignored: true).
+        Without current_step_id, content_type="procedural" stays a ranked list.
+      guidance(memory_id, [project_id, options: max_hops])
+        Localized guidance for one current procedural step, plus the
+        neighborhood the generator saw. memory_id is the step, not a root.
+        max_hops defaults to 2 (cap 5). Same service path as search with
+        current_step_id.
       list([scope, project_id, options: max_results, cursor, include_branches])
         Enumerate memories without semantic ranking. Ordered by creation time.
       read(memory_id, [project_id, options: include_versions, hydrate, resolve_current])
@@ -263,6 +276,8 @@ async def memory(
         return await _dispatch_similar(memory_id, project_id, opts, ctx)
     if action == "relationships":
         return await _dispatch_relationships(memory_id, project_id, opts, ctx)
+    if action == "guidance":
+        return await _dispatch_guidance(memory_id, project_id, opts, ctx)
     if action == "reconstruct":
         return await _dispatch_reconstruct(scope, project_id, opts, ctx)
     if action == "status":
@@ -358,6 +373,16 @@ async def _dispatch_similar(memory_id, project_id, opts, ctx):
         action="get_similar", memory_id=memory_id,
         project_id=project_id, ctx=ctx,
         **_forward(opts, _SIMILAR_OPTS),
+    )
+
+
+async def _dispatch_guidance(memory_id, project_id, opts, ctx):
+    from src.tools.manage_graph import manage_graph
+    _require("guidance", "memory_id", memory_id)
+    return await manage_graph(
+        action="get_guidance", node_id=memory_id,
+        project_id=project_id, ctx=ctx,
+        **_forward(opts, _GUIDANCE_OPTS),
     )
 
 
