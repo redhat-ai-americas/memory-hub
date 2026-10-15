@@ -16,36 +16,6 @@ from typing import Annotated, Any, Literal
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
-from memoryhub_core.models.memory import MemoryNode
-from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
-from memoryhub_core.services.campaign import get_campaigns_for_project
-from memoryhub_core.services.compilation import (
-    CompilationEpoch,
-    apply_compilation,
-    compile_memory_set,
-    should_recompile,
-)
-from memoryhub_core.services.exceptions import (
-    EmbeddingContentTooLargeError,
-    EmbeddingServiceError,
-    EmbeddingServiceUnavailableError,
-)
-from memoryhub_core.services.memory import (
-    _build_search_filters,
-    _bulk_branch_flags,
-    count_search_matches,
-    node_to_read,
-    search_memories,
-    search_memories_with_focus,
-)
-from memoryhub_core.services.pattern import PatternSignal, detect_patterns
-from memoryhub_core.services.project import get_projects_for_user
-from memoryhub_core.services.role import get_roles_for_user
-from memoryhub_core.services.valkey_client import (
-    ValkeyUnavailableError,
-    get_valkey_client,
-)
 from src.core.app import mcp
 from src.core.authz import (
     PROJECT_ISOLATION_ENABLED,
@@ -62,6 +32,40 @@ from src.tools._deps import (
     get_reranker_service,
     get_s3_adapter,
     release_db_session,
+)
+
+from memoryhub_core.models.memory import MemoryNode
+from memoryhub_core.models.schemas import MemoryNodeRead, MemoryNodeStub, MemoryScope
+from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.compilation import (
+    CompilationEpoch,
+    apply_compilation,
+    compile_memory_set,
+    should_recompile,
+)
+from memoryhub_core.services.exceptions import (
+    EmbeddingContentTooLargeError,
+    EmbeddingServiceError,
+    EmbeddingServiceUnavailableError,
+    MembershipNotFoundError,
+)
+from memoryhub_core.services.memory import (
+    _build_search_filters,
+    _bulk_branch_flags,
+    count_search_matches,
+    node_to_read,
+    search_memories,
+    search_memories_with_focus,
+)
+from memoryhub_core.services.pattern import PatternSignal, detect_patterns
+from memoryhub_core.services.project import (
+    assert_project_membership,
+    get_projects_for_user_in_tenant,
+)
+from memoryhub_core.services.role import get_roles_for_user
+from memoryhub_core.services.valkey_client import (
+    ValkeyUnavailableError,
+    get_valkey_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -859,51 +863,67 @@ async def search_memory(
     except AuthenticationError as exc:
         raise ToolError(str(exc)) from None
 
-    # Build RBAC visibility filter + resolve caller tenant for SQL-level
-    # isolation. Tenant filter is ALWAYS applied, independent of scopes.
-    authorized = build_authorized_scopes(claims)
+    # Resolve caller tenant for SQL-level isolation. Tenant filter
+    # is ALWAYS applied, independent of scopes.
     tenant = resolve_tenant(claims, tenant_id)
+    caller_id = claims["sub"]
+    project_ids: set[str] | None = None
 
     # Resolve campaign membership when project_id is provided. The
     # campaign_ids set feeds into _build_search_filters so campaign-scoped
     # memories for enrolled campaigns appear in results.
     campaign_ids: set[str] | None = None
+
+    # An explicit project ID must be used to verify membership before resolving
+    # campaign access. Project-memory filtering is controlled by
+    # PROJECT_ISOLATION_ENABLED.
     if project_id:
         session_for_campaign, gen_for_campaign = await get_db_session()
         try:
+            await assert_project_membership(
+                session_for_campaign, caller_id, project_id, tenant
+            )
+        except MembershipNotFoundError:
+            raise ToolError("Not authorized for this project.") from None
+        else:
+            # Restrict project-scoped results to this project when isolation is on.
+            if PROJECT_ISOLATION_ENABLED:
+                project_ids = {project_id}
+
+            # Campaign visibility is resolved from the verified project.
             campaign_ids = await get_campaigns_for_project(
                 session_for_campaign, project_id, tenant,
             )
         finally:
             await release_db_session(gen_for_campaign)
 
-    # Resolve project memberships for the caller.
-    # When PROJECT_ISOLATION_ENABLED is False, skip resolution -- the
-    # search filter's generic branch handles project scope without
-    # scope_id filtering, and authorize_read returns True.
-    #
-    # When a specific project_id is given, restrict results to THAT
-    # project only.  Without project_id, use claims-based memberships
-    # (populated at registration by _resolve_project_memberships) as
-    # the primary source. Fall back to a DB query for sessions that
-    # predate the claims pipeline or when mid-session auto-enrollment
-    # needs the freshest state.
-    project_ids: set[str] | None = None
-    if PROJECT_ISOLATION_ENABLED:
-        if project_id:
-            project_ids = {project_id}
+    # Without an explicit project_id, resolve memberships only when project
+    # isolation is enabled. Prefer claims populated at registration; fall back
+    # to the database when claims are absent.
+    elif PROJECT_ISOLATION_ENABLED:
+        claims_memberships = claims.get("project_memberships", [])
+        if claims_memberships:
+            project_ids = set(claims_memberships)
         else:
-            claims_memberships = claims.get("project_memberships", [])
-            if claims_memberships:
-                project_ids = set(claims_memberships)
-            else:
-                session_for_project, gen_for_project = await get_db_session()
-                try:
-                    project_ids = await get_projects_for_user(
-                        session_for_project, claims["sub"],
-                    )
-                finally:
-                    await release_db_session(gen_for_project)
+            session_for_project, gen_for_project = await get_db_session()
+            try:
+                project_ids = await get_projects_for_user_in_tenant(
+                    session_for_project, claims["sub"], tenant,
+                )
+            finally:
+                await release_db_session(gen_for_project)
+
+    # Build scope filters using the resolved memberships, while preserving
+    # the caller's original scope.
+    effective_claims = claims
+    if PROJECT_ISOLATION_ENABLED:
+        effective_claims = {
+            **claims,
+            "project_memberships": sorted(project_ids or set())
+        }
+
+    # Build RBAC visibility filters after resolving project memberships.
+    authorized = build_authorized_scopes(effective_claims)
 
     # Resolve role assignments for the caller (table + JWT claims).
     role_names: set[str] | None = None

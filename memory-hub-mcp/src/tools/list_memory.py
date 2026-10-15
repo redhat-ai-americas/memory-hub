@@ -10,12 +10,6 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
-from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope
-from memoryhub_core.services.campaign import get_campaigns_for_project
-from memoryhub_core.services.memory import list_memories
-from memoryhub_core.services.project import get_projects_for_user
-from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
 from src.core.authz import (
     PROJECT_ISOLATION_ENABLED,
@@ -26,6 +20,16 @@ from src.core.authz import (
     resolve_tenant,
 )
 from src.tools._deps import get_db_session, release_db_session
+
+from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope
+from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.exceptions import MembershipNotFoundError
+from memoryhub_core.services.memory import list_memories
+from memoryhub_core.services.project import (
+    assert_project_membership,
+    get_projects_for_user_in_tenant,
+)
+from memoryhub_core.services.role import get_roles_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -116,35 +120,49 @@ async def list_memory(
     except AuthenticationError as exc:
         raise ToolError(str(exc)) from None
 
-    authorized = build_authorized_scopes(claims)
     tenant = resolve_tenant(claims, tenant_id)
-
+    caller_id = claims["sub"]
+    project_ids: set[str] | None = None
     campaign_ids: set[str] | None = None
+
     if project_id:
         session_c, gen_c = await get_db_session()
         try:
+            await assert_project_membership(
+                session_c, caller_id, project_id, tenant
+            )
+        except MembershipNotFoundError:
+            raise ToolError("Not authorized for this project.") from None
+        else:
             campaign_ids = await get_campaigns_for_project(
                 session_c, project_id, tenant,
             )
+            if PROJECT_ISOLATION_ENABLED:
+                project_ids = {project_id}
         finally:
             await release_db_session(gen_c)
 
-    project_ids: set[str] | None = None
-    if PROJECT_ISOLATION_ENABLED:
-        if project_id:
-            project_ids = {project_id}
+    elif PROJECT_ISOLATION_ENABLED:
+        claims_memberships = claims.get("project_memberships", [])
+        if claims_memberships:
+            project_ids = set(claims_memberships)
         else:
-            claims_memberships = claims.get("project_memberships", [])
-            if claims_memberships:
-                project_ids = set(claims_memberships)
-            else:
-                session_p, gen_p = await get_db_session()
-                try:
-                    project_ids = await get_projects_for_user(
-                        session_p, claims["sub"],
-                    )
-                finally:
-                    await release_db_session(gen_p)
+            session_p, gen_p = await get_db_session()
+            try:
+                project_ids = await get_projects_for_user_in_tenant(
+                    session_p, caller_id, tenant,
+                )
+            finally:
+                await release_db_session(gen_p)
+
+    effective_claims = claims
+    if PROJECT_ISOLATION_ENABLED:
+        effective_claims = {
+            **claims,
+            "project_memberships": sorted(project_ids or set()),
+        }
+
+    authorized = build_authorized_scopes(effective_claims)
 
     role_names: set[str] | None = None
     if ROLE_ISOLATION_ENABLED:

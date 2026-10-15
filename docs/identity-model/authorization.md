@@ -34,15 +34,10 @@ The framework correctly enforces:
 - **Enterprise-scope writes blocked.** Always denied at the API; the design
   intent is HITL approval through a separate workflow.
 
-The framework does **not** enforce:
+The framework's enforcement has these boundaries and safeguards:
 
-- **Project-scope membership (implemented, #167).** `authz.py` checks
-  `memory.scope_id in project_ids` for reads and `scope_id in project_ids`
-  for writes, where `project_ids` is resolved from the `project_memberships`
-  table via `get_projects_for_user()`. The `_build_search_filters` function
-  filters project-scoped results by `scope_id IN (caller's project
-  memberships)`. Feature-flagged via `MEMORYHUB_PROJECT_ISOLATION_ENABLED`
-  (default: on).
+- **Project-scope membership (implemented, #167; bulk-tool gap closed by #514).** Project reads are constrained by membership. For explicit `project_id` requests, `list_memory` and `search_memory` also verify membership against the resolved tenant before resolving campaign access or returning project-wide results. This check applies even when `MEMORYHUB_PROJECT_ISOLATION_ENABLED` is off; that flag controls project-result filtering, not explicit-project authorization.
+- **Empty-claims fallback (#514).** For requests without an explicit `project_id`, when project isolation is enabled and membership claims are absent or empty, list/search use a database lookup joined to `Project` and filtered by the resolved tenant. The resulting IDs feed both the retrieval filters and the effective claims passed to `build_authorized_scopes()`.
 - **Role matching (implemented, #167).** `authz.py` checks
   `memory.scope_id in role_names` where `role_names` is resolved from the
   `role_assignments` table plus JWT `roles` claims. Role writes remain

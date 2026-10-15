@@ -524,7 +524,7 @@ async def test_search_as_b_does_not_see_a_memories():
             return_value=set(),
         ),
         patch(
-            "src.tools.search_memory.get_projects_for_user",
+            "src.tools.search_memory.get_projects_for_user_in_tenant",
             new_callable=AsyncMock,
             return_value=set(),
         ),
@@ -616,7 +616,7 @@ async def test_search_as_a_finds_own_memories():
             return_value=set(),
         ),
         patch(
-            "src.tools.search_memory.get_projects_for_user",
+            "src.tools.search_memory.get_projects_for_user_in_tenant",
             new_callable=AsyncMock,
             return_value=set(),
         ),

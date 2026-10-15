@@ -105,6 +105,8 @@ OpenShift; not published as a package.
 
 ### [Unreleased]
 
+- **Project membership authorization (#514)**: `list_memory` and `search_memory` verify membership in the resolved tenant before serving an explicit `project_id`, regardless of the project-isolation setting. For requests without an explicit project, when isolation is enabled and membership claims are empty, both tools use tenant-scoped database memberships for retrieval and authorization filters.
+
 - **Procedural graph content type, Phase 1 (#552)**: `write`/`list`/`search` accept `content_type="procedural"`; `relate` accepts `precedes`/`requires`/`alternative_to` edge types (`mentions` remains system-managed). `reconstruct` is unchanged and still scoped to `behavioral` only — procedural graphs are not returned by it. Retrieval/traversal support is #553, not this change.
 
 - FastMCP 3 server exposing the 13 MemoryHub tools over streamable-HTTP.
