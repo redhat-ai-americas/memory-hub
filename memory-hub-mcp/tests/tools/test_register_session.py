@@ -19,6 +19,8 @@ from unittest.mock import patch
 import fakeredis.aioredis
 import pytest
 from fastmcp.exceptions import ToolError
+from src.tools import auth as auth_module
+from src.tools.register_session import register_session
 
 from memoryhub_core.config import ValkeySettings
 from memoryhub_core.services.push_subscriber import (
@@ -30,8 +32,6 @@ from memoryhub_core.services.valkey_client import (
     ValkeyClient,
     set_valkey_client,
 )
-from src.tools import auth as auth_module
-from src.tools.register_session import register_session
 
 # FastMCP's @mcp.tool decorator returns the original function in this codebase
 # (verified by the existing set_session_focus tests), so we don't need .fn here.
@@ -89,12 +89,10 @@ def mock_authenticate():
 
 @pytest.fixture
 def mock_set_session():
-    """Replace ``set_session`` so the API-key path is a no-op for identity."""
-    from datetime import UTC, datetime, timedelta
-
-    expires_at = datetime.now(UTC) + timedelta(seconds=3600)
-    with patch("src.tools.register_session.set_session", return_value=expires_at):
-        yield
+    """Use the real per-MCP-session binding and clear it after the test."""
+    auth_module.clear_session()
+    yield
+    auth_module.clear_session()
 
 
 @pytest.fixture(autouse=True)
@@ -109,10 +107,10 @@ def mock_fetch_projects():
 
 @pytest.fixture(autouse=True)
 def reset_session_id():
-    """Clear the module-level session_id between tests."""
-    auth_module._session_id = None
+    """Clear the compatibility state and per-connection bindings."""
+    auth_module.clear_session()
     yield
-    auth_module._session_id = None
+    auth_module.clear_session()
 
 
 def _is_uuid(value: str) -> bool:
@@ -137,8 +135,9 @@ class FakeServerSession:
     streamable-http transport does on session shutdown.
     """
 
-    def __init__(self):
+    def __init__(self, session_id: str | None = None):
         self._exit_stack = contextlib.AsyncExitStack()
+        self.session_id = session_id
         self.sent: list = []
 
     async def send_notification(self, notification):
@@ -148,8 +147,13 @@ class FakeServerSession:
 class FakeContext:
     """Stand-in for ``fastmcp.Context`` exposing only what register_session uses."""
 
-    def __init__(self, session: FakeServerSession | None = None):
+    def __init__(
+        self,
+        session: FakeServerSession | None = None,
+        session_id: str | None = None,
+    ):
         self._session = session or FakeServerSession()
+        self.session_id = session_id or str(uuid.uuid4())
         self.info_calls: list[str] = []
 
     @property
@@ -204,9 +208,50 @@ class TestValidApiKey:
         assert "expires_at" in result
         assert "session_ttl_seconds" in result
         assert result["session_ttl_seconds"] == 3600
+        assert auth_module.get_current_user(ctx)["user_id"] == "wjackson"
+        assert auth_module.get_session_id(ctx) == result["session_id"]
         members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
         assert len(members) == 1
         assert _is_uuid(members.pop())
+
+    async def test_two_mcp_clients_keep_separate_api_key_sessions(
+        self, fake_valkey, mock_authenticate, mock_set_session
+    ):
+        mock_authenticate.side_effect = {
+            "key-a": {
+                "user_id": "user-a",
+                "name": "User A",
+                "scopes": ["user", "project"],
+                "project_memberships": ["project-a"],
+            },
+            "key-b": {
+                "user_id": "user-b",
+                "name": "User B",
+                "scopes": ["user"],
+                "project_memberships": ["project-b"],
+            },
+        }.__getitem__
+        ctx_a = FakeContext(session_id="mcp-a")
+        ctx_b = FakeContext(session_id="mcp-b")
+
+        result_a = await register_session_fn(
+            api_key="key-a", default_driver_id="driver-a", ctx=ctx_a
+        )
+        result_b = await register_session_fn(
+            api_key="key-b", default_driver_id="driver-b", ctx=ctx_b
+        )
+
+        assert result_a["session_id"] != result_b["session_id"]
+        user_a = auth_module.get_current_user(ctx_a)
+        user_b = auth_module.get_current_user(ctx_b)
+        assert user_a["user_id"] == "user-a"
+        assert user_a["project_memberships"] == ["project-a"]
+        assert user_b["user_id"] == "user-b"
+        assert user_b["project_memberships"] == ["project-b"]
+        assert auth_module.get_session_id(ctx_a) == result_a["session_id"]
+        assert auth_module.get_session_id(ctx_b) == result_b["session_id"]
+        assert auth_module.get_default_driver_id(ctx_a) == "driver-a"
+        assert auth_module.get_default_driver_id(ctx_b) == "driver-b"
 
     async def test_starts_subscriber_task(
         self, fake_valkey, mock_authenticate, mock_set_session
@@ -274,11 +319,9 @@ class TestValidApiKey:
 
 
 class TestNoContextDegradesGracefully:
-    """If a tool is invoked without a Context (rare — out-of-band call), the
-    SADD should still happen but the subscriber loop is skipped because
-    there's no session to forward notifications to."""
+    """API-key authentication must fail closed without an MCP session."""
 
-    async def test_sads_session_but_skips_subscriber(
+    async def test_rejects_registration_without_mcp_session(
         self, fake_valkey, mock_authenticate, mock_set_session
     ):
         mock_authenticate.return_value = {
@@ -287,11 +330,10 @@ class TestNoContextDegradesGracefully:
             "scopes": [],
         }
 
-        result = await register_session_fn(api_key="valid", ctx=None)
-
+        with pytest.raises(ToolError, match="established MCP client session"):
+            await register_session_fn(api_key="valid", ctx=None)
         members = await fake_valkey._client.smembers(ACTIVE_SESSIONS_KEY)
-        assert len(members) == 1
-        assert result["session_id"] in members
+        assert members == set()
         assert get_active_subscriber_count() == 0
 
 

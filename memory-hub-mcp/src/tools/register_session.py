@@ -21,6 +21,20 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
+from src.core.app import mcp
+from src.core.audit import record_event
+from src.core.authz import get_tenant_filter
+from src.tools._deps import get_db_session, release_db_session
+from src.tools.auth import (
+    DEFAULT_TENANT_ID,
+    AuthServiceUnavailableError,
+    authenticate,
+    authenticate_remote,
+    get_mcp_session_id,
+    set_default_driver_id,
+    set_session,
+    set_session_id,
+)
 
 from memoryhub_core.config import AppSettings
 from memoryhub_core.services.project import get_projects_for_user, list_projects_for_tenant
@@ -31,19 +45,6 @@ from memoryhub_core.services.push_subscriber import (
 from memoryhub_core.services.valkey_client import (
     ValkeyUnavailableError,
     get_valkey_client,
-)
-from src.core.app import mcp
-from src.core.audit import record_event
-from src.core.authz import get_tenant_filter
-from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import (
-    DEFAULT_TENANT_ID,
-    AuthServiceUnavailableError,
-    authenticate,
-    authenticate_remote,
-    set_default_driver_id,
-    set_session,
-    set_session_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -257,8 +258,8 @@ async def register_session(
         jwt_claims = token.claims
         user_id = jwt_claims.get("sub", token.client_id)
         session_id = str(uuid.uuid4())
-        set_session_id(session_id)
-        set_default_driver_id(default_driver_id)
+        set_session_id(session_id, ctx=ctx)
+        set_default_driver_id(default_driver_id, ctx=ctx)
         tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
         projects = await _fetch_user_projects(user_id, tenant)
@@ -296,6 +297,12 @@ async def register_session(
             ),
         }
 
+    if get_mcp_session_id(ctx) is None:
+        raise ToolError(
+            "API-key registration requires an established MCP client session. "
+            "Reconnect using a stateful MCP transport and call register_session again."
+        )
+
     user = authenticate(api_key)
     if user is None:
         try:
@@ -323,6 +330,11 @@ async def register_session(
             "Keys follow the format: mh-dev-<hex>."
         )
 
+    # authenticate() returns a shared cached ConfigMap record. Project
+    # membership resolution below is session data, so do not mutate that
+    # process-wide cached record.
+    user = dict(user)
+
     # Resolve project memberships: merge ConfigMap bootstrap with DB state.
     # This must happen before set_session() so the session user dict
     # carries project_memberships for get_claims_from_context() to extract.
@@ -330,10 +342,20 @@ async def register_session(
 
     app_settings = AppSettings()
     ttl = app_settings.session_ttl_seconds
-    expires_at = set_session(user, ttl_seconds=ttl)
     session_id = str(uuid.uuid4())
-    set_session_id(session_id)
-    set_default_driver_id(default_driver_id)
+    try:
+        expires_at = set_session(
+            user,
+            ttl_seconds=ttl,
+            ctx=ctx,
+            session_id=session_id,
+            default_driver_id=default_driver_id,
+        )
+    except RuntimeError as exc:
+        raise ToolError(
+            "API-key registration requires an established MCP client session. "
+            "Reconnect and call register_session again."
+        ) from exc
     await _start_push_for_session(session_id, ctx)
 
     if ctx:

@@ -77,7 +77,8 @@ jobs:
         if: github.event_name != 'pull_request' || steps.mcp-changes.outputs.mcp == 'true'
         run: |
           python -m pip install --upgrade pip
-          cd memory-hub-mcp && pip install -r requirements.txt && pip install pytest
+          pip install -e ".[dev]"
+          cd memory-hub-mcp && pip install -r requirements.txt
 
       - name: Run tests with pytest
         if: github.event_name != 'pull_request' || steps.mcp-changes.outputs.mcp == 'true'
