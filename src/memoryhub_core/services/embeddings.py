@@ -54,6 +54,10 @@ class MockEmbeddingService(EmbeddingService):
     def max_tokens(self) -> int:
         return self._max_tokens
 
+    async def initialize(self) -> None:
+        """No-op for mock service; production HttpEmbeddingService uses this."""
+        pass
+
     async def embed(self, text: str) -> list[float]:
         return self._hash_embed(text)
 

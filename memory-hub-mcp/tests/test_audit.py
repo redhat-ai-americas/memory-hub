@@ -154,16 +154,6 @@ def test_record_event_session_denied(caplog):
 class TestFireAndForget:
     """Verify audit failures never block tool operations (audit.py:8)."""
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Known product bug: record_event's final logger.info is unguarded, "
-            "so a logging failure propagates into the caller and breaks the "
-            "fire-and-forget contract the module docstring promises. Tracked in "
-            "#600. strict=True so fixing audit.py turns this red and "
-            "forces the marker off."
-        ),
-    )
     def test_logger_exception_does_not_propagate(self):
         """Audit logging failures are swallowed (fire-and-forget)."""
         from unittest.mock import patch

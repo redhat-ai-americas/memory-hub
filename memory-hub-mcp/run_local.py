@@ -1,4 +1,4 @@
-#!/Users/wjackson/Developer/memory-hub/memory-hub-mcp/.venv/bin/python
+#!/usr/bin/env python
 """Run MemoryHub MCP server locally against port-forwarded PostgreSQL."""
 
 import os
@@ -17,7 +17,10 @@ if not os.environ.get("MEMORYHUB_DB_PASSWORD"):
 
 # Auth: point to the local dev users file
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-os.environ.setdefault("MEMORYHUB_USERS_FILE", os.path.join(_script_dir, "dev-users.json"))
+_users_file = os.path.join(_script_dir, "dev-users.json")
+if not os.path.isfile(_users_file):
+    _users_file = os.path.join(_script_dir, "dev-users.example.json")
+os.environ.setdefault("MEMORYHUB_USERS_FILE", _users_file)
 
 # Ensure memoryhub core library is importable
 os.chdir(_script_dir)

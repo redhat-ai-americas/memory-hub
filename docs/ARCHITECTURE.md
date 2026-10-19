@@ -1,6 +1,6 @@
 # Architecture
 
-MemoryHub is a Kubernetes-native agent memory system for OpenShift AI. It provides centralized, governed memory behind a single service core -- an MCP server backed by PostgreSQL with pgvector and protected by an OAuth 2.1 authorization server with service-layer RBAC. Consumers reach that core through multiple interchangeable **surfaces**; today those are agents over MCP, a typed Python SDK, a CLI, a dashboard UI, and agent-harness hooks, and the set is expected to grow (e.g., agent plugins, platform connectors).
+MemoryHub is a Kubernetes-native agent memory system for OpenShift AI. It provides centralized, governed memory behind a single service core -- an MCP server backed by PostgreSQL with pgvector and protected by an OAuth 2.1 authorization server with service-layer RBAC. Consumers reach that core through multiple interchangeable **surfaces**; today those are agents over MCP, a typed Python SDK, a CLI, a dashboard UI, agent-harness hooks, and native agent-host plugins (OpenClaw, opencode), and the set is expected to grow (e.g., platform connectors).
 
 This document covers the big picture. Subsystem details live in their own docs (see [SYSTEMS.md](SYSTEMS.md)). For the conceptual case -- what agent memory is, when local files suffice, and when you need a governed platform -- read [What Agent Memory Really Is](guides/what-is-agent-memory.md) first.
 
@@ -17,6 +17,7 @@ A *surface* is any way a human or agent reaches MemoryHub. Surfaces are delibera
 | CLI (`memoryhub-cli`) | Humans, scripts, agent harnesses | CLI → SDK → MCP server |
 | Dashboard UI | Administrators | React frontend → BFF → MCP server |
 | Agent-harness hooks | SessionStart / UserPromptSubmit / Stop hooks | Hooks → CLI → SDK → MCP server |
+| Agent-host plugins (`integrations/`) | OpenClaw, opencode | Plugin (host-side auth, auto-recall injection) → MCP protocol → MCP server — see [design/agent-host-integrations.md](design/agent-host-integrations.md) |
 
 Rules for adding a new surface (a plugin, a platform connector, an editor extension, ...):
 
@@ -310,7 +311,7 @@ External cluster routes:
 
 **Decided and shipped.** The architectural decisions that are settled and running in production, by theme. (Feature-level detail and issue numbers live in [SYSTEMS.md](SYSTEMS.md) and [CHANGELOG.md](../CHANGELOG.md) -- this list is deliberately about *decisions*, not features.)
 
-- *Core model.* Tree-based memory model with typed relationships; `content_type` (experiential/knowledge/behavioral, #237); write-time entity extraction with content-addressed dedup (#170/#247); scope promotion with provenance (#235); durable workflow checkpoints (#238).
+- *Core model.* Tree-based memory model with typed relationships; `content_type` (experiential/knowledge/behavioral/procedural, #237/#552); write-time entity extraction with content-addressed dedup (#170/#247); scope promotion with provenance (#235); durable workflow checkpoints (#238).
 - *Retrieval.* Stateless per-call session focus with cross-encoder reranking and graceful cosine fallback (#58); campaign scoping and domain-tag boosting (#154); temporal awareness -- `relevant_until` expiry and `temporal_status` filtering (#282), pattern surfacing (#292).
 - *Governance and identity.* OAuth 2.1 + short-lived JWTs with service-layer RBAC enforced at the SQL level; three grant types (`client_credentials`, `authorization_code + PKCE`, `token_exchange` RFC 8693); owner/actor/driver identity with on-behalf-of authorization (#66/#284); project auto-enrollment and membership enforcement (#188/#64); write-time curation with PII blocking (#234); admin content moderation with sanitized audit mode (#45); structured audit logging on every tool call site (#67).
 - *Conversation persistence.* First-class governed threads with extraction pipeline, fork/handoff (A2A-compatible), a 4-level deletion hierarchy, legal hold, and retention sweeps (#168/#193).

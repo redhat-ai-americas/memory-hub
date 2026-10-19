@@ -29,7 +29,7 @@ Deployment is automated via `deploy/deploy.sh` which stages a build context, tri
 
 | Tool | Purpose | Read/Write |
 |------|---------|------------|
-| `manage_graph(action="create_relationship", ...)` | Create directed edges between memories (derived_from, supersedes, conflicts_with, related_to). Use `conflicts_with` with merge metadata to suggest merges (consolidated from `suggest_merge`, #173) | Write |
+| `manage_graph(action="create_relationship", ...)` | Create directed edges between memories (derived_from, supersedes, conflicts_with, related_to, precedes, requires, alternative_to). `mentions` is system-managed. Use `conflicts_with` with merge metadata to suggest merges (consolidated from `suggest_merge`, #173) | Write |
 | `manage_graph(action="get_relationships", ...)` | Query edges for a node with optional provenance tracing | Read |
 | `manage_graph(action="get_similar", ...)` | Paged similar memory lookup by embedding similarity | Read |
 | `manage_curation(action="set_rule", ...)` | Create/update user-layer curation rules (dedup thresholds, custom regex) | Write |
@@ -121,7 +121,7 @@ All MCP tools raise `fastmcp.exceptions.ToolError` for failures. This sets
 the `is_error` flag on the MCP wire response — no tool returns error dicts.
 Error messages explain what went wrong AND how to fix it:
 
-- "Invalid relationship_type 'friends_with'. Must be one of: derived_from, supersedes, conflicts_with, related_to."
+- "Invalid relationship_type 'friends_with'. Must be one of: derived_from, supersedes, conflicts_with, related_to, precedes, requires, alternative_to."
 - "Write blocked by curation rule: secrets_scan. Content matches aws_access_key pattern (AKIA...MPLE)."
 - "Memory node abc-123 not found. Verify both source_id and target_id refer to existing, current memory nodes."
 

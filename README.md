@@ -29,6 +29,21 @@ claude mcp add memoryhub -- memoryhub mcp
 
 Start a new Claude Code session and your agent has persistent memory. See [`memoryhub-local/README.md`](memoryhub-local/README.md) for configuration, dreaming (offline fact extraction), and how it works under the hood.
 
+### Local full-stack development
+
+The cluster edition can also run locally for development without OpenShift.
+This mode uses PostgreSQL + pgvector, an HTTP MCP server, and the dashboard
+UI. It is a development mode of the cluster edition, not a third edition.
+
+```bash
+make local-install
+make local-up
+make local-down
+```
+
+See [`docs/guides/local-development.md`](docs/guides/local-development.md) for
+the Compose, Vite, local auth-service, and integration-test workflows.
+
 ### Cluster edition
 
 Full governed stack on OpenShift AI: PostgreSQL + pgvector, OAuth 2.1, embedding + reranker models, dashboard UI.
@@ -82,6 +97,7 @@ Per-subsystem status and dependency graph: [`docs/SYSTEMS.md`](docs/SYSTEMS.md).
 | **Curation agents** | [`memoryhub-agents/`](memoryhub-agents/) | Background agents (Fact Checker, Trace Reviewer) running on Valkey job queues with leader election. |
 | **Dashboard UI** | [`memoryhub-ui/`](memoryhub-ui/) | React + PatternFly 6 frontend behind a FastAPI BFF, deployed as a single container. Six panels: Memory Graph, Status Overview, Users & Agents, Client Management, Curation Rules, Contradiction Log. OAuth-proxy sidecar in front of OpenShift login. |
 | **Auth service** | [`memoryhub-auth/`](memoryhub-auth/) | Standalone OAuth 2.1 authorization server. FastAPI with `client_credentials` and `refresh_token` grants, RSA-2048 JWT signing, JWKS endpoint, admin client management API. |
+| **Agent-host integrations** | [`integrations/`](integrations/) | Native plugins for agent hosts: [OpenClaw](integrations/openclaw/DEPLOY.md) and [opencode](integrations/opencode/README.md). Each wraps the MCP client with host-side auth, auto-recall injection, and the memory protocol. |
 | **Database migrations** | [`alembic/`](alembic/) | Schema migrations for the server-side library. PostgreSQL with the pgvector extension. |
 | **Design docs** | [`docs/`](docs/) | Subsystem designs, the agent-memory-ergonomics design cluster, package layout, auth and identity model. Start at [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). |
 | **Planning** | [`planning/`](planning/) | In-flight designs for unimplemented features (operator, observability, org-ingestion) and the LlamaStack integration plan. |

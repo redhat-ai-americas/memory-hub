@@ -13,7 +13,7 @@ Together they form the acceptance coverage for issue #46:
     (proves the tenant filter holds at the actual storage layer).
 
 Run with the compose stack active:
-    podman-compose -f tests/integration/compose.yaml up -d
+podman compose -f tests/integration/compose.yaml up -d
     pytest tests/integration/test_tenant_isolation.py
 """
 
