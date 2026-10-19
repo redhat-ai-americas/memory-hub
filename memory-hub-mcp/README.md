@@ -49,9 +49,16 @@ notifications without polling. Push wiring is non-fatal — if Valkey is
 unreachable, registration still succeeds and the agent falls back to
 pull-only loading.
 
-When the server is deployed behind a JWT-issuing auth server, session
-registration is a no-op: the JWT's `sub` claim is used directly and the
-push subscriber starts automatically.
+API-key registration requires a stateful MCP transport session and fails
+closed if FastMCP cannot provide a stable session ID. The canonical HTTP server
+passes `stateless_http=False` to `mcp.run`; keep this setting when API-key
+authentication is enabled. Stateless HTTP requests cannot use
+`register_session` with an API key.
+
+With JWT authentication, each request is authenticated from its token, so
+API-key registration is unnecessary. Calling `register_session` still creates
+per-connection session metadata and starts the push subscriber; that optional
+session setup also requires a stateful transport.
 
 **Parameters:** `api_key` (str, required — format `mh-dev-<username>-<year>`)
 

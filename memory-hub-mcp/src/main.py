@@ -144,7 +144,13 @@ def main():
         host = os.getenv("MCP_HTTP_HOST", "0.0.0.0")
         port = int(os.getenv("MCP_HTTP_PORT", "8080"))
         path = os.getenv("MCP_HTTP_PATH", "/mcp/")
-        mcp.run(transport="http", host=host, port=port, path=path)
+        mcp.run(
+            transport="http",
+            host=host,
+            port=port,
+            path=path,
+            stateless_http=False,
+        )
     else:
         mcp.run()
 

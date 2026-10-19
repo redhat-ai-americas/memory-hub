@@ -8,7 +8,11 @@ authorize_read / authorize_write helpers consume uniformly.
 import os
 
 from src.core.logging import get_logger
-from src.tools.auth import DEFAULT_TENANT_ID, get_current_user
+from src.tools.auth import (
+    DEFAULT_TENANT_ID,
+    get_current_user,
+    refresh_session_metadata,
+)
 
 log = get_logger("authz")
 
@@ -83,6 +87,7 @@ def get_claims_from_context() -> dict:
         token = None
 
     if token is not None:
+        refresh_session_metadata()
         claims = {
             "sub": token.claims.get("sub", token.client_id),
             "identity_type": token.claims.get("identity_type", "user"),
@@ -99,6 +104,7 @@ def get_claims_from_context() -> dict:
     #    since the transport already validated the signature.
     jwt_claims = _extract_jwt_from_headers()
     if jwt_claims is not None:
+        refresh_session_metadata()
         scopes = jwt_claims.get("scopes", [])
         if isinstance(scopes, str):
             scopes = scopes.split()

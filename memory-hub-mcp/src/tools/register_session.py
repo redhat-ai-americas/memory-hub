@@ -21,6 +21,17 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
+
+from memoryhub_core.config import AppSettings
+from memoryhub_core.services.project import get_projects_for_user, list_projects_for_tenant
+from memoryhub_core.services.push_subscriber import (
+    ensure_memoryhub_subscriber_running,
+    stop_memoryhub_subscriber,
+)
+from memoryhub_core.services.valkey_client import (
+    ValkeyUnavailableError,
+    get_valkey_client,
+)
 from src.core.app import mcp
 from src.core.audit import record_event
 from src.core.authz import get_tenant_filter
@@ -34,17 +45,6 @@ from src.tools.auth import (
     set_default_driver_id,
     set_session,
     set_session_id,
-)
-
-from memoryhub_core.config import AppSettings
-from memoryhub_core.services.project import get_projects_for_user, list_projects_for_tenant
-from memoryhub_core.services.push_subscriber import (
-    ensure_memoryhub_subscriber_running,
-    stop_memoryhub_subscriber,
-)
-from memoryhub_core.services.valkey_client import (
-    ValkeyUnavailableError,
-    get_valkey_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,8 @@ async def _start_push_for_session(session_id: str, ctx: Context | None) -> None:
         )
         return
 
+    # FastMCP 3.4.2 exposes no public close callback; the private ``_exit_stack``
+    # hook below is covered by the session lifecycle regression test.
     # Register session-close cleanup exactly once per session. FastMCP's
     # ``_exit_stack`` unwinds when the streamable-http connection closes,
     # calling our callback which cancels the subscriber task and removes
@@ -234,7 +236,13 @@ async def register_session(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Register this session with your API key.
+    """Register this session with an API key or attach JWT session metadata.
+
+    API-key registration requires a stateful MCP session and fails closed
+    without one. For HTTP deployments, configure FastMCP with
+    ``stateless_http=False`` so the transport provides a stable session ID.
+    JWT authentication is carried and verified per request; this tool stores
+    optional session and driver metadata for that authenticated connection.
 
     Call this once at the start of every conversation to establish your identity.
     After registration, write_memory and search_memory will automatically scope
@@ -258,7 +266,12 @@ async def register_session(
         jwt_claims = token.claims
         user_id = jwt_claims.get("sub", token.client_id)
         session_id = str(uuid.uuid4())
-        set_session_id(session_id, ctx=ctx)
+        session_ttl_seconds = AppSettings().session_ttl_seconds
+        set_session_id(
+            session_id,
+            ctx=ctx,
+            ttl_seconds=session_ttl_seconds,
+        )
         set_default_driver_id(default_driver_id, ctx=ctx)
         tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
