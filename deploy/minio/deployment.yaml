@@ -1,5 +1,9 @@
-# NOTE: The upstream MinIO image runs as uid 1000. OpenShift assigns random
-# UIDs by default via the restricted SCC, which breaks the image. This
+# NOTE: This image declares uid 65532 (Chainguard's "nonroot" user), not 1000.
+# The securityContext below deliberately overrides it to 1000, which is the uid
+# this Deployment has run as since it was first added, so existing PVC data
+# stays readable. Do not drop the override on the assumption that the image
+# already runs as 1000, because it does not. OpenShift also assigns random UIDs
+# by default via the restricted SCC, which breaks the image either way, so this
 # Deployment uses a dedicated ServiceAccount (memoryhub-minio) granted the
 # "anyuid" SCC, scoping the grant to just this workload rather than the
 # namespace's default SA. See README.md for the prerequisite oc adm command.
@@ -14,14 +18,21 @@
 #
 # cgr.dev/chainguard/minio is still anonymously pullable, and despite the stale
 # upstream_url in Chainguard's image metadata it does not build the archived
-# repo. It builds pgsty/silo, a maintained AGPLv3 fork, so the binary reports
-# release dates past the archive date and carries security fixes the archived
-# upstream never got. Verify with: oc exec deploy/memoryhub-minio -- minio --version
+# repo. Its SPDX attestation names the source as
+# pkg:github/chainguard-forks/minio@RELEASE.2026-09-22T19-25-18Z --
+# chainguard-forks/minio is Chainguard's own AGPLv3 fork of minio/minio, public
+# and still being pushed to, so the binary reports release dates past the
+# archive date and carries fixes the archived upstream never got. The SBOM also
+# shows github.com/minio/console v1.7.7 is still embedded, so the console and
+# the --console-address flag below are intact. Read the provenance yourself
+# with: cosign verify-attestation --type spdxjson cgr.dev/chainguard/minio
+# (the image labels still point at the archived repo and are not reliable).
+# Runtime check: oc exec deploy/memoryhub-minio -- minio --version
 #
 # Pinned by digest because Chainguard's free tier serves only the :latest tag,
 # so the digest needs a periodic bump. This is a stopgap on two counts: a
-# third-party free tier for distribution, and a community fork for maintenance.
-# See #611 for replacing MinIO outright.
+# third-party free tier for distribution, and a vendor fork rather than a
+# first-party upstream for maintenance. See #611 for replacing MinIO outright.
 #
 # Uses strategy.Recreate because the PVC is ReadWriteOnce -- a rolling update
 # would hit a multi-attach error when the old pod still holds the volume.
