@@ -64,7 +64,12 @@ _WRITE_OPTS = frozenset({
     "project_description", "force", "owner_id", "content_type",
     "driver_id", "relevant_until", "tenant_id",
     "chunk_target_tokens", "chunk_overlap_tokens", "extract_facts",
+    "upstream_trust_level",
 })
+# upstream_trust_level is deliberately absent: trust is set once at write time
+# and inherited by later versions. Letting a caller edit it after the fact
+# would be a laundering path straight through the feature this field exists
+# to provide.
 _UPDATE_OPTS = frozenset({"weight", "metadata", "domains", "driver_id"})
 _SET_RULE_OPTS = frozenset({
     "name", "tier", "action_type", "config", "scope_filter",

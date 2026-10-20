@@ -84,6 +84,7 @@ async def _extract_facts_via_sampling(
     domains: list[str] | None,
     embedding_service: Any,
     session: Any,
+    upstream_trust_level: str = "trusted",
 ) -> int | str:
     """Run fact extraction via MCP sampling. Returns fact count or "deferred"."""
     try:
@@ -130,6 +131,7 @@ async def _extract_facts_via_sampling(
             extraction_run_id=extraction_run_id,
             embedding_service=embedding_service,
             session=session,
+            upstream_trust_level=upstream_trust_level,
         )
         return count
     except Exception as exc:
@@ -305,6 +307,22 @@ async def write_memory(
             description=(
                 "Target tenant for this write. Omit to use the session's "
                 "own tenant. Must be a tenant the caller is authorized for."
+            ),
+        ),
+    ] = None,
+    upstream_trust_level: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Trust level of the material this memory came from: 'trusted' "
+                "(direct user input, verified tool output), 'untrusted' (web "
+                "scrapes, unverified MCP servers, browser automation), or "
+                "'mixed' (both, and the memory cannot be attributed to only "
+                "the trusted part). Omit for 'trusted'. Set this when writing "
+                "anything derived from content you did not authenticate. The "
+                "value is advisory and is surfaced to readers as taint "
+                "metadata; it is set once and inherited by later versions, so "
+                "it cannot be raised after the fact."
             ),
         ),
     ] = None,
@@ -565,6 +583,8 @@ async def write_memory(
             create_kwargs["chunk_target_tokens"] = chunk_target_tokens
         if chunk_overlap_tokens is not None:
             create_kwargs["chunk_overlap_tokens"] = chunk_overlap_tokens
+        if upstream_trust_level is not None:
+            create_kwargs["upstream_trust_level"] = upstream_trust_level
         try:
             node_create = MemoryNodeCreate(**create_kwargs)
         except ValidationError as exc:
@@ -669,6 +689,7 @@ async def write_memory(
                 domains=domains,
                 embedding_service=embedding_service,
                 session=session,
+                upstream_trust_level=memory.upstream_trust_level,
             )
 
         # Full MemoryNodeRead dump, including content_type. Keep that field if

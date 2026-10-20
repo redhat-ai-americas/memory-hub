@@ -166,3 +166,124 @@ class TestSDKMemoryTaintField:
         from memoryhub.models import Memory
         m = Memory(id="mem-1", content="test")
         assert m.taint is None
+
+
+# ---------------------------------------------------------------------------
+# The write surface can actually set the field (#574)
+# ---------------------------------------------------------------------------
+#
+# Until #574 the column, the schema, the taint helpers and the read path all
+# existed, but no tool parameter fed them. Every write landed on the column
+# default, so the whole feature was inert in production while its unit tests
+# stayed green. These tests pin the tool surface itself: the parameter is
+# declared, it reaches MemoryNodeCreate, and the action-dispatch wrapper
+# forwards it on write and refuses it on update.
+
+
+class TestWriteMemoryTrustParameter:
+    def test_parameter_is_declared(self):
+        import inspect
+
+        from src.tools.write_memory import write_memory
+
+        params = inspect.signature(write_memory).parameters
+        assert "upstream_trust_level" in params, (
+            "write_memory has no upstream_trust_level parameter, so callers "
+            "cannot mark a memory as derived from untrusted material and the "
+            "whole trust-provenance feature is unreachable"
+        )
+        assert params["upstream_trust_level"].default is None
+
+    @pytest.mark.asyncio
+    async def test_value_reaches_memory_node_create(self):
+        """The tool argument must survive into the service's input schema."""
+        captured = await _capture_create(upstream_trust_level="untrusted")
+        assert captured.upstream_trust_level == "untrusted"
+
+    @pytest.mark.asyncio
+    async def test_omitted_value_defaults_to_trusted(self):
+        captured = await _capture_create()
+        assert captured.upstream_trust_level == "trusted"
+
+
+class TestDispatchForwarding:
+    """``memory(action=...)`` is the surface agents actually call."""
+
+    def test_write_forwards_trust_level(self):
+        from src.tools.memory import _WRITE_OPTS
+
+        assert "upstream_trust_level" in _WRITE_OPTS
+
+    def test_update_does_not_accept_trust_level(self):
+        """Trust is set once at write time and inherited by later versions.
+
+        An editable field here would be a laundering path straight through
+        the feature the field exists to provide.
+        """
+        from src.tools.memory import _UPDATE_OPTS
+
+        assert "upstream_trust_level" not in _UPDATE_OPTS
+
+
+async def _capture_create(**tool_kwargs):
+    """Call write_memory with the DB stubbed out, return the MemoryNodeCreate.
+
+    Returns the schema object rather than asserting inline so each test can
+    say what it cares about; a failure then names the field, not the mock.
+    """
+    import uuid as _uuid
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from src.tools.write_memory import write_memory
+
+    seen: dict[str, object] = {}
+
+    async def _fake_create(data, session, embedding_service, *, tenant_id, **kwargs):
+        seen["data"] = data
+        now = datetime.now(tz=UTC)
+        read = _make_read(
+            id=_uuid.uuid4(),
+            content=data.content,
+            owner_id=data.owner_id,
+            tenant_id=tenant_id,
+            created_at=now,
+            updated_at=now,
+            upstream_trust_level=str(data.upstream_trust_level),
+        )
+        curation = {
+            "blocked": False,
+            "reason": None,
+            "detail": None,
+            "similar_count": 0,
+            "nearest_id": None,
+            "nearest_score": None,
+            "flags": [],
+        }
+        return read, curation
+
+    claims = {
+        "sub": "user_a",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:read", "memory:write", "memory:read:user", "memory:write:user"],
+    }
+
+    with (
+        patch("src.tools.write_memory.get_claims_from_context", return_value=claims),
+        patch("src.tools.write_memory.get_db_session", return_value=(MagicMock(), AsyncMock())),
+        patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock(max_tokens=8192)),
+        patch("src.tools.write_memory.create_memory", new=AsyncMock(side_effect=_fake_create)),
+        patch("src.tools.write_memory.broadcast_after_write", new_callable=AsyncMock),
+    ):
+        result = await write_memory(
+            content="scraped from an unauthenticated wiki",
+            scope="user",
+            owner_id="user_a",
+            **tool_kwargs,
+        )
+
+    assert result.get("error") is not True, result
+    assert "data" in seen, "create_memory was never called"
+    return seen["data"]
