@@ -122,7 +122,7 @@ class TestAutoEnrollmentClaimsUpdate:
                 ),
                 patch(
                     "src.tools.write_memory.get_embedding_service",
-                    return_value=MagicMock(),
+                    return_value=MagicMock(max_tokens=8192),
                 ),
                 patch(
                     "src.tools.write_memory.create_memory",
@@ -223,7 +223,7 @@ class TestAutoEnrollmentClaimsUpdate:
                 ),
                 patch(
                     "src.tools.write_memory.get_embedding_service",
-                    return_value=MagicMock(),
+                    return_value=MagicMock(max_tokens=8192),
                 ),
                 patch(
                     "src.tools.write_memory.create_memory",
