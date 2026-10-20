@@ -6,16 +6,16 @@ Existing rows default to 'trusted'.
 
 Part of #559 (OMP-informed improvements).
 
-Revision ID: 028_add_upstream_trust_level
-Revises: 027_add_logical_id
+Revision ID: 031_add_upstream_trust_level
+Revises: 030_add_procedural_content_type
 Create Date: 2026-09-10
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "028_add_upstream_trust_level"
-down_revision = "027_add_logical_id"
+revision = "031_add_upstream_trust_level"
+down_revision = "030_add_procedural_content_type"
 branch_labels = None
 depends_on = None
 
