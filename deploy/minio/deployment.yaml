@@ -30,8 +30,12 @@
 # Runtime check: oc exec deploy/memoryhub-minio -- minio --version
 #
 # Pinned by digest because Chainguard's free tier serves only the :latest tag,
-# so the digest needs a periodic bump. This is a stopgap on two counts: a
-# third-party free tier for distribution, and a vendor fork rather than a
+# which floats to a new build daily. Digest pulls themselves stay anonymous on
+# every tier ("all users across all tiers continue to have access to pulling by
+# digest"), so the pin does not expire out from under a fresh install; what a
+# stale pin loses is CVE fixes, not pullability. That still makes the bump a
+# standing chore rather than an optional one. This is a stopgap on two counts:
+# a third-party free tier for distribution, and a vendor fork rather than a
 # first-party upstream for maintenance. See #611 for replacing MinIO outright.
 #
 # Uses strategy.Recreate because the PVC is ReadWriteOnce -- a rolling update
@@ -64,6 +68,11 @@ spec:
         fsGroup: 1000
       containers:
         - name: minio
+          # RELEASE.2026-09-22T19-25-18Z (chainguard-forks/minio), built
+          # 2026-10-11. Keep this comment in step with the digest on every
+          # bump: a bare digest otherwise leaves an operator auditing the
+          # running version with nothing to read but `minio --version`
+          # against a live pod.
           image: cgr.dev/chainguard/minio@sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
           args:
             - "server"
