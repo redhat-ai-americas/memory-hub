@@ -78,8 +78,9 @@ async def list_memory(
         str | None,
         Field(
             description=(
-                "(Advanced) Filter by content type. 'declarative' for facts and "
-                "preferences, 'behavioral' for demonstrated patterns. Omit to list all types."
+                "(Advanced) Filter by content type. 'knowledge' for facts and "
+                "preferences, 'behavioral' for demonstrated patterns, "
+                "'procedural' for directed-graph runbooks. Omit to list all types."
             ),
         ),
     ] = None,

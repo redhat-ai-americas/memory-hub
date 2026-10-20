@@ -20,6 +20,9 @@ class RelationshipType(StrEnum):
     conflicts_with = "conflicts_with"
     related_to = "related_to"
     mentions = "mentions"  # Phase 2: memory -> entity (system-managed)
+    precedes = "precedes"  # procedural step ordering (#552)
+    requires = "requires"  # procedural precondition (#552)
+    alternative_to = "alternative_to"  # procedural branching path (#552)
 
 
 class MemoryScope(StrEnum):
@@ -35,11 +38,13 @@ class MemoryScope(StrEnum):
 
 
 class ContentType(StrEnum):
-    """Content classification for behavioral memory (#237)."""
+    """Content classification for memory nodes (#237, #552)."""
 
     EXPERIENTIAL = "experiential"
     KNOWLEDGE = "knowledge"
     BEHAVIORAL = "behavioral"
+    PROCEDURAL = "procedural"
+
 
 
 class CampaignStatus(StrEnum):
@@ -107,6 +112,8 @@ class MemoryNodeUpdate(BaseModel):
     weight: float | None = Field(default=None, ge=0.0, le=1.0)
     metadata: dict[str, Any] | None = None
     domains: list[str] | None = Field(default=None, description="Updated domain tags")
+    content_type: ContentType | None = None
+    source: str | None = None
 
 
 # -- Output schemas --

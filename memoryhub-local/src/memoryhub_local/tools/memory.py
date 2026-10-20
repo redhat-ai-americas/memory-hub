@@ -112,9 +112,11 @@ async def memory(
         Declare session focus for retrieval bias.
       relate(options: {source_id, target_id, relationship_type})
         Create directed graph edge between memories.
-        Valid types: derived_from, supersedes, conflicts_with, related_to.
+        Valid types: derived_from, supersedes, conflicts_with, related_to,
+        precedes, requires, alternative_to.
         (mentions is system-managed by entity extraction, not user-creatable.)
         derived_from is used by trace_provenance; conflicts_with feeds contradiction detection.
+        precedes/requires/alternative_to encode procedural-graph topology.
       report(memory_id, options: {observed_behavior})
         Flag contradiction against a stored memory.
       resolve(options: {contradiction_id, resolution_action})
@@ -401,6 +403,7 @@ async def _do_write(content, scope, project_id, opts):
                 "weight": node.weight,
                 "version": node.version,
                 "content": node.content,
+                "content_type": node.content_type,
                 "created_at": node.created_at.isoformat() if node.created_at else None,
             },
             "curation": {

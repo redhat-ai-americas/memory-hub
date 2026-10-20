@@ -133,6 +133,7 @@ async def test_write_memory_forwards_tenant_id_to_service():
         has_children=False,
         has_rationale=False,
         branch_count=0,
+        content_type="experiential",
     )
     fake_curation = {
         "blocked": False,
@@ -168,7 +169,7 @@ async def test_write_memory_forwards_tenant_id_to_service():
         ),
         patch(
             "src.tools.write_memory.get_embedding_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(max_tokens=8192),
         ),
         patch(
             "src.tools.write_memory.create_memory",
@@ -188,6 +189,7 @@ async def test_write_memory_forwards_tenant_id_to_service():
         )
 
     assert "error" not in result or result.get("error") is not True
+    assert result["memory"]["content_type"] == "experiential"
     _, kwargs = mock_create_memory.call_args
     assert kwargs.get("tenant_id") == "tenant_a", (
         f"Expected tenant_id='tenant_a' forwarded from claims into create_memory, "
@@ -230,7 +232,7 @@ async def test_write_memory_gated_returns_structured_response():
             return_value=(MagicMock(), AsyncMock()),
         ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock(max_tokens=8192)),
         patch(
             "src.tools.write_memory.create_memory",
             new_callable=AsyncMock,
@@ -282,7 +284,7 @@ async def test_write_memory_regex_block_still_raises_tool_error():
             return_value=(MagicMock(), AsyncMock()),
         ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock(max_tokens=8192)),
         patch(
             "src.tools.write_memory.create_memory",
             new_callable=AsyncMock,
@@ -324,6 +326,7 @@ async def test_write_memory_force_forwarded_to_create_memory():
         has_children=False,
         has_rationale=False,
         branch_count=0,
+        content_type="experiential",
     )
     fake_curation = {
         "blocked": False,
@@ -350,7 +353,7 @@ async def test_write_memory_force_forwarded_to_create_memory():
             return_value=(MagicMock(), AsyncMock()),
         ),
         patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock()),
+        patch("src.tools.write_memory.get_embedding_service", return_value=MagicMock(max_tokens=8192)),
         patch(
             "src.tools.write_memory.create_memory",
             new_callable=AsyncMock,
@@ -361,5 +364,82 @@ async def test_write_memory_force_forwarded_to_create_memory():
         result = await write_memory(content="forced write", scope="user", force=True, content_type="experiential")
 
     assert result["memory"] is not None
+    assert result["memory"]["content_type"] == "experiential"
     _, kwargs = mock_create.call_args
     assert kwargs.get("force") is True
+
+
+@pytest.mark.asyncio
+async def test_write_memory_response_includes_procedural_content_type():
+    """#552: write echoes stored content_type so callers can confirm vs the default."""
+    import datetime as _dt
+    import uuid as _uuid
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, StorageType
+
+    fake_node = MemoryNodeRead(
+        id=_uuid.uuid4(),
+        parent_id=None,
+        content="Deploy to staging",
+        stub="Deploy to staging",
+        storage_type=StorageType.INLINE,
+        content_ref=None,
+        weight=0.9,
+        scope=MemoryScope.USER,
+        branch_type=None,
+        owner_id="wjackson",
+        tenant_id="default",
+        is_current=True,
+        version=1,
+        previous_version_id=None,
+        metadata=None,
+        created_at=_dt.datetime.now(_dt.UTC),
+        updated_at=_dt.datetime.now(_dt.UTC),
+        expires_at=None,
+        has_children=False,
+        has_rationale=False,
+        branch_count=0,
+        content_type="procedural",
+    )
+    fake_curation = {
+        "blocked": False,
+        "reason": None,
+        "detail": None,
+        "similar_count": 0,
+        "nearest_id": None,
+        "nearest_score": None,
+        "flags": [],
+    }
+    fake_claims = {
+        "sub": "wjackson",
+        "identity_type": "user",
+        "tenant_id": "default",
+        "scopes": ["memory:write:user", "memory:read:user"],
+    }
+
+    with (
+        patch("src.tools.write_memory.get_claims_from_context", return_value=fake_claims),
+        patch(
+            "src.tools.write_memory.get_db_session",
+            return_value=(MagicMock(), AsyncMock()),
+        ),
+        patch("src.tools.write_memory.release_db_session", new_callable=AsyncMock),
+        patch(
+            "src.tools.write_memory.get_embedding_service",
+            return_value=MagicMock(max_tokens=8192),
+        ),
+        patch(
+            "src.tools.write_memory.create_memory",
+            new_callable=AsyncMock,
+            return_value=(fake_node, fake_curation),
+        ),
+        patch("src.tools.write_memory.broadcast_after_write", new_callable=AsyncMock),
+    ):
+        result = await write_memory(
+            content="Deploy to staging",
+            scope="user",
+            content_type="procedural",
+        )
+
+    assert result["memory"]["content_type"] == "procedural"

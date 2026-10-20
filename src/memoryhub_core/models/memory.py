@@ -79,7 +79,8 @@ class MemoryNode(TimestampMixin, Base):
         server_default=text("'{}'::text[]"),
     )
 
-    # Content type classification for behavioral memory (#237)
+    # Content type classification (#237, #552). CHECK lives in Alembic
+    # (017 + 028) and is mirrored here so SQLite create_all tests enforce it.
     content_type: Mapped[str] = mapped_column(String(20), nullable=False, default="experiential")
 
     # Content moderation status (#45). Governs visibility:
@@ -165,6 +166,10 @@ class MemoryNode(TimestampMixin, Base):
     # -- Table-level indexes --
 
     __table_args__ = (
+        CheckConstraint(
+            "content_type IN ('experiential', 'knowledge', 'behavioral', 'procedural')",
+            name="ck_memory_nodes_content_type",
+        ),
         Index("ix_memory_nodes_owner_scope_current", "owner_id", "scope", "is_current"),
         Index("ix_memory_nodes_tenant_scope", "tenant_id", "scope"),
         # These indexes are created by migrations 007 and 002 respectively.

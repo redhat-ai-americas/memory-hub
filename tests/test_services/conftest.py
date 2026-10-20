@@ -14,8 +14,10 @@ from contextlib import contextmanager
 
 import pytest
 from memoryhub_local.models.dialect import JsonEncodedList, JsonEncodedVector
-from sqlalchemy import Text, text
+from sqlalchemy import JSON, Text, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from memoryhub_core.models.audit import AuditLog
 
 from memoryhub_core.models.base import Base
 from memoryhub_core.models.campaign import (  # noqa: F401
@@ -63,9 +65,17 @@ def _sqlite_schema_patches():
     _swap_type(ConversationExtraction.__table__.c.source_messages, JsonEncodedList())
     _swap_default(ConversationExtraction.__table__.c.source_messages)
 
+    # AuditLog uses PostgreSQL JSONB and UUID columns.
+    _swap_type(AuditLog.__table__.c["metadata"], JsonEncodedList())
+    _swap_type(AuditLog.__table__.c.memory_id, PortableUUID())
+
     # JSONB server_defaults ('{}'::jsonb casts)
     _swap_default(MemoryRelationship.__table__.c.metadata_)
     _swap_default(CuratorRule.__table__.c.config)
+
+    # audit_log.metadata is postgresql.JSONB, which SQLite cannot compile.
+    # Other JSON columns use the generic JSON type and already render.
+    _swap_type(AuditLog.__table__.c.metadata, JSON())
 
     # jsonb_typeof check constraint (PostgreSQL-only function)
     thread_table = ConversationThread.__table__

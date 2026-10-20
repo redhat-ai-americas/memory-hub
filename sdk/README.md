@@ -182,7 +182,7 @@ results = client.search_sync("deployment patterns")
 |--------|-------------|
 | `get_similar(memory_id, *, threshold, project_id)` | Find similar memories |
 | `get_relationships(node_id, *, relationship_type, direction, project_id)` | Get memory relationships |
-| `create_relationship(source_id, target_id, relationship_type, *, project_id)` | Create a relationship (use `conflicts_with` + merge metadata to suggest merges) |
+| `create_relationship(source_id, target_id, relationship_type, *, project_id)` | Create a relationship (`derived_from`, `supersedes`, `conflicts_with`, `related_to`, `precedes`, `requires`, `alternative_to`; use `conflicts_with` + merge metadata to suggest merges) |
 | `set_curation_rule(name, *, tier, action, config)` | Configure curation rules |
 
 ### Session focus
