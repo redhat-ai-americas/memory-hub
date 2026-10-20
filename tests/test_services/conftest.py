@@ -13,7 +13,7 @@ Run ``make test-integration`` to exercise those paths.
 from contextlib import contextmanager
 
 import pytest
-from memoryhub_local.models.dialect import JsonEncodedList, JsonEncodedVector
+from memoryhub_local.models.dialect import JsonEncodedList, JsonEncodedVector, PortableUUID
 from sqlalchemy import JSON, Text, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
