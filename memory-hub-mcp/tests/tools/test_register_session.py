@@ -130,19 +130,25 @@ def _is_uuid(value: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def fake_server_session(session_id: str | None = None) -> SimpleNamespace:
+class FakeServerSession:
+    """Minimal server-session stand-in used by these tests.
+
+    Use a regular class because push_subscriber keeps the session in a weakref,
+    and SimpleNamespace instances cannot be weak-referenced.
+    """
+
+    def __init__(self, session_id: str | None = None):
+        self._exit_stack = contextlib.AsyncExitStack()
+        self.session_id = session_id
+        self.sent: list = []
+
+    async def send_notification(self, notification):
+        self.sent.append(notification)
+
+
+def fake_server_session(session_id: str | None = None) -> FakeServerSession:
     """Build only the server-session surface used by these tests."""
-    sent: list = []
-
-    async def send_notification(notification):
-        sent.append(notification)
-
-    return SimpleNamespace(
-        _exit_stack=contextlib.AsyncExitStack(),
-        session_id=session_id,
-        sent=sent,
-        send_notification=send_notification,
-    )
+    return FakeServerSession(session_id)
 
 
 def fake_context(
