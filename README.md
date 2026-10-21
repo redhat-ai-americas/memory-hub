@@ -89,7 +89,7 @@ Per-subsystem status and dependency graph: [`docs/SYSTEMS.md`](docs/SYSTEMS.md).
 
 | Component | Path | What it is |
 |---|---|---|
-| **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing memory operations over streamable-HTTP. Four action-dispatch tools (compact profile, default) or 13 individual tools (full profile). The primary agent surface. |
+| **MCP server** | [`memory-hub-mcp/`](memory-hub-mcp/) | FastMCP 3 server exposing memory operations over streamable-HTTP. Five tools in compact profile (default), including four action-dispatch tools, or 14 tools in full profile. The primary agent surface. |
 | **Server-side library** | [`src/memoryhub_core/`](src/memoryhub_core/) | SQLAlchemy models, service layer, embedding integration, RBAC enforcement (`core/authz.py`). Distribution name `memoryhub-core`; import name `memoryhub_core`. The MCP server, BFF, alembic migrations, and the seed-OAuth-clients script all import from here. |
 | **Python SDK** | [`sdk/`](sdk/) | `pip install memoryhub` -- typed async client wrapping the MCP tools. OAuth 2.1 token management is automatic. See [`sdk/README.md`](sdk/README.md). |
 | **CLI** | [`memoryhub-cli/`](memoryhub-cli/) | `pip install memoryhub-cli` -- terminal client for search/read/write/delete plus `memoryhub config init` for generating project-level `.memoryhub.yaml` and `.claude/rules/memoryhub-loading.md` rule files. |

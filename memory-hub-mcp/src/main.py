@@ -6,13 +6,13 @@ designed for FastMCP 2 and doesn't register tools correctly in v3.
 
 Tool profiles (MEMORYHUB_TOOL_PROFILE env var):
 
-  compact  — register_session + memory + thread + admin_memory (4 tools).
+  compact  — register_session + memory + thread + admin_memory + persona (5 tools).
              Action-dispatch with options dict. Best for frontier models
              (Claude, GPT-4) where tool count is the constraint.
 
-  full     — register_session + 12 flat-param tools (13 tools).
-             Each operation is a separate tool with typed parameters.
-             Best for mid-range models that need schema discoverability.
+  full     — 14 tools, including flat memory operations and the
+             thread and persona action dispatchers. Best for mid-range
+             models that need schema discoverability.
 
   minimal  — register_session + search_memory + write_memory +
              read_memory + thread (5 tools). Just the essentials for
@@ -28,16 +28,14 @@ from contextlib import asynccontextmanager
 from fastmcp import FastMCP
 
 from src.tools.admin_memory import admin_memory
-from src.tools.compile_persona import compile_persona
 from src.tools.delete_memory import delete_memory
-from src.tools.edit_persona import edit_persona
-from src.tools.get_persona import get_persona
 from src.tools.list_memory import list_memory
 from src.tools.manage_curation import manage_curation
 from src.tools.manage_graph import manage_graph
 from src.tools.manage_project import manage_project
 from src.tools.manage_session import manage_session
 from src.tools.memory import memory
+from src.tools.persona import persona
 from src.tools.read_memory import read_memory
 from src.tools.register_session import register_session
 from src.tools.search_memory import search_memory
@@ -72,9 +70,9 @@ _INSTRUCTIONS_COMPACT = (
     "Use thread(action=...) for conversation persistence — create, "
     "append, get, list, and archive governed conversation threads. "
     "PERSONA: If register_session returns a non-null persona_synopsis_id, call "
-    "get_persona() before search_memory to load the user's standing profile "
-    "(preferences, working style, current focus). Use compile_persona() to "
-    "refresh the profile when is_stale=True. "
+    "persona(action='get') before memory(action='search') to load the user's "
+    "standing profile (preferences, working style, current focus). Use "
+    "persona(action='compile') to refresh the profile when is_stale=True. "
     "See each tool's docstring for the full action reference."
 )
 
@@ -92,7 +90,9 @@ _INSTRUCTIONS_FULL = (
     "manage_curation to report and resolve contradictions and tune "
     "curation rules. Use manage_project to discover, create, and "
     "manage projects and their members; writing to a new project "
-    "auto-enrolls you."
+    "auto-enrolls you. Use persona(action='get') to load the standing user "
+    "profile, persona(action='compile') to refresh it, and "
+    "persona(action='edit') to manage user-declared pins."
 )
 
 _INSTRUCTIONS_MINIMAL = (
@@ -105,13 +105,13 @@ _INSTRUCTIONS_MINIMAL = (
 
 # ── Profile-specific tool sets ─────────────────────────────────────────────
 
-_TOOLS_COMPACT = [register_session, memory, admin_memory, thread, get_persona, compile_persona, edit_persona]
+_TOOLS_COMPACT = [register_session, memory, admin_memory, thread, persona]
 
 _TOOLS_FULL = [
     register_session, write_memory, read_memory, update_memory,
     delete_memory, search_memory, list_memory,
     manage_session, manage_graph, manage_curation, manage_project,
-    admin_memory, thread, get_persona, compile_persona, edit_persona,
+    admin_memory, thread, persona,
 ]
 
 _TOOLS_MINIMAL = [register_session, search_memory, write_memory, read_memory, thread]

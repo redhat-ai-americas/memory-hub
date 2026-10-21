@@ -1,7 +1,8 @@
-"""Compile a standing persona synopsis from behavioral dreaming facts — WRIG-1483.
+"""Internal implementation for ``persona(action="compile")`` — WRIG-1483.
 
-Triggered on-demand (CLI or agent call). Dreaming automatically marks the
-synopsis stale when new behavioral facts land — call compile_persona to refresh.
+The dispatcher calls this on demand to compile a standing persona synopsis
+from behavioral dreaming facts. Dreaming automatically marks the synopsis
+stale when new behavioral facts land.
 
 The compiler:
   1. Queries scope=user, source=dreaming, content_type=behavioral, is_current=True
@@ -21,20 +22,12 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub_core.services.persona import compile_persona_synopsis
-from src.core.app import mcp
 from src.core.authz import AuthenticationError, get_claims_from_context
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session
 
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool(
-    annotations={
-        "readOnlyHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    }
-)
 async def compile_persona(
     user_id: Annotated[
         str | None,

@@ -1,15 +1,15 @@
-"""Get the compiled persona synopsis for a user — WRIG-1483.
+"""Internal implementation for ``persona(action="get")`` — WRIG-1483.
 
-Always-inject path: agents call this at session start BEFORE search_memory.
-The synopsis is scope=user, source=persona_compiler, weight=1.0.
+The dispatcher returns the compiled user synopsis for an agent to inject
+before searching memory. The synopsis is scope=user, source=persona_compiler,
+weight=1.0.
 
 Staleness: when the synopsis is stale (new dreaming facts since last compile),
 the response includes is_stale=True and a hint to recompile. The stale profile
 is still returned — it is better than nothing.
 
-Usage pattern in a SessionStart hook:
-  1. get_persona() → inject result first (always-include, unconditional)
-  2. search_memory(query=<task>) → inject search hits after
+Agents access this behavior through the ``persona`` dispatcher, then search
+with ``memory(action="search")``.
 """
 
 import logging
@@ -20,20 +20,12 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub_core.services.persona import get_current_synopsis, get_persona_status
-from src.core.app import mcp
 from src.core.authz import AuthenticationError, get_claims_from_context
 from src.tools._deps import get_db_session, release_db_session
 
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool(
-    annotations={
-        "readOnlyHint": True,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    }
-)
 async def get_persona(
     user_id: Annotated[
         str | None,

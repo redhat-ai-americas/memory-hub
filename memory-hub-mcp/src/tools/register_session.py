@@ -50,11 +50,13 @@ from src.tools.auth import (
 logger = logging.getLogger(__name__)
 
 _QUICK_START = [
-    "Call get_persona() FIRST to load the standing user profile — always inject "
-    "it before search results. Check is_stale; if True, call compile_persona().",
-    "Call search_memory(query='...') to load context relevant to your task.",
-    "Pass project_id='<name>' in search_memory and write_memory to scope "
-    "memories to a project.",
+    "When the persona tool is available (compact/full profiles), call "
+    "persona(action='get') FIRST and inject the profile before search results. "
+    "If is_stale=True, call persona(action='compile').",
+    "Use memory(action='search') in compact, or search_memory(query='...') "
+    "in full/minimal, to load context relevant to your task.",
+    "Pass project_id='<name>' to search/write operations to scope memories "
+    "to a project.",
     "Writing to a project you haven't joined? Auto-enrollment handles it.",
 ]
 
@@ -181,7 +183,7 @@ async def _fetch_persona_synopsis_id(
 
     Non-fatal: returns None on any failure so registration is never blocked.
     Gives agents a fast path: read_memory(persona_synopsis_id) instead of
-    calling get_persona() separately.
+    calling persona(action='get') separately.
     """
     gen = None
     try:

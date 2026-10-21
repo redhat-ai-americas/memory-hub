@@ -1,4 +1,4 @@
-"""Add user-declared facts that survive persona recompilation — WRIG-1483.
+"""Internal implementation for ``persona(action="edit")`` — WRIG-1483.
 
 User pins are stored as branch_type="fact", source="user" children of the
 current synopsis node. On every recompile, pins are prepended to the LLM
@@ -17,20 +17,12 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub_core.services.persona import add_user_pin, get_current_synopsis, get_user_pins
-from src.core.app import mcp
 from src.core.authz import AuthenticationError, get_claims_from_context
 from src.tools._deps import get_db_session, release_db_session
 
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool(
-    annotations={
-        "readOnlyHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    }
-)
 async def edit_persona(
     action: Annotated[
         str,

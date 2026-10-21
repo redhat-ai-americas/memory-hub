@@ -11,8 +11,8 @@ Part of WRIG-1483 (user persona feature).
 
 from alembic import op
 
-revision = "029_persona_source_values"
-down_revision = ("028_add_audit_log", "028_add_curator_rule_versioning")
+revision = "031_persona_source_values"
+down_revision = ("030_add_procedural_content_type")
 branch_labels = None
 depends_on = None
 
