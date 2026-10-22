@@ -8,4 +8,7 @@ export default defineConfig({
   clean: true,
   target: "es2022",
   external: ["openclaw"],
+  esbuildOptions(options) {
+    options.loader = { ...options.loader, ".md": "text" };
+  },
 });

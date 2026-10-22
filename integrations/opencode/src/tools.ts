@@ -1,8 +1,22 @@
 import { tool, type ToolDefinition } from "@opencode-ai/plugin";
+import {
+  buildMemoryOperation,
+  MEMORY_TOOL_DESCRIPTIONS,
+} from "../../common/src/memory-operations.js";
 import { type MemoryHubMcpClient } from "./mcp-client.js";
 import type { MemoryHubConfig } from "./config.js";
 
 const z = tool.schema;
+
+const contentTypeFilter = z
+  .enum(["experiential", "knowledge", "behavioral", "procedural"])
+  .describe("Filter by content type. Omit to include all types.");
+
+const contentTypeForWrite = z
+  .enum(["experiential", "knowledge", "behavioral", "procedural"])
+  .describe(
+    "Content type: experiential (server default), knowledge (facts and preferences), behavioral, or procedural.",
+  );
 
 function ok(title: string, data: unknown) {
   return { title, output: JSON.stringify(data, null, 2) };
@@ -26,10 +40,26 @@ export function createTools(
   config: MemoryHubConfig,
   withSession: <T>(fn: () => Promise<T>) => Promise<T>,
 ): Record<string, ToolDefinition> {
+  async function execute(
+    name: keyof typeof MEMORY_TOOL_DESCRIPTIONS,
+    args: Record<string, unknown>,
+    title: string,
+    fallback: string,
+  ) {
+    try {
+      const operation = buildMemoryOperation(name, args, config.defaults);
+      const result = await withSession(() =>
+        mcpClient.callMemory(operation.action, operation.params),
+      );
+      return ok(title, result);
+    } catch (error) {
+      return err(error, fallback);
+    }
+  }
+
   return {
     memoryhub_search: tool({
-      description:
-        "Search through long-term memories. Use when you need context about past decisions, preferences, learned facts, or previously discussed topics.",
+      description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_search,
       args: {
         query: z.string().describe("Natural language search query"),
         limit: z
@@ -49,46 +79,15 @@ export function createTools(
           .array(z.string())
           .optional()
           .describe("Boost results tagged with these domain labels"),
-        content_type: z
-          .string()
-          .optional()
-          .describe("Filter: factual, behavioral, or all"),
+        content_type: contentTypeFilter.optional(),
       },
       async execute(args) {
-        try {
-          const options: Record<string, unknown> = {};
-          if (args.limit) options.max_results = args.limit;
-          if (args.content_type) options.content_type = args.content_type;
-
-          const domains =
-            args.domains ??
-            (config.defaults.domains.length > 0
-              ? config.defaults.domains
-              : undefined);
-          if (domains) options.domains = domains;
-
-          const callParams: Record<string, unknown> = {
-            query: args.query,
-            options,
-          };
-          if (args.scope) callParams.scope = args.scope;
-          if (config.defaults.projectId) {
-            callParams.project_id = config.defaults.projectId;
-          }
-
-          const result = await withSession(() =>
-            mcpClient.callMemory("search", callParams),
-          );
-          return ok("MemoryHub search", result);
-        } catch (e) {
-          return err(e, "Search failed");
-        }
+        return execute("memoryhub_search", args, "MemoryHub search", "Search failed");
       },
     }),
 
     memoryhub_read: tool({
-      description:
-        "Retrieve a specific memory by its ID, optionally including its version history.",
+      description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_read,
       args: {
         memory_id: z.string().describe("UUID of the memory to read"),
         include_versions: z
@@ -101,27 +100,12 @@ export function createTools(
           .describe("Fetch full content for S3-backed memories (default: false)"),
       },
       async execute(args) {
-        try {
-          const options: Record<string, unknown> = {};
-          if (args.include_versions) options.include_versions = true;
-          if (args.hydrate) options.hydrate = true;
-
-          const result = await withSession(() =>
-            mcpClient.callMemory("read", {
-              memory_id: args.memory_id,
-              options,
-            }),
-          );
-          return ok("MemoryHub read", result);
-        } catch (e) {
-          return err(e, "Read failed");
-        }
+        return execute("memoryhub_read", args, "MemoryHub read", "Read failed");
       },
     }),
 
     memoryhub_list: tool({
-      description:
-        "List memories without semantic ranking, ordered by creation time. Use for browsing or auditing what has been stored.",
+      description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_list,
       args: {
         limit: z
           .number()
@@ -131,41 +115,19 @@ export function createTools(
           .optional()
           .describe("Max results (default: 20)"),
         scope: z.string().optional().describe("Filter by scope"),
-        content_type: z
-          .string()
-          .optional()
-          .describe("Filter: factual, behavioral, or all"),
+        content_type: contentTypeFilter.optional(),
         cursor: z
           .string()
           .optional()
           .describe("Pagination cursor from previous result"),
       },
       async execute(args) {
-        try {
-          const options: Record<string, unknown> = {};
-          if (args.limit) options.max_results = args.limit;
-          if (args.content_type) options.content_type = args.content_type;
-          if (args.cursor) options.cursor = args.cursor;
-
-          const callParams: Record<string, unknown> = { options };
-          if (args.scope) callParams.scope = args.scope;
-          if (config.defaults.projectId) {
-            callParams.project_id = config.defaults.projectId;
-          }
-
-          const result = await withSession(() =>
-            mcpClient.callMemory("list", callParams),
-          );
-          return ok("MemoryHub list", result);
-        } catch (e) {
-          return err(e, "List failed");
-        }
+        return execute("memoryhub_list", args, "MemoryHub list", "List failed");
       },
     }),
 
     memoryhub_write: tool({
-      description:
-        "Save information to long-term memory. Use for preferences, decisions, facts, and important context.",
+      description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_write,
       args: {
         content: z.string().describe("The memory text to store"),
         scope: z
@@ -184,10 +146,7 @@ export function createTools(
           .array(z.string())
           .optional()
           .describe("Domain labels for retrieval boosting"),
-        content_type: z
-          .string()
-          .optional()
-          .describe("factual (default) or behavioral"),
+        content_type: contentTypeForWrite.optional(),
         metadata: z
           .record(z.string(), z.unknown())
           .optional()
@@ -202,39 +161,12 @@ export function createTools(
           .describe("Branch type: revision, rationale, example, dissent"),
       },
       async execute(args) {
-        try {
-          const scope = args.scope ?? config.defaults.scope;
-
-          const options: Record<string, unknown> = {};
-          if (args.weight !== undefined) options.weight = args.weight;
-          if (args.content_type) options.content_type = args.content_type;
-          if (args.metadata) options.metadata = args.metadata;
-          if (args.parent_id) options.parent_id = args.parent_id;
-          if (args.branch_type) options.branch_type = args.branch_type;
-          if (args.domains) options.domains = args.domains;
-
-          const callParams: Record<string, unknown> = {
-            content: args.content,
-            scope,
-            options,
-          };
-          if (config.defaults.projectId) {
-            callParams.project_id = config.defaults.projectId;
-          }
-
-          const result = await withSession(() =>
-            mcpClient.callMemory("write", callParams),
-          );
-          return ok("MemoryHub write", result);
-        } catch (e) {
-          return err(e, "Write failed");
-        }
+        return execute("memoryhub_write", args, "MemoryHub write", "Write failed");
       },
     }),
 
     memoryhub_update: tool({
-      description:
-        "Update an existing memory, creating a new version. The old version is preserved in the version chain.",
+      description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_update,
       args: {
         memory_id: z.string().describe("UUID of the memory to update"),
         content: z.string().optional().describe("New content"),
@@ -254,45 +186,17 @@ export function createTools(
           .describe("Updated domain labels"),
       },
       async execute(args) {
-        try {
-          const options: Record<string, unknown> = {};
-          if (args.weight !== undefined) options.weight = args.weight;
-          if (args.metadata) options.metadata = args.metadata;
-          if (args.domains) options.domains = args.domains;
-
-          const callParams: Record<string, unknown> = {
-            memory_id: args.memory_id,
-            options,
-          };
-          if (args.content) callParams.content = args.content;
-
-          const result = await withSession(() =>
-            mcpClient.callMemory("update", callParams),
-          );
-          return ok("MemoryHub update", result);
-        } catch (e) {
-          return err(e, "Update failed");
-        }
+        return execute("memoryhub_update", args, "MemoryHub update", "Update failed");
       },
     }),
 
     memoryhub_delete: tool({
-      description:
-        "Delete a memory. This is a soft-delete — the memory and its version chain are marked as deleted but not physically removed.",
+      description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_delete,
       args: {
         memory_id: z.string().describe("UUID of the memory to delete"),
       },
       async execute(args) {
-        try {
-          const result = await withSession(() =>
-            mcpClient.callMemory("delete", {
-              memory_id: args.memory_id,
-            }),
-          );
-          return ok("MemoryHub delete", result);
-        } catch (e) {
-          return err(e, "Delete failed");
-        }
+        return execute("memoryhub_delete", args, "MemoryHub delete", "Delete failed");
       },
     }),
   };

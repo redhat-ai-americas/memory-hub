@@ -8,4 +8,7 @@ export default defineConfig({
   clean: true,
   target: "es2022",
   external: ["@opencode-ai/plugin", "@modelcontextprotocol/sdk"],
+  esbuildOptions(options) {
+    options.loader = { ...options.loader, ".md": "text" };
+  },
 });

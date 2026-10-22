@@ -50,7 +50,7 @@ describe("createTools", () => {
           query: "deployment patterns",
           limit: 5,
           scope: "project",
-          content_type: "factual",
+          content_type: "knowledge",
         },
         ctx,
       );
@@ -58,7 +58,7 @@ describe("createTools", () => {
         query: "deployment patterns",
         scope: "project",
         project_id: "proj-1",
-        options: { max_results: 5, content_type: "factual" },
+        options: { max_results: 5, content_type: "knowledge" },
       });
     });
 
