@@ -4,15 +4,15 @@ Persona compilation writes synopsis nodes with source='persona_compiler'.
 User-declared pins are written with source='user'. Neither was allowed by
 the original constraint (agent, dreaming, import).
 
-Revision ID: 029_extend_source_constraint_persona
-Revises: 028_add_audit_log, 028_add_curator_rule_versioning
+Revision ID: 032_persona_source_values
+Revises: 031_add_upstream_trust_level
 Part of WRIG-1483 (user persona feature).
 """
 
 from alembic import op
 
-revision = "031_persona_source_values"
-down_revision = ("030_add_procedural_content_type")
+revision = "032_persona_source_values"
+down_revision = "031_add_upstream_trust_level"
 branch_labels = None
 depends_on = None
 
