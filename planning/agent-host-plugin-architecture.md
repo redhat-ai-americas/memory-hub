@@ -8,7 +8,7 @@
 
 This plan is limited to those two runtime plugins. Other agent integrations and instruction-file generation are separate work.
 
-**Baseline status:** OpenCode has been confirmed working after selecting the correct MemoryHub context. OpenClaw has not had a live-host check: installation attempts on the managed Mac were terminated by the system. Treat OpenClaw runtime verification as pending until it can be run on an authorized host.
+**Baseline status (updated 2026-10-22):** OpenCode was confirmed working after selecting the correct MemoryHub context. OpenClaw was deployed to an authorized cluster runtime; the plugin's MemoryHub tools and auto-recall were exercised successfully. The managed Mac installation attempts were terminated by the system, so local Mac installation remains unavailable, but OpenClaw runtime verification is no longer pending.
 
 ## 1. Goal
 
@@ -80,7 +80,7 @@ The following behavior contract is the Phase 0 default. Record any change to it 
 1. Use §2 as the code inventory and verify the MCP errors and request mappings against the server implementation.
 2. Keep the decisions in §4 as the behavior contract; record any deliberate exception in the implementation PR.
 3. Map each shared behavior to common tests and each host integration point to adapter tests.
-4. Record which baseline checks have run: OpenCode live check succeeded; OpenClaw live check remains pending on an authorized runtime. Automated tests can cover both adapters with mocked MCP responses but do not replace the OpenClaw host check.
+4. Record which baseline checks have run: OpenCode live check succeeded; OpenClaw live check succeeded on an authorized cluster runtime. Automated tests cover both adapters with mocked MCP responses, alongside the live-host checks.
 
 **Exit:** Contract, bundling approach, and verification matrix are agreed before extraction.
 

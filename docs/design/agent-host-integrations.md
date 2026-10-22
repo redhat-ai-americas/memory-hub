@@ -81,10 +81,11 @@ tests: `scope` and `project_id` are top-level; tuning knobs travel in
 
 Config defaults fill gaps: `defaults.scope` when a write omits scope,
 `defaults.projectId` on search/list/write, `defaults.domains` on search
-when the caller passes none. Tool failures return a structured
-`{ title: "Error", output: <message> }` result rather than throwing, so a
-memory outage degrades to an error string the model can react to instead
-of a broken turn.
+when the caller passes none. Tool failures are returned in each host's
+expected tool-result shape rather than thrown: OpenCode uses
+`{ title: "Error", output: <message> }`, while OpenClaw returns a text
+content block prefixed with `Error:`. This lets the model react to a memory
+outage without breaking the turn.
 
 ## opencode integration specifics
 
