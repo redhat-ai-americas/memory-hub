@@ -8,7 +8,6 @@ const API_KEY = "test-api-key";
 describe("isAuthError", () => {
   it.each([
     "Authentication required. Call register_session first.",
-    "session not found",
     "Session expired, please re-register",
   ])("matches %s", (msg) => {
     expect(isAuthError(new Error(msg))).toBe(true);
@@ -18,6 +17,7 @@ describe("isAuthError", () => {
     expect(isAuthError(new Error("connection refused"))).toBe(false);
     expect(isAuthError("session expired")).toBe(false);
     expect(isAuthError(undefined)).toBe(false);
+    expect(isAuthError(new Error("session not found"))).toBe(false);
   });
 });
 
@@ -66,9 +66,9 @@ describe("createSessionManager", () => {
 
     const fn = vi
       .fn()
-      .mockRejectedValue(new McpClientError("session not found", true));
+      .mockRejectedValue(new McpClientError("Session expired", true));
 
-    await expect(manager.withSession(fn)).rejects.toThrow("session not found");
+    await expect(manager.withSession(fn)).rejects.toThrow("Session expired");
     expect(fn).toHaveBeenCalledTimes(2);
   });
 

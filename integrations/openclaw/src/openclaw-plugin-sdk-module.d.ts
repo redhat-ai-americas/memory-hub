@@ -5,22 +5,18 @@ declare module "openclaw/plugin-sdk/plugin-entry" {
     config: Record<string, unknown>;
     pluginConfig?: Record<string, unknown>;
     logger: import("./openclaw-plugin-sdk.js").PluginLogger;
-
     registerTool(
       tool: import("./openclaw-plugin-sdk.js").AnyAgentTool,
       opts?: { name?: string; names?: string[] },
     ): void;
-
     on<K extends string>(
       hookName: K,
       handler: (...args: unknown[]) => unknown,
       opts?: { priority?: number; timeoutMs?: number },
     ): void;
-
     registerMemoryCapability(
       capability: import("./openclaw-plugin-sdk.js").MemoryPluginCapability,
     ): void;
-
     registerService(
       service: import("./openclaw-plugin-sdk.js").OpenClawPluginService,
     ): void;

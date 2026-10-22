@@ -1,7 +1,34 @@
 import { Type } from "@sinclair/typebox";
+import {
+  buildMemoryOperation,
+  MEMORY_TOOL_DESCRIPTIONS,
+} from "../../common/src/memory-operations.js";
 import type { MemoryHubMcpClient } from "./mcp-client.js";
 import type { MemoryHubConfig } from "./config.js";
 import type { AnyAgentTool, AgentToolResult } from "./openclaw-plugin-sdk.js";
+
+const contentTypeFilter = Type.Union(
+  [
+    Type.Literal("experiential"),
+    Type.Literal("knowledge"),
+    Type.Literal("behavioral"),
+    Type.Literal("procedural"),
+  ],
+  { description: "Filter by content type. Omit to include all types." },
+);
+
+const contentTypeForWrite = Type.Union(
+  [
+    Type.Literal("experiential"),
+    Type.Literal("knowledge"),
+    Type.Literal("behavioral"),
+    Type.Literal("procedural"),
+  ],
+  {
+    description:
+      "Content type: experiential (server default), knowledge (facts and preferences), behavioral, or procedural.",
+  },
+);
 
 function textResult(data: unknown): AgentToolResult {
   return {
@@ -20,12 +47,29 @@ function errorResult(message: string): AgentToolResult {
 export function createTools(
   mcpClient: MemoryHubMcpClient,
   config: MemoryHubConfig,
+  withSession: <T>(operation: () => Promise<T>) => Promise<T> = (operation) =>
+    operation(),
 ): AnyAgentTool[] {
+  async function execute(
+    name: keyof typeof MEMORY_TOOL_DESCRIPTIONS,
+    params: Record<string, unknown>,
+    fallback: string,
+  ): Promise<AgentToolResult> {
+    try {
+      const operation = buildMemoryOperation(name, params, config.defaults);
+      const result = await withSession(() =>
+        mcpClient.callMemory(operation.action, operation.params),
+      );
+      return textResult(result);
+    } catch (error) {
+      return errorResult(error instanceof Error ? error.message : fallback);
+    }
+  }
+
   const memoryhubSearch: AnyAgentTool = {
     name: "memoryhub_search",
     label: "MemoryHub Search",
-    description:
-      "Search through long-term memories. Use when you need context about past decisions, preferences, learned facts, or previously discussed topics.",
+    description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_search,
     parameters: Type.Object({
       query: Type.String({ description: "Natural language search query" }),
       limit: Type.Optional(
@@ -47,48 +91,18 @@ export function createTools(
         }),
       ),
       content_type: Type.Optional(
-        Type.String({
-          description: "Filter: factual, behavioral, or all",
-        }),
+        contentTypeFilter,
       ),
     }),
     async execute(_toolCallId, params) {
-      try {
-        const options: Record<string, unknown> = {};
-        if (params.limit) options.max_results = params.limit;
-        if (params.content_type) options.content_type = params.content_type;
-
-        const domains =
-          (params.domains as string[] | undefined) ??
-          (config.defaults.domains.length > 0
-            ? config.defaults.domains
-            : undefined);
-        if (domains) options.domains = domains;
-
-        const callParams: Record<string, unknown> = {
-          query: params.query,
-          options,
-        };
-        if (params.scope) callParams.scope = params.scope;
-        if (config.defaults.projectId) {
-          callParams.project_id = config.defaults.projectId;
-        }
-
-        const result = await mcpClient.callMemory("search", callParams);
-        return textResult(result);
-      } catch (e) {
-        return errorResult(
-          e instanceof Error ? e.message : "Search failed",
-        );
-      }
+      return execute("memoryhub_search", params, "Search failed");
     },
   };
 
   const memoryhubRead: AnyAgentTool = {
     name: "memoryhub_read",
     label: "MemoryHub Read",
-    description:
-      "Retrieve a specific memory by its ID, optionally including its version history.",
+    description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_read,
     parameters: Type.Object({
       memory_id: Type.String({ description: "UUID of the memory to read" }),
       include_versions: Type.Optional(
@@ -104,29 +118,14 @@ export function createTools(
       ),
     }),
     async execute(_toolCallId, params) {
-      try {
-        const options: Record<string, unknown> = {};
-        if (params.include_versions) options.include_versions = true;
-        if (params.hydrate) options.hydrate = true;
-
-        const result = await mcpClient.callMemory("read", {
-          memory_id: params.memory_id,
-          options,
-        });
-        return textResult(result);
-      } catch (e) {
-        return errorResult(
-          e instanceof Error ? e.message : "Read failed",
-        );
-      }
+      return execute("memoryhub_read", params, "Read failed");
     },
   };
 
   const memoryhubList: AnyAgentTool = {
     name: "memoryhub_list",
     label: "MemoryHub List",
-    description:
-      "List memories without semantic ranking, ordered by creation time. Use for browsing or auditing what has been stored.",
+    description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_list,
     parameters: Type.Object({
       limit: Type.Optional(
         Type.Integer({
@@ -139,9 +138,7 @@ export function createTools(
         Type.String({ description: "Filter by scope" }),
       ),
       content_type: Type.Optional(
-        Type.String({
-          description: "Filter: factual, behavioral, or all",
-        }),
+        contentTypeFilter,
       ),
       cursor: Type.Optional(
         Type.String({
@@ -150,33 +147,14 @@ export function createTools(
       ),
     }),
     async execute(_toolCallId, params) {
-      try {
-        const options: Record<string, unknown> = {};
-        if (params.limit) options.max_results = params.limit;
-        if (params.content_type) options.content_type = params.content_type;
-        if (params.cursor) options.cursor = params.cursor;
-
-        const callParams: Record<string, unknown> = { options };
-        if (params.scope) callParams.scope = params.scope;
-        if (config.defaults.projectId) {
-          callParams.project_id = config.defaults.projectId;
-        }
-
-        const result = await mcpClient.callMemory("list", callParams);
-        return textResult(result);
-      } catch (e) {
-        return errorResult(
-          e instanceof Error ? e.message : "List failed",
-        );
-      }
+      return execute("memoryhub_list", params, "List failed");
     },
   };
 
   const memoryhubWrite: AnyAgentTool = {
     name: "memoryhub_write",
     label: "MemoryHub Write",
-    description:
-      "Save information to long-term memory. Use for preferences, decisions, facts, and important context.",
+    description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_write,
     parameters: Type.Object({
       content: Type.String({ description: "The memory text to store" }),
       scope: Type.Optional(
@@ -198,9 +176,7 @@ export function createTools(
         }),
       ),
       content_type: Type.Optional(
-        Type.String({
-          description: "factual (default) or behavioral",
-        }),
+        contentTypeForWrite,
       ),
       metadata: Type.Optional(
         Type.Record(Type.String(), Type.Unknown(), {
@@ -218,44 +194,14 @@ export function createTools(
       ),
     }),
     async execute(_toolCallId, params) {
-      try {
-        const scope =
-          (params.scope as string | undefined) ?? config.defaults.scope;
-
-        const options: Record<string, unknown> = {};
-        if (params.weight !== undefined) options.weight = params.weight;
-        if (params.content_type) options.content_type = params.content_type;
-        if (params.metadata) options.metadata = params.metadata;
-        if (params.parent_id) options.parent_id = params.parent_id;
-        if (params.branch_type) options.branch_type = params.branch_type;
-
-        const domains = params.domains as string[] | undefined;
-        if (domains) options.domains = domains;
-
-        const callParams: Record<string, unknown> = {
-          content: params.content,
-          scope,
-          options,
-        };
-        if (config.defaults.projectId) {
-          callParams.project_id = config.defaults.projectId;
-        }
-
-        const result = await mcpClient.callMemory("write", callParams);
-        return textResult(result);
-      } catch (e) {
-        return errorResult(
-          e instanceof Error ? e.message : "Write failed",
-        );
-      }
+      return execute("memoryhub_write", params, "Write failed");
     },
   };
 
   const memoryhubUpdate: AnyAgentTool = {
     name: "memoryhub_update",
     label: "MemoryHub Update",
-    description:
-      "Update an existing memory, creating a new version. The old version is preserved in the version chain.",
+    description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_update,
     parameters: Type.Object({
       memory_id: Type.String({
         description: "UUID of the memory to update",
@@ -282,49 +228,21 @@ export function createTools(
       ),
     }),
     async execute(_toolCallId, params) {
-      try {
-        const options: Record<string, unknown> = {};
-        if (params.weight !== undefined) options.weight = params.weight;
-        if (params.metadata) options.metadata = params.metadata;
-        if (params.domains) options.domains = params.domains;
-
-        const callParams: Record<string, unknown> = {
-          memory_id: params.memory_id,
-          options,
-        };
-        if (params.content) callParams.content = params.content;
-
-        const result = await mcpClient.callMemory("update", callParams);
-        return textResult(result);
-      } catch (e) {
-        return errorResult(
-          e instanceof Error ? e.message : "Update failed",
-        );
-      }
+      return execute("memoryhub_update", params, "Update failed");
     },
   };
 
   const memoryhubDelete: AnyAgentTool = {
     name: "memoryhub_delete",
     label: "MemoryHub Delete",
-    description:
-      "Delete a memory. This is a soft-delete — the memory and its version chain are marked as deleted but not physically removed.",
+    description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_delete,
     parameters: Type.Object({
       memory_id: Type.String({
         description: "UUID of the memory to delete",
       }),
     }),
     async execute(_toolCallId, params) {
-      try {
-        const result = await mcpClient.callMemory("delete", {
-          memory_id: params.memory_id,
-        });
-        return textResult(result);
-      } catch (e) {
-        return errorResult(
-          e instanceof Error ? e.message : "Delete failed",
-        );
-      }
+      return execute("memoryhub_delete", params, "Delete failed");
     },
   };
 
