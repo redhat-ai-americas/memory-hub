@@ -116,6 +116,22 @@ export function defineAdapterConformance(harness: AdapterConformanceHarness): vo
       expect(client.callMemory).toHaveBeenCalledTimes(2);
     });
 
+    // Confirms both adapters recover from an MCP session lost after server restart.
+    it("retries once when the MCP transport reports a missing session", async () => {
+      const client = mockClient({
+        callMemory: vi.fn()
+          .mockRejectedValueOnce(new Error("Session not found"))
+          .mockResolvedValueOnce({ ok: true }),
+      });
+      const session = harness.createSession(client, "test-api-key", logger);
+
+      await expect(session.withSession(() => client.callMemory("search", {})))
+        .resolves.toEqual({ ok: true });
+      expect(client.registerSession).toHaveBeenCalledTimes(2);
+      expect(client.resetSession).toHaveBeenCalledOnce();
+      expect(client.callMemory).toHaveBeenCalledTimes(2);
+    });
+
     // Verifies shutdown and session reset release the active MCP transport.
     it("closes active transports on shutdown and session reset", async () => {
       const close = vi.fn().mockResolvedValue(undefined);

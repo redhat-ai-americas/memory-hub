@@ -19,7 +19,7 @@ describe("shared session recovery", () => {
   it("matches errors returned by the current server", () => {
     expect(isSessionError(new Error("Authentication required"))).toBe(true);
     expect(isSessionError(new Error("Session expired"))).toBe(true);
-    expect(isSessionError(new Error("session not found"))).toBe(false);
+    expect(isSessionError(new Error("session not found"))).toBe(true);
   });
 
   it("registers lazily and retries one operation once after expiry", async () => {
@@ -31,6 +31,19 @@ describe("shared session recovery", () => {
       .mockResolvedValueOnce("ok");
 
     expect(client.registerSession).not.toHaveBeenCalled();
+    await expect(manager.withSession(operation)).resolves.toBe("ok");
+    expect(client.registerSession).toHaveBeenCalledTimes(2);
+    expect(client.resetSession).toHaveBeenCalledOnce();
+    expect(operation).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers when the MCP transport reports a missing session", async () => {
+    const client = makeClient();
+    const manager = createSessionManager(client, "test-key", { info: vi.fn() });
+    const operation = vi.fn()
+      .mockRejectedValueOnce(new Error("Session not found"))
+      .mockResolvedValueOnce("ok");
+
     await expect(manager.withSession(operation)).resolves.toBe("ok");
     expect(client.registerSession).toHaveBeenCalledTimes(2);
     expect(client.resetSession).toHaveBeenCalledOnce();

@@ -3,6 +3,7 @@ import type { MemoryHubMcpClient, SessionInfo } from "./types.js";
 const AUTH_ERROR_FRAGMENTS = [
   "authentication required",
   "session expired",
+  "session not found",
 ];
 
 export interface SessionLogger {

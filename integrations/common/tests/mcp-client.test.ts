@@ -40,6 +40,28 @@ describe("shared MCP client", () => {
     expect(client.isConnected()).toBe(true);
   });
 
+  it("fails clearly after repeated resets during connection", async () => {
+    let client: ReturnType<typeof createMcpClient>;
+    const connect = vi.fn(async () => {
+      client.resetSession();
+    });
+    const close = vi.fn().mockResolvedValue(undefined);
+    const runtime: McpRuntime = {
+      createTransport: vi.fn(() => ({ close })),
+      createClient: vi.fn(() => ({
+        connect,
+        callTool: vi.fn().mockResolvedValue({}),
+      })),
+    };
+    client = createMcpClient("https://hub.example/mcp/", runtime);
+
+    await expect(client.callMemory("search", { query: "q" })).rejects.toThrow(
+      "MCP connection was reset during all 3 connection attempts",
+    );
+    expect(connect).toHaveBeenCalledTimes(3);
+    expect(close).toHaveBeenCalledTimes(3);
+  });
+
   it("turns MCP tool errors into bounded client errors", async () => {
     const { runtime, callTool } = createRuntime();
     callTool.mockResolvedValueOnce({

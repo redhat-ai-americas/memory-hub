@@ -62,6 +62,7 @@ export async function searchWithTimeout(
     timer = setTimeout(() => reject(new Error("auto-recall timeout")), AUTO_RECALL_TIMEOUT_MS);
   });
   try {
+    // The timeout stops waiting; it intentionally does not cancel the MCP request.
     return await Promise.race([search, timeout]);
   } finally {
     if (timer) clearTimeout(timer);

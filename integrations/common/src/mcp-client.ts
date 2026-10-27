@@ -24,6 +24,8 @@ export class McpClientError extends Error {
   }
 }
 
+const MAX_CONNECT_ATTEMPTS = 3;
+
 export function createMcpClient(
   serverUrl: string,
   runtime: McpRuntime,
@@ -67,10 +69,13 @@ export function createMcpClient(
   }
 
   async function ensureConnected(): Promise<McpRuntimeClient> {
-    while (!connected || !client) {
+    for (let attempt = 0; attempt < MAX_CONNECT_ATTEMPTS; attempt++) {
       await connect();
+      if (connected && client) return client;
     }
-    return client;
+    throw new Error(
+      `MCP connection was reset during all ${MAX_CONNECT_ATTEMPTS} connection attempts`,
+    );
   }
 
   function extractTextContent(result: unknown): unknown {

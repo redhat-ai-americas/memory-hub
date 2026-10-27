@@ -13,11 +13,11 @@ describe("isAuthError", () => {
     expect(isAuthError(new Error(msg))).toBe(true);
   });
 
-  it("does not match unrelated errors or non-errors", () => {
+  it("matches lost MCP sessions but ignores unrelated errors and non-errors", () => {
     expect(isAuthError(new Error("connection refused"))).toBe(false);
     expect(isAuthError("session expired")).toBe(false);
     expect(isAuthError(undefined)).toBe(false);
-    expect(isAuthError(new Error("session not found"))).toBe(false);
+    expect(isAuthError(new Error("session not found"))).toBe(true);
   });
 });
 

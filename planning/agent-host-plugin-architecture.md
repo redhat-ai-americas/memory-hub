@@ -1,169 +1,731 @@
-# Shared Runtime for MemoryHub Agent Plugins
+# Shared Plugin Package for MemoryHub Integrations
 
-**Issue:** #581
-**Design PR:** #595
-**Related:** OpenClaw integration (merged PR #490); OpenCode integration (PR #549)
-**Reviewed:** 2026-10-20
-**Scope:** Refactor the existing OpenClaw and OpenCode TypeScript plugins so they share MemoryHub behavior while retaining each host's runtime adapter.
+**Date:** 2026-09-23
+**Issue:** #581 (`subsystem: client`)
+**Subsystem:** `client` — restructures existing `integrations/*` packages
+**Related:** #310 (instruction file generation - separate concern), OpenClaw (merged), OpenCode (PR #549)
 
-This plan is limited to those two runtime plugins. Other agent integrations and instruction-file generation are separate work.
+**Implementation status (2026-10-27):** The shared-core extraction for OpenClaw and OpenCode was completed under #622. The common TypeScript source lives in `integrations/common/` and each plugin build bundles it into that plugin's artifact; consumers do not install a separate common package. The broader integration and instruction-generation work described below remains planned.
 
-**Baseline status (updated 2026-10-22):** OpenCode was confirmed working after selecting the correct MemoryHub context. OpenClaw was deployed to an authorized cluster runtime; the plugin's MemoryHub tools and auto-recall were exercised successfully. The managed Mac installation attempts were terminated by the system, so local Mac installation remains unavailable, but OpenClaw runtime verification is no longer pending.
+---
 
-## 1. Goal
+## 1. Problem
 
-Remove duplicated MemoryHub client behavior from the OpenClaw and OpenCode plugins. A fix to shared behavior should be implemented once, while each host keeps the code needed to register tools, receive events, shape results, and inject context through its own SDK.
+MemoryHub has no single source of truth for integration artifacts. Every plugin—whether TypeScript runtime (OpenClaw, OpenCode) or config-based (Claude Code, Codex)—duplicates the same content and patterns.
 
-The refactor should preserve current behavior unless a difference is explicitly reviewed and accepted. It does not change MemoryHub's MCP tool surface or wire protocol.
+### 1.1 Evidence of Duplication Across ALL Plugin Types
 
-## 2. Current implementation
+**Protocol content (behavioral instructions):**
+- OpenClaw ships `integrations/openclaw/memoryhub-rules.md` (133 lines)
+- OpenCode ships `integrations/opencode/memoryhub-rules.md` (133 lines, **byte-identical**)
+- Claude Code ships `.claude/rules/memoryhub-loading.md` (manually maintained, drifted content)
+- Each new config-based plugin (Codex, Hermes, etc.) would duplicate the same pattern
 
-Both plugins expose six `memoryhub_*` tools and call the MCP server's `memory` tool with an action and action-specific arguments. They also implement session setup, auto-recall, configuration, and inject the same `memoryhub-rules.md` content.
+**Tool contracts:**
+- OpenClaw defines 6 tools in `tools.ts` with typebox schemas (339 lines)
+- OpenCode defines same 6 tools in `tools.ts` with zod schemas (240 lines)
+- Future TS plugins (Hermes Python) would redefine same contracts
 
-| Area | OpenClaw | OpenCode | Refactor boundary |
-|---|---|---|---|
-| Plugin lifecycle | `definePluginEntry`, registered service, `api.on` | Plugin factory, returned hooks, `dispose` | Keep host-specific |
-| Tool registration/schema | Individually registered TypeBox tools | Zod tools returned from a hook | Share definitions and MCP mapping; adapt schemas and result shapes per host |
-| Event and context injection | `before_prompt_build`; returns prompt context | `chat.message` search and message/system transform hooks | Keep event timing and host payload mutation per host |
-| Recall | Search in prompt build; omits configured `projectId`; timeout timer is not cleared | Search on chat message; includes `projectId`; clears timeout; injects transformed message content | Share search/format/budget/error behavior; send configured `projectId` from both; keep trigger and injection per host |
-| MCP connection | Concurrent calls can create multiple transports; reset does not close stale transport | Single-flight connect; closes failed/stale transports | Share lifecycle implementation |
-| Session recovery | Lazy registration; tool calls retry recognized auth/session errors, but auto-recall catches its own errors so expired-session failures there are not retried | Lazy registration, one retry, and a generation guard in `session.ts`; tools and recall use it | Share one bounded recovery path and invoke it for both tools and recall |
-| Configuration | Reads plugin options | Reads plugin options, environment, credentials INI, and legacy API-key file | Share normalized fields/defaults where they overlap; preserve each host's source lookup |
-| Protocol text | Loads and injects `memoryhub-rules.md` | Loads and injects the same file through a different hook | Embed one canonical copy in both bundles; keep injection host-specific |
-| Logging | OpenClaw host logger | Integration logger | Pass a small logger interface to shared code |
+**Config schema:**
+- OpenClaw defines in `openclaw.plugin.json` `configSchema` (lines 74-120)
+- OpenCode defines in `config.ts` validation (230 lines)
+- Different validation rules, different defaults, drift risk
 
-These are observations of the checked-in implementations. The MCP server currently emits “Authentication required” and “Session expired”; it does not currently emit “session not found,” although both plugins recognize that phrase. Keep or remove that compatibility match only after checking whether a supported older server needs it. OpenClaw's auto-recall error handling currently prevents its outer retry wrapper from seeing session errors.
+### 1.2 Evidence of Behavioral Drift (TypeScript Plugins)
 
-## 3. Proposed package boundary
+Even when duplicating the *same* logic, OpenClaw and OpenCode have diverged:
 
-Add a small shared TypeScript module under `integrations/common/`. It should own only host-neutral behavior:
+| Module | OpenClaw | OpenCode | Divergence |
+|--------|----------|----------|------------|
+| `mcp-client.ts` connect | Creates transport on every call | Single-flight (`connectPromise`) | OpenClaw can open duplicate connections |
+| `mcp-client.ts` resetSession | Sets `apiKey=null`, `connected=false` | Also closes stale transport | OpenClaw leaks client object |
+| Session recovery | Retry on `"memory_expired"` (never returned by server) | Retry on real tokens, generation-guarded | OpenClaw retry is **dead code** |
+| Recall timeout | `Promise.race` with timer never cleared | Clears timer in `finally` | OpenClaw leaks timer per turn |
+| Config precedence | One source + env | Four tiers with defined precedence | Different resolution semantics |
 
-- MCP transport and connection lifecycle
-- Session registration and bounded recovery
-- Shared tool definitions and mapping to the MCP `memory` action
-- Recall query construction, result formatting, untrusted-data framing, timeout, and token budget
-- Shared configuration types, defaults, and validation for the overlapping fields
-- The canonical protocol instructions embedded from one Markdown source
+### 1.3 Concrete Costs
 
-The OpenClaw and OpenCode packages remain responsible for:
+**For TypeScript runtime plugins:**
+- OpenClaw has 3 known bugs fixed in OpenCode (dead retry, timer leak, stale connection)
+- Each plugin is ~1,045 lines to maintain
+- Fixes land unevenly, manual backporting required
 
-- Their plugin entrypoints, SDK calls, hook registration, lifecycle, and disposal
-- Converting shared tool definitions to TypeBox or Zod
-- Translating host arguments and result shapes
-- Selecting host events and inserting recalled content into host messages
-- Host logging and host-specific configuration input
+**For config-based plugins:**
+- Claude Code integration is manual (user creates files)
+- No shared hook scripts, each plugin rewrites credential resolution
+- Future plugins (Codex, Hermes) would duplicate the same pattern
 
-Do not target a specific adapter line count. Keep code in an adapter when it translates host APIs; share it when it implements the same MemoryHub behavior.
+**Root cause:** No shared package providing:
+1. Canonical protocol content
+2. TypeScript MCP client wrapper for runtime plugins
+3. Templates for config-based plugins
+4. Tool contracts and config schema
 
-### Package distribution decision
+**Wire protocol:** Both OpenClaw and OpenCode send identical MCP requests (`callTool("memory", {action, query, scope, project_id, options})`). The shared package extracts client-side logic only; no protocol changes.
 
-**Decision:** Keep the shared module inside this repository and bundle it into each plugin's build output. Do not create a runtime dependency on a separately published `@memory-hub/common` package, and do not put repository-relative `file:` dependencies in the plugin manifests. A JavaScript workspace may help local development, but it must not be required by consumers installing a plugin.
+---
 
-This avoids making the refactor depend on npm organization access or a separate package release. Publishing the shared code as its own npm package can be reconsidered later if other consumers need it. The implementation must verify each packed plugin can be installed and loaded without access to this repository.
+## 2. Solution
 
-## 4. Decisions before extraction
+The original proposal was to extract shared MemoryHub integration artifacts into a package that any plugin could use. Sections 2–5 retain that broader design intent for future integrations. #622 implemented a narrower runtime boundary: shared TypeScript source is bundled into OpenClaw and OpenCode, not distributed as a separate package. The completed boundary and packaging decision are recorded in §6.
 
-The following behavior contract is the Phase 0 default. Record any change to it in the implementation PR before moving modules:
+**Plugin types:**
+- **TypeScript runtime plugins** (OpenClaw, OpenCode): Register tools directly in the agent host's runtime, wrap MCP client
+- **Config-based plugins** (Claude Code, Codex, Hermes): Connect to MemoryHub MCP server via config, discover tools via handshake
 
-1. **Recall request:** Send the configured `projectId` as `project_id` in auto-recall for both plugins. OpenCode already does this; OpenClaw's auto-recall should be aligned. Keep host event timing and injection mechanics separate.
-2. **Configuration:** Preserve each plugin's current source lookup in this refactor: OpenClaw uses its plugin options; OpenCode keeps plugin options, environment, credentials INI, and legacy key-file lookup. Share normalized types/defaults/validation for fields both actually use. Do not add credential sources to OpenClaw or drop its declared host-specific fields silently.
-3. **Session recovery:** Register lazily and retry an operation at most once on recognized authentication/session-expiry errors. Use one concurrency-safe recovery path for tools and auto-recall. Match the current server phrases; retain the extra `session not found` match only if compatibility evidence supports it.
-4. **Tool contract:** Compare all six tool names, descriptions, required/optional fields, defaults, and `memory` action mappings. Keep TypeBox/Zod conversion and host result wrappers in adapters.
-5. **Recall failures:** Keep the 15-second timeout and graceful degradation. Clear timeout resources. A timeout should not claim to cancel an in-flight MCP call unless the transport supports cancellation.
-6. **Protocol asset:** Use one canonical copy and confirm both npm packages include it in their published artifacts.
-7. **Versioning:** Internal code movement alone does not require a major plugin version. Choose versions based on public compatibility changes and document any intentional behavior change.
+```
+integrations/common/
+├── protocol.md                    # Behavioral instructions
+├── tool-contracts.json            # 6 tools: signatures + MCP mapping
+├── config-schema.json             # Valid config fields + validation
+├── templates/
+│   ├── .mcp.json.template        # MCP server config for Claude Code
+│   ├── session-start.sh          # Hook script template
+│   ├── recall.sh                 # Hook script template
+│   └── capture.sh                # Hook script template
+├── docs/
+│   └── credential-resolution.md  # Standard credential lookup pattern
+├── src/
+│   ├── client.ts                 # TypeScript MCP client (for TS plugins)
+│   ├── session.ts
+│   ├── tools.ts
+│   └── recall.ts
+└── package.json                   # Package: @memory-hub/common
+```
 
-## 5. Work sequence
+---
 
-### Phase 0: Freeze and agree on behavior
+## 3. What the Original Proposal Would Share
 
-1. Use §2 as the code inventory and verify the MCP errors and request mappings against the server implementation.
-2. Keep the decisions in §4 as the behavior contract; record any deliberate exception in the implementation PR.
-3. Map each shared behavior to common tests and each host integration point to adapter tests.
-4. Record which baseline checks have run: OpenCode live check succeeded; OpenClaw live check succeeded on an authorized cluster runtime. Automated tests cover both adapters with mocked MCP responses, alongside the live-host checks.
+### 3.1 Protocol Content (protocol.md)
 
-**Exit:** Contract, bundling approach, and verification matrix are agreed before extraction.
+Canonical behavioral instructions: when to search, how to write, DURABLE/NOVEL/CONCRETE/SAFE gates, hygiene rules.
 
-### Phase 1: Build the shared module
+**How each plugin type uses it:**
 
-1. Create `integrations/common/` with a module API limited to the agreed shared behaviors.
-2. Add common unit tests for connection lifecycle, session recovery, tool mapping, recall formatting/timeout, and configuration behavior that is actually shared.
-3. Define the shared conformance cases; run them through both adapters after migration in Phase 2.
-4. Confirm both plugin build configurations can inline shared TypeScript modules and the canonical Markdown asset. Packed plugin checks happen after adapters import the shared module in Phase 2.
+| Plugin Type | Usage |
+|-------------|-------|
+| **Claude Code** (config plugin) | Ships as `.claude/rules/memoryhub-loading.md` → Claude reads as permanent rule |
+| **Codex** (config plugin) | Ships as `.codex/rules/memoryhub-loading.md` → Codex reads as permanent rule |
+| **OpenClaw** (TS runtime) | `import { PROTOCOL_CONTENT } from '@memory-hub/common'` → `api.prependSystemContext(PROTOCOL_CONTENT)` |
+| **OpenCode** (TS runtime) | `import { PROTOCOL_CONTENT } from '@memory-hub/common'` → inject via `systemTransform` hook |
+| **Hermes** (config plugin) | Ships as plugin hook file → plugin injects via `pre_llm_call` hook |
+| **#310 adapters** | Reads `integrations/common/protocol.md` → writes to `.goosehints` / `AGENTS.md` / etc. |
 
-**Exit:** The shared module API and behavior tests are in place. Both plugin build configurations can bundle it without a published common-package dependency.
+### 3.2 Tool Contracts (tool-contracts.json)
 
-### Phase 2: Migrate adapters
+Signature for 6 tools: `memoryhub_search`, `memoryhub_read`, `memoryhub_list`, `memoryhub_write`, `memoryhub_update`, `memoryhub_delete`.
 
-1. Move OpenClaw to the shared module; retain its plugin registration, TypeBox conversion, hooks, logger, and result translation.
-2. Run OpenClaw adapter and conformance tests; perform a live-host smoke check on an authorized runtime when available.
-3. Move OpenCode to the shared module; retain its plugin factory, Zod conversion, hooks, logger, and result translation.
-4. Run OpenCode adapter and conformance tests, plus a live-host smoke check where available.
-5. Compare both adapters with the Phase 0 contract and document any deliberate behavior changes.
-6. Pack and install both plugins in clean temporary projects; confirm the shared runtime and protocol are present and no repository-relative or common-package dependency is required.
+**How each plugin type uses it:**
 
-Migrate one adapter at a time so failures can be localized and each package remains reviewable.
+| Plugin Type | Usage |
+|-------------|-------|
+| **Claude Code** (config plugin) | ❌ NOT USED - tools come via MCP server, Claude discovers via `tools/list` |
+| **Codex** (config plugin) | ❌ NOT USED - tools come via MCP server, Codex discovers via `tools/list` |
+| **OpenClaw** (TS runtime) | `import { TOOL_CONTRACTS } from '@memory-hub/common'` → generate typebox schemas → `api.registerTool()` |
+| **OpenCode** (TS runtime) | `import { TOOL_CONTRACTS } from '@memory-hub/common'` → generate zod schemas → return from `buildTools()` |
+| **Hermes** (config plugin) | ❌ NOT USED - connects to MCP server, discovers tools via handshake |
+| **#310 adapters** | ❌ NOT USED - artifact hosts get tools via MCP |
 
-**Exit:** Both adapters use the shared implementation, packed artifacts install outside the checkout, and all available automated and live checks are reported accurately.
+**Example contract:**
+```json
+{
+  "name": "memoryhub_search",
+  "description": "Search through long-term memories...",
+  "parameters": [
+    { "name": "query", "type": "string", "required": true },
+    { "name": "limit", "type": "integer", "min": 1, "max": 50, "default": 10 },
+    { "name": "scope", "type": "string", "enum": ["user", "project", ...] },
+    { "name": "domains", "type": "array", "items": "string" },
+    { "name": "content_type", "type": "string", "enum": ["factual", "behavioral", "all"] }
+  ],
+  "mcpMapping": {
+    "action": "search",
+    "topLevel": ["query"],
+    "options": ["max_results", "domains", "content_type", "project_id", "focus", "max_response_tokens"]
+  }
+}
+```
 
-### Phase 3: Release and documentation
+### 3.3 Config Schema (config-schema.json)
 
-1. Release updated OpenClaw and OpenCode plugin packages with migration notes for any user-visible changes. A maintainer with publishing access can perform the npm releases if the implementer does not have it.
-2. Document shared-module development, build, test, and release steps.
+Validation rules for MemoryHub configuration.
 
-The shared module does not need its own npm release. Revisit separate publication only if it becomes useful to consumers beyond these two bundled plugins.
+**How each plugin type uses it:**
 
-Additional host integrations, templates, and instruction generation belong to separate work (including #310 where applicable).
+| Plugin Type | Usage |
+|-------------|-------|
+| **Claude Code** (config plugin) | ❌ NOT USED - config from env vars/INI, no plugin validation |
+| **Codex** (config plugin) | ❌ NOT USED - config from env vars/config.toml, no plugin validation |
+| **OpenClaw** (TS runtime) | `import { validateConfig } from '@memory-hub/common'` → validate `openclaw.json` section → throw on invalid |
+| **OpenCode** (TS runtime) | `import { validateConfig } from '@memory-hub/common'` → validate `opencode.json` options → merge with env/INI |
+| **Hermes** (config plugin) | ⚠️ Minimal - validates MCP server config (command, args, env), not plugin-specific fields |
+| **#310 adapters** | Validates user input during `memoryhub config init --framework <name>` prompts |
 
-## 6. Verification strategy
+**Schema:**
+```json
+{
+  "server": { "url": "string (required)", "transport": "enum" },
+  "auth": { "mode": "enum", "apiKey": "string (sensitive)" },
+  "autoRecall": {
+    "enabled": "boolean (default: true)",
+    "maxResults": "integer (1-50, default: 10)",
+    "maxResponseTokens": "integer (default: 4000)",
+    "useFocus": "boolean (default: true)"
+  },
+  "autoCapture": {
+    "enabled": "boolean (default: false)",
+    "defaultScope": "string (default: user)",
+    "defaultWeight": "number (0-1, default: 0.7)"
+  },
+  "defaults": {
+    "scope": "string",
+    "projectId": "string",
+    "domains": "array<string>"
+  }
+}
+```
 
-### Shared behavior tests
+### 3.4 MCP Connection Templates (templates/)
 
-- Connection: concurrent connects share one attempt; failed setup cleans up; reset and close release stale transports.
-- Session: lazy registration; one bounded recovery for recognized failures; concurrent failures do not cause duplicate registration or retries.
-- Tools: all six definitions map to the agreed `memory` action and arguments; invalid host input is rejected by the adapter schema.
-- Recall: request fields match the contract; output formatting and untrusted framing are stable; token budget and timeout are enforced; timers/resources are cleaned up.
-- Configuration: per-field precedence, defaults, missing values, invalid types/URLs, and context selection match the agreed contract.
-- Errors: MCP failures produce useful bounded errors and do not crash or hang a host turn.
+For config-based plugins (Claude Code, Codex).
 
-### Adapter tests
+**templates/.mcp.json:**
+```json
+{
+  "mcpServers": {
+    "memoryhub": {
+      "command": "memoryhub",
+      "args": ["mcp"],
+      "env": {
+        "MEMORYHUB_API_KEY": "${MEMORYHUB_API_KEY}"
+      }
+    }
+  }
+}
+```
 
-- OpenClaw: plugin registration, TypeBox schemas, `before_prompt_build` inputs/outputs, service lifecycle, and result shape.
-- OpenCode: plugin factory, Zod schemas, hook wiring, message/system transforms, disposal, and result shape.
+**templates/config.toml** (Codex alternative):
+```toml
+[mcp.servers.memoryhub]
+command = "memoryhub"
+args = ["mcp"]
+env = { MEMORYHUB_API_KEY = "${MEMORYHUB_API_KEY}" }
+```
 
-### Packaging and host checks
+**templates/config.yaml** (Hermes alternative):
+```yaml
+mcp_servers:
+  memoryhub:
+    command: "memoryhub"
+    args: ["mcp"]
+    env:
+      MEMORYHUB_API_KEY: "${MEMORYHUB_API_KEY}"
+```
 
-- Pack and install each plugin in a clean temporary project with no repository-relative dependencies.
-- Verify the protocol asset and runtime entrypoint are present in each package.
-- Verify that each host loads the plugin, exposes the six tools, performs recall, and can complete a write against a test MemoryHub user.
-- If a host cannot be run in the available environment, report that check as pending; unit or adapter tests do not substitute for live host verification.
+**templates/hooks/session-start.sh:**
+```bash
+#!/bin/bash
+# SessionStart hook - loads memories via CLI
+# Works for both Claude Code and Codex (same event names)
+memoryhub session register
+memoryhub recall --output json
+```
 
-Do not use a production user's memory for live checks. Use an identifiable test user and clean up any test memories.
+**How used:**
+- **Claude Code plugin**: Ships `.mcp.json` + hook scripts in plugin bundle
+- **Codex plugin**: Ships `config.toml` (or `.mcp.json`) + hook scripts in plugin bundle
+- **Hermes plugin**: Ships `config.yaml` section + `pre_llm_call` hook to inject protocol
+- **#310 adapters**: Reads templates → substitutes variables → writes to project
 
-## 7. Risks and mitigations
+### 3.5 TypeScript MCP Client Wrapper (src/)
 
-| Risk | Mitigation |
-|---|---|
-| Shared changes regress both hosts | Establish the behavior contract first; keep adapter tests and migrate one host at a time |
-| A plugin artifact omits shared runtime code or assets | Inspect packed artifacts and install them in a clean temporary project outside the checkout |
-| Host-specific behavior is flattened into generic code | Keep lifecycle, hooks, schema conversion, logging, and results in adapters |
-| OpenClaw behavior changes unintentionally | Document config and recall decisions; compare against its current behavior |
-| Server errors drift from retry matching | Verify and test against the server's current error contract |
-| Live-host coverage is unavailable | Mark the exact check pending and run it later on an authorized host before claiming full verification |
+For TypeScript runtime plugins only (OpenClaw, OpenCode). This is the **MCP client wrapper**, not a high-level SDK — it handles MCP transport, session management, and tool calls.
 
-## 8. Out of scope
+**src/client.ts:**
+```typescript
+export class MemoryHubClient {
+  constructor(config: MemoryHubConfig);
+  async connect(): Promise<void>;           // single-flight
+  async registerSession(apiKey: string): Promise<Session>;
+  resetSession(): void;                     // closes stale transport
+  async callMemory(action: string, params: Record<string, unknown>): Promise<unknown>;
+  isConnected(): boolean;
+}
+```
 
-- Building Claude Code, Codex, or other host integrations
-- Generating host instruction/configuration files (#310)
-- Changing MemoryHub MCP tools or wire protocol
-- Adding automatic memory capture or unrelated product behavior
-- Reworking either host's hook model
+**src/session.ts:**
+```typescript
+export class SessionManager {
+  async withSession<T>(fn: () => Promise<T>): Promise<T>;  // generation-guarded recovery
+}
+```
 
-## 9. Success criteria
+**src/recall.ts:**
+```typescript
+export class RecallEngine {
+  async search(query: string): Promise<string>;  // timeout, untrusted framing
+  formatMemoriesXml(memories: Memory[]): string;
+}
+```
 
-- One shared module owns the agreed host-neutral MemoryHub behavior and is bundled into both plugin artifacts.
-- OpenClaw and OpenCode retain thin, understandable host adapters without losing required host-specific behavior.
-- Common behavior and adapter tests cover the agreed contract.
-- Both plugin artifacts install without repository-relative paths or a separately published common package, and contain the runtime/protocol assets they need.
-- User-visible changes are either absent or documented with appropriate migration and versioning.
-- Automated and live-host verification results, including unavailable checks, are reported accurately.
+**src/config.ts:**
+```typescript
+export function resolveConfig(
+  options?: Record<string, unknown>,
+  env?: ConfigEnv
+): MemoryHubConfig;  // Four-tier precedence: plugin > env > INI > flat file
+export function validateConfig(config: MemoryHubConfig): void;  // Throws on invalid
+```
+
+**Config resolution precedence:**
+1. Plugin options (from `openclaw.json` / `opencode.json`)
+2. Environment variables (`MEMORYHUB_URL`, `MEMORYHUB_API_KEY`)
+3. INI file (`~/.config/memoryhub/credentials`, section from `MEMORYHUB_CONTEXT`)
+4. Flat file (`~/.config/memoryhub/api-key`, backward compat)
+
+Per-field: first non-empty value wins. This matches CLI/SDK credential resolution.
+
+**Original OpenClaw migration proposal (not implemented as specified in #622):**
+- ✅ **Additive breaking change** — OpenClaw 2.0.0 gains env var support
+- ✅ Backward compatible — plugin config still takes precedence
+- ⚠️ Users with `MEMORYHUB_URL` env var set for other tools will now see it used
+- 📝 Document in migration guide as new feature
+
+**How used:**
+- **OpenClaw** (TS runtime): `import { MemoryHubClient, RecallEngine, TOOL_CONTRACTS } from '@memory-hub/common'` → use directly
+- **OpenCode** (TS runtime): Same imports → use directly
+- **Claude Code** (config plugin): ❌ NOT USED - connects to MCP server, no TypeScript runtime
+- **Codex** (config plugin): ❌ NOT USED - connects to MCP server, no TypeScript runtime
+- **Hermes** (config plugin): ❌ NOT USED - connects to MCP server, uses Python SDK if needed
+
+---
+
+## 4. Proposed Plugin Architecture
+
+### 4.1 TypeScript Runtime Plugins (OpenClaw, OpenCode)
+
+**Before (OpenClaw):**
+```
+integrations/openclaw/
+├── src/
+│   ├── index.ts           154 lines  - Entry, registration
+│   ├── mcp-client.ts      156 lines  - MCP client
+│   ├── tools.ts           339 lines  - Tool definitions
+│   ├── hooks.ts           144 lines  - Auto-recall
+│   ├── config.ts          121 lines  - Config parsing
+│   └── openclaw-plugin-sdk.d.ts  131 lines
+├── memoryhub-rules.md     133 lines
+└── openclaw.plugin.json   127 lines
+Total: ~1,045 lines
+```
+
+**After (OpenClaw):**
+```
+integrations/openclaw/
+├── src/
+│   └── index.ts           ~150 lines  - Thin adapter
+├── package.json           (adds @memory-hub/common dependency)
+└── openclaw.plugin.json
+Total: ~150 lines (85% reduction)
+```
+
+**What the thin adapter does:**
+```typescript
+import { MemoryHubClient, RecallEngine, TOOL_CONTRACTS, PROTOCOL_CONTENT }
+  from '@memory-hub/common';
+import { Type } from '@sinclair/typebox'; // OpenClaw-specific
+import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
+
+export default definePluginEntry({
+  id: "openclaw-memoryhub",
+
+  register(api) {
+    const config = parseOpenClawConfig(api.pluginConfig);  // ~40 lines - reads openclaw.json
+    const client = new MemoryHubClient(config);
+
+    // Convert shared contracts to OpenClaw's typebox format (~30 lines)
+    const tools = TOOL_CONTRACTS.map(contract => ({
+      name: contract.name,
+      description: contract.description,
+      parameters: convertToTypebox(contract.parameters),
+      execute: (id, params) => client.callTool(contract.name, params)
+    }));
+
+    // Register with OpenClaw API
+    tools.forEach(tool => api.registerTool(tool));
+    api.prependSystemContext(PROTOCOL_CONTENT);
+
+    // Auto-recall hook (~20 lines)
+    api.on('before_prompt_build', async (event) => {
+      const recall = new RecallEngine(client, config);
+      const memories = await recall.search(event.userMessage);
+      event.prependContext(memories);
+    });
+  }
+});
+```
+
+**OpenCode is similar** - same reduction, but uses `zod` instead of `typebox`.
+
+### 4.2 Config-Based Plugins (Claude Code, Codex, Hermes)
+
+Claude Code, Codex, and Hermes all use config-based plugin models (MCP server config + hooks/protocol injection). They connect to the MemoryHub MCP server rather than registering tools directly.
+
+**Claude Code plugin structure:**
+```
+memoryhub-claude-plugin/
+├── .claude-plugin/
+│   └── plugin.json          # Metadata
+├── rules/
+│   └── memoryhub-loading.md # From @memory-hub/common/protocol.md
+├── hooks/
+│   ├── hooks.json           # Hook configuration
+│   └── load-memories.sh     # From @memory-hub/common/templates/
+└── .mcp.json                # From @memory-hub/common/templates/
+```
+
+**Codex plugin structure:**
+```
+memoryhub-codex-plugin/
+├── .codex-plugin/           # Codex uses .codex-plugin/
+│   └── plugin.json
+├── rules/                   # Or AGENTS.md section (TBD based on Codex conventions)
+│   └── memoryhub-loading.md
+├── hooks/
+│   ├── hooks.json           # Same hook events as Claude Code
+│   └── load-memories.sh     # Same CLI calls
+└── .mcp.json                # Or config.toml (Codex supports both)
+```
+
+**Hermes plugin structure:**
+```
+memoryhub-hermes-plugin/
+├── plugin.py                # Plugin entry point
+├── hooks/
+│   └── pre_llm_call.py      # Injects protocol content
+├── config/
+│   └── mcp_server.yaml      # MCP server config snippet
+└── docs/
+    └── memoryhub-protocol.md # From @memory-hub/common/protocol.md
+```
+
+**Key differences:**
+- Claude Code/Codex: event-driven hooks (SessionStart, etc.)
+- Hermes: plugin hooks (`pre_llm_call`, `post_llm_call`, `on_session_start`, `on_session_end`)
+- Hermes uses `config.yaml` for MCP server registration
+- All three connect to MCP server (no tool registration)
+
+**How they're built:**
+- Read `protocol.md` from shared package → write to `rules/memoryhub-loading.md`
+- Read template `.mcp.json` → write to plugin root (or generate `config.toml` for Codex)
+- Read template hook scripts → write to `hooks/`
+
+**Who builds them:**
+- Could be part of #581 (example plugins)
+- Could be part of #310 (artifact generation)
+- Could be separate issue
+
+---
+
+## 5. Relationship to #310
+
+**#310 (instruction file generation) is MOSTLY SEPARATE.**
+
+The only connection: #310's adapters can read `protocol.md` from `@memory-hub/common` as the canonical source when generating instruction files.
+
+**#310 scope:**
+- CLI: `memoryhub config init --framework <name>`
+- Generates instruction files for non-plugin frameworks (Goose, etc.)
+- Validates user input using `config-schema.json` from shared package
+
+**#581 scope:**
+- Shared package for plugin authors
+- Refactor OpenClaw/OpenCode to use it
+- Provide building blocks for new plugins
+
+**Overlap:** Both use `protocol.md` and `config-schema.json` from the shared package.
+
+---
+
+## 6. Migration Plan
+
+### Phase 0: Drift Fix (completed as part of Phase 1)
+
+The drift-fix work was delivered with the shared-core extraction rather than as a separate pre-extraction change. Shared behavior is implemented once and covered by the conformance suite. Host-specific configuration lookup and registration remain in each adapter; the original proposal to give both hosts identical four-tier credential lookup was not adopted.
+
+**Tasks:**
+1. Copy OpenCode's single-flight connect into OpenClaw
+2. Copy OpenCode's stale-close `resetSession` into OpenClaw
+3. Copy OpenCode's `SessionManager` into OpenClaw
+4. Fix OpenClaw's timer leak (clear in `finally`)
+5. Delete dead `"memory_expired"` retry in OpenClaw
+6. Share normalization for common config fields while keeping credential-source lookup and host-only settings in each adapter
+7. Deduplicate `memoryhub-rules.md` (byte-identical, pick one as canonical)
+
+**Status:** The shared behavior and adapter boundaries are covered by the conformance suite, which runs against both plugins. The shared core normalizes common configuration fields; credential source lookup and host-only options remain adapter-specific.
+
+**Impact:** No MCP API or wire-protocol change. User-visible changes accepted for the implementation, including OpenClaw auto-recall passing the configured `project_id`, are documented in the changelog.
+
+### Phase 1: Extract Shared Runtime Core (completed in #622)
+
+**Implemented:**
+- Shared configuration normalization, MCP client lifecycle, session recovery, memory-operation mapping, recall behavior, types, and protocol content live in `integrations/common/src/`.
+- OpenClaw and OpenCode keep host-specific SDK registration, schemas, configuration-source lookup, and tool-result formatting in their adapters.
+- Both adapters run the shared conformance suite, alongside adapter-specific tests and type checks.
+- Each plugin build bundles the common source into its own distributable artifact. There is no `@memory-hub/common` package dependency, `file:../common` dependency, or separately published common package.
+- User-visible behavior changes are documented; the MCP wire protocol is unchanged.
+
+**Packaging decision:** Keep the common source local to this repository and bundle it into both plugin packages. Revisit publishing a separate common package only if a future consumer needs to install it independently.
+
+**Exit criteria:** The common behavior is exercised by both adapters' conformance tests; both plugin artifacts remain independently installable and contain the shared runtime code they need.
+
+### Phase 2: Documentation & Templates (optional)
+
+**Tasks:**
+1. Document "How to build a MemoryHub plugin"
+2. Provide `integrations/plugin-template/` starter
+3. Example: Build Claude Code plugin (or defer to #310)
+4. Reassess whether a separately published common package is useful if future integrations need to consume the shared runtime independently. The OpenClaw and OpenCode packages currently bundle the common source.
+
+---
+
+## 7. Migration Impact (implemented outcome for #622)
+
+- Users continue to install the OpenClaw and OpenCode plugins as separate packages. Each plugin build includes the common runtime code; users do not install or configure a third common package.
+- The adapters retain host-specific registration, configuration-source lookup, schemas, and tool-result formats. OpenCode and OpenClaw do not have identical credential-source resolution.
+- Common configuration normalization, MCP connection and cleanup, session recovery, memory-operation mapping, recall behavior, and protocol text now come from `integrations/common/src/`.
+- OpenClaw auto-recall now sends the configured `project_id`. The `session not found` retry match is retained for recovery after MCP session loss. These behavior details are recorded in `CHANGELOG.md`.
+- The MCP tools and wire protocol are unchanged. The two plugin packages can be released independently; publishing their updated versions is a release step, not a prerequisite to installing a separate common package.
+
+---
+
+## 8. Testing Strategy
+
+The detailed matrix below records the original proposal. The implemented tests are in `integrations/common/tests/`, `integrations/openclaw/tests/`, and `integrations/opencode/tests/`; the current package boundary and completed checks are summarized in §6 and §12.
+
+**Wire protocol:** OpenClaw and OpenCode send identical MCP requests. The shared package extracts client-side logic only; no protocol changes.
+
+### Shared Package Tests
+
+**Unit tests** (transport mocked):
+- `MemoryHubClient`: single-flight connect, stale-close, auth retry
+- `SessionManager`: generation-guarded recovery, no double retries
+- `RecallEngine`: format, timeout, untrusted framing, budget
+- Config validator: schema validation, precedence
+- Tool contracts: valid JSON, complete mappings
+
+### Conformance Suite
+
+**Purpose:** Prevent "fix lands in one plugin but not another"
+
+**Scope:** Given mocked MCP backend, every plugin must:
+
+#### 1. Config Resolution
+- ✅ **Four-tier precedence:** plugin > env > INI > flat file
+- ✅ **Per-field resolution:** mix sources (e.g., URL from plugin, API key from env)
+- ✅ **Validation:** reject invalid URL, wrong types, missing required fields
+- ✅ **Context switching:** respect `MEMORYHUB_CONTEXT` env var for INI sections
+- ✅ **Backward compat:** fall back to flat file `~/.config/memoryhub/api-key`
+
+```typescript
+// Test: plugin config wins over env
+resolveConfig(
+  { server: { url: "http://plugin" } },
+  { env: { MEMORYHUB_URL: "http://env" } }
+) → url === "http://plugin"
+
+// Test: env wins when plugin empty
+resolveConfig({}, { env: { MEMORYHUB_URL: "http://env" } })
+  → url === "http://env"
+
+// Test: per-field mix
+resolveConfig(
+  { server: { url: "http://plugin" } },
+  { env: { MEMORYHUB_API_KEY: "env-key" } }
+) → url === "http://plugin", apiKey === "env-key"
+
+// Test: validation
+resolveConfig({ server: { url: "not-a-url" } }) → throws
+resolveConfig({}) → throws (missing url)
+```
+
+#### 2. Inert When Unconfigured
+- ✅ No URL → plugin registers no tools
+- ✅ No API key → plugin registers no tools
+- ✅ No errors thrown (graceful degradation)
+
+#### 3. Session Management
+- ✅ Register session lazily (not on plugin load)
+- ✅ Recover on auth error exactly once (generation-guarded)
+- ✅ No double retries on same error
+- ✅ Close stale transport on `resetSession()`
+
+#### 4. Tool Registration
+- ✅ Surface 6 tools: search, read, list, write, update, delete
+- ✅ Each tool round-trips correctly (send params → receive result)
+- ✅ Tool schemas valid (typebox for OpenClaw, zod for OpenCode)
+
+#### 5. Auto-Recall
+- ✅ Inject memories with untrusted framing (`<memoryhub-context>` tags)
+- ✅ Respect `useFocus` flag (send focus when enabled)
+- ✅ Honor `maxResponseTokens` budget
+
+#### 6. Timeout & Error Handling
+- ✅ Recall timeout (never stall indefinitely)
+- ✅ Clear timers in `finally` (no timer leak)
+- ✅ Degrade gracefully on MCP server error (return error, don't crash)
+- ✅ Error framing: no stack trace leakage, consistent error messages
+
+```typescript
+// Test: MCP error is surfaced, not stack trace
+mockMcp.callTool.mockResolvedValue({
+  isError: true,
+  content: [{ type: "text", text: "Memory not found: abc-123" }]
+});
+
+await expect(client.callMemory("read", { memory_id: "abc-123" }))
+  .rejects.toThrow("Memory not found: abc-123");  // Clean message
+  // NOT: Error: McpClientError: Memory not found: abc-123\n  at mcp-client.ts:76...
+```
+
+#### 7. Connection Management
+- ✅ Single-flight connect (overlapping calls share one attempt)
+- ✅ No duplicate transports (failed attempt cleaned up)
+- ✅ Socket cleanup on close
+
+**Coverage:**
+- Run against OpenClaw adapter
+- Run against OpenCode adapter
+- (Future) Run against CLI + hooks for artifact hosts
+
+### Adapter Tests
+
+**OpenClaw-specific:**
+- Typebox schema generation from contracts
+- OpenClaw API registration
+- `before_prompt_build` hook injection
+
+**OpenCode-specific:**
+- Zod schema generation from contracts
+- OpenCode hook registration
+- `systemTransform` injection
+
+---
+
+## 9. Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| **Shared package breaks both plugins** | Both plugins fail | Comprehensive test suite, semver versioning, Phase 0 proves parity first |
+| **OpenClaw-specific behavior lost** | OpenClaw users see regression | Phase 0 aligns behavior, conformance suite catches differences |
+| **Breaking changes anger users** | Users resist upgrade | Clear migration guide, 0.1.x stays available, document benefits; mixed versions are safe |
+| **Different host SDKs diverge** | Adapter breaks on SDK update | Adapter seam isolates host SDK, tests catch breakage |
+
+---
+
+## 10. Out of Scope
+
+- ❌ Implementing the refactor (this is a design)
+- ❌ Building Claude Code/Codex/Hermes plugins (defer to #310 or separate issue)
+- ❌ Instruction file generation (#310)
+- ❌ Turn-level hooks (#313)
+- ❌ MCP tool surface changes
+
+---
+
+## 11. Follow-Up Issues
+
+Ordered by dependency:
+
+1. **`core: Reconcile OpenClaw + OpenCode to behavioral baseline`** *(Phase 0, completed as part of #622)* — shared lifecycle, session, recall, and protocol behavior; conformance coverage for both adapters. Credential lookup remains host-specific rather than adopting the proposed identical four-tier policy.
+
+2. **`build: Introduce JS workspace for integrations`** *(Not needed for current packaging)* — both plugin builds bundle the local common source; there is no `file:../common` package dependency. Reconsider a workspace if future packaging needs justify it.
+
+4. **`core: Extract shared runtime core`** *(Phase 1, completed in #622)* — shared TypeScript runtime code lives in `integrations/common/src/` and is bundled into each adapter. It is not a separately installable `@memory-hub/common` package; config-source lookup and host schemas remain adapter-specific.
+
+5. **`adapters: Refactor OpenClaw to use shared runtime`** *(Phase 1, completed in #622)* — OpenClaw keeps its TypeBox schema, host registration, hooks, and result formatting while using the common source.
+
+6. **`adapters: Refactor OpenCode to use shared runtime`** *(Phase 1, completed in #622)* — OpenCode keeps its Zod schema, host registration, hooks, and result formatting while using the common source.
+
+7. **`test: Add conformance suite`** *(Phase 1, completed in #622)* — the shared suite runs against both adapters; adapter-specific tests remain in each plugin.
+
+8. **`docs: Plugin authoring guide`** *(Phase 2, optional)* — "How to build a MemoryHub plugin" with template.
+
+9. **`example: Claude Code plugin`** *(Phase 2, optional OR defer to #310)* — working example using shared package templates.
+
+10. **`example: Codex plugin`** *(Phase 2, optional OR defer to #310)* — Codex variant (nearly identical to Claude Code, demonstrates portability).
+
+11. **`example: Hermes plugin`** *(Phase 2, optional OR defer to #310)* — Hermes config-based plugin using `pre_llm_call` hook for protocol injection.
+
+---
+
+## 12. Success Criteria
+
+**Phase 0:**
+- [x] OpenClaw and OpenCode pass the same shared conformance assertions
+- [x] Common configuration fields are normalized by the shared core; credential lookup and host-only settings remain adapter-specific
+- [x] Shared behavior is implemented once; registration, schemas, and result shapes remain adapter-specific
+- [x] Connection cleanup, session recovery, and recall timeout behavior are covered by shared or adapter tests
+
+**Phase 1:**
+- [x] Shared runtime source exists under `integrations/common/src/`
+- [x] Both plugin builds bundle the shared source; neither depends on a separately published common package
+- [x] OpenClaw and OpenCode retain their host-specific adapters and package manifests
+- [x] Conformance suite passes for both adapters
+- [x] User-visible behavior changes are documented in `CHANGELOG.md`
+- [x] Existing package tests and type checks pass; package manifests and lockfiles reflect the implemented package boundary
+
+**Phase 2:**
+- [ ] Plugin authoring guide published
+- [ ] Template available for new plugins
+- [ ] At least one example config-based plugin using shared package (Claude Code, Codex, or Hermes)
+- [ ] Templates support Claude Code (`.mcp.json`), Codex (`config.toml`), and Hermes (`config.yaml`) formats
+
+---
+
+## Appendix: File Size Breakdown
+
+### Original shared-package estimate (proposal, not the implemented package boundary)
+
+The estimate below describes the earlier proposal for a separately consumable
+`@memory-hub/common` package. #622 instead keeps the shared source in
+`integrations/common/` and bundles it into each plugin. The adapter-size
+estimates below are also projections, not measured post-refactor sizes.
+
+Extracted from OpenClaw/OpenCode:
+
+| File | Lines | Source |
+|------|-------|--------|
+| `src/client.ts` | ~180 | OpenCode mcp-client.ts (has single-flight) |
+| `src/session.ts` | ~60 | OpenCode session.ts (has generation guards) |
+| `src/recall.ts` | ~120 | OpenCode hooks.ts recall logic |
+| `src/tools.ts` | ~50 | Tool contract loader (new) |
+| `src/config.ts` | ~230 | OpenCode config.ts (four-tier resolution + INI reader) |
+| `protocol.md` | 133 | Existing (duplicated today) |
+| `tool-contracts.json` | ~200 | Extracted from tools.ts |
+| `config-schema.json` | ~80 | Extracted from configSchema |
+| `templates/.mcp.json.template` | ~15 | Template (new) |
+| `templates/session-start.sh` | ~20 | Template script (new) |
+| `templates/recall.sh` | ~15 | Template script (new) |
+| `templates/capture.sh` | ~15 | Template script (new) |
+| `docs/credential-resolution.md` | ~50 | Documentation (new) |
+| **Total** | ~1,168 lines | (**+150 from four-tier config**) |
+
+### OpenClaw Adapter (after)
+
+| File | Lines | What it does |
+|------|-------|--------------|
+| `src/index.ts` | ~150 | Plugin entry, converts contracts to typebox, registers with OpenClaw API |
+| **Total** | ~150 lines | |
+
+**Reduction:** 1,045 → 150 lines (85%)
+
+### OpenCode Adapter (after)
+
+| File | Lines | What it does |
+|------|-------|--------------|
+| `src/index.ts` | ~150 | Plugin factory, converts contracts to zod, registers with OpenCode hooks |
+| **Total** | ~150 lines | |
+
+**Reduction:** ~700 → 150 lines (78%)
