@@ -22,6 +22,8 @@ cp "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR/requirements.txt" "$BUILD_DIR/"
 cp "$SCRIPT_DIR/conftest.py" "$BUILD_DIR/" 2>/dev/null || true
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
     --exclude='.mypy_cache' "$SCRIPT_DIR/src/" "$BUILD_DIR/src/"
+cp -r "$SCRIPT_DIR/alembic/" "$BUILD_DIR/"
+cp "$SCRIPT_DIR/alembic.ini" "$BUILD_DIR/"
 
 FIXED_COUNT=$(find "$BUILD_DIR" -name '*.py' -perm 600 2>/dev/null | wc -l | tr -d ' ')
 if [ "$FIXED_COUNT" -gt 0 ]; then
