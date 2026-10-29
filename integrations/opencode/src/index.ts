@@ -1,23 +1,11 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
 import type { Plugin, Hooks } from "@opencode-ai/plugin";
+import { PROTOCOL_CONTENT } from "../../common/src/protocol.js";
 import { resolveConfig } from "./config.js";
 import { createMcpClient } from "./mcp-client.js";
 import { createTools } from "./tools.js";
 import { createRecallEngine, createSystemTransform } from "./hooks.js";
 import { createSessionManager } from "./session.js";
 import { createLogger } from "./logger.js";
-
-function loadProtocolContent(): string | undefined {
-  try {
-    const selfDir = dirname(fileURLToPath(import.meta.url));
-    const protocolPath = resolve(selfDir, "..", "memoryhub-rules.md");
-    return readFileSync(protocolPath, "utf-8");
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * MemoryHub plugin for opencode.
@@ -43,12 +31,7 @@ export const MemoryHubPlugin: Plugin = async (_input, options) => {
   }
 
   const mcpClient = createMcpClient(config.server.url);
-  const protocolContent = loadProtocolContent();
-  if (!protocolContent) {
-    logger.warn(
-      "memoryhub-rules.md not found, skipping system context injection",
-    );
-  }
+  const protocolContent = PROTOCOL_CONTENT;
 
   const { withSession } = createSessionManager(
     mcpClient,
@@ -76,12 +59,10 @@ export const MemoryHubPlugin: Plugin = async (_input, options) => {
     },
   };
 
-  if (protocolContent) {
-    const systemTransform = createSystemTransform(protocolContent);
-    hooks["experimental.chat.system.transform"] = async (_input, output) => {
-      systemTransform(output);
-    };
-  }
+  const systemTransform = createSystemTransform(protocolContent);
+  hooks["experimental.chat.system.transform"] = async (_input, output) => {
+    systemTransform(output);
+  };
 
   return hooks;
 };

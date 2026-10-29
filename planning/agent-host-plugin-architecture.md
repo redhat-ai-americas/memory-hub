@@ -5,6 +5,8 @@
 **Subsystem:** `client` — restructures existing `integrations/*` packages
 **Related:** #310 (instruction file generation - separate concern), OpenClaw (merged), OpenCode (PR #549)
 
+**Implementation status (2026-10-27):** The shared-core extraction for OpenClaw and OpenCode was completed under #622. The common TypeScript source lives in `integrations/common/` and each plugin build bundles it into that plugin's artifact; consumers do not install a separate common package. The broader integration and instruction-generation work described below remains planned.
+
 ---
 
 ## 1. Problem
@@ -65,7 +67,7 @@ Even when duplicating the *same* logic, OpenClaw and OpenCode have diverged:
 
 ## 2. Solution
 
-Extract shared MemoryHub integration artifacts into one package that any plugin can use.
+The original proposal was to extract shared MemoryHub integration artifacts into a package that any plugin could use. Sections 2–5 retain that broader design intent for future integrations. #622 implemented a narrower runtime boundary: shared TypeScript source is bundled into OpenClaw and OpenCode, not distributed as a separate package. The completed boundary and packaging decision are recorded in §6.
 
 **Plugin types:**
 - **TypeScript runtime plugins** (OpenClaw, OpenCode): Register tools directly in the agent host's runtime, wrap MCP client
@@ -93,7 +95,7 @@ integrations/common/
 
 ---
 
-## 3. What Gets Shared
+## 3. What the Original Proposal Would Share
 
 ### 3.1 Protocol Content (protocol.md)
 
@@ -284,7 +286,7 @@ export function validateConfig(config: MemoryHubConfig): void;  // Throws on inv
 
 Per-field: first non-empty value wins. This matches CLI/SDK credential resolution.
 
-**Migration impact for OpenClaw:**
+**Original OpenClaw migration proposal (not implemented as specified in #622):**
 - ✅ **Additive breaking change** — OpenClaw 2.0.0 gains env var support
 - ✅ Backward compatible — plugin config still takes precedence
 - ⚠️ Users with `MEMORYHUB_URL` env var set for other tools will now see it used
@@ -299,7 +301,7 @@ Per-field: first non-empty value wins. This matches CLI/SDK credential resolutio
 
 ---
 
-## 4. Plugin Architecture After Migration
+## 4. Proposed Plugin Architecture
 
 ### 4.1 TypeScript Runtime Plugins (OpenClaw, OpenCode)
 
@@ -330,18 +332,18 @@ Total: ~150 lines (85% reduction)
 
 **What the thin adapter does:**
 ```typescript
-import { MemoryHubClient, RecallEngine, TOOL_CONTRACTS, PROTOCOL_CONTENT } 
+import { MemoryHubClient, RecallEngine, TOOL_CONTRACTS, PROTOCOL_CONTENT }
   from '@memory-hub/common';
 import { Type } from '@sinclair/typebox'; // OpenClaw-specific
 import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
 
 export default definePluginEntry({
   id: "openclaw-memoryhub",
-  
+
   register(api) {
     const config = parseOpenClawConfig(api.pluginConfig);  // ~40 lines - reads openclaw.json
     const client = new MemoryHubClient(config);
-    
+
     // Convert shared contracts to OpenClaw's typebox format (~30 lines)
     const tools = TOOL_CONTRACTS.map(contract => ({
       name: contract.name,
@@ -349,11 +351,11 @@ export default definePluginEntry({
       parameters: convertToTypebox(contract.parameters),
       execute: (id, params) => client.callTool(contract.name, params)
     }));
-    
+
     // Register with OpenClaw API
     tools.forEach(tool => api.registerTool(tool));
     api.prependSystemContext(PROTOCOL_CONTENT);
-    
+
     // Auto-recall hook (~20 lines)
     api.on('before_prompt_build', async (event) => {
       const recall = new RecallEngine(client, config);
@@ -448,9 +450,9 @@ The only connection: #310's adapters can read `protocol.md` from `@memory-hub/co
 
 ## 6. Migration Plan
 
-### Phase 0: Drift Fix (no breaking changes)
+### Phase 0: Drift Fix (completed as part of Phase 1)
 
-Align OpenClaw to OpenCode's fixes without extracting anything.
+The drift-fix work was delivered with the shared-core extraction rather than as a separate pre-extraction change. Shared behavior is implemented once and covered by the conformance suite. Host-specific configuration lookup and registration remain in each adapter; the original proposal to give both hosts identical four-tier credential lookup was not adopted.
 
 **Tasks:**
 1. Copy OpenCode's single-flight connect into OpenClaw
@@ -458,40 +460,25 @@ Align OpenClaw to OpenCode's fixes without extracting anything.
 3. Copy OpenCode's `SessionManager` into OpenClaw
 4. Fix OpenClaw's timer leak (clear in `finally`)
 5. Delete dead `"memory_expired"` retry in OpenClaw
-6. Copy OpenCode's four-tier config resolution into OpenClaw (adds env var support)
+6. Share normalization for common config fields while keeping credential-source lookup and host-only settings in each adapter
 7. Deduplicate `memoryhub-rules.md` (byte-identical, pick one as canonical)
 
-**Exit criteria:** Both plugins pass identical conformance tests
+**Status:** The shared behavior and adapter boundaries are covered by the conformance suite, which runs against both plugins. The shared core normalizes common configuration fields; credential source lookup and host-only options remain adapter-specific.
 
-**Impact:** Internal code only, no API changes, no breaking changes
+**Impact:** No MCP API or wire-protocol change. User-visible changes accepted for the implementation, including OpenClaw auto-recall passing the configured `project_id`, are documented in the changelog.
 
-### Phase 1: Extract Shared Package (breaking changes)
+### Phase 1: Extract Shared Runtime Core (completed in #622)
 
-**Prerequisites:**
-- [x] Confirm OpenClaw provenance → **In-repo original** (PR #490, no upstream coordination needed)
-- [ ] JS workspace decision → **Deferred** (use path dependencies for now: `"@memory-hub/common": "file:../common"`)
+**Implemented:**
+- Shared configuration normalization, MCP client lifecycle, session recovery, memory-operation mapping, recall behavior, types, and protocol content live in `integrations/common/src/`.
+- OpenClaw and OpenCode keep host-specific SDK registration, schemas, configuration-source lookup, and tool-result formatting in their adapters.
+- Both adapters run the shared conformance suite, alongside adapter-specific tests and type checks.
+- Each plugin build bundles the common source into its own distributable artifact. There is no `@memory-hub/common` package dependency, `file:../common` dependency, or separately published common package.
+- User-visible behavior changes are documented; the MCP wire protocol is unchanged.
 
-**Tasks:**
-1. Create `integrations/common/` package (`@memory-hub/common`)
-   - Move shared code from OpenClaw/OpenCode
-   - Export `MemoryHubClient`, `SessionManager`, `RecallEngine`
-   - Export `TOOL_CONTRACTS`, `CONFIG_SCHEMA`, `PROTOCOL_CONTENT`
-   - Ship templates in `templates/` directory
-   - Document credential resolution pattern
-3. Refactor OpenClaw as thin adapter (~150 lines)
-4. Refactor OpenCode as thin adapter (~150 lines)
-5. Write conformance suite
-6. Prove behavior unchanged
+**Packaging decision:** Keep the common source local to this repository and bundle it into both plugin packages. Revisit publishing a separate common package only if a future consumer needs to install it independently.
 
-**Exit criteria:** 
-- Both plugins depend on `@memory-hub/common`
-- Conformance suite passes
-- No user-visible changes
-
-**Impact:** 
-- Breaking: New imports, new APIs
-- Major version bump (2.0.0)
-- Mixed versions safe (wire protocol unchanged)
+**Exit criteria:** The common behavior is exercised by both adapters' conformance tests; both plugin artifacts remain independently installable and contain the shared runtime code they need.
 
 ### Phase 2: Documentation & Templates (optional)
 
@@ -499,54 +486,23 @@ Align OpenClaw to OpenCode's fixes without extracting anything.
 1. Document "How to build a MemoryHub plugin"
 2. Provide `integrations/plugin-template/` starter
 3. Example: Build Claude Code plugin (or defer to #310)
-4. Publish `@memory-hub/common` to npm (or keep private)
+4. Reassess whether a separately published common package is useful if future integrations need to consume the shared runtime independently. The OpenClaw and OpenCode packages currently bundle the common source.
 
 ---
 
-## 7. Migration Impact
+## 7. Migration Impact (implemented outcome for #622)
 
-### OpenClaw Migration
-
-| Aspect | Before | After | Breaking? |
-|--------|--------|-------|-----------|
-| **Dependencies** | `@modelcontextprotocol/sdk`, `@sinclair/typebox` | Add `@memory-hub/common` | ✅ Yes - new dep |
-| **Code size** | 1,045 lines | ~150 lines | No |
-| **Imports** | `import { createMcpClient } from './mcp-client'` | `import { MemoryHubClient } from '@memory-hub/common'` | ✅ Yes - new paths |
-| **API** | `createMcpClient(url)` | `new MemoryHubClient(config)` | ✅ Yes - different constructor |
-| **Session** | Manual `ensureSession()` | `client.withSession()` | ✅ Yes - new pattern |
-| **Config resolution** | Plugin config only | Four-tier: plugin > env > INI > flat file | ✅ Yes - **new env var support** |
-| **Files deleted** | `mcp-client.ts`, `tools.ts`, `hooks.ts`, `config.ts` | Kept in shared package | No |
-| **Version** | 0.1.x | 2.0.0 (major bump) | ✅ Yes - breaking |
-
-**Config migration note:**
-OpenClaw 2.0.0 now supports environment variables (`MEMORYHUB_URL`, `MEMORYHUB_API_KEY`) and INI files (`~/.config/memoryhub/credentials`), matching the CLI/SDK pattern. Plugin config still takes precedence, so existing configurations are unaffected. Users can now omit the plugin config and use environment variables instead.
-
-### OpenCode Migration
-
-Same pattern as OpenClaw, but uses `zod` instead of `typebox`.
-
-### Deployment
-
-**Coordinated release:**
-1. Publish `@memory-hub/common@1.0.0`
-2. Publish `openclaw-memoryhub@2.0.0` (depends on @memory-hub/common)
-3. Publish `opencode-memoryhub@2.0.0` (depends on @memory-hub/common)
-
-**Mixed version safety:**
-- ✅ Users can upgrade OpenClaw and OpenCode independently
-- ✅ Safe to run both 2.0.0 and 0.1.x against the same MemoryHub backend
-- ✅ No wire protocol changes — both send identical MCP requests
-- ✅ Different session tokens per client (no collision)
-- ⚠️ Users with both hosts get bug fixes unevenly until both are upgraded
-
-**Version pinning strategy:**
-- `@memory-hub/common` uses exact semver in plugin dependencies (`1.0.0`, not `^1.0.0`)
-- Plugins pin to same `@memory-hub/common` version for behavioral parity
-- Rollback: patch release (1.0.1) or revert all three packages atomically
+- Users continue to install the OpenClaw and OpenCode plugins as separate packages. Each plugin build includes the common runtime code; users do not install or configure a third common package.
+- The adapters retain host-specific registration, configuration-source lookup, schemas, and tool-result formats. OpenCode and OpenClaw do not have identical credential-source resolution.
+- Common configuration normalization, MCP connection and cleanup, session recovery, memory-operation mapping, recall behavior, and protocol text now come from `integrations/common/src/`.
+- OpenClaw auto-recall now sends the configured `project_id`. The `session not found` retry match is retained for recovery after MCP session loss. These behavior details are recorded in `CHANGELOG.md`.
+- The MCP tools and wire protocol are unchanged. The two plugin packages can be released independently; publishing their updated versions is a release step, not a prerequisite to installing a separate common package.
 
 ---
 
 ## 8. Testing Strategy
+
+The detailed matrix below records the original proposal. The implemented tests are in `integrations/common/tests/`, `integrations/openclaw/tests/`, and `integrations/opencode/tests/`; the current package boundary and completed checks are summarized in §6 and §12.
 
 **Wire protocol:** OpenClaw and OpenCode send identical MCP requests. The shared package extracts client-side logic only; no protocol changes.
 
@@ -682,17 +638,17 @@ await expect(client.callMemory("read", { memory_id: "abc-123" }))
 
 Ordered by dependency:
 
-1. **`core: Reconcile OpenClaw + OpenCode to behavioral baseline`** *(Phase 0)* — copy OpenCode fixes into OpenClaw; fix timer leak, dead retry, stale connection cleanup; copy four-tier config resolution (adds env var support); dedupe memoryhub-rules.md. Exit: identical conformance run passes.
+1. **`core: Reconcile OpenClaw + OpenCode to behavioral baseline`** *(Phase 0, completed as part of #622)* — shared lifecycle, session, recall, and protocol behavior; conformance coverage for both adapters. Credential lookup remains host-specific rather than adopting the proposed identical four-tier policy.
 
-2. ~~**`build: Introduce JS workspace for integrations`**~~ *(Deferred)* — use path dependencies (`file:../common`) for now; workspace can be added later if needed.
+2. **`build: Introduce JS workspace for integrations`** *(Not needed for current packaging)* — both plugin builds bundle the local common source; there is no `file:../common` package dependency. Reconsider a workspace if future packaging needs justify it.
 
-4. **`core: Extract @memory-hub/common package`** *(Phase 1)* — create `integrations/common/`; move shared code (client, session, recall, tools, config, protocol); export contracts, schema, templates; document credential resolution.
+4. **`core: Extract shared runtime core`** *(Phase 1, completed in #622)* — shared TypeScript runtime code lives in `integrations/common/src/` and is bundled into each adapter. It is not a separately installable `@memory-hub/common` package; config-source lookup and host schemas remain adapter-specific.
 
-5. **`adapters: Refactor OpenClaw as thin adapter`** *(Phase 1)* — rewrite to use `@memory-hub/common`; ~150 lines; typebox conversion.
+5. **`adapters: Refactor OpenClaw to use shared runtime`** *(Phase 1, completed in #622)* — OpenClaw keeps its TypeBox schema, host registration, hooks, and result formatting while using the common source.
 
-6. **`adapters: Refactor OpenCode as thin adapter`** *(Phase 1)* — rewrite to use `@memory-hub/common`; ~150 lines; zod conversion.
+6. **`adapters: Refactor OpenCode to use shared runtime`** *(Phase 1, completed in #622)* — OpenCode keeps its Zod schema, host registration, hooks, and result formatting while using the common source.
 
-7. **`test: Add conformance suite`** *(Phase 1)* — scenario matrix from §8; run against both adapters.
+7. **`test: Add conformance suite`** *(Phase 1, completed in #622)* — the shared suite runs against both adapters; adapter-specific tests remain in each plugin.
 
 8. **`docs: Plugin authoring guide`** *(Phase 2, optional)* — "How to build a MemoryHub plugin" with template.
 
@@ -707,18 +663,18 @@ Ordered by dependency:
 ## 12. Success Criteria
 
 **Phase 0:**
-- [ ] OpenClaw and OpenCode pass identical conformance tests
-- [ ] Both use four-tier config resolution (plugin > env > INI > flat file)
-- [ ] No behavioral differences outside adapter seams
-- [ ] All Phase 0 bugs fixed (timer leak, dead retry, stale connection, etc.)
+- [x] OpenClaw and OpenCode pass the same shared conformance assertions
+- [x] Common configuration fields are normalized by the shared core; credential lookup and host-only settings remain adapter-specific
+- [x] Shared behavior is implemented once; registration, schemas, and result shapes remain adapter-specific
+- [x] Connection cleanup, session recovery, and recall timeout behavior are covered by shared or adapter tests
 
 **Phase 1:**
-- [ ] `@memory-hub/common` package exists and exports all shared code
-- [ ] OpenClaw is ~150 lines, depends on mcp-client
-- [ ] OpenCode is ~150 lines, depends on mcp-client
-- [ ] Conformance suite passes for both
-- [ ] No user-visible behavior changes
-- [ ] Breaking changes documented in migration guide
+- [x] Shared runtime source exists under `integrations/common/src/`
+- [x] Both plugin builds bundle the shared source; neither depends on a separately published common package
+- [x] OpenClaw and OpenCode retain their host-specific adapters and package manifests
+- [x] Conformance suite passes for both adapters
+- [x] User-visible behavior changes are documented in `CHANGELOG.md`
+- [x] Existing package tests and type checks pass; package manifests and lockfiles reflect the implemented package boundary
 
 **Phase 2:**
 - [ ] Plugin authoring guide published
@@ -730,7 +686,12 @@ Ordered by dependency:
 
 ## Appendix: File Size Breakdown
 
-### Shared Package (integrations/common/ → @memory-hub/common)
+### Original shared-package estimate (proposal, not the implemented package boundary)
+
+The estimate below describes the earlier proposal for a separately consumable
+`@memory-hub/common` package. #622 instead keeps the shared source in
+`integrations/common/` and bundles it into each plugin. The adapter-size
+estimates below are also projections, not measured post-refactor sizes.
 
 Extracted from OpenClaw/OpenCode:
 

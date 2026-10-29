@@ -1,29 +1,17 @@
-export interface MemoryHubConfig {
-  server: {
-    url: string;
+import { normalizeSharedConfig } from "../../common/src/config.js";
+import type { SharedPluginConfig } from "../../common/src/types.js";
+
+export interface MemoryHubConfig extends SharedPluginConfig {
+  server: SharedPluginConfig["server"] & {
     transport: "streamable-http" | "http-sse";
   };
-  auth: {
-    mode: "api_key" | "oauth";
-    apiKey?: string;
-  };
-  autoRecall: {
-    enabled: boolean;
-    maxResults: number;
-    maxResponseTokens: number;
-    useFocus: boolean;
-  };
+  auth: SharedPluginConfig["auth"] & { mode: "api_key" | "oauth" };
+  autoRecall: SharedPluginConfig["autoRecall"] & { useFocus: boolean };
   autoCapture: {
     enabled: boolean;
     defaultScope: string;
     defaultWeight: number;
   };
-  defaults: {
-    scope: string;
-    projectId?: string;
-    domains: string[];
-  };
-  needsSetup: boolean;
 }
 
 function getString(
@@ -52,17 +40,6 @@ function getNumber(
   return typeof val === "number" ? val : fallback;
 }
 
-function getStringArray(
-  obj: Record<string, unknown> | undefined,
-  key: string,
-): string[] {
-  const val = obj?.[key];
-  if (Array.isArray(val)) {
-    return val.filter((v): v is string => typeof v === "string");
-  }
-  return [];
-}
-
 function getObj(
   obj: Record<string, unknown> | undefined,
   key: string,
@@ -81,29 +58,26 @@ export function parseConfig(
   const auth = getObj(raw, "auth");
   const autoRecall = getObj(raw, "autoRecall");
   const autoCapture = getObj(raw, "autoCapture");
-  const defaults = getObj(raw, "defaults");
 
   const url = getString(server, "url") ?? "";
   const apiKey = getString(auth, "apiKey");
-  const needsSetup = !url || (!apiKey && getString(auth, "mode") !== "oauth");
+  const authMode = getString(auth, "mode") === "oauth" ? "oauth" : "api_key";
+  const shared = normalizeSharedConfig(raw, { url, apiKey });
 
   return {
     server: {
-      url,
+      ...shared.server,
       transport:
         getString(server, "transport") === "http-sse"
           ? "http-sse"
           : "streamable-http",
     },
     auth: {
-      mode:
-        getString(auth, "mode") === "oauth" ? "oauth" : "api_key",
-      apiKey,
+      ...shared.auth,
+      mode: authMode,
     },
     autoRecall: {
-      enabled: getBool(autoRecall, "enabled", true),
-      maxResults: getNumber(autoRecall, "maxResults", 10),
-      maxResponseTokens: getNumber(autoRecall, "maxResponseTokens", 4000),
+      ...shared.autoRecall,
       useFocus: getBool(autoRecall, "useFocus", true),
     },
     autoCapture: {
@@ -111,11 +85,7 @@ export function parseConfig(
       defaultScope: getString(autoCapture, "defaultScope") ?? "user",
       defaultWeight: getNumber(autoCapture, "defaultWeight", 0.7),
     },
-    defaults: {
-      scope: getString(defaults, "scope") ?? "user",
-      projectId: getString(defaults, "projectId"),
-      domains: getStringArray(defaults, "domains"),
-    },
-    needsSetup,
+    defaults: shared.defaults,
+    needsSetup: !url || (!apiKey && authMode !== "oauth"),
   };
 }
