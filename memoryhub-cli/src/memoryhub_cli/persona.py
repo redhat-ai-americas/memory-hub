@@ -83,8 +83,12 @@ def compile_cmd(
         async with client:
             try:
                 return await client._call(
-                    "compile_persona",
-                    {"user_id": user_id, "project_id": project_id},
+                    "persona",
+                    {
+                        "action": "compile",
+                        "user_id": user_id,
+                        "project_id": project_id,
+                    },
                 )
             except Exception as exc:
                 handle_error("compile_failed", str(exc), output, EXIT_SERVER_ERROR)
@@ -141,8 +145,12 @@ def show_cmd(
         async with client:
             try:
                 return await client._call(
-                    "get_persona",
-                    {"user_id": user_id, "project_id": project_id},
+                    "persona",
+                    {
+                        "action": "get",
+                        "user_id": user_id,
+                        "project_id": project_id,
+                    },
                 )
             except Exception as exc:
                 handle_error("fetch_failed", str(exc), output, EXIT_SERVER_ERROR)
