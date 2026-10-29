@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MemoryHub · Foundations</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0066cc}a:hover{color:#004d99}
+.sec{font-family:'Red Hat Display',sans-serif;font-size:20px;font-weight:600;margin:0 0 16px}
+.sw{display:flex;flex-direction:column;gap:6px;font-size:12px}
+.sw span:first-child{height:64px;border-radius:12px;border:1px solid #d2d2d2}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12px;color:#4d4d4d}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:24px}
+.in{font:inherit;font-size:14px;border:1px solid #c7c7c7;border-radius:8px;padding:8px 12px;background:#fff;color:#151515;width:100%}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1100px; box-sizing: border-box; background: #f2f2f2; color: #151515; font-family: 'Red Hat Text', sans-serif; padding: 56px 64px; display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; justify-content: space-between; align-items: flex-end">
+<div>
+<div class="mono" style="margin-bottom: 8px">MemoryHub UI · PatternFly 6 · Red Hat type</div>
+<h1 style="font-family: 'Red Hat Display'; font-size: 44px; font-weight: 500; margin: 0; letter-spacing: -.02em">Foundations &amp; components</h1>
+</div>
+<p style="margin: 0; max-width: 460px; font-size: 14px; color: #4d4d4d; line-height: 1.5">Build with PatternFly 6 React components; these tokens only document how MemoryHub uses them, so the dashboard sits naturally inside the OpenShift AI console.</p>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+<div class="card">
+<p class="sec">Color</p>
+<div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px">
+<div class="sw"><span style="background: #ee0000; border-color: #ee0000"></span><b>Brand red</b><span class="mono">#EE0000</span></div>
+<div class="sw"><span style="background: #151515"></span><b>Masthead</b><span class="mono">#151515</span></div>
+<div class="sw"><span style="background: #212427"></span><b>Navigation</b><span class="mono">#212427</span></div>
+<div class="sw"><span style="background: #f2f2f2"></span><b>Canvas</b><span class="mono">#F2F2F2</span></div>
+<div class="sw"><span style="background: #0066cc; border-color: #0066cc"></span><b>Primary</b><span class="mono">#0066CC</span></div>
+<div class="sw"><span style="background: #b1380b; border-color: #b1380b"></span><b>Danger</b><span class="mono">#B1380B</span></div>
+</div>
+<p style="font-size: 13px; color: #4d4d4d; margin: 16px 0 0">Red is identity only — the mark, the active-nav bar and notification badges. Actions are always blue.</p>
+</div>
+<div class="card">
+<p class="sec">Scope labels</p>
+<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px">
+<span class="lbl" style="background: #e7f1fa; color: #004d99; border-color: #b9dafc">User</span>
+<span class="lbl" style="background: #daf2f2; color: #004d4d; border-color: #9ad8d8">Project</span>
+<span class="lbl" style="background: #ece6ff; color: #3d2785; border-color: #cbc1ff">Campaign</span>
+<span class="lbl" style="background: #fff0dd; color: #8f4700; border-color: #f8c48a">Role</span>
+<span class="lbl" style="background: #e9f7df; color: #204d00; border-color: #afdc8f">Organizational</span>
+<span class="lbl" style="background: #fce3e3; color: #a60000; border-color: #f9a8a8">Enterprise</span>
+</div>
+<p style="font-size: 13px; color: #4d4d4d; margin: 0; line-height: 1.5">One hue per tier, ordered from personal (blue) to mandated (red). Graph nodes use the solid 500 shade of the same hue. The label text always names the tier, so color is never the only signal.</p>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px">
+<div class="card">
+<p class="sec">Type</p>
+<div style="display: flex; flex-direction: column; gap: 12px">
+<div><div style="font-family: 'Red Hat Display'; font-size: 28px; font-weight: 500">Page title 28</div><span class="mono">Red Hat Display 500</span></div>
+<div><div style="font-family: 'Red Hat Display'; font-size: 16px; font-weight: 600">Card title 16</div><span class="mono">Red Hat Display 600</span></div>
+<div><div style="font-size: 14px">Body and table text 14 — the dashboard default.</div><span class="mono">Red Hat Text 400</span></div>
+<div><div style="font-family: 'Red Hat Mono'; font-size: 12.5px">mem_7f3a…c21 · memory:write:user</div><span class="mono">Red Hat Mono — IDs, scopes, tool names</span></div>
+</div>
+</div>
+<div class="card">
+<p class="sec">Buttons</p>
+<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px">
+<button class="btn" style="background: #0066cc; color: #fff">Primary</button>
+<button class="btn" style="background: #fff; color: #0066cc; border-color: #0066cc">Secondary</button>
+<button class="btn" style="background: #fff; color: #151515; border-color: #c7c7c7">Tertiary</button>
+<button class="btn" style="background: #b1380b; color: #fff">Danger</button>
+<button class="btn" style="background: transparent; color: #0066cc; padding: 8px 6px">Link</button>
+</div>
+<p class="sec" style="font-size: 16px; margin-bottom: 10px">Status</p>
+<div style="display: flex; flex-direction: column; gap: 8px; font-size: 14px; font-weight: 500">
+<span style="color: #3d7317">● Healthy / Permitted</span>
+<span style="color: #8f6100">● Degraded / Queued for review</span>
+<span style="color: #b1380b">● Down / Denied / Blocked</span>
+</div>
+</div>
+<div class="card" style="display: flex; flex-direction: column; gap: 14px">
+<p class="sec" style="margin: 0">Form controls</p>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="sgq" style="font-size: 13px; font-weight: 600">Query</label><input id="sgq" class="in" value="container runtime"></div>
+<div style="display: flex; justify-content: space-between; align-items: center; font-size: 14px"><span>Cross-encoder rerank</span><span style="width: 40px; height: 22px; border-radius: 999px; background: #0066cc; position: relative; display: inline-block"><span style="position: absolute; top: 3px; left: 21px; width: 16px; height: 16px; border-radius: 99px; background: #fff"></span></span></div>
+<div style="display: inline-flex; border: 1px solid #c7c7c7; border-radius: 999px; overflow: hidden; font-size: 13px; align-self: flex-start"><span style="background: #0066cc; color: #fff; padding: 6px 14px">full</span><span style="padding: 6px 14px; background: #fff">index</span><span style="padding: 6px 14px; background: #fff">full_only</span></div>
+<span style="display: inline-flex; align-items: center; gap: 6px; background: #f2f2f2; border: 1px solid #d2d2d2; border-radius: 999px; padding: 2px 10px; font-size: 13px; align-self: flex-start">Scope: User ✕</span>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+<div class="card" style="text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 36px">
+<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#8a8d90" stroke-width="1.5" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg>
+<div style="font-family: 'Red Hat Display'; font-size: 20px; font-weight: 500">No memories in this project yet</div>
+<p style="margin: 0; color: #4d4d4d; font-size: 14px; max-width: 420px">Connect an agent and the first project-scope write will enroll it automatically.</p>
+<button class="btn" style="background: #0066cc; color: #fff">Connect an agent</button>
+<span class="mono">Empty state pattern</span>
+</div>
+<div class="card" style="display: flex; flex-direction: column; gap: 12px">
+<p class="sec" style="margin: 0">Layout rules</p>
+<ul style="margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.7; color: #383838">
+<li>Masthead 60 px · dark nav 256 px · white page header · grey content canvas</li>
+<li>Cards: 16 px radius, 1 px #D2D2D2 border, 24 px padding, 20 px gaps</li>
+<li>List pages: table left, detail drawer right; stack below 960 px</li>
+<li>Every destructive action names what it destroys and that it is audited</li>
+<li>Hidden-by-RBAC results are counted, never silently dropped</li>
+</ul>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

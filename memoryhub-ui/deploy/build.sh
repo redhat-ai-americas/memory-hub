@@ -22,6 +22,14 @@ BUILD_DIR="$PROJECT_ROOT/.build-context"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 echo "Starting OpenShift UI build..."
-oc start-build --context "$CONTEXT" "$IMAGESTREAM" \
-    --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow
+BUILD_NAME=$(oc start-build --context "$CONTEXT" "$IMAGESTREAM" \
+    --from-dir="$BUILD_DIR" -n "$NAMESPACE" -o name)
+oc logs --context "$CONTEXT" "$BUILD_NAME" -n "$NAMESPACE" -f
+
+BUILD_PHASE=$(oc get "$BUILD_NAME" --context "$CONTEXT" -n "$NAMESPACE" \
+    -o jsonpath='{.status.phase}')
+if [ "$BUILD_PHASE" != "Complete" ]; then
+    echo "Error: OpenShift build $BUILD_NAME finished with status: ${BUILD_PHASE:-unknown}."
+    exit 1
+fi
 echo "UI image build complete; no deployment was changed."

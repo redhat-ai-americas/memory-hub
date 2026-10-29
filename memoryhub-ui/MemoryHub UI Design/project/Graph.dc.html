@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MemoryHub · Memory graph</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f2f2f2;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.mast{min-height:60px;background:#151515;color:#fff;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 16px}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none}
+.brand:hover{color:#fff}
+.mark{width:30px;height:30px;border-radius:8px;background:#ee0000;display:grid;place-items:center}
+.wm{font-family:'Red Hat Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.wm small{font-weight:400;color:#c7c7c7;font-size:13px;margin-left:6px}
+.ctx{margin-left:12px;border:1px solid #4d4d4d;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:#e0e0e0;background:transparent;display:flex;gap:8px;align-items:center}
+.mast-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.icb{width:40px;height:40px;border-radius:999px;border:0;background:transparent;color:#e0e0e0;display:grid;place-items:center;cursor:pointer;position:relative}
+.icb:hover{background:#2c2c2c}
+.dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;border-radius:999px;background:#ee0000;color:#fff;font-size:10px;font-weight:600;display:grid;place-items:center;padding:0 4px}
+.av{width:32px;height:32px;border-radius:999px;background:#5e40be;color:#fff;font-size:13px;font-weight:600;display:grid;place-items:center}
+.who{font-size:14px;color:#e0e0e0;padding:0 8px}
+.shell{display:flex;flex-wrap:wrap;align-items:stretch}
+.nav{flex:1 1 256px;background:#212427;padding:12px 0 32px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;color:#e0e0e0;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+.nav a:hover{background:#2c3035;color:#fff}
+.nav a.on{background:#3a3f45;color:#fff;border-left-color:#ee0000;font-weight:600}
+.ng{padding:18px 24px 6px;font-size:12px;color:#a3a3a3;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.cnt{background:#4d4d4d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;font-weight:600}
+.main{flex:999 1 560px;min-width:0}
+.ph{background:#fff;border-bottom:1px solid #d2d2d2;padding:20px 32px 22px}
+.crumbs{font-size:13px;color:#4d4d4d;display:flex;gap:8px;flex-wrap:wrap}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+h1{font-family:'Red Hat Display',sans-serif;font-size:28px;font-weight:500;margin:8px 0 6px;letter-spacing:-.01em}
+.desc{color:#4d4d4d;font-size:14px;margin:0;max-width:760px;line-height:1.5}
+.body{padding:24px 32px 48px;display:flex;flex-direction:column;gap:16px}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:20px 24px;min-width:0}
+.card h3{font-family:'Red Hat Display',sans-serif;font-size:16px;font-weight:600;margin:0}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bs{background:#fff;color:#0066cc;border-color:#0066cc}
+.bl{background:transparent;color:#0066cc;padding:8px 6px}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.s-user{background:#e7f1fa;color:#004d99;border-color:#b9dafc}
+.s-project{background:#daf2f2;color:#004d4d;border-color:#9ad8d8}
+.s-org{background:#e9f7df;color:#204d00;border-color:#afdc8f}
+.g{background:#f2f2f2;color:#383838;border-color:#d2d2d2}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12.5px}
+.muted{color:#4d4d4d}
+.sm{font-size:13px}
+.sel{font:inherit;font-size:14px;border:1px solid #c7c7c7;border-radius:8px;padding:8px 12px;background:#fff;color:#151515;display:inline-flex;gap:10px;align-items:center;cursor:pointer}
+.seg{display:inline-flex;border:1px solid #c7c7c7;border-radius:999px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;border:0;background:#fff;padding:7px 14px;cursor:pointer;color:#151515}
+.seg button.on{background:#0066cc;color:#fff}
+.tg{display:inline-flex;align-items:center;gap:6px;font-size:13px;border:1px solid #c7c7c7;border-radius:999px;padding:4px 12px;background:#fff}
+.dl{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;font-size:14px;margin:0}
+.dl dt{font-weight:600}.dl dd{margin:0}
+.zoom{position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;background:#fff;border:1px solid #d2d2d2;border-radius:12px;overflow:hidden}
+.zoom button{width:40px;height:40px;border:0;background:#fff;font-size:18px;cursor:pointer;border-bottom:1px solid #e6e6e6}
+.legend{position:absolute;left:16px;bottom:16px;background:#fff;border:1px solid #d2d2d2;border-radius:12px;padding:12px 14px;font-size:12px;display:flex;flex-direction:column;gap:6px}
+</style>
+</helmet>
+<div>
+<header class="mast">
+<button class="icb" aria-label="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button>
+<a class="brand" href="Main.dc.html"><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span><span class="wm">MemoryHub<small>for OpenShift AI</small></span></a>
+<button class="ctx">Tenant: org-acme-healthcare <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="mast-r">
+<button class="icb" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+<button class="icb" aria-label="Notifications, 4 unread"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg><span class="dot">4</span></button>
+<button class="icb" aria-label="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"></path></svg></button>
+<span class="av">AR</span><span class="who">Alex Rivera</span>
+</div>
+</header>
+<div class="shell">
+<nav class="nav" aria-label="Primary">
+<a href="Main.dc.html">Overview</a>
+<div class="ng">Memory</div>
+<a href="Memories.dc.html">Memory browser</a>
+<a href="Graph.dc.html" class="on">Memory graph</a>
+<a href="Search.dc.html">Search playground</a>
+<a href="Projects.dc.html">Projects &amp; campaigns</a>
+<div class="ng">Governance</div>
+<a href="Review.dc.html">Review queue <span class="cnt">12</span></a>
+<a href="Curation.dc.html">Curation rules</a>
+<a href="Audit.dc.html">Audit &amp; forensics</a>
+<div class="ng">Access</div>
+<a href="Identities.dc.html">Users &amp; agents</a>
+<a href="Clients.dc.html">OAuth clients &amp; keys</a>
+<div class="ng">Platform</div>
+<a href="Settings.dc.html">Settings</a>
+</nav>
+<main class="main">
+<div class="ph">
+<div class="crumbs"><a href="Main.dc.html">MemoryHub</a><span>/</span><span>Memory graph</span></div>
+<div class="ph-row">
+<div>
+<h1>Memory graph</h1>
+<p class="desc">Explore how memories connect: provenance, supersession and conflicts. Nodes you cannot read are counted, never shown.</p>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn bg">Export PNG</button><button class="btn bs">Create relationship</button></div>
+</div>
+</div>
+<div class="body">
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+<button class="sel">Focus: mem_7f3a…c21 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="seg" role="group" aria-label="Layout"><button class="on">Force</button><button>Provenance tree</button><button>Timeline</button></div>
+<button class="sel">Depth: 2 hops <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<span class="tg"><input type="checkbox" checked="" aria-label="related_to"> related_to</span>
+<span class="tg"><input type="checkbox" checked="" aria-label="derived_from"> derived_from</span>
+<span class="tg"><input type="checkbox" checked="" aria-label="supersedes"> supersedes</span>
+<span class="tg"><input type="checkbox" checked="" aria-label="conflicts_with"> conflicts_with</span>
+<span class="sm muted" style="margin-left: auto">17 nodes · 21 edges · 2 hidden</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch">
+<div class="card" style="flex: 999 1 560px; padding: 0; position: relative; overflow: hidden; background: #fafafa; min-height: 680px">
+<svg viewBox="0 0 900 680" role="img" aria-label="Force-directed graph centered on the Podman preference memory, linked to project, organizational and user memories" style="width: 100%; height: 100%; display: block; min-height: 680px">
+<defs>
+<pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#d9d9d9"></circle></pattern>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8a8d90"></path></marker>
+<marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#3d7317"></path></marker>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#b1380b"></path></marker>
+<marker id="arp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#5e40be"></path></marker>
+</defs>
+<rect width="900" height="680" fill="url(#dots)"></rect>
+<g fill="none" stroke-width="2">
+<line x1="450" y1="340" x2="268" y2="210" stroke="#8a8d90" marker-end="url(#ar)"></line>
+<line x1="450" y1="340" x2="640" y2="200" stroke="#b1380b" stroke-dasharray="6 5" marker-end="url(#arr)"></line>
+<line x1="470" y1="150" x2="455" y2="310" stroke="#3d7317" marker-end="url(#arg)"></line>
+<line x1="450" y1="340" x2="300" y2="470" stroke="#5e40be" marker-end="url(#arp)"></line>
+<line x1="450" y1="340" x2="660" y2="420" stroke="#8a8d90" marker-end="url(#ar)"></line>
+<line x1="470" y1="150" x2="300" y2="90" stroke="#3d7317" stroke-opacity=".6"></line>
+<line x1="470" y1="150" x2="650" y2="80" stroke="#3d7317" stroke-opacity=".6"></line>
+<line x1="268" y1="210" x2="130" y2="290" stroke="#8a8d90" stroke-opacity=".6"></line>
+<line x1="268" y1="210" x2="170" y2="120" stroke="#8a8d90" stroke-opacity=".6"></line>
+<line x1="640" y1="200" x2="790" y2="270" stroke="#8a8d90" stroke-opacity=".6"></line>
+<line x1="660" y1="420" x2="780" y2="520" stroke="#8a8d90" stroke-opacity=".6"></line>
+<line x1="660" y1="420" x2="600" y2="560" stroke="#8a8d90" stroke-opacity=".6"></line>
+<line x1="300" y1="470" x2="180" y2="560" stroke="#8a8d90" stroke-opacity=".6"></line>
+<line x1="300" y1="470" x2="390" y2="590" stroke="#8a8d90" stroke-opacity=".6"></line>
+<line x1="130" y1="290" x2="120" y2="420" stroke="#8a8d90" stroke-opacity=".6"></line>
+</g>
+<g font-family="Red Hat Text" font-size="12" fill="#151515">
+<circle cx="450" cy="340" r="30" fill="#0066cc" stroke="#fff" stroke-width="4"></circle><circle cx="450" cy="340" r="38" fill="none" stroke="#0066cc" stroke-width="2" stroke-dasharray="3 4"></circle>
+<text x="450" y="395" text-anchor="middle" font-weight="600">Prefers Podman over Docker</text>
+<circle cx="268" cy="210" r="18" fill="#009596" stroke="#fff" stroke-width="3"></circle><text x="268" y="245" text-anchor="middle">podman play kube tests</text>
+<circle cx="640" cy="200" r="18" fill="#009596" stroke="#fff" stroke-width="3"></circle><text x="640" y="235" text-anchor="middle">docker-compose.dev.yml</text>
+<circle cx="470" cy="150" r="22" fill="#3d7317" stroke="#fff" stroke-width="3"></circle><text x="470" y="118" text-anchor="middle">UBI9 base images (org)</text>
+<circle cx="300" cy="470" r="14" fill="#a3c9f2" stroke="#fff" stroke-width="3"></circle><text x="300" y="502" text-anchor="middle">Uses Docker Desktop (v1)</text>
+<circle cx="660" cy="420" r="16" fill="#0066cc" stroke="#fff" stroke-width="3"></circle><text x="660" y="452" text-anchor="middle">Rootless by default</text>
+<circle cx="300" cy="90" r="11" fill="#0066cc"></circle><circle cx="650" cy="80" r="11" fill="#0066cc"></circle>
+<circle cx="130" cy="290" r="12" fill="#009596"></circle><text x="130" y="318" text-anchor="middle" fill="#4d4d4d">CI cluster profile</text>
+<circle cx="170" cy="120" r="10" fill="#009596"></circle>
+<circle cx="790" cy="270" r="10" fill="#009596"></circle><text x="790" y="296" text-anchor="middle" fill="#4d4d4d">Local Postgres</text>
+<circle cx="780" cy="520" r="10" fill="#0066cc"></circle><circle cx="600" cy="560" r="10" fill="#5e40be"></circle><text x="600" y="586" text-anchor="middle" fill="#4d4d4d">Quarkus wave 2</text>
+<circle cx="180" cy="560" r="10" fill="#0066cc"></circle><circle cx="390" cy="590" r="10" fill="#0066cc"></circle>
+<circle cx="120" cy="420" r="12" fill="none" stroke="#8a8d90" stroke-width="2" stroke-dasharray="3 3"></circle><text x="120" y="448" text-anchor="middle" fill="#4d4d4d">+2 hidden</text>
+</g>
+</svg>
+<div class="legend">
+<b style="font-size: 12px">Scope</b>
+<span style="display: flex; gap: 6px; align-items: center"><span style="width: 10px; height: 10px; border-radius: 99px; background: #0066cc"></span>User</span>
+<span style="display: flex; gap: 6px; align-items: center"><span style="width: 10px; height: 10px; border-radius: 99px; background: #009596"></span>Project</span>
+<span style="display: flex; gap: 6px; align-items: center"><span style="width: 10px; height: 10px; border-radius: 99px; background: #5e40be"></span>Campaign</span>
+<span style="display: flex; gap: 6px; align-items: center"><span style="width: 10px; height: 10px; border-radius: 99px; background: #3d7317"></span>Organizational</span>
+<b style="font-size: 12px; margin-top: 6px">Edge</b>
+<span style="display: flex; gap: 6px; align-items: center"><span style="width: 18px; border-top: 2px solid #3d7317"></span>derived_from</span>
+<span style="display: flex; gap: 6px; align-items: center"><span style="width: 18px; border-top: 2px solid #5e40be"></span>supersedes</span>
+<span style="display: flex; gap: 6px; align-items: center"><span style="width: 18px; border-top: 2px dashed #b1380b"></span>conflicts_with</span>
+<span style="display: flex; gap: 6px; align-items: center"><span style="width: 18px; border-top: 2px solid #8a8d90"></span>related_to</span>
+</div>
+<div class="zoom"><button aria-label="Zoom in">+</button><button aria-label="Zoom out">−</button><button aria-label="Fit to screen" style="font-size: 13px; border-bottom: 0">Fit</button></div>
+</div>
+<aside class="card" style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; align-items: center"><span class="lbl s-user">User · selected</span><button class="btn bl" aria-label="Close panel">✕</button></div>
+<h3 style="font-size: 18px; line-height: 1.35">Prefers Podman over Docker for local containers; never suggest docker-compose.</h3>
+<dl class="dl">
+<dt>Owner</dt><dd>arivera</dd>
+<dt>Weight</dt><dd>0.90</dd>
+<dt>Version</dt><dd>v3 · current</dd>
+<dt>Degree</dt><dd>5 visible · 1 hidden</dd>
+</dl>
+<div>
+<div class="sm" style="font-weight: 600; margin-bottom: 8px">Provenance chain</div>
+<div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<div style="display: flex; gap: 8px; align-items: center"><span class="lbl s-org">org</span>UBI9 base images</div>
+<div class="muted" style="padding-left: 18px">↓ derived_from</div>
+<div style="display: flex; gap: 8px; align-items: center"><span class="lbl s-user">user</span>This memory</div>
+</div>
+</div>
+<div style="border: 1px solid #f9a8a8; background: #fdf1f1; border-radius: 12px; padding: 12px 14px; font-size: 14px"><b>Conflict detected</b><br><span class="muted">conflicts_with “Local dev stack is defined in docker-compose.dev.yml” (project memoryhub-ui).</span><div style="margin-top: 8px"><a href="Review.dc.html">Resolve in review queue</a></div></div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto"><a class="btn bp" href="MemoryDetail.dc.html">Open memory</a><button class="btn bg">Expand neighbours</button></div>
+</aside>
+</div>
+</div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

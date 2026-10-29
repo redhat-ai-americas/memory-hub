@@ -61,6 +61,11 @@ class MemoryDetail(BaseModel):
     weight: float
     branch_type: str | None
     owner_id: str
+    actor_id: str | None = None
+    driver_id: str | None = None
+    content_type: str | None = None
+    status: str | None = None
+    source: str | None = None
     version: int
     is_current: bool
     parent_id: str | None
@@ -122,13 +127,16 @@ class ClientResponse(BaseModel):
 
 class ClientCreatedResponse(ClientResponse):
     client_secret: str
-    api_key: str
+    # Older auth-service deployments may not return an API key on client
+    # creation. The UI can still reveal the client secret and explain how to
+    # generate the key later.
+    api_key: str | None = None
 
 
 class SecretRotatedResponse(BaseModel):
     client_id: str
     client_secret: str
-    api_key: str
+    api_key: str | None = None
 
 
 class ApiKeyRotatedResponse(BaseModel):
@@ -148,6 +156,7 @@ class PublicConfigResponse(BaseModel):
 
 
 # --- Curation Rules ---
+
 
 class CurationRuleResponse(BaseModel):
     id: str
@@ -204,6 +213,7 @@ class UpdateRuleRequest(BaseModel):
 
 # --- Contradiction Reports ---
 
+
 class ContradictionResponse(BaseModel):
     id: str
     memory_id: str
@@ -225,3 +235,37 @@ class ContradictionStatsResponse(BaseModel):
 
 class UpdateContradictionRequest(BaseModel):
     resolved: bool
+
+
+class MemoryListItem(BaseModel):
+    """One row of the Memory Explorer table."""
+
+    id: str
+    stub: str
+    content_preview: str
+    scope: str
+    owner_id: str
+    actor_id: str | None = None
+    driver_id: str | None = None
+    branch_type: str | None = None
+    content_type: str | None = None
+    status: str | None = None
+    source: str | None = None
+    weight: float
+    version: int
+    parent_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    # Cosine similarity for semantic search; None when the list is not a
+    # semantic search result (plain listing or text-match fallback).
+    score: float | None = None
+
+
+class MemoryListResponse(BaseModel):
+    items: list[MemoryListItem]
+    total: int
+    page: int
+    per_page: int
+    # "none" (plain listing), "semantic" (embedding similarity) or "text"
+    # (substring fallback when the embedding service is unavailable).
+    search_mode: str

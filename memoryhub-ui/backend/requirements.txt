@@ -6,3 +6,4 @@ pgvector
 pydantic>=2.0
 pydantic-settings
 httpx
+alembic>=1.13

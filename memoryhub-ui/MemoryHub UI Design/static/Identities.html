@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>MemoryHub · Users and agents</title>
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f2f2f2;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.mast{min-height:60px;background:#151515;color:#fff;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 16px}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none}
+.brand:hover{color:#fff}
+.mark{width:30px;height:30px;border-radius:8px;background:#ee0000;display:grid;place-items:center}
+.wm{font-family:'Red Hat Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.wm small{font-weight:400;color:#c7c7c7;font-size:13px;margin-left:6px}
+.ctx{margin-left:12px;border:1px solid #4d4d4d;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:#e0e0e0;background:transparent;display:flex;gap:8px;align-items:center}
+.mast-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.icb{width:40px;height:40px;border-radius:999px;border:0;background:transparent;color:#e0e0e0;display:grid;place-items:center;cursor:pointer;position:relative}
+.icb:hover{background:#2c2c2c}
+.dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;border-radius:999px;background:#ee0000;color:#fff;font-size:10px;font-weight:600;display:grid;place-items:center;padding:0 4px}
+.av{width:32px;height:32px;border-radius:999px;background:#5e40be;color:#fff;font-size:13px;font-weight:600;display:grid;place-items:center}
+.who{font-size:14px;color:#e0e0e0;padding:0 8px}
+.shell{display:flex;flex-wrap:wrap;align-items:stretch}
+.nav{flex:1 1 256px;background:#212427;padding:12px 0 32px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;color:#e0e0e0;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+.nav a:hover{background:#2c3035;color:#fff}
+.nav a.on{background:#3a3f45;color:#fff;border-left-color:#ee0000;font-weight:600}
+.ng{padding:18px 24px 6px;font-size:12px;color:#a3a3a3;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.cnt{background:#4d4d4d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;font-weight:600}
+.main{flex:999 1 560px;min-width:0}
+.ph{background:#fff;border-bottom:1px solid #d2d2d2;padding:20px 32px 0}
+.crumbs{font-size:13px;color:#4d4d4d;display:flex;gap:8px;flex-wrap:wrap}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+h1{font-family:'Red Hat Display',sans-serif;font-size:28px;font-weight:500;margin:8px 0 6px;letter-spacing:-.01em}
+.desc{color:#4d4d4d;font-size:14px;margin:0;max-width:760px;line-height:1.5}
+.body{padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:20px 24px;min-width:0}
+.card h3{font-family:'Red Hat Display',sans-serif;font-size:16px;font-weight:600;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bs{background:#fff;color:#0066cc;border-color:#0066cc}
+.bl{background:transparent;color:#0066cc;padding:8px 6px}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.g{background:#f2f2f2;color:#383838;border-color:#d2d2d2}
+.blue{background:#e7f1fa;color:#004d99;border-color:#b9dafc}
+.pur{background:#ece6ff;color:#3d2785;border-color:#cbc1ff}
+.ok{color:#3d7317}.muted{color:#4d4d4d}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font-weight:600;font-size:13px;padding:10px 12px;border-bottom:1px solid #d2d2d2;white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid #e6e6e6;vertical-align:top}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12px}
+.sm{font-size:13px}
+.scroll{overflow-x:auto}
+.tabs{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
+.tab{padding:10px 16px;font-size:14px;color:#4d4d4d;border-bottom:3px solid transparent;text-decoration:none}
+.tab.on{color:#151515;border-bottom-color:#0066cc;font-weight:600}
+.in{font:inherit;font-size:14px;border:1px solid #c7c7c7;border-radius:8px;padding:8px 12px;background:#fff;color:#151515}
+.code{font-family:'Red Hat Mono',monospace;font-size:11.5px;background:#f2f2f2;border:1px solid #e0e0e0;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.mx{width:100%;border-collapse:collapse;font-size:13px}
+.mx th,.mx td{padding:8px 6px;border-bottom:1px solid #eeeeee;text-align:center}
+.mx th:first-child,.mx td:first-child{text-align:left}
+.y{color:#3d7317;font-weight:700}.n{color:#a3a3a3}
+.idav{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;flex:none}
+</style>
+</head>
+<body>
+
+
+<div>
+<header class="mast">
+<button class="icb" aria-label="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button>
+<a class="brand" href="Main.html"><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span><span class="wm">MemoryHub<small>for OpenShift AI</small></span></a>
+<button class="ctx">Tenant: org-acme-healthcare <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="mast-r">
+<button class="icb" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+<button class="icb" aria-label="Notifications, 4 unread"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg><span class="dot">4</span></button>
+<button class="icb" aria-label="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"></path></svg></button>
+<span class="av">AR</span><span class="who">Alex Rivera</span>
+</div>
+</header>
+<div class="shell">
+<nav class="nav" aria-label="Primary">
+<a href="Main.html">Overview</a>
+<div class="ng">Memory</div>
+<a href="Memories.html">Memory browser</a>
+<a href="Graph.html">Memory graph</a>
+<a href="Search.html">Search playground</a>
+<a href="Projects.html">Projects &amp; campaigns</a>
+<div class="ng">Governance</div>
+<a href="Review.html">Review queue <span class="cnt">12</span></a>
+<a href="Curation.html">Curation rules</a>
+<a href="Audit.html">Audit &amp; forensics</a>
+<div class="ng">Access</div>
+<a href="Identities.html" class="on">Users &amp; agents</a>
+<a href="Clients.html">OAuth clients &amp; keys</a>
+<div class="ng">Platform</div>
+<a href="Settings.html">Settings</a>
+</nav>
+<main class="main">
+<div class="ph">
+<div class="crumbs"><a href="Main.html">MemoryHub</a><span>/</span><span>Users &amp; agents</span></div>
+<div class="ph-row">
+<div>
+<h1>Users &amp; agents</h1>
+<p class="desc">Every identity that can touch memory. User-bound agents act for a person; service agents such as the curator have their own, narrowly scoped identity.</p>
+</div>
+<div style="display: flex; gap: 8px; padding-bottom: 6px"><button class="btn bs">Sync from OpenShift groups</button><button class="btn bp">Add service agent</button></div>
+</div>
+<nav class="tabs" aria-label="Identity type"><a class="tab on" href="Identities.html">All <span class="muted">58</span></a><a class="tab" href="Identities.html">Users <span class="muted">21</span></a><a class="tab" href="Identities.html">User agents <span class="muted">31</span></a><a class="tab" href="Identities.html">Service agents <span class="muted">6</span></a><a class="tab" href="Identities.html">Roles <span class="muted">7</span></a></nav>
+</div>
+<div class="body">
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<section class="card" style="flex: 999 1 560px; padding: 0">
+<div style="display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 20px">
+<label for="f" style="position: absolute; left: -9999px">Filter identities</label>
+<input id="f" class="in" placeholder="Filter by name or ID" style="flex: 1 1 260px">
+<button class="in" style="cursor: pointer">Role: any ▾</button>
+<button class="in" style="cursor: pointer">Status: any ▾</button>
+</div>
+<div class="scroll"><table class="tbl" style="min-width: 780px">
+<thead><tr><th>Identity</th><th>Type</th><th>Operational scopes</th><th>Roles</th><th>Memories</th><th>Last active</th></tr></thead>
+<tbody>
+
+<tr style="background: #fff">
+<td><div style="display: flex; gap: 10px; align-items: center"><span class="idav" style="background: #5e40be">AR</span><div><div style="font-weight: 600">Alex Rivera</div><div class="mono muted">arivera</div></div></div></td>
+<td><span class="lbl blue">user</span></td>
+<td style="max-width: 280px"><div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="code">memory:read</span><span class="code">memory:write:user</span><span class="code">memory:admin</span></div></td>
+<td class="sm">platform-admin, sre-oncall</td>
+<td>1840</td>
+<td class="sm"><span class="ok">● Active now</span></td>
+</tr>
+
+<tr style="background: #fff">
+<td><div style="display: flex; gap: 10px; align-items: center"><span class="idav" style="background: #8f4700">CC</span><div><div style="font-weight: 600">claude-code</div><div class="mono muted">cc-arivera → arivera</div></div></div></td>
+<td><span class="lbl g">user agent</span></td>
+<td style="max-width: 280px"><div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="code">memory:read</span><span class="code">memory:write:user</span><span class="code">memory:write:project</span></div></td>
+<td class="sm">inherits arivera</td>
+<td>1622</td>
+<td class="sm"><span class="ok">● Active now</span></td>
+</tr>
+
+<tr style="background: #f5f9fc">
+<td><div style="display: flex; gap: 10px; align-items: center"><span class="idav" style="background: #3d7317">CU</span><div><div style="font-weight: 600">curator-agent</div><div class="mono muted">curator-agent</div></div></div></td>
+<td><span class="lbl pur">service</span></td>
+<td style="max-width: 280px"><div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="code">memory:read</span><span class="code">memory:write:organizational</span><span class="code">memory:write:role</span></div></td>
+<td class="sm">—</td>
+<td>2104</td>
+<td class="sm"><span class="ok">● Active now</span></td>
+</tr>
+
+<tr style="background: #fff">
+<td><div style="display: flex; gap: 10px; align-items: center"><span class="idav" style="background: #004d4d">FC</span><div><div style="font-weight: 600">fact-checker</div><div class="mono muted">fact-checker</div></div></div></td>
+<td><span class="lbl pur">service</span></td>
+<td style="max-width: 280px"><div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="code">memory:read</span></div></td>
+<td class="sm">—</td>
+<td>0</td>
+<td class="sm"><span class="muted">4 min ago</span></td>
+</tr>
+
+<tr style="background: #fff">
+<td><div style="display: flex; gap: 10px; align-items: center"><span class="idav" style="background: #a60000">ST</span><div><div style="font-weight: 600">soc-triage-agent</div><div class="mono muted">sa:soc/triage (token exchange)</div></div></div></td>
+<td><span class="lbl pur">service</span></td>
+<td style="max-width: 280px"><div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="code">memory:read:project</span><span class="code">memory:write:project</span></div></td>
+<td class="sm">—</td>
+<td>4702</td>
+<td class="sm"><span class="ok">● Active now</span></td>
+</tr>
+
+<tr style="background: #fff">
+<td><div style="display: flex; gap: 10px; align-items: center"><span class="idav" style="background: #004d99">MC</span><div><div style="font-weight: 600">Mei Chen</div><div class="mono muted">mchen</div></div></div></td>
+<td><span class="lbl blue">user</span></td>
+<td style="max-width: 280px"><div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="code">memory:read</span><span class="code">memory:write:user</span></div></td>
+<td class="sm">developer</td>
+<td>912</td>
+<td class="sm"><span class="muted">22 min ago</span></td>
+</tr>
+
+<tr style="background: #fff">
+<td><div style="display: flex; gap: 10px; align-items: center"><span class="idav" style="background: #383838">DK</span><div><div style="font-weight: 600">Dana Kim</div><div class="mono muted">dkim</div></div></div></td>
+<td><span class="lbl blue">user</span></td>
+<td style="max-width: 280px"><div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="code">memory:read</span><span class="code">memory:approve:enterprise</span></div></td>
+<td class="sm">compliance-approver</td>
+<td>31</td>
+<td class="sm"><span class="muted">Yesterday</span></td>
+</tr>
+
+<tr style="background: #fff">
+<td><div style="display: flex; gap: 10px; align-items: center"><span class="idav" style="background: #5e40be">LI</span><div><div style="font-weight: 600">langgraph-intake</div><div class="mono muted">lg-intake → mchen</div></div></div></td>
+<td><span class="lbl g">user agent</span></td>
+<td style="max-width: 280px"><div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="code">memory:read:user</span><span class="code">memory:write:user</span></div></td>
+<td class="sm">inherits mchen</td>
+<td>6011</td>
+<td class="sm"><span class="muted">1 h ago</span></td>
+</tr>
+
+</tbody></table></div>
+</section>
+
+<aside class="card" style="flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; gap: 12px; align-items: center"><span class="idav" style="background: #3d7317; width: 44px; height: 44px; font-size: 14px">CU</span><div style="flex: 1"><h3 style="font-size: 18px">curator-agent</h3><div class="sm muted">Service agent · leader on pod curator-1</div></div><button class="btn bl" aria-label="Close">✕</button></div>
+<div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="lbl pur">service</span><span class="lbl g">OAuth client_credentials</span><span class="lbl g">Token TTL 10 min</span></div>
+<div>
+<div class="ch" style="margin-bottom: 6px"><b class="sm">Scope permissions</b><button class="btn bl sm">Edit</button></div>
+<table class="mx">
+<thead><tr><th>Tier</th><th>Read</th><th>Write</th></tr></thead>
+<tbody>
+<tr><td>User</td><td class="y">✓</td><td class="n">—</td></tr>
+<tr><td>Project</td><td class="y">✓</td><td class="n">—</td></tr>
+<tr><td>Campaign</td><td class="y">✓</td><td class="n">—</td></tr>
+<tr><td>Role</td><td class="y">✓</td><td class="y">✓</td></tr>
+<tr><td>Organizational</td><td class="y">✓</td><td class="y">✓</td></tr>
+<tr><td>Enterprise</td><td class="y">✓</td><td class="sm muted">via approval</td></tr>
+</tbody>
+</table>
+</div>
+<div>
+<b class="sm">Last 24 h</b>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 8px; font-size: 13px">
+<div><div class="muted">Scans</div><div style="font-size: 20px; font-family: 'Red Hat Display'">48</div></div>
+<div><div class="muted">Promotions</div><div style="font-size: 20px; font-family: 'Red Hat Display'">7</div></div>
+<div><div class="muted">Flags</div><div style="font-size: 20px; font-family: 'Red Hat Display'">19</div></div>
+</div>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap"><a class="btn bs" href="Audit.html">View activity</a><a class="btn bg" href="Clients.html">Rotate credentials</a></div>
+</aside>
+</div>
+</div>
+</main>
+</div>
+</div>
+
+
+
+
+</body></html>

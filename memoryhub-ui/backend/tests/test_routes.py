@@ -41,6 +41,11 @@ def _make_node(**kwargs) -> MagicMock:
         "created_at": datetime(2026, 1, 1, tzinfo=UTC),
         "updated_at": datetime(2026, 1, 2, tzinfo=UTC),
         "expires_at": None,
+        "actor_id": None,
+        "driver_id": None,
+        "content_type": "experiential",
+        "status": "active",
+        "source": "agent",
     }
     defaults.update(kwargs)
     m = MagicMock()
@@ -94,8 +99,7 @@ def _make_db_session(execute_side_effects: list):
         session.executed_statements.append(stmt)
         if not results:
             raise AssertionError(
-                "execute() called more times than _make_db_session was "
-                f"given results for (statement={stmt!r})"
+                f"execute() called more times than _make_db_session was given results for (statement={stmt!r})"
             )
         return results.pop(0)
 
@@ -424,9 +428,7 @@ class TestMemoryHistoryEndpoint:
             new=AsyncMock(return_value=service_result),
         ) as mock_service:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get(f"/api/memory/{memory_id}/history")
 
                 assert response.status_code == 200
@@ -465,9 +467,7 @@ class TestMemoryHistoryEndpoint:
             new=AsyncMock(side_effect=MemoryNotFoundError(missing_id)),
         ):
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get(f"/api/memory/{missing_id}/history")
 
                 assert response.status_code == 404
@@ -481,9 +481,7 @@ class TestMemoryHistoryEndpoint:
         app.dependency_overrides[get_settings] = lambda: test_settings
 
         try:
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as ac:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.get("/api/memory/not-a-uuid/history")
 
             assert response.status_code == 422
@@ -612,13 +610,9 @@ class TestGraphSearchEndpoint:
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: test_settings
 
-        with patch(
-            "src.routes._get_embedding", new=AsyncMock(return_value=[0.1, 0.2, 0.3])
-        ):
+        with patch("src.routes._get_embedding", new=AsyncMock(return_value=[0.1, 0.2, 0.3])):
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get("/api/graph/search", params={"q": "hello"})
 
                 assert response.status_code == 200
@@ -767,9 +761,7 @@ class TestClientEndpoints:
         )
         app.dependency_overrides[get_settings] = lambda: local_settings
         try:
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as ac:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.get("/api/clients")
 
             assert response.status_code == 503
@@ -784,9 +776,7 @@ class TestClientEndpoints:
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get("/api/clients")
 
                 assert response.status_code == 200
@@ -803,9 +793,7 @@ class TestClientEndpoints:
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get("/api/clients")
 
                 assert response.status_code == 503
@@ -821,9 +809,7 @@ class TestClientEndpoints:
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.post(
                         "/api/clients",
                         json={
@@ -850,9 +836,7 @@ class TestClientEndpoints:
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.patch(
                         "/api/clients/test-client",
                         json={"client_name": "Renamed"},
@@ -864,17 +848,13 @@ class TestClientEndpoints:
                 app.dependency_overrides.clear()
 
     async def test_rotate_secret_returns_new_secret(self, test_settings):
-        upstream = _mock_httpx_response(
-            200, {"client_id": "test-client", "client_secret": "rotated-secret"}
-        )
+        upstream = _mock_httpx_response(200, {"client_id": "test-client", "client_secret": "rotated-secret"})
         patcher, _ = _patch_admin_httpx(upstream)
 
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.post("/api/clients/test-client/rotate-secret")
 
                 assert response.status_code == 200
@@ -900,9 +880,7 @@ class TestClientTenantForwarding:
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     await ac.get("/api/clients")
 
                 # The mock_http.request call should include params with tenant_id
@@ -923,9 +901,7 @@ class TestClientTenantForwarding:
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     await ac.post(
                         "/api/clients",
                         json={
@@ -947,9 +923,7 @@ class TestClientTenantForwarding:
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     await ac.patch(
                         "/api/clients/test-client",
                         json={"client_name": "Renamed"},
@@ -961,17 +935,13 @@ class TestClientTenantForwarding:
                 app.dependency_overrides.clear()
 
     async def test_rotate_secret_forwards_tenant_id(self, test_settings):
-        upstream = _mock_httpx_response(
-            200, {"client_id": "x", "client_secret": "s", "api_key": "mh-dev-a"}
-        )
+        upstream = _mock_httpx_response(200, {"client_id": "x", "client_secret": "s", "api_key": "mh-dev-a"})
         patcher, mock_http = _patch_admin_httpx(upstream)
 
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     await ac.post("/api/clients/test-client/rotate-secret")
 
                 params = mock_http.request.call_args.kwargs.get("params", {})
@@ -980,17 +950,13 @@ class TestClientTenantForwarding:
                 app.dependency_overrides.clear()
 
     async def test_rotate_api_key_forwards_tenant_id(self, test_settings):
-        upstream = _mock_httpx_response(
-            200, {"client_id": "x", "api_key": "mh-dev-a"}
-        )
+        upstream = _mock_httpx_response(200, {"client_id": "x", "api_key": "mh-dev-a"})
         patcher, mock_http = _patch_admin_httpx(upstream)
 
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     await ac.post("/api/clients/test-client/rotate-api-key")
 
                 params = mock_http.request.call_args.kwargs.get("params", {})
@@ -1012,9 +978,7 @@ class TestClientTenantForwarding:
         app.dependency_overrides[get_settings] = lambda: test_settings
         with patcher:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     await ac.get("/api/users")
 
                 params = mock_http.request.call_args.kwargs.get("params", {})
@@ -1204,9 +1168,7 @@ class TestCurationRulesEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/rules/{uuid.uuid4()}", json={"enabled": False}
-                )
+                response = await ac.patch(f"/api/rules/{uuid.uuid4()}", json={"enabled": False})
 
             assert response.status_code == 404
         finally:
@@ -1314,9 +1276,7 @@ class TestCurationRulesEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/rules/{old_rule.id}", json={"enabled": False}
-                )
+                response = await ac.patch(f"/api/rules/{old_rule.id}", json={"enabled": False})
 
             assert response.status_code == 409
             db_session.commit.assert_not_awaited()
@@ -1492,9 +1452,7 @@ class TestContradictionsEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/contradictions/{report.id}", json={"resolved": True}
-                )
+                response = await ac.patch(f"/api/contradictions/{report.id}", json={"resolved": True})
 
             assert response.status_code == 200
             assert report.resolved is True
@@ -1504,9 +1462,7 @@ class TestContradictionsEndpoints:
             app.dependency_overrides.clear()
 
     async def test_unresolve_contradiction_clears_resolved_at(self, test_settings):
-        report = _make_contradiction(
-            resolved=True, resolved_at=datetime(2026, 1, 1, tzinfo=UTC)
-        )
+        report = _make_contradiction(resolved=True, resolved_at=datetime(2026, 1, 1, tzinfo=UTC))
 
         db_session = AsyncMock()
         db_session.execute = AsyncMock(return_value=_scalar_result(report))
@@ -1518,9 +1474,7 @@ class TestContradictionsEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/contradictions/{report.id}", json={"resolved": False}
-                )
+                response = await ac.patch(f"/api/contradictions/{report.id}", json={"resolved": False})
 
             assert response.status_code == 200
             assert report.resolved is False
@@ -1539,9 +1493,7 @@ class TestContradictionsEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/contradictions/{uuid.uuid4()}", json={"resolved": True}
-                )
+                response = await ac.patch(f"/api/contradictions/{uuid.uuid4()}", json={"resolved": True})
 
             assert response.status_code == 404
         finally:
@@ -1554,9 +1506,7 @@ class TestContradictionsEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    "/api/contradictions/not-a-uuid", json={"resolved": True}
-                )
+                response = await ac.patch("/api/contradictions/not-a-uuid", json={"resolved": True})
 
             assert response.status_code == 422
         finally:
@@ -1614,18 +1564,14 @@ class TestTenantFiltering:
                 response = await ac.get(f"/api/memory/{memory_id}")
 
             assert response.status_code == 404
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
     async def test_get_memory_same_tenant_returns_data(self, test_settings):
         """Sanity check: when tenant matches, the existing happy path works."""
         node = _make_node()
-        db_session = _make_db_session(
-            [_scalar_result(node), _scalar_result(0), _scalars_result([])]
-        )
+        db_session = _make_db_session([_scalar_result(node), _scalar_result(0), _scalars_result([])])
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: test_settings
@@ -1667,9 +1613,7 @@ class TestTenantFiltering:
             new=AsyncMock(return_value=service_result),
         ) as mock_service:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get(f"/api/memory/{memory_id}/history")
 
                 assert response.status_code == 200
@@ -1695,9 +1639,7 @@ class TestTenantFiltering:
             new=AsyncMock(side_effect=MemoryNotFoundError(memory_id)),
         ) as mock_service:
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get(f"/api/memory/{memory_id}/history")
 
                 assert response.status_code == 404
@@ -1724,9 +1666,7 @@ class TestTenantFiltering:
                 response = await ac.delete(f"/api/memory/{memory_id}")
 
             assert response.status_code == 404
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
@@ -1754,9 +1694,7 @@ class TestTenantFiltering:
             assert response.status_code == 200
             body = response.json()
             assert body == {"nodes": [], "edges": []}
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
@@ -1786,9 +1724,7 @@ class TestTenantFiltering:
             assert response.status_code == 200
             assert len(db_session.executed_statements) == 2
             for stmt in db_session.executed_statements:
-                assert _statement_mentions_tenant_filter(stmt, "tenant_b"), (
-                    f"Statement not tenant-scoped: {stmt}"
-                )
+                assert _statement_mentions_tenant_filter(stmt, "tenant_b"), f"Statement not tenant-scoped: {stmt}"
         finally:
             app.dependency_overrides.clear()
 
@@ -1814,9 +1750,7 @@ class TestTenantFiltering:
 
             assert response.status_code == 200
             assert response.json() == []
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
@@ -1844,13 +1778,9 @@ class TestTenantFiltering:
         app.dependency_overrides[get_db] = lambda: session
         app.dependency_overrides[get_settings] = lambda: settings
 
-        with patch(
-            "src.routes._get_embedding", new=AsyncMock(return_value=[0.1, 0.2, 0.3])
-        ):
+        with patch("src.routes._get_embedding", new=AsyncMock(return_value=[0.1, 0.2, 0.3])):
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get("/api/graph/search", params={"q": "hello"})
 
                 assert response.status_code == 200
@@ -1896,9 +1826,7 @@ class TestTenantFiltering:
             mock_client_cls.return_value = mock_http
 
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get("/api/stats")
 
                 assert response.status_code == 200
@@ -1929,9 +1857,7 @@ class TestTenantFiltering:
 
             assert response.status_code == 200
             assert response.json() == []
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
@@ -1993,9 +1919,7 @@ class TestTenantFiltering:
                 response = await ac.get(f"/api/rules/{uuid.uuid4()}")
 
             assert response.status_code == 404
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
@@ -2010,14 +1934,10 @@ class TestTenantFiltering:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/rules/{uuid.uuid4()}", json={"enabled": False}
-                )
+                response = await ac.patch(f"/api/rules/{uuid.uuid4()}", json={"enabled": False})
 
             assert response.status_code == 404
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
@@ -2035,9 +1955,7 @@ class TestTenantFiltering:
                 response = await ac.delete(f"/api/rules/{uuid.uuid4()}")
 
             assert response.status_code == 404
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
             db_session.delete.assert_not_called()
         finally:
             app.dependency_overrides.clear()
@@ -2057,9 +1975,7 @@ class TestTenantFiltering:
 
             assert response.status_code == 200
             assert response.json() == []
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
@@ -2110,14 +2026,10 @@ class TestTenantFiltering:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/contradictions/{uuid.uuid4()}", json={"resolved": True}
-                )
+                response = await ac.patch(f"/api/contradictions/{uuid.uuid4()}", json={"resolved": True})
 
             assert response.status_code == 404
-            assert _statement_mentions_tenant_filter(
-                db_session.executed_statements[0], "tenant_b"
-            )
+            assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
         finally:
             app.dependency_overrides.clear()
 
@@ -2146,15 +2058,143 @@ class TestTenantFiltering:
             new=AsyncMock(side_effect=RuntimeError("auth down")),
         ):
             try:
-                async with AsyncClient(
-                    transport=ASGITransport(app=app), base_url="http://test"
-                ) as ac:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     response = await ac.get("/api/users")
 
                 assert response.status_code == 200
                 assert response.json() == []
-                assert _statement_mentions_tenant_filter(
-                    db_session.executed_statements[0], "tenant_b"
-                )
+                assert _statement_mentions_tenant_filter(db_session.executed_statements[0], "tenant_b")
             finally:
                 app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/memories (Memory Explorer)
+# ---------------------------------------------------------------------------
+
+
+def _rows_result(rows):
+    """Mock for a select() of (entity, label) tuples read via .all()."""
+    r = MagicMock()
+    r.all.return_value = rows
+    return r
+
+
+@pytest.mark.asyncio
+class TestMemoryListEndpoint:
+    async def _get(self, settings, db_session, params=None):
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: settings
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                return await ac.get("/api/memories", params=params or {})
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_plain_listing_returns_page_and_total(self, test_settings):
+        nodes = [_make_node(stub="first"), _make_node(stub="second")]
+        db_session = _make_db_session([_scalar_result(42), _scalars_result(nodes)])
+
+        response = await self._get(test_settings, db_session, {"page": 2, "per_page": 2})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 42
+        assert body["page"] == 2
+        assert body["per_page"] == 2
+        assert body["search_mode"] == "none"
+        assert [item["stub"] for item in body["items"]] == ["first", "second"]
+        assert body["items"][0]["score"] is None
+        list_sql = str(db_session.executed_statements[1].compile(compile_kwargs={"literal_binds": True}))
+        assert "OFFSET 2" in list_sql and "LIMIT 2" in list_sql
+
+    async def test_every_query_is_tenant_filtered(self):
+        settings = _make_settings(tenant_id="tenant-a")
+        db_session = _make_db_session([_scalar_result(0), _scalars_result([])])
+
+        response = await self._get(settings, db_session)
+
+        assert response.status_code == 200
+        assert len(db_session.executed_statements) == 2
+        for stmt in db_session.executed_statements:
+            assert _statement_mentions_tenant_filter(stmt, "tenant-a")
+
+    async def test_filters_are_applied(self, test_settings):
+        db_session = _make_db_session([_scalar_result(0), _scalars_result([])])
+
+        response = await self._get(
+            test_settings,
+            db_session,
+            [
+                ("scope", "project"),
+                ("scope", "user"),
+                ("owner_id", "alice"),
+                ("content_type", "knowledge"),
+                ("status", "quarantined"),
+                ("source", "dreaming"),
+            ],
+        )
+
+        assert response.status_code == 200
+        sql = str(db_session.executed_statements[1].compile(compile_kwargs={"literal_binds": True}))
+        assert "'project'" in sql and "'user'" in sql
+        assert "'alice'" in sql
+        assert "'knowledge'" in sql
+        assert "'quarantined'" in sql
+        assert "'dreaming'" in sql
+
+    async def test_long_content_is_truncated_to_preview(self, test_settings):
+        node = _make_node(content="x" * 1000)
+        db_session = _make_db_session([_scalar_result(1), _scalars_result([node])])
+
+        response = await self._get(test_settings, db_session)
+
+        preview = response.json()["items"][0]["content_preview"]
+        assert len(preview) <= 280
+        assert preview.endswith("…")
+
+    async def test_text_fallback_without_embedding(self, test_settings):
+        node = _make_node()
+        db_session = _make_db_session([_scalar_result(1), _scalars_result([node])])
+
+        response = await self._get(test_settings, db_session, {"q": "postgres"})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["search_mode"] == "text"
+        assert body["items"][0]["score"] is None
+        sql = str(db_session.executed_statements[1].compile(compile_kwargs={"literal_binds": True})).lower()
+        assert "like" in sql and "postgres" in sql
+
+    async def test_semantic_search_returns_scores_and_pages(self, test_settings):
+        best, middle, worst = _make_node(stub="best"), _make_node(stub="middle"), _make_node(stub="worst")
+        db_session = _make_db_session([_rows_result([(best, 0.91), (middle, 0.6), (worst, 0.2)])])
+
+        with patch("src.routes._get_embedding", new=AsyncMock(return_value=[0.1] * 384)):
+            response = await self._get(test_settings, db_session, {"q": "hello", "sort": "score", "per_page": 2})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["search_mode"] == "semantic"
+        assert body["total"] == 3
+        assert [item["stub"] for item in body["items"]] == ["best", "middle"]
+        assert body["items"][0]["score"] == pytest.approx(0.91)
+
+    async def test_semantic_search_can_sort_by_other_column(self, test_settings):
+        old = _make_node(stub="old", updated_at=datetime(2026, 1, 1, tzinfo=UTC))
+        new = _make_node(stub="new", updated_at=datetime(2026, 3, 1, tzinfo=UTC))
+        db_session = _make_db_session([_rows_result([(old, 0.9), (new, 0.4)])])
+
+        with patch("src.routes._get_embedding", new=AsyncMock(return_value=[0.1] * 384)):
+            response = await self._get(test_settings, db_session, {"q": "hello", "sort": "updated_at"})
+
+        assert [item["stub"] for item in response.json()["items"]] == ["new", "old"]
+
+    @pytest.mark.parametrize(
+        "params",
+        [{"sort": "content; drop table"}, {"order": "sideways"}, {"per_page": 500}, {"page": 0}],
+    )
+    async def test_invalid_parameters_return_422(self, test_settings, params):
+        db_session = _make_db_session([])
+        response = await self._get(test_settings, db_session, params)
+        assert response.status_code == 422

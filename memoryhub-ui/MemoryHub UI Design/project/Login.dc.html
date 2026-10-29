@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MemoryHub · Log in</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#151515;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.btn{font:inherit;font-size:15px;border-radius:999px;padding:10px 20px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.f{display:flex;flex-direction:column;gap:6px}
+.f label{font-size:13px;font-weight:600}
+.in{font:inherit;font-size:14px;border:1px solid #c7c7c7;border-radius:8px;padding:10px 12px;background:#fff;color:#151515;width:100%}
+</style>
+</helmet>
+<div style="min-height: 900px; position: relative; overflow: hidden; display: flex; flex-direction: column; color: #fff">
+<svg aria-hidden="true" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" style="position: absolute; inset: 0; width: 100%; height: 100%">
+<g fill="none" stroke="#2a2a2a" stroke-width="1.5">
+<circle cx="1180" cy="300" r="120"></circle><circle cx="1180" cy="300" r="240"></circle><circle cx="1180" cy="300" r="360"></circle><circle cx="1180" cy="300" r="480"></circle>
+</g>
+<g stroke="#3a3a3a" stroke-width="1.5"><line x1="1040" y1="180" x2="1300" y2="420"></line><line x1="1300" y1="180" x2="980" y2="520"></line><line x1="900" y1="300" x2="1440" y2="300"></line></g>
+<g fill="#ee0000"><circle cx="1040" cy="180" r="6"></circle><circle cx="1300" cy="420" r="6"></circle></g>
+<g fill="#4d4d4d"><circle cx="1300" cy="180" r="5"></circle><circle cx="980" cy="520" r="5"></circle><circle cx="1180" cy="300" r="7"></circle></g>
+</svg>
+<header style="position: relative; display: flex; align-items: center; gap: 10px; padding: 28px 48px">
+<span style="width: 34px; height: 34px; border-radius: 9px; background: #ee0000; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span>
+<span style="font-family: 'Red Hat Display'; font-weight: 600; font-size: 20px">MemoryHub</span><span style="color: #c7c7c7; font-size: 14px">for OpenShift AI</span>
+</header>
+<div style="position: relative; flex: 1; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; padding: 24px 48px 64px; max-width: 1280px">
+<form style="flex: 0 1 440px; background: #fff; color: #151515; border-radius: 20px; padding: 40px 40px 32px; display: flex; flex-direction: column; gap: 20px">
+<div>
+<h1 style="font-family: 'Red Hat Display'; font-size: 28px; font-weight: 500; margin: 0 0 6px">Log in to your account</h1>
+<p style="margin: 0; color: #4d4d4d; font-size: 14px">Use your OpenShift identity. Your access to memories follows your cluster roles.</p>
+</div>
+<a class="btn bp" href="Main.dc.html" style="width: 100%">Log in with OpenShift</a>
+<div style="display: flex; align-items: center; gap: 12px; color: #4d4d4d; font-size: 13px"><span style="flex: 1; border-top: 1px solid #d2d2d2"></span>or, for development clusters<span style="flex: 1; border-top: 1px solid #d2d2d2"></span></div>
+<div class="f"><label for="k">API key</label><input id="k" class="in" type="password" placeholder="mh-dev-…"></div>
+<a class="btn bg" href="Main.dc.html" style="width: 100%">Continue with API key</a>
+<p style="margin: 0; font-size: 13px; color: #4d4d4d; line-height: 1.5">API-key sessions are for single-operator setups. Production deployments should use OAuth 2.1. <a href="Clients.dc.html">Learn about authentication</a></p>
+</form>
+<div style="flex: 1 1 420px; max-width: 560px">
+<h2 style="font-family: 'Red Hat Display'; font-size: 44px; font-weight: 500; line-height: 1.12; margin: 0 0 18px; letter-spacing: -.02em">Governed memory for every agent in your cluster.</h2>
+<p style="color: #c7c7c7; font-size: 17px; line-height: 1.55; margin: 0 0 28px">Shared, versioned and audited memory over MCP — with six-tier scopes, contradiction handling and a forensic trail that answers what an agent knew and why.</p>
+<div style="display: flex; flex-direction: column; gap: 14px; font-size: 15px">
+<div style="display: flex; gap: 12px; align-items: center"><span style="width: 8px; height: 8px; border-radius: 99px; background: #ee0000"></span>Scope isolation enforced in SQL, not in prompts</div>
+<div style="display: flex; gap: 12px; align-items: center"><span style="width: 8px; height: 8px; border-radius: 99px; background: #ee0000"></span>Human approval for enterprise policy memories</div>
+<div style="display: flex; gap: 12px; align-items: center"><span style="width: 8px; height: 8px; border-radius: 99px; background: #ee0000"></span>Air-gap ready with on-cluster embedding models</div>
+</div>
+</div>
+</div>
+<footer style="position: relative; padding: 20px 48px; font-size: 13px; color: #a3a3a3; display: flex; gap: 20px; flex-wrap: wrap"><span>Version 0.9 · cluster apps.[YOUR-CLUSTER]</span><a href="Login.dc.html" style="color: #c7c7c7">Help</a><a href="Login.dc.html" style="color: #c7c7c7">Privacy</a></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
@@ -14,9 +14,10 @@ from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import (
     get_memory_history as get_memory_history_service,
 )
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.access import access_for, admin_viewer, current_viewer, legacy_viewer
 from src.config import Settings, get_settings
 from src.database import get_db
 from src.schemas import (
@@ -32,6 +33,8 @@ from src.schemas import (
     GraphNode,
     GraphResponse,
     MemoryDetail,
+    MemoryListItem,
+    MemoryListResponse,
     PublicConfigResponse,
     RecentActivity,
     RuleVersionEntry,
@@ -44,6 +47,7 @@ from src.schemas import (
     UpdateRuleRequest,
     VersionEntry,
 )
+from src.ui_common import Viewer, audit, viewer_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +71,11 @@ def _node_to_graph_node(node: MemoryNode) -> GraphNode:
         weight=node.weight,
         branch_type=node.branch_type,
         owner_id=node.owner_id,
+        actor_id=node.actor_id,
+        driver_id=node.driver_id,
+        content_type=node.content_type,
+        status=node.status,
+        source=node.source,
         version=node.version,
         created_at=node.created_at,
         updated_at=node.updated_at,
@@ -104,9 +113,7 @@ async def _admin_request(
         params["tenant_id"] = tenant_id
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.request(
-                method, url, headers=headers, json=json_body, params=params
-            )
+            response = await client.request(method, url, headers=headers, json=json_body, params=params)
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=503,
@@ -175,7 +182,7 @@ async def get_public_config(settings: SettingsDep) -> PublicConfigResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/graph", response_model=GraphResponse)
+@router.get("/api/graph", response_model=GraphResponse, dependencies=[Depends(legacy_viewer)])
 async def get_graph(
     db: DbDep,
     settings: SettingsDep,
@@ -245,7 +252,7 @@ async def get_graph(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/graph/search", response_model=list[SearchMatch])
+@router.get("/api/graph/search", response_model=list[SearchMatch], dependencies=[Depends(legacy_viewer)])
 async def search_graph(
     db: DbDep,
     settings: SettingsDep,
@@ -270,9 +277,7 @@ async def search_graph(
             LIMIT 20
             """
         )
-        result = await db.execute(
-            sql, {"query_vec": str(embedding), "tenant_id": tenant_id}
-        )
+        result = await db.execute(sql, {"query_vec": str(embedding), "tenant_id": tenant_id})
         rows = result.fetchall()
         return [SearchMatch(id=row[0], score=float(row[1])) for row in rows]
 
@@ -294,11 +299,146 @@ async def search_graph(
 
 
 # ---------------------------------------------------------------------------
+# Memory Explorer list
+# ---------------------------------------------------------------------------
+
+_LIST_SORT_COLUMNS = {
+    "updated_at": MemoryNode.updated_at,
+    "created_at": MemoryNode.created_at,
+    "weight": MemoryNode.weight,
+    "version": MemoryNode.version,
+}
+_PREVIEW_CHARS = 280
+# Semantic search ranks a bounded candidate set; the table pages through it.
+_SEMANTIC_CANDIDATES = 200
+
+
+def _node_to_list_item(node: MemoryNode, score: float | None = None) -> MemoryListItem:
+    content = node.content or ""
+    preview = content if len(content) <= _PREVIEW_CHARS else content[: _PREVIEW_CHARS - 1].rstrip() + "\u2026"
+    return MemoryListItem(
+        id=str(node.id),
+        stub=node.stub,
+        content_preview=preview,
+        scope=node.scope,
+        owner_id=node.owner_id,
+        actor_id=getattr(node, "actor_id", None),
+        driver_id=getattr(node, "driver_id", None),
+        branch_type=node.branch_type,
+        content_type=getattr(node, "content_type", None),
+        status=getattr(node, "status", None),
+        source=getattr(node, "source", None),
+        weight=node.weight,
+        version=node.version,
+        parent_id=str(node.parent_id) if node.parent_id else None,
+        created_at=node.created_at,
+        updated_at=node.updated_at,
+        score=score,
+    )
+
+
+@router.get("/api/memories", response_model=MemoryListResponse, dependencies=[Depends(legacy_viewer)])
+async def list_memories(
+    db: DbDep,
+    settings: SettingsDep,
+    q: str | None = Query(default=None, max_length=1000),
+    scope: list[str] | None = Query(default=None),
+    owner_id: str | None = Query(default=None, max_length=255),
+    actor_id: str | None = Query(default=None, max_length=255),
+    content_type: list[str] | None = Query(default=None),
+    status: list[str] | None = Query(default=None),
+    source: list[str] | None = Query(default=None),
+    sort: str = Query(default="updated_at", pattern="^(updated_at|created_at|weight|version|score)$"),
+    order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
+):
+    """Paginated, filterable list of current memories for the Memory Explorer.
+
+    Filters strictly by ``settings.ui_tenant_id`` like every other read in
+    the BFF. With ``q`` the list becomes a search: semantic (cosine
+    similarity, top ``_SEMANTIC_CANDIDATES``) when the embedding service is
+    reachable, otherwise a case-insensitive substring match. Semantic
+    results carry a ``score`` and default to score ordering.
+    """
+    tenant_id = settings.ui_tenant_id
+    filters = [
+        MemoryNode.tenant_id == tenant_id,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
+    ]
+    if scope:
+        filters.append(MemoryNode.scope.in_(scope))
+    if owner_id:
+        filters.append(MemoryNode.owner_id == owner_id)
+    if actor_id:
+        filters.append(MemoryNode.actor_id == actor_id)
+    if content_type:
+        filters.append(MemoryNode.content_type.in_(content_type))
+    if status:
+        filters.append(MemoryNode.status.in_(status))
+    if source:
+        filters.append(MemoryNode.source.in_(source))
+
+    query = (q or "").strip()
+    descending = order == "desc"
+
+    if query:
+        embedding = await _get_embedding(query, settings.embedding_url)
+        if embedding is not None:
+            distance = MemoryNode.embedding.cosine_distance(embedding)
+            stmt = (
+                select(MemoryNode, (1 - distance).label("score"))
+                .where(*filters, MemoryNode.embedding.is_not(None))
+                .order_by(distance)
+                .limit(_SEMANTIC_CANDIDATES)
+            )
+            rows = (await db.execute(stmt)).all()
+            ranked = [_node_to_list_item(row[0], float(row[1])) for row in rows]
+            if sort != "score":
+                ranked.sort(key=lambda item: getattr(item, sort), reverse=descending)
+            elif not descending:
+                ranked.reverse()
+            start = (page - 1) * per_page
+            return MemoryListResponse(
+                items=ranked[start : start + per_page],
+                total=len(ranked),
+                page=page,
+                per_page=per_page,
+                search_mode="semantic",
+            )
+        pattern = f"%{query}%"
+        filters.append(MemoryNode.content.ilike(pattern) | MemoryNode.stub.ilike(pattern))
+        search_mode = "text"
+    else:
+        search_mode = "none"
+
+    total = (await db.execute(select(func.count()).select_from(MemoryNode).where(*filters))).scalar_one()
+
+    column = _LIST_SORT_COLUMNS.get(sort, MemoryNode.updated_at)
+    stmt = (
+        select(MemoryNode)
+        .where(*filters)
+        .order_by(column.desc() if descending else column.asc(), MemoryNode.id)
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
+    nodes = (await db.execute(stmt)).scalars().all()
+    return MemoryListResponse(
+        items=[_node_to_list_item(n) for n in nodes],
+        total=total,
+        page=page,
+        per_page=per_page,
+        search_mode=search_mode,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/stats", response_model=StatsResponse)
+@router.get("/api/stats", response_model=StatsResponse, dependencies=[Depends(legacy_viewer)])
 async def get_stats(db: DbDep, settings: SettingsDep):
     """Return dashboard statistics.
 
@@ -378,7 +518,7 @@ async def get_stats(db: DbDep, settings: SettingsDep):
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/memory/{memory_id}", response_model=MemoryDetail)
+@router.get("/api/memory/{memory_id}", response_model=MemoryDetail, dependencies=[Depends(legacy_viewer)])
 async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
     """Return full detail for a single memory node.
 
@@ -419,10 +559,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
     rel_result = await db.execute(
         select(MemoryRelationship).where(
             MemoryRelationship.tenant_id == tenant_id,
-            (
-                (MemoryRelationship.source_id == parsed_id)
-                | (MemoryRelationship.target_id == parsed_id)
-            ),
+            ((MemoryRelationship.source_id == parsed_id) | (MemoryRelationship.target_id == parsed_id)),
         )
     )
     relationships = rel_result.scalars().all()
@@ -453,7 +590,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/memory/{memory_id}/history", response_model=list[VersionEntry])
+@router.get("/api/memory/{memory_id}/history", response_model=list[VersionEntry], dependencies=[Depends(legacy_viewer)])
 async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep):
     """Return the full version chain for a memory, newest first.
 
@@ -505,7 +642,11 @@ async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep):
 
 
 @router.delete("/api/memory/{memory_id}", status_code=204)
-async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
+async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, viewer: Viewer = Depends(current_viewer)):
+    await forget_memory(memory_id, db, settings, viewer)
+
+
+async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, viewer: Viewer) -> dict:
     """Soft-delete a memory and its entire version chain.
 
     Phase 6 (#46): every SELECT and the final bulk UPDATE filter by
@@ -532,6 +673,11 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
     )
     node = result.scalar_one_or_none()
     if node is None:
+        raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
+    if viewer.redacts_content:
+        # #667: admins moderate the scopes they can read; user memories need a super-user grant.
+        (await access_for(db, settings, viewer)).ensure_moderatable(node)
+    if viewer.restricted and not (await access_for(db, settings, viewer)).can_read_row(node):
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
     if node.deleted_at is not None:
         raise HTTPException(status_code=409, detail=f"Memory {memory_id!r} is already deleted")
@@ -588,6 +734,17 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
         .values(deleted_at=now, is_current=False)
     )
     await db.commit()
+    # What was actually forgotten — the UI reports exactly this (R1-022).
+    return {
+        "id": str(parsed_id),
+        "scope": node.scope,
+        "scope_id": node.scope_id,
+        "owner_id": node.owner_id,
+        "versions": len(version_ids),
+        "branches": len(child_ids),
+        "rows": len(all_ids),
+        "deleted_at": now.isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -595,46 +752,96 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
 # ---------------------------------------------------------------------------
 
 
+async def _client_viewer(
+    request: Request, db: AsyncSession, settings: Settings, client_id: str | None = None
+) -> Viewer:
+    """Admins manage every client; users only the agents that belong to them."""
+    viewer = viewer_from_request(request, settings)
+    if viewer.restricted and client_id is not None:
+        acc = await access_for(db, settings, viewer)
+        if client_id not in (acc.grants.identities if acc.grants else set()):
+            raise HTTPException(status_code=404, detail=f"Client {client_id!r} not found")
+    return viewer
+
+
 @router.get("/api/clients", response_model=list[ClientResponse])
-async def list_clients(settings: SettingsDep):
-    resp = await _admin_request(
-        settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id
-    )
-    return resp.json()
+async def list_clients(request: Request, db: DbDep, settings: SettingsDep):
+    resp = await _admin_request(settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id)
+    clients = resp.json()
+    viewer = viewer_from_request(request, settings)
+    if viewer.restricted and isinstance(clients, list):
+        acc = await access_for(db, settings, viewer)
+        mine = acc.grants.identities if acc.grants else set()
+        clients = [c for c in clients if c.get("client_id") in mine]
+    return clients
 
 
 @router.post("/api/clients", response_model=ClientCreatedResponse, status_code=201)
-async def create_client(body: CreateClientRequest, settings: SettingsDep):
+async def create_client(body: CreateClientRequest, request: Request, db: DbDep, settings: SettingsDep):
+    viewer = await _client_viewer(request, db, settings)
+    if viewer.restricted and body.identity_type != "user":
+        raise HTTPException(status_code=403, detail="Users can register their own agents; admins create service agents")
+    if viewer.restricted:
+        body.tenant_id = settings.ui_tenant_id
     resp = await _admin_request(
-        settings, "POST", "/admin/clients",
-        json_body=body.model_dump(), tenant_id=settings.ui_tenant_id,
+        settings,
+        "POST",
+        "/admin/clients",
+        json_body=body.model_dump(),
+        tenant_id=settings.ui_tenant_id,
     )
-    return resp.json()
+    created = resp.json()
+    if viewer.restricted:
+        from src.ownership import set_owner
+
+        await set_owner(db, settings.ui_tenant_id, body.client_id, viewer.username, viewer.username, "created")
+        await audit(
+            db,
+            tenant_id=settings.ui_tenant_id,
+            viewer=viewer,
+            event_type="agent.create",
+            scope="session",
+            owner_id=viewer.username,
+            memory_id=None,
+            metadata={"client_id": body.client_id},
+        )
+        await db.commit()
+    return created
 
 
 @router.patch("/api/clients/{client_id}", response_model=ClientResponse)
-async def update_client(client_id: str, body: UpdateClientRequest, settings: SettingsDep):
+async def update_client(client_id: str, body: UpdateClientRequest, request: Request, db: DbDep, settings: SettingsDep):
+    await _client_viewer(request, db, settings, client_id)
     payload = body.model_dump(exclude_none=True)
     resp = await _admin_request(
-        settings, "PATCH", f"/admin/clients/{client_id}",
-        json_body=payload, tenant_id=settings.ui_tenant_id,
+        settings,
+        "PATCH",
+        f"/admin/clients/{client_id}",
+        json_body=payload,
+        tenant_id=settings.ui_tenant_id,
     )
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-secret", response_model=SecretRotatedResponse)
-async def rotate_client_secret(client_id: str, settings: SettingsDep):
+async def rotate_client_secret(client_id: str, request: Request, db: DbDep, settings: SettingsDep):
+    await _client_viewer(request, db, settings, client_id)
     resp = await _admin_request(
-        settings, "POST", f"/admin/clients/{client_id}/rotate-secret",
+        settings,
+        "POST",
+        f"/admin/clients/{client_id}/rotate-secret",
         tenant_id=settings.ui_tenant_id,
     )
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-api-key", response_model=ApiKeyRotatedResponse)
-async def rotate_api_key(client_id: str, settings: SettingsDep):
+async def rotate_api_key(client_id: str, request: Request, db: DbDep, settings: SettingsDep):
+    await _client_viewer(request, db, settings, client_id)
     resp = await _admin_request(
-        settings, "POST", f"/admin/clients/{client_id}/rotate-api-key",
+        settings,
+        "POST",
+        f"/admin/clients/{client_id}/rotate-api-key",
         tenant_id=settings.ui_tenant_id,
     )
     return resp.json()
@@ -645,7 +852,7 @@ async def rotate_api_key(client_id: str, settings: SettingsDep):
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/users", response_model=list[dict])
+@router.get("/api/users", response_model=list[dict], dependencies=[Depends(admin_viewer)])
 async def list_users(db: DbDep, settings: SettingsDep):
     """List all identities with memory counts and last active times.
 
@@ -670,17 +877,12 @@ async def list_users(db: DbDep, settings: SettingsDep):
         .group_by(MemoryNode.owner_id)
     )
     result = await db.execute(stats_query)
-    owner_stats = {
-        row[0]: {"memory_count": row[1], "last_active": row[2]}
-        for row in result.fetchall()
-    }
+    owner_stats = {row[0]: {"memory_count": row[1], "last_active": row[2]} for row in result.fetchall()}
 
     # Try to get client list from auth service
     clients = []
     try:
-        resp = await _admin_request(
-            settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id
-        )
+        resp = await _admin_request(settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id)
         clients = resp.json()
     except Exception:
         logger.warning("Could not fetch clients from auth service, using DB owner_ids only")
@@ -692,24 +894,28 @@ async def list_users(db: DbDep, settings: SettingsDep):
         for c in clients:
             cid = c["client_id"]
             stats = owner_stats.get(cid, {"memory_count": 0, "last_active": None})
-            users.append({
-                "name": c["client_name"],
-                "owner_id": cid,
-                "identity_type": c["identity_type"],
-                "memory_count": stats["memory_count"],
-                "last_active": stats["last_active"],
-            })
+            users.append(
+                {
+                    "name": c["client_name"],
+                    "owner_id": cid,
+                    "identity_type": c["identity_type"],
+                    "memory_count": stats["memory_count"],
+                    "last_active": stats["last_active"],
+                }
+            )
             seen_owners.add(cid)
         # Add owners that exist in DB but not in auth service
         for owner_id, stats in owner_stats.items():
             if owner_id not in seen_owners:
-                users.append({
-                    "name": owner_id,
-                    "owner_id": owner_id,
-                    "identity_type": "unknown",
-                    "memory_count": stats["memory_count"],
-                    "last_active": stats["last_active"],
-                })
+                users.append(
+                    {
+                        "name": owner_id,
+                        "owner_id": owner_id,
+                        "identity_type": "unknown",
+                        "memory_count": stats["memory_count"],
+                        "last_active": stats["last_active"],
+                    }
+                )
         return users
 
     # Fallback: just DB owner_ids
@@ -754,8 +960,31 @@ def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
     )
 
 
+async def _own_rule_guard(rule_id: str, request: Request, db: DbDep, settings: SettingsDep) -> None:
+    """#667: users change only their own user-layer rules; organizational and
+    system rules are managed by platform admins and read-only for users."""
+    viewer = viewer_from_request(request, settings)
+    if viewer.can_admin:
+        return
+    try:
+        parsed = uuid.UUID(rule_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}") from None
+    rule = (
+        await db.execute(
+            select(CuratorRule).where(CuratorRule.id == parsed, CuratorRule.tenant_id == settings.ui_tenant_id)
+        )
+    ).scalar_one_or_none()
+    if rule is None or rule.layer != "user" or rule.owner_id != viewer.username:
+        raise HTTPException(
+            status_code=403,
+            detail="Organizational rules are managed by platform admins. You can change only your own rules.",
+        )
+
+
 @router.get("/api/rules", response_model=list[CurationRuleResponse])
 async def list_rules(
+    request: Request,
     db: DbDep,
     settings: SettingsDep,
     tier: str | None = Query(default=None),
@@ -780,19 +1009,29 @@ async def list_rules(
         stmt = stmt.where(CuratorRule.enabled == enabled)
     if layer:
         stmt = stmt.where(CuratorRule.layer == layer)
+    viewer = viewer_from_request(request, settings)
+    if viewer.restricted:
+        # Users see the shared layers and their own personal rules.
+        stmt = stmt.where(or_(CuratorRule.layer != "user", CuratorRule.owner_id == viewer.username))
     result = await db.execute(stmt)
     rules = result.scalars().all()
     return [_rule_to_response(r) for r in rules]
 
 
 @router.post("/api/rules", response_model=CurationRuleResponse, status_code=201)
-async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep):
+async def create_rule(body: CreateRuleRequest, request: Request, db: DbDep, settings: SettingsDep):
     """Create a new curation rule.
 
     Phase 6 (#46): stamps ``settings.ui_tenant_id`` on the new rule so it
     is owned by this UI deployment's tenant. The BFF never writes rules
     into other tenants' namespaces.
     """
+    viewer = viewer_from_request(request, settings)
+    if not viewer.can_admin:
+        # Personal rules only: they apply to the user's own writes.
+        body.layer = "user"
+        body.owner_id = viewer.username
+        body.override = False
     rule = CuratorRule(
         tenant_id=settings.ui_tenant_id,
         name=body.name,
@@ -839,10 +1078,11 @@ async def get_rule(rule_id: str, db: DbDep, settings: SettingsDep):
     return _rule_to_response(rule)
 
 
-@router.patch("/api/rules/{rule_id}", response_model=CurationRuleResponse)
+@router.patch("/api/rules/{rule_id}", response_model=CurationRuleResponse, dependencies=[Depends(_own_rule_guard)])
 async def update_rule(
     rule_id: str,
     body: UpdateRuleRequest,
+    request: Request,
     db: DbDep,
     settings: SettingsDep,
 ):
@@ -854,16 +1094,22 @@ async def update_rule(
 
     Phase 6 (#46): cross-tenant updates return 404.
     """
+    if not viewer_from_request(request, settings).can_admin:
+        body.layer = None
+        body.owner_id = None
+        body.override = None
     tenant_id = settings.ui_tenant_id
     try:
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}") from None
     result = await db.execute(
-        select(CuratorRule).where(
+        select(CuratorRule)
+        .where(
             CuratorRule.id == parsed_id,
             CuratorRule.tenant_id == tenant_id,
-        ).with_for_update()
+        )
+        .with_for_update()
     )
     old_rule = result.scalar_one_or_none()
     if old_rule is None:
@@ -968,7 +1214,7 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep):
     ]
 
 
-@router.delete("/api/rules/{rule_id}", status_code=204)
+@router.delete("/api/rules/{rule_id}", status_code=204, dependencies=[Depends(_own_rule_guard)])
 async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep):
     """Delete a curation rule.
 
@@ -996,7 +1242,10 @@ async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep):
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
     if not rule.is_current:
-        raise HTTPException(status_code=409, detail=f"Rule {rule_id!r} is not the current version; only current rules can be deleted")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Rule {rule_id!r} is not the current version; only current rules can be deleted",
+        )
     await db.delete(rule)
     await db.commit()
 
@@ -1107,21 +1356,15 @@ async def contradiction_stats(db: DbDep, settings: SettingsDep):
     )
     unresolved = unresolved_result.scalar_one()
 
-    high_result = await db.execute(
-        _live_contradiction_count(tenant_id).where(ContradictionReport.confidence > 0.8)
-    )
+    high_result = await db.execute(_live_contradiction_count(tenant_id).where(ContradictionReport.confidence > 0.8))
     high = high_result.scalar_one()
 
     medium_result = await db.execute(
-        _live_contradiction_count(tenant_id).where(
-            ContradictionReport.confidence.between(0.5, 0.8)
-        )
+        _live_contradiction_count(tenant_id).where(ContradictionReport.confidence.between(0.5, 0.8))
     )
     medium = medium_result.scalar_one()
 
-    low_result = await db.execute(
-        _live_contradiction_count(tenant_id).where(ContradictionReport.confidence < 0.5)
-    )
+    low_result = await db.execute(_live_contradiction_count(tenant_id).where(ContradictionReport.confidence < 0.5))
     low = low_result.scalar_one()
 
     return ContradictionStatsResponse(

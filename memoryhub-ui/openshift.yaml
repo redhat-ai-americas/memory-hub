@@ -53,6 +53,27 @@ spec:
           value: "https://mcp-server.example.com/mcp/"
         - name: MEMORYHUB_PUBLIC_AUTH_URL
           value: "https://auth-server.example.com"
+        # Roles: OpenShift users listed here (or members of memoryhub-admins,
+        # when the proxy forwards X-Forwarded-Groups) are platform admins and
+        # see memory metadata only; everyone else is a user and sees only the
+        # memories RBAC lets them read.
+        - name: MEMORYHUB_UI_ADMIN_USERS
+          value: ""
+        # TEST DEPLOYMENTS ONLY: account switcher in the user menu (view the
+        # dashboard as another identity / role without logging out).
+        # Set to "false" or remove before production.
+        # Test cluster: ON so the user menu can switch between the user,
+        # platform admin and other identities. Set "false" for production.
+        - name: MEMORYHUB_UI_TEST_MODE
+          value: "true"
+        # #667 tier 3: OpenShift group whose members are super-users (admins who
+        # can open user memories for an incident). Assigned here only.
+        - name: MEMORYHUB_UI_SUPERUSER_GROUP
+          value: "memoryhub-superusers"
+        # Release 1 surface: features beyond R1 (knowledge pages, packs,
+        # retrieval checks, entity merge…) stay hidden unless set to "true".
+        - name: MEMORYHUB_UI_LABS
+          value: "false"
         - name: MEMORYHUB_ADMIN_KEY
           valueFrom:
             secretKeyRef:
