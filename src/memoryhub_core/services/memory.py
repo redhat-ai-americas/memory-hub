@@ -71,6 +71,7 @@ async def create_memory(
     skip_curation: bool = False,
     force: bool = False,
     s3_adapter: S3StorageAdapter | None = None,
+    commit: bool = True,
 ) -> tuple[MemoryNodeRead | None, dict]:
     """Create a new memory node.
 
@@ -104,12 +105,36 @@ async def create_memory(
 
     Storage is independent: content exceeding ``s3_threshold_bytes`` goes to
     S3 (if configured), otherwise stays inline in PostgreSQL.
+
+    ``commit=False`` lets a caller write several nodes in one transaction
+    (#554, procedural graph extraction). The node is added and flushed, the
+    caller's transaction is left open, and the post-commit work -- chunk
+    children and the entity-extraction trigger -- is skipped; the caller
+    owns the commit and must fire ``trigger_extraction`` itself afterwards.
+    Content that would need chunking or an S3 upload is refused with
+    ``ValueError`` on this path, because both have side effects that cannot
+    be rolled back with the transaction. ``skip_curation=True`` is also
+    required: the curation pipeline may commit the session when it seeds a
+    tenant's default rules, so a ``commit=False`` caller runs curation as
+    a pre-flight before its first write.
     """
     app_settings = AppSettings()
     content_bytes = len(data.content.encode("utf-8"))
     embedding_max_chars = embedding_service.max_tokens * 4
     needs_chunking = len(data.content) > embedding_max_chars
     use_s3 = content_bytes > app_settings.s3_threshold_bytes and s3_adapter is not None
+
+    if not commit:
+        if not skip_curation:
+            raise ValueError(
+                "create_memory(commit=False) requires skip_curation=True; run the "
+                "curation pipeline as a pre-flight before the transaction's first write"
+            )
+        if needs_chunking or content_bytes > app_settings.s3_threshold_bytes:
+            raise ValueError(
+                "create_memory(commit=False) cannot write content that needs chunking "
+                "or S3 storage; shorten the content or use the committing path"
+            )
 
     embed_text = data.content[:embedding_max_chars] if needs_chunking else data.content
     embedding = await embedding_service.embed(embed_text)
@@ -207,6 +232,11 @@ async def create_memory(
         node.relevant_until = classify_temporal(data.content, now)
 
     session.add(node)
+    if not commit:
+        await session.flush()
+        await session.refresh(node)
+        return node_to_read(node, has_children=False, has_rationale=False), curation_result
+
     await session.commit()
     await session.refresh(node)
 
@@ -649,14 +679,21 @@ async def update_memory(
     old_children = children_result.scalars().all()
 
     copied_count = 0
+    copied_ids: dict[uuid.UUID, uuid.UUID] = {}
     for child in old_children:
+        if child.deleted_at is not None:
+            # A soft-deleted branch stays deleted on the old parent; copying it
+            # would resurrect it as a current child of the new version.
+            continue
         if child.branch_type == "chunk" and content_changed:
             # Retire old chunk — new chunks will be created below
             child.is_current = False
             child.expires_at = now + timedelta(days=app_settings.version_retention_days)
             continue
 
-        # Deep copy non-chunk branch to new parent
+        # Deep copy non-chunk branch to new parent. Every field that defines
+        # the child is carried over: dropping content_type or scope_id turned
+        # procedure steps into experiential, unscoped nodes (#554 review).
         copied_id = uuid.uuid4()
         copied_child = MemoryNode(
             id=copied_id,
@@ -664,14 +701,20 @@ async def update_memory(
             content=child.content,
             stub=child.stub,
             scope=child.scope,
+            scope_id=child.scope_id,
             weight=child.weight,
             owner_id=child.owner_id,
+            actor_id=child.actor_id,
+            driver_id=child.driver_id,
             tenant_id=child.tenant_id,
             parent_id=new_node.id,
             branch_type=child.branch_type,
             metadata_=child.metadata_,
             domains=child.domains,
+            content_type=child.content_type,
+            source=child.source,
             upstream_trust_level=child.upstream_trust_level,
+            relevant_until=child.relevant_until,
             embedding=list(child.embedding) if child.embedding is not None else None,
             is_current=True,
             version=child.version,
@@ -682,11 +725,44 @@ async def update_memory(
             updated_at=now,
         )
         session.add(copied_child)
+        copied_ids[child.id] = copied_id
         copied_count += 1
 
         # Retire old branch — deep copy is the canonical version now
         child.is_current = False
         child.expires_at = now + timedelta(days=app_settings.version_retention_days)
+
+    if copied_ids:
+        # The copies are the canonical children now, so active edges that
+        # touched the retired rows move with them, exactly as the root's own
+        # edges were re-pointed above (#472). Without this a procedure's
+        # precedes/requires/alternative_to edges stayed on retired steps and
+        # resolve_procedure_entry failed on the new root (#554 review).
+        await session.flush()
+        for old_id, copy_id in copied_ids.items():
+            await session.execute(
+                update(MemoryRelationship)
+                .where(MemoryRelationship.source_id == old_id, MemoryRelationship.valid_until.is_(None))
+                .values(source_id=copy_id)
+            )
+            await session.execute(
+                update(MemoryRelationship)
+                .where(MemoryRelationship.target_id == old_id, MemoryRelationship.valid_until.is_(None))
+                .values(target_id=copy_id)
+            )
+        # A procedure root names its entry step by id; follow it to the copy.
+        if isinstance(new_node.metadata_, dict):
+            procedure = new_node.metadata_.get("procedure")
+            if isinstance(procedure, dict) and procedure.get("entry_step_id"):
+                try:
+                    old_entry = uuid.UUID(str(procedure["entry_step_id"]))
+                except ValueError:
+                    old_entry = None
+                if old_entry in copied_ids:
+                    new_node.metadata_ = {
+                        **new_node.metadata_,
+                        "procedure": {**procedure, "entry_step_id": str(copied_ids[old_entry])},
+                    }
 
     await session.commit()
 

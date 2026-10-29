@@ -5,7 +5,8 @@ import type { Plugin, Hooks } from "@opencode-ai/plugin";
 import { resolveConfig } from "./config.js";
 import { createMcpClient } from "./mcp-client.js";
 import { createTools } from "./tools.js";
-import { createRecallEngine, createSystemTransform } from "./hooks.js";
+import { createRecallEngine, createSystemTransform, extractTextFromParts } from "./hooks.js";
+import { createTrajectoryRecorder } from "./trajectory.js";
 import { createSessionManager } from "./session.js";
 import { createLogger } from "./logger.js";
 
@@ -56,14 +57,21 @@ export const MemoryHubPlugin: Plugin = async (_input, options) => {
     logger,
   );
   const recall = createRecallEngine(mcpClient, config, logger, withSession);
+  const recorder = createTrajectoryRecorder(mcpClient, config, logger, withSession);
 
   logger.info(`initialized (server: ${config.server.url})`);
 
   const hooks: Hooks = {
     tool: createTools(mcpClient, config, withSession),
 
-    "chat.message": async (_input, output) => {
+    "chat.message": async (input, output) => {
       await recall.onChatMessage(output);
+      // Fire and forget: recording never delays the conversation.
+      void recorder.onUserMessage(input.sessionID, extractTextFromParts(output.parts ?? []));
+    },
+
+    "tool.execute.after": async (input, output) => {
+      void recorder.onToolExecuted(input, output);
     },
 
     "experimental.chat.messages.transform": async (_input, output) => {

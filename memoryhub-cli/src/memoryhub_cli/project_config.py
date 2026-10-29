@@ -902,6 +902,78 @@ def write_hook_script(project_dir: Path) -> Path:
     return hook_path
 
 
+# ── Trajectory recording (#554) ──────────────────────────────────────────────
+
+RECORD_HOOK_SCRIPT_NAME = "record-trajectory.sh"
+
+_RECORD_HOOK_HEADER = (
+    "# Record this Claude Code event (prompt, tool call/result, final reply)\n"
+    "# into the session's MemoryHub thread for procedural extraction (#554).\n"
+    "# Opt-in via `memoryhub config init --record-trajectories`; pause with\n"
+    "# MEMORYHUB_RECORD_TRAJECTORY=0. Exits 0 silently on any failure."
+)
+_LOAD_HOOK_HEADER = (
+    "# Inject MemoryHub memories at Claude Code session start.\n"
+    "# Stdout is added to the conversation context before the first prompt.\n"
+    "# Exits 0 silently on any failure -- the session starts normally and\n"
+    "# the MCP server remains available as a fallback."
+)
+_PROJECT_ID_LINE = 'PROJECT_ID=$(basename "$PROJECT_ROOT")'
+
+#: Credential, URL and binary resolution shared with load-memories.sh; the hook
+#: payload on stdin then goes to `memoryhub thread record`.
+RECORD_HOOK_SCRIPT_TEMPLATE = (
+    HOOK_SCRIPT_TEMPLATE.split(_PROJECT_ID_LINE, 1)[0]
+    .replace(_LOAD_HOOK_HEADER, _RECORD_HOOK_HEADER)
+    + _PROJECT_ID_LINE
+    + "\n\n# stdin carries the hook's JSON payload; `thread record` reads it.\n"
+    + '"$MEMORYHUB_BIN" thread record --project-id "$PROJECT_ID" 2>/dev/null || exit 0\n'
+)
+
+#: Events recorded. All run asynchronously, so recording adds no latency.
+RECORD_HOOK_EVENTS: tuple[str, ...] = (
+    "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop",
+)
+
+
+def write_record_hook_script(project_dir: Path) -> Path:
+    """Write record-trajectory.sh to .claude/hooks/ with execute permission."""
+    hooks_dir = project_dir / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    path = hooks_dir / RECORD_HOOK_SCRIPT_NAME
+    path.write_text(RECORD_HOOK_SCRIPT_TEMPLATE)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def merge_record_hooks(project_dir: Path) -> Path:
+    """Add async trajectory-recording hooks to .claude/settings.json (idempotent)."""
+    settings_path = project_dir / ".claude" / "settings.json"
+    settings: dict[str, Any] = (
+        json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    )
+    hooks = settings.setdefault("hooks", {})
+    changed = False
+    for event_name in RECORD_HOOK_EVENTS:
+        entries = hooks.setdefault(event_name, [])
+        if _has_hook_script(entries, RECORD_HOOK_SCRIPT_NAME):
+            continue
+        entries.append({
+            "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/" + RECORD_HOOK_SCRIPT_NAME,
+                "timeout": 15,
+                "async": True,
+            }],
+        })
+        changed = True
+    if changed:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    return settings_path
+
+
 __all__ = [
     "InitChoices",
     "InstructionFormat",
@@ -915,6 +987,10 @@ __all__ = [
     "LEGACY_RULE_NAME",
     "build_project_config",
     "merge_settings_hooks",
+    "merge_record_hooks",
+    "RECORD_HOOK_SCRIPT_NAME",
+    "RECORD_HOOK_SCRIPT_TEMPLATE",
+    "write_record_hook_script",
     "render_instructions",
     "render_yaml",
     "render_rule_file",

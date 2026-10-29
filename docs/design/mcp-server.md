@@ -40,6 +40,10 @@ Deployment is automated via `deploy/deploy.sh` which stages a build context, tri
 |------|---------|------------|
 | `delete_memory` | Soft-delete a memory and its entire version chain (#42) | Write |
 
+### Thread extraction options (#554)
+
+`thread(action="extract")` takes optional `dry_run`, `procedures` and `procedure_mode` (`off`/`propose`/`apply`). The server's `MEMORYHUB_PROCEDURAL_EXTRACTION_MODE` (default `off`) is a ceiling the caller can only lower. When the procedural pass runs or was requested, the response gains a `procedures` report. No new tool; see `planning/procedural-graph-extraction.md` (D10).
+
 ### Curation Pipeline
 
 `write_memory` runs an inline curation pipeline before persisting:

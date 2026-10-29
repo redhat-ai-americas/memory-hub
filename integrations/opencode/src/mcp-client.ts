@@ -16,6 +16,11 @@ export interface MemoryHubMcpClient {
     action: string,
     params: Record<string, unknown>,
   ): Promise<unknown>;
+  /** Call the `thread` tool (conversation threads; used by trajectory recording). */
+  callThread(
+    action: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown>;
   close(): Promise<void>;
   isConnected(): boolean;
   resetSession(): void;
@@ -156,6 +161,19 @@ export function createMcpClient(serverUrl: string): MemoryHubMcpClient {
     return extractTextContent(result);
   }
 
+  async function callThread(
+    action: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    const c = await ensureConnected();
+    const args: Record<string, unknown> = { action };
+    for (const key of ["thread_id", "content", "scope", "role", "options"]) {
+      if (params[key] !== undefined) args[key] = params[key];
+    }
+    const result = await c.callTool({ name: "thread", arguments: args });
+    return extractTextContent(result);
+  }
+
   async function close(): Promise<void> {
     if (transport) {
       await transport.close();
@@ -169,6 +187,7 @@ export function createMcpClient(serverUrl: string): MemoryHubMcpClient {
     connect,
     registerSession,
     callMemory,
+    callThread,
     close,
     isConnected: () => connected,
     resetSession,

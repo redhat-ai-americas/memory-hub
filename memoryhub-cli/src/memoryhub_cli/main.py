@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import warnings
 from importlib.metadata import version as pkg_version
@@ -1055,6 +1056,16 @@ def config_init(
         "--format",
         help="Instruction format: claude-code, system-prompt, agents-md, ogx, raw",
     ),
+    record_trajectories: bool = typer.Option(
+        False,
+        "--record-trajectories",
+        help=(
+            "Also install Claude Code hooks that record prompts, tool calls/results and "
+            "final replies into a MemoryHub thread per session, for procedural extraction "
+            "(#554). Off by default: tool output leaves the machine (secret-shaped strings "
+            "are redacted)."
+        ),
+    ),
 ):
     """Walk through project setup and write `.memoryhub.yaml` + the
     generated `.claude/rules/memoryhub-loading.md` rule file."""
@@ -1141,8 +1152,16 @@ def config_init(
     except FileExistsError as exc:
         handle_error("file_exists", str(exc), output, EXIT_CLIENT_ERROR)
 
+    record_hook_path = None
+    if record_trajectories:
+        from memoryhub_cli.project_config import merge_record_hooks, write_record_hook_script
+
+        record_hook_path = write_record_hook_script(project_dir)
+        merge_record_hooks(project_dir)
+
     if output == OutputFormat.json:
         json_success({
+            "record_hook_path": str(record_hook_path) if record_hook_path else None,
             "yaml_path": str(result.yaml_path),
             "rule_path": str(result.rule_path) if result.rule_path else None,
             "hook_path": str(result.hook_path) if result.hook_path else None,
@@ -1168,6 +1187,11 @@ def config_init(
             console.print(f"[green]Wrote {result.hook_path}[/green]")  # noqa: T201
         if result.settings_path:
             console.print(f"[green]Updated {result.settings_path}[/green]")  # noqa: T201
+        if record_hook_path:
+            console.print(  # noqa: T201
+                f"[green]Wrote {record_hook_path}[/green] (trajectory recording enabled; "
+                "mark outcomes with `memoryhub thread outcome success|failure|partial`)"
+            )
         if result.legacy_backup is not None:
             console.print(  # noqa: T201
                 f"[yellow]Backed up legacy rule to {result.legacy_backup}.[/yellow]\n"
@@ -2147,6 +2171,124 @@ def thread_append(
     console.print(f"  Sequence: {result.sequence_number}")  # noqa: T201
 
 
+@thread_app.command("record")
+def thread_record(
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p",
+        help=(
+            "Record into a project-scoped thread "
+            "(default: .memoryhub.yaml project, else user scope)"
+        ),
+    ),
+    max_chars: int = typer.Option(
+        16000, "--max-chars", help="Clip each message to this many characters",
+    ),
+):
+    """Record a Claude Code hook event into this session's thread (#554).
+
+    Reads the hook's JSON payload on stdin (UserPromptSubmit, PostToolUse,
+    PostToolUseFailure, Stop) and appends it to a thread bound to the
+    session, creating the thread on first use. Secret-shaped strings are
+    redacted and long tool output is clipped before anything is sent.
+    Installed by `memoryhub config init --record-trajectories`. Set
+    MEMORYHUB_RECORD_TRAJECTORY=0 to pause recording.
+
+    Always exits 0 so it can never block the host.
+    """
+    from memoryhub_cli.trajectory import locked_state, messages_from_hook_payload
+
+    paused = os.environ.get("MEMORYHUB_RECORD_TRAJECTORY", "1").strip().lower()
+    if paused in ("0", "false", "no", "off"):
+        raise typer.Exit(0)
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except (json.JSONDecodeError, ValueError):
+        raise typer.Exit(0) from None
+    if not isinstance(payload, dict) or not payload.get("session_id"):
+        raise typer.Exit(0)
+    messages = messages_from_hook_payload(payload, max_chars=max_chars)
+    if not messages:
+        raise typer.Exit(0)
+
+    _project_id = project_id or _get_project_id_default()
+    try:
+        client = _get_client(OutputFormat.quiet)
+
+        async def _do():
+            async with client:
+                with locked_state(str(payload["session_id"])) as state:
+                    if state.thread_id is None:
+                        created = await client.create_thread(
+                            "project" if _project_id else "user",
+                            scope_id=_project_id,
+                            title=f"Claude Code session {str(payload['session_id'])[:12]}",
+                            metadata={
+                                "host": "claude-code",
+                                "host_session_id": payload["session_id"],
+                            },
+                        )
+                        state.thread_id = str(created.id)
+                        state.project_dir = payload.get("cwd") or os.getcwd()
+                    for message in messages:
+                        await client.append_message(
+                            state.thread_id, message.role, message.content,
+                            tool_call_id=message.tool_call_id, metadata=message.metadata,
+                        )
+
+        asyncio.run(_do())
+    except (SystemExit, Exception) as exc:
+        print(f"memoryhub thread record: {type(exc).__name__}: {exc}", file=sys.stderr)  # noqa: T201
+    raise typer.Exit(0)
+
+
+@thread_app.command("outcome")
+def thread_outcome(
+    result: str = typer.Argument(..., help="success, failure or partial"),
+    thread_id: str | None = typer.Option(
+        None, "--thread", "-t",
+        help="Thread UUID (default: the latest recorded session in this directory)",
+    ),
+    note: str | None = typer.Option(None, "--note", "-n", help="Optional one-line note"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Mark how a recorded session ended (#554).
+
+    Appends an explicit outcome marker (message metadata ``outcome``) that
+    the procedural extraction pass treats as strong evidence, instead of
+    inferring the outcome from the transcript.
+    """
+    from memoryhub_cli.trajectory import latest_thread_for, outcome_message
+
+    try:
+        message = outcome_message(result, note)
+    except ValueError as exc:
+        handle_error("invalid_argument", str(exc), output, EXIT_CLIENT_ERROR)
+    target = thread_id or latest_thread_for(os.getcwd())
+    if not target:
+        handle_error(
+            "not_found",
+            "No recorded session found for this directory. Pass --thread <uuid>.",
+            output, EXIT_CLIENT_ERROR,
+        )
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.append_message(
+                target, message.role, message.content, metadata=message.metadata,
+            )
+
+    appended = _run_command(_do(), output)
+    if output == OutputFormat.json:
+        json_success({"thread_id": target, "outcome": result, "message_id": str(appended.id)})
+        return
+    if output == OutputFormat.quiet:
+        return
+    console.print(f"[green]Outcome recorded:[/green] {result} on thread {target}")  # noqa: T201
+
+
 @thread_app.command("get")
 def thread_get(
     thread_id: str = typer.Argument(..., help="Thread UUID"),
@@ -2533,6 +2675,10 @@ def dream(
         False, "--dry-run",
         help="Show pending threads without extracting",
     ),
+    procedures: bool = typer.Option(
+        False, "--procedures",
+        help="Also learn procedural graphs from tool-call trajectories (off by default)",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o",
         help="Output format: table, json, quiet",
@@ -2553,6 +2699,13 @@ def dream(
             --api-key $GEMINI_API_KEY
 
         memoryhub dream --model llama3.2 --thread <uuid>
+
+        memoryhub dream --model llama3.2 --procedures
+
+    With --procedures, a second pass looks for a multi-step procedure in
+    each thread with new tool calls and stores it as a candidate procedural
+    graph (or adds the session as evidence to a matching one). It keeps its
+    own cursor, so turning it on later still sees earlier threads.
     """
     try:
         import memoryhub_local  # noqa: F401
@@ -2563,10 +2716,10 @@ def dream(
         )
         raise typer.Exit(1)
 
-    asyncio.run(_run_dream(model, url, api_key, thread_id, dry_run, output))
+    asyncio.run(_run_dream(model, url, api_key, thread_id, dry_run, output, procedures))
 
 
-async def _run_dream(model, url, api_key, thread_id, dry_run, output):
+async def _run_dream(model, url, api_key, thread_id, dry_run, output, procedures=False):
     import logging
 
     logging.basicConfig(
@@ -2587,9 +2740,19 @@ async def _run_dream(model, url, api_key, thread_id, dry_run, output):
     if dry_run:
         async with state.session_factory() as session:
             pending = await get_pending_threads(session)
+            procedural_pending = (
+                await _procedural_pending(session) if procedures else None
+            )
         if output == OutputFormat.json:
-            json_success({"pending": pending})
+            data: dict = {"pending": pending}
+            if procedural_pending is not None:
+                data["procedural_pending"] = procedural_pending
+            json_success(data)
             return
+        if procedural_pending:
+            console.print(
+                f"[dim]{len(procedural_pending)} thread(s) pending procedural extraction.[/dim]"
+            )
         if not pending:
             console.print("[dim]No threads with pending extraction.[/dim]")
             return
@@ -2611,7 +2774,7 @@ async def _run_dream(model, url, api_key, thread_id, dry_run, output):
         async with state.session_factory() as session:
             threads_to_process = await get_pending_threads(session)
 
-    if not threads_to_process:
+    if not threads_to_process and not procedures:
         if output == OutputFormat.json:
             json_success({"message": "no pending threads", "threads_processed": 0})
         else:
@@ -2653,18 +2816,80 @@ async def _run_dream(model, url, api_key, thread_id, dry_run, output):
             if output != OutputFormat.json:
                 err_console.print(f"  [red]{tid[:12]}... ({title}): {exc}[/red]")
 
+    procedural = (
+        await _run_procedural_pass(state, model, url, api_key, thread_id, output)
+        if procedures else None
+    )
+
     if output == OutputFormat.json:
-        json_success({
+        data = {
             "threads_processed": len(results),
             "total_extracted": total_extracted,
             "total_failures": total_failures,
             "results": results,
-        })
+        }
+        if procedural is not None:
+            data["procedures"] = procedural
+        json_success(data)
     elif output != OutputFormat.quiet:
         console.print(
             f"\n[bold]Done.[/bold] {total_extracted} memories extracted, "
             f"{total_failures} failures across {len(results)} thread(s)."
         )
+        if procedural is not None:
+            console.print(
+                f"Procedures: {procedural['created']} created, "
+                f"{procedural['matched']} matched, {procedural['rejected']} rejected, "
+                f"{procedural['errors']} errors across {len(procedural['results'])} thread(s)."
+            )
+
+
+async def _procedural_pending(session) -> list[dict]:
+    from memoryhub_local.services.procedure_extraction import get_procedural_pending_threads
+
+    return await get_procedural_pending_threads(session)
+
+
+async def _run_procedural_pass(state, model, url, api_key, thread_id, output) -> dict:
+    """Second dreaming pass: procedural graphs from tool-call trajectories (#554)."""
+    from memoryhub_local.services.procedure_extraction import (
+        extract_procedures_from_thread,
+        get_procedural_pending_threads,
+        make_http_complete_fn,
+    )
+
+    complete_fn = make_http_complete_fn(model, url, api_key)
+    if thread_id:
+        threads = [{"id": thread_id, "title": None}]
+    else:
+        async with state.session_factory() as session:
+            threads = await get_procedural_pending_threads(session)
+
+    summary = {"created": 0, "matched": 0, "rejected": 0, "errors": 0, "results": []}
+    for t_info in threads:
+        tid = t_info["id"]
+        try:
+            async with state.session_factory() as session:
+                r = await extract_procedures_from_thread(
+                    session, tid,
+                    complete_fn=complete_fn,
+                    embedding_service=state.embedding_service,
+                    recall_backend=state.recall_backend,
+                    extraction_model=model,
+                )
+        except Exception as exc:
+            r = {"error": str(exc)}
+        summary["created"] += r.get("created", 0)
+        summary["matched"] += r.get("matched", 0)
+        summary["rejected"] += len(r.get("rejections", []))
+        summary["errors"] += 1 if r.get("error") else 0
+        summary["results"].append({"thread_id": tid, **r})
+        if output == OutputFormat.table:
+            note = r.get("error") or r.get("skipped") or (
+                f"{r.get('created', 0)} created, {r.get('matched', 0)} matched"
+            )
+            console.print(f"  {tid[:12]}... procedures: {note}")
+    return summary
 
 
 # ── Turn-level hooks (#313) ──────────────────────────────────────────────────

@@ -14,6 +14,15 @@ export interface MemoryHubConfig {
     maxResults: number;
     maxResponseTokens: number;
   };
+  /**
+   * Opt-in: append each user message and tool call/result to a MemoryHub
+   * conversation thread so dreaming can learn procedures from them (#554).
+   * Off by default — tool output leaves the machine when enabled.
+   */
+  recordTrajectory: {
+    enabled: boolean;
+    maxToolOutputChars: number;
+  };
   defaults: {
     scope: string;
     projectId?: string;
@@ -134,6 +143,7 @@ export function resolveConfig(
   const server = getObj(raw, "server");
   const auth = getObj(raw, "auth");
   const autoRecall = getObj(raw, "autoRecall");
+  const recordTrajectory = getObj(raw, "recordTrajectory");
   const defaults = getObj(raw, "defaults");
 
   const credsPath = join(home, ".config", "memoryhub", "credentials");
@@ -172,6 +182,14 @@ export function resolveConfig(
       enabled: getBool(autoRecall, "enabled", true),
       maxResults: getNumber(autoRecall, "maxResults", 10),
       maxResponseTokens: getNumber(autoRecall, "maxResponseTokens", 4000),
+    },
+    recordTrajectory: {
+      enabled: getBool(
+        recordTrajectory,
+        "enabled",
+        env.MEMORYHUB_RECORD_TRAJECTORY === "1",
+      ),
+      maxToolOutputChars: getNumber(recordTrajectory, "maxToolOutputChars", 16000),
     },
     defaults: {
       scope: getString(defaults, "scope") ?? "user",

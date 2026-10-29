@@ -326,6 +326,35 @@ class TestExtractAction:
         assert result["model_url"] == "http://test"
 
     @pytest.mark.asyncio
+    async def test_extract_forwards_procedural_and_dry_run_opts(self):
+        from src.tools.thread import _EXTRACT_OPTS, _forward
+
+        result = _forward(
+            {"procedures": True, "procedure_mode": "propose", "dry_run": True, "x": 1},
+            _EXTRACT_OPTS,
+        )
+        assert result == {"procedures": True, "procedure_mode": "propose", "dry_run": True}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "opts, message",
+        [
+            ({"procedure_mode": "always"}, "procedure_mode"),
+            ({"procedures": "yes"}, "procedures"),
+            ({"dry_run": "true"}, "dry_run"),
+        ],
+    )
+    async def test_extract_rejects_bad_procedural_opts(self, opts, message):
+        from src.tools.thread import thread
+
+        claims = {"sub": "u1", "tenant_id": "default"}
+        with patch("src.core.authz.get_claims_from_context", return_value=claims), \
+                patch("src.tools._deps.get_s3_adapter", return_value=None), \
+                patch("src.tools._deps.get_embedding_service", return_value=None):
+            with pytest.raises(ToolError, match=message):
+                await thread(action="extract", thread_id=str(uuid.uuid4()), options=opts)
+
+    @pytest.mark.asyncio
     async def test_extract_action_dispatched(self):
         from src.tools.thread import thread
 

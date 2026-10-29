@@ -184,6 +184,17 @@ async def test_search_current_step_missing_node_is_a_tool_error():
 
 
 @pytest.mark.asyncio
+async def test_search_current_step_candidate_procedure_is_refused():
+    from memoryhub_core.services.exceptions import ProcedureNotEstablishedError
+
+    async def candidate(*args, **kwargs):
+        raise ProcedureNotEstablishedError(uuid.uuid4(), uuid.uuid4())
+
+    with _search_stack(candidate), pytest.raises(ToolError, match="still a candidate"):
+        await search_memory(query="deploy", current_step_id=str(uuid.uuid4()))
+
+
+@pytest.mark.asyncio
 async def test_search_current_step_llm_unavailable_does_not_rank():
     async def down(*args, **kwargs):
         raise LLMExtractionServiceUnavailableError("LLM extraction URL is not configured")

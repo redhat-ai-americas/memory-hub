@@ -2,6 +2,16 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [Unreleased]
+
+- **`memoryhub thread record`** (#554): appends a Claude Code hook payload
+  (stdin) to the session's thread as `user` / `tool_call` / `tool_result` /
+  `assistant` messages. Opt-in via `memoryhub config init --record-trajectories`
+  (async hooks). Never fails the host.
+- **`memoryhub thread outcome`** (#554): explicit session outcome marker.
+- **`memoryhub dream --procedures`** (#554): learn procedural graphs from
+  local threads (off by default).
+
 ## [0.12.1] -- 2026-07-29
 
 - Defer topic search until user provides actionable signal (#471)

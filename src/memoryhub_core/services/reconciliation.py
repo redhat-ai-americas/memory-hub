@@ -286,6 +286,12 @@ async def rollback_extraction_run(
     For creates: soft-delete the created memory and its children.
     For updates: soft-delete the new version and restore the prior version.
     Skips decisions where post-run modifications have occurred.
+
+    Procedural decisions (``proc_*`` actions, #554) are undone by
+    ``procedure_evolution.rollback_procedural_decision``: created graphs are
+    soft-deleted, in-place metadata edits are restored from their snapshots,
+    deprecated steps and edges are reinstated and added ones retired. Their
+    counts are reported under ``procedural`` (only when such rows exist).
     """
     stmt = (
         select(ReconciliationDecisionRow)
@@ -310,7 +316,24 @@ async def rollback_extraction_run(
     skipped_modified = 0
     skipped_deleted = 0
 
+    procedural = {"rolled_back": 0, "skipped_modified": 0, "noop": 0}
+    has_procedural = False
     for decision in decisions:
+        if decision.action.startswith("proc_"):
+            from memoryhub_core.services.procedure_evolution import rollback_procedural_decision
+
+            has_procedural = True
+            status = await rollback_procedural_decision(
+                session,
+                action=decision.action,
+                content=decision.candidate_content,
+                memory_id=decision.memory_id,
+                now=now,
+                tenant_id=decision.tenant_id,
+            )
+            procedural[status] += 1
+            continue
+
         if decision.action == "skip":
             rolled_skips += 1
             continue
@@ -406,7 +429,7 @@ async def rollback_extraction_run(
 
     await session.commit()
 
-    return {
+    response: dict[str, Any] = {
         "extraction_run_id": extraction_run_id,
         "total_decisions": len(decisions),
         "rolled_back": {
@@ -419,3 +442,6 @@ async def rollback_extraction_run(
             "already_deleted": skipped_deleted,
         },
     }
+    if has_procedural:
+        response["procedural"] = procedural
+    return response

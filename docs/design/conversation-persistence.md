@@ -175,7 +175,7 @@ All actions inherit MemoryHub's existing authorization flow: `get_claims_from_co
 | `share` | thread_id, grantee_id, access_level | authorized_by | Grant read or read-write access. |
 | `archive` | thread_id | reason | Set status to archived. Immutable thereafter. |
 | `fork` | thread_id, from_sequence | title | Create a divergent copy from a fork point. |
-| `extract` | thread_id | turn_range, method, model | Trigger extraction pipeline. Async by default. |
+| `extract` | thread_id | turn_range, method, model, dry_run, procedures, procedure_mode | Trigger extraction pipeline. Async by default. `procedures`/`procedure_mode` control the procedural-graph pass (#554). |
 
 ### Authorization
 
@@ -237,6 +237,10 @@ For each extraction window:
 4. For each extracted fact, call the existing `write_memory` service path to create or update a `memory_node`. This reuses deduplication, embedding, and conflict detection.
 5. Write a `conversation_extractions` record linking `memory_node_id` to `thread_id` and `source_messages`.
 6. Advance `extraction_cursor` to the highest processed `sequence_number`.
+
+### Procedural graph pass (#554)
+
+When `MEMORYHUB_PROCEDURAL_EXTRACTION_MODE` is `propose` or `apply` (default `off`), `extract` runs a second pass after the fact windows. It re-reads the whole session (S3 content hydrated, budgeted), asks the model for a procedural graph proposal, writes new procedures in one transaction and refines matching ones. It keeps its own cursor in `thread.metadata_["procedural_extraction"]` and never moves `extraction_cursor`. An explicit outcome can be attached to a message with `append(..., options={"metadata": {"outcome": "success" | "failure" | "partial"}})`, or `memoryhub thread outcome`. Hosts can stream trajectories into threads with `memoryhub thread record` (Claude Code hooks, installed by `memoryhub config init --record-trajectories`) or the opencode plugin's `recordTrajectory` option. Both are opt-in. Design: `planning/procedural-graph-extraction.md`.
 
 ### Integration with `write_memory`
 

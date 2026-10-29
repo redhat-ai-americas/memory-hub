@@ -87,6 +87,37 @@ class AppSettings(BaseSettings):
     conv_extraction_window_size: int = 4
     conv_extraction_timeout: int = 60
 
+    # Procedural graph extraction from dreaming (#554). Off by default so R1
+    # dreaming is unchanged. Values: off | propose | apply. Design:
+    # planning/procedural-graph-extraction.md (D1, D7).
+    procedural_extraction_mode: str = "off"
+    procedural_min_steps: int = 3
+    procedural_max_steps: int = 30
+    procedural_min_detection_confidence: float = 0.7
+    procedural_min_outcome_confidence: float = 0.7
+    procedural_min_supporting_sessions: int = 2
+    procedural_deprecation_min_failures: int = 2
+    procedural_max_edits_per_run: int = 10
+    procedural_auto_weight: float = 0.6
+    procedural_max_auto_weight: float = 0.7
+    procedural_evidence_session_limit: int = 50
+    procedural_max_transcript_chars: int = 60000
+    procedural_step_match_threshold: float = 0.85
+    # Serve localized guidance (#553) for extracted procedures that are still
+    # "candidate" (one session of evidence). Off: such guidance is refused
+    # until the procedure is "established".
+    procedural_serve_candidates: bool = False
+    # CA bundle for the procedural extraction LLM endpoint when it uses a
+    # private CA (TLS verification stays on; see #604).
+    procedural_llm_ca_bundle: str = ""
+    # Optional validation gate for structural edits in apply mode (for
+    # example an EvalHub-backed service). Empty: off. Fails closed when set.
+    # See memoryhub_core.services.procedure_validation for the contract.
+    procedural_validation_url: str = ""
+    procedural_validation_api_key: str = ""
+    procedural_validation_timeout: float = 120
+    procedural_validation_ca_bundle: str = ""
+
     # Phase 2 entity extraction (#170)
     entity_extraction_enabled: bool = False
     entity_extraction_concurrency: int = 10

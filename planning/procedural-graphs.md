@@ -326,11 +326,12 @@ hand for existing records isn't blocking anything in this epic.
 
 ## Open questions carried forward
 
-1. Should `precedes`/`requires`/`alternative_to` remain manually creatable indefinitely, or
-   should they become system-managed (like `mentions`) once #554 ships automated extraction?
-   Leaning toward: keep manual creation available even after #554, since hand-authored
-   procedures (a human writing down a known-good runbook) are a legitimate first-class use case,
-   not just a bootstrapping measure.
+1. ~~Should `precedes`/`requires`/`alternative_to` remain manually creatable indefinitely, or
+   should they become system-managed (like `mentions`) once #554 ships automated extraction?~~
+   **Closed by #554 (2026-10-26): they stay manually creatable.** Hand-authored procedures are
+   first-class. Automated extraction marks what it writes with `metadata_.procedure.origin =
+   "extracted"` and never structurally changes a procedure without that marker; it only records
+   pending edits on the root. See `planning/procedural-graph-extraction.md` (D6).
 2. Should a procedure's entry point be a convention (e.g. "the step with no incoming `precedes`
    edge") or an explicit field (`metadata_.procedure.entry_step_id` on the root, as sketched in
    3c)? The explicit field is more robust against graphs with multiple valid entry points

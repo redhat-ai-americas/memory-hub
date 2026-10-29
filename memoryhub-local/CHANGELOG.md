@@ -2,6 +2,16 @@
 
 All notable changes to the `memoryhub-local` package.
 
+## [Unreleased]
+
+- Procedural graph extraction (#554), used by `memoryhub dream --procedures`:
+  - Uses the same detection contract and prompt as the server
+    (`services/procedure_contract.py`, `services/procedure_prompt.py`, kept in sync by a parity test).
+  - Writes a candidate graph (root, steps, edges, provenance, decision rows, cursor) in one
+    transaction in the thread's own scope.
+  - A later matching session adds its evidence to the root's ledger.
+  - No refinement in the personal edition.
+
 ## [0.2.1] -- 2026-07-29
 
 - Fix: include `logical_id` in read, write, and update tool responses

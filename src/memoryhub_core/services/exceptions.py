@@ -23,6 +23,25 @@ class GuidanceAccessDeniedError(Exception):
         super().__init__(f"Not authorized to read memory {node_id}.")
 
 
+class ProcedureNotEstablishedError(GuidanceAccessDeniedError):
+    """Guidance was requested for an extracted procedure that is still a candidate.
+
+    Extracted procedures start as ``candidate`` after one session of evidence
+    and become ``established`` once enough sessions support them (#554).
+    Candidate guidance is not served unless
+    ``MEMORYHUB_PROCEDURAL_SERVE_CANDIDATES`` is set.
+    """
+
+    def __init__(self, node_id: uuid.UUID, procedure_id: uuid.UUID) -> None:
+        self.node_id = node_id
+        self.procedure_id = procedure_id
+        Exception.__init__(
+            self,
+            f"Procedure {procedure_id} was extracted automatically and is still a candidate; "
+            "guidance is served once it is established by more sessions.",
+        )
+
+
 class EntryStepResolutionError(Exception):
     """Raised when a procedure has no single step to enter on.
 

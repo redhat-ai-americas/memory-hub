@@ -111,7 +111,23 @@ Set `MEMORYHUB_DEBUG=1` for verbose logging in the opencode server log.
 | `chat.message` | Runs the auto-recall search for the new user message (15s cap) |
 | `experimental.chat.messages.transform` | Injects the recalled `<relevant-memories>` block into the latest user message (idempotent, marker-guarded) |
 | `experimental.chat.system.transform` | Appends `memoryhub-rules.md` to the system prompt |
+| `tool.execute.after` | With `recordTrajectory.enabled`: records the tool call and its output in the session's thread |
 | `dispose` | Closes the MCP connection |
+
+### Recording tool-call trajectories (opt-in)
+
+With `"recordTrajectory": { "enabled": true }` in the plugin options (or
+`MEMORYHUB_RECORD_TRAJECTORY=1`), the plugin writes each opencode session into one
+MemoryHub conversation thread. User messages, tool calls and tool results are written
+in order, and the thread is project-scoped when `defaults.projectId` is set. The server's
+dreaming pass can then learn procedural graphs from these threads when
+`MEMORYHUB_PROCEDURAL_EXTRACTION_MODE` is `propose` or `apply` (#554).
+
+- Off by default.
+- MemoryHub's own `memoryhub_*` tools are not recorded.
+- Common secret formats are redacted before anything is sent.
+- Tool output is clipped to `maxToolOutputChars` (default 16000).
+- A recording failure is logged and never fails the tool call.
 
 All MemoryHub traffic flows through the server's MCP interface
 (`register_session` + the multiplexed `memory(action=...)` tool) over

@@ -30,7 +30,11 @@ _LIST_OPTS = frozenset({
     "scope_id", "status", "participant_id", "limit", "offset",
 })
 _ARCHIVE_OPTS = frozenset({"reason"})
-_EXTRACT_OPTS = frozenset({"turn_range", "model", "model_url", "tenant_id"})
+_EXTRACT_OPTS = frozenset({
+    "turn_range", "model", "model_url", "tenant_id",
+    "procedures", "procedure_mode", "dry_run",
+})
+_PROCEDURE_MODES = frozenset({"off", "propose", "apply"})
 _FORK_OPTS = frozenset({"from_sequence", "title"})
 _SHARE_OPTS = frozenset({"grantee_id", "access_level", "authorized_by"})
 _DELETE_OPTS = frozenset({"cascade"})
@@ -111,8 +115,13 @@ async def thread(
         List threads visible to the caller.
       archive(thread_id, [options: reason])
         Archive a thread. Immutable thereafter.
-      extract(thread_id, [options: turn_range, model, model_url])
+      extract(thread_id, [options: turn_range, model, model_url, dry_run,
+              procedures, procedure_mode])
         Trigger extraction pipeline. Produces memory nodes from messages.
+        dry_run returns decisions without writing. procedures/procedure_mode
+        control procedural-graph extraction (off|propose|apply); the server
+        setting MEMORYHUB_PROCEDURAL_EXTRACTION_MODE (default off) is a
+        ceiling. When it runs, the result has a 'procedures' report.
       fork(thread_id, [options: from_sequence (required), title])
         Create a divergent copy of a thread up to from_sequence.
       share(thread_id, [options: grantee_id (required), access_level (required),
@@ -503,6 +512,19 @@ async def _dispatch_extract(thread_id_str, opts, ctx):
             parts = tr.split("-", 1)
             turn_range = (int(parts[0]), int(parts[1]))
 
+    procedure_mode = extract_opts.get("procedure_mode")
+    if procedure_mode is not None and procedure_mode not in _PROCEDURE_MODES:
+        raise ToolError(
+            "options.procedure_mode must be one of: off, propose, apply. "
+            "Example: thread(action='extract', thread_id='...', options={'procedure_mode': 'propose'})"
+        )
+    procedures = extract_opts.get("procedures")
+    if procedures is not None and not isinstance(procedures, bool):
+        raise ToolError("options.procedures must be true or false.")
+    dry_run = extract_opts.get("dry_run", False)
+    if not isinstance(dry_run, bool):
+        raise ToolError("options.dry_run must be true or false.")
+
     session, gen = await get_db_session()
     try:
         from sqlalchemy import select
@@ -531,6 +553,9 @@ async def _dispatch_extract(thread_id_str, opts, ctx):
             model_override=extract_opts.get("model"),
             url_override=extract_opts.get("model_url"),
             turn_range=turn_range,
+            dry_run=dry_run,
+            procedures=procedures,
+            procedure_mode=procedure_mode,
         )
 
         if ctx is not None:

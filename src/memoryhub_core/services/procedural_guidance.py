@@ -27,6 +27,7 @@ from memoryhub_core.services.exceptions import (
     GuidanceAccessDeniedError,
     LLMExtractionServiceError,
     LLMExtractionServiceUnavailableError,
+    ProcedureNotEstablishedError,
 )
 from memoryhub_core.services.graph import (
     _MAX_HOPS_CAP,
@@ -495,6 +496,30 @@ def restrict_subgraph(
     )
 
 
+async def _refuse_candidate_procedure(
+    current: MemoryNodeRead, session: AsyncSession, *, tenant_id: str,
+) -> None:
+    """Raise when ``current`` belongs to an extracted procedure that is still a candidate (#554).
+
+    Hand-authored procedures carry no ``origin`` and are never affected.
+    """
+    if AppSettings().procedural_serve_candidates:
+        return
+    candidates = [current.id] + ([current.parent_id] if current.parent_id else [])
+    for candidate_id in candidates:
+        try:
+            node = await _fetch_current_node(candidate_id, session, tenant_id=tenant_id)
+        except Exception:
+            continue
+        if node.parent_id is not None or node.content_type != "procedural":
+            continue
+        procedure = (node.metadata_ or {}).get("procedure") if isinstance(node.metadata_, dict) else None
+        if isinstance(procedure, dict) and procedure.get("origin") == "extracted" \
+                and procedure.get("status", "candidate") == "candidate":
+            raise ProcedureNotEstablishedError(current.id, node.id)
+        return
+
+
 async def localized_guidance(
     node_id: uuid.UUID,
     session: AsyncSession,
@@ -522,9 +547,10 @@ async def localized_guidance(
         relationship_types=relationship_types,
     )
     omitted = 0
+    if authorize is not None and not authorize(subgraph.current):
+        raise GuidanceAccessDeniedError(subgraph.current.id)
+    await _refuse_candidate_procedure(subgraph.current, session, tenant_id=tenant_id)
     if authorize is not None:
-        if not authorize(subgraph.current):
-            raise GuidanceAccessDeniedError(subgraph.current.id)
         before = len(subgraph.neighbors)
         readable = {item["node"].id for item in subgraph.neighbors if authorize(item["node"])}
         subgraph = restrict_subgraph(subgraph, readable)

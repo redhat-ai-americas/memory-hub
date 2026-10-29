@@ -19,6 +19,7 @@ from memoryhub_core.services.exceptions import (
     LLMExtractionServiceError,
     LLMExtractionServiceUnavailableError,
     MemoryNotFoundError,
+    ProcedureNotEstablishedError,
 )
 from memoryhub_core.services.procedural_guidance import (
     GuidanceResult,
@@ -68,6 +69,8 @@ async def run_guidance(
         )
     except MemoryNotFoundError:
         raise ToolError(f"Memory node {node_id} not found.") from None
+    except ProcedureNotEstablishedError as exc:
+        raise ToolError(f"{exc} Search without current_step_id still lists it.") from None
     except GuidanceAccessDeniedError as exc:
         raise ToolError(str(exc)) from None
     except LLMExtractionServiceUnavailableError as exc:

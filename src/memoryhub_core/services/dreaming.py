@@ -380,6 +380,8 @@ async def extract_from_thread(
     dry_run: bool = False,
     circuit_breaker_ratio: float = 20.0,
     circuit_breaker_min: int = 5,
+    procedures: bool | None = None,
+    procedure_mode: str | None = None,
 ) -> dict[str, Any]:
     """Extract memories from a conversation thread.
 
@@ -396,9 +398,15 @@ async def extract_from_thread(
         dry_run: Produce decisions without committing writes.
         circuit_breaker_ratio: Max create:update ratio before halting.
         circuit_breaker_min: Minimum decisions before circuit breaker arms.
+        procedures: Request (True/None) or suppress (False) the procedural
+            pass (#554). It runs only when the effective mode is not ``off``.
+        procedure_mode: Caller's procedural mode (off|propose|apply). It can
+            only lower ``AppSettings.procedural_extraction_mode``.
 
     Returns:
         Dict with extracted_count, cursor, failures count, extraction_run_id.
+        When the procedural pass runs (or was explicitly requested), a
+        ``procedures`` key with its report.
     """
     settings = AppSettings()
     model = model_override or settings.conv_extraction_model
@@ -427,6 +435,20 @@ async def extract_from_thread(
         from memoryhub_core.services.exceptions import ThreadNotFoundError
         raise ThreadNotFoundError(thread_id)
 
+    # Procedural graph extraction (#554). With the default mode "off" this is
+    # the only new statement on the fact path: no query, no import.
+    proc_mode = "off"
+    if settings.procedural_extraction_mode != "off" or procedures or procedure_mode is not None:
+        from memoryhub_core.services.procedure_extraction import resolve_mode
+
+        proc_mode = resolve_mode(
+            settings.procedural_extraction_mode,
+            thread.retention_policy,
+            caller_mode=procedure_mode,
+            procedures=procedures,
+        )
+    proc_requested = bool(procedures) or procedure_mode is not None
+
     # Determine extraction mode from retention_policy
     retention = thread.retention_policy or {}
     mode = retention.get("extraction_mode", "per_turn")
@@ -454,12 +476,19 @@ async def extract_from_thread(
     messages = list(msg_result.scalars().all())
 
     if not messages:
-        return {
+        empty_response: dict[str, Any] = {
             "extracted_count": 0,
             "cursor": thread.extraction_cursor,
             "failures": 0,
             "extraction_run_id": extraction_run_id,
         }
+        if proc_mode != "off" or proc_requested:
+            empty_response["procedures"] = await _run_procedural_pass(
+                session, thread=thread, mode=proc_mode, settings=settings, model=model, url=url,
+                embedding_service=embedding_service, s3_adapter=s3_adapter,
+                turn_range=turn_range, dry_run=dry_run, fact_memory_ids=[],
+            )
+        return empty_response
 
     # Build windows
     windows = _compute_windows(messages, mode, settings.conv_extraction_window_size)
@@ -550,6 +579,18 @@ async def extract_from_thread(
                 )
                 break
 
+    procedures_report: dict[str, Any] | None = None
+    if proc_mode != "off" or proc_requested:
+        procedures_report = await _run_procedural_pass(
+            session, thread=thread, mode=proc_mode, settings=settings, model=model, url=url,
+            embedding_service=embedding_service, s3_adapter=s3_adapter,
+            turn_range=turn_range, dry_run=dry_run,
+            fact_memory_ids=[
+                d.memory_id for d in all_decisions
+                if d.memory_id is not None and d.action == "create"
+            ],
+        )
+
     response: dict[str, Any] = {
         "extracted_count": total_extracted,
         "cursor": thread.extraction_cursor,
@@ -567,4 +608,52 @@ async def extract_from_thread(
         response["windows_completed"] = windows_completed
         response["windows_total"] = len(windows)
 
+    if procedures_report is not None:
+        response["procedures"] = procedures_report
+
     return response
+
+
+async def _run_procedural_pass(
+    session: AsyncSession,
+    *,
+    thread: ConversationThread,
+    mode: str,
+    settings: AppSettings,
+    model: str,
+    url: str,
+    embedding_service: Any,
+    s3_adapter: Any | None,
+    turn_range: tuple[int, int] | None,
+    dry_run: bool,
+    fact_memory_ids: list[uuid.UUID],
+) -> dict[str, Any]:
+    """Run the #554 pass after the fact windows. Failures never affect facts."""
+    if mode == "off":
+        return {"mode": "off"}
+    from memoryhub_core.services.procedure_extraction import extract_procedures_from_thread
+
+    try:
+        return await extract_procedures_from_thread(
+            session,
+            thread=thread,
+            embedding_service=embedding_service,
+            mode=mode,
+            model=model,
+            url=url,
+            api_key=settings.conv_extraction_api_key,
+            timeout=settings.conv_extraction_timeout,
+            s3_adapter=s3_adapter,
+            turn_range=turn_range,
+            dry_run=dry_run,
+            settings=settings,
+            fact_memory_ids=fact_memory_ids,
+        )
+    except Exception as exc:  # defensive: the pass reports its own errors
+        logger.exception("Procedural pass failed for thread %s", thread.id)
+        try:
+            await session.rollback()
+            await session.refresh(thread)
+        except Exception:  # pragma: no cover
+            pass
+        return {"mode": mode, "error": str(exc)[:500]}

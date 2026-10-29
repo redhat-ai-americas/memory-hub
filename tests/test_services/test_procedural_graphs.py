@@ -32,6 +32,7 @@ from memoryhub_core.services.graph import (
     create_relationship,
     find_related,
     get_subtree,
+    resolve_procedure_entry,
 )
 from memoryhub_core.services.memory import create_memory as _svc_create_memory
 from memoryhub_core.services.memory import list_memories
@@ -369,3 +370,81 @@ async def test_collect_graph_neighbors_filtered_to_procedural_types():
     assert params["rel_types"] == _PROCEDURAL_REL_TYPES
     sql_obj = session.execute.call_args[0][0]
     assert "ANY(:rel_types)" in str(sql_obj)
+
+
+# ---------------------------------------------------------------------------
+# update_memory on a procedure root (#554 review: the graph used to be orphaned)
+# ---------------------------------------------------------------------------
+
+
+async def _linear_procedure(session, embedding_service, *, scope=MemoryScope.USER, scope_id=None):
+    root = await _create_node(
+        session, embedding_service, content="Release: build, test, ship",
+        content_type=ContentType.PROCEDURAL, scope=scope, scope_id=scope_id,
+    )
+    steps = []
+    for action in ("Build", "Test", "Ship"):
+        steps.append(await _create_node(
+            session, embedding_service, content=action, content_type=ContentType.PROCEDURAL,
+            parent_id=root.id, branch_type="procedure_step", scope=scope, scope_id=scope_id,
+            metadata={"procedure": {"action": action}},
+        ))
+    for a, b in zip(steps, steps[1:], strict=False):
+        await create_relationship(_rel(a.id, b.id, RelationshipType.precedes), session)
+    return root, steps
+
+
+@pytest.mark.asyncio
+async def test_updating_a_procedure_root_keeps_its_graph(async_session, embedding_service):
+    from memoryhub_core.models.schemas import MemoryNodeUpdate
+    from memoryhub_core.services.memory import update_memory
+
+    root, steps = await _linear_procedure(
+        async_session, embedding_service, scope=MemoryScope.PROJECT, scope_id="proj-1",
+    )
+    new_root = await update_memory(
+        root.id,
+        MemoryNodeUpdate(metadata={"procedure": {"entry_step_id": str(steps[0].id), "note": "v2"}}),
+        async_session, embedding_service,
+    )
+    entry = await resolve_procedure_entry(new_root.id, async_session, tenant_id=_TEST_TENANT_ID)
+    copies = {n.content: n for n in (await async_session.execute(
+        select(MemoryNode).where(MemoryNode.parent_id == new_root.id, MemoryNode.is_current.is_(True))
+    )).scalars().all()}
+    assert set(copies) == {"Build", "Test", "Ship"}
+    assert entry == copies["Build"].id  # entry_step_id followed the copy
+    for node in copies.values():
+        assert node.content_type == "procedural" and node.scope_id == "proj-1"
+        assert node.branch_type == "procedure_step"
+    related = await find_related(
+        copies["Build"].id, async_session, tenant_id=_TEST_TENANT_ID, relationship_types=_PROCEDURAL_REL_TYPES,
+    )
+    assert {r["node"].content for r in related} == {"Test", "Ship"}
+
+
+@pytest.mark.asyncio
+async def test_updating_a_root_without_entry_still_resolves(async_session, embedding_service):
+    from memoryhub_core.models.schemas import MemoryNodeUpdate
+    from memoryhub_core.services.memory import update_memory
+
+    root, _ = await _linear_procedure(async_session, embedding_service)
+    new_root = await update_memory(root.id, MemoryNodeUpdate(content="Release v2"), async_session, embedding_service)
+    entry = await resolve_procedure_entry(new_root.id, async_session, tenant_id=_TEST_TENANT_ID)
+    node = await async_session.get(MemoryNode, entry)
+    assert node.content == "Build" and node.parent_id == new_root.id
+
+
+@pytest.mark.asyncio
+async def test_updating_a_root_does_not_resurrect_deleted_steps(async_session, embedding_service):
+    from memoryhub_core.models.schemas import MemoryNodeUpdate
+    from memoryhub_core.services.memory import update_memory
+
+    root, steps = await _linear_procedure(async_session, embedding_service)
+    dead = await async_session.get(MemoryNode, steps[2].id)
+    dead.deleted_at = datetime.now(UTC)
+    await async_session.commit()
+    new_root = await update_memory(root.id, MemoryNodeUpdate(content="Release v2"), async_session, embedding_service)
+    live = (await async_session.execute(
+        select(MemoryNode.content).where(MemoryNode.parent_id == new_root.id, MemoryNode.deleted_at.is_(None))
+    )).scalars().all()
+    assert sorted(live) == ["Build", "Test"]
