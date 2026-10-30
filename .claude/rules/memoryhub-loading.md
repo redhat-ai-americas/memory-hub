@@ -24,8 +24,8 @@ there is no working set in this pattern.
 
 ## During the session
 
-- Call `search_memory` only when you encounter a question whose answer
-  might be in memory. Each search is one-shot.
+- Call `memory(action="search", query="...")` only when you encounter a
+  question whose answer might be in memory. Each search is one-shot.
 - Triggers that warrant a search: the user asks "what did we decide
   about X?", references a project-specific term you don't recognize, or
   asks for a recommendation that should reflect prior decisions.
@@ -57,8 +57,8 @@ implicit context. Use it for narrow one-shot tooling sessions.
 - DO write preferences, decisions, architectural choices, tool
   configuration, and workflow patterns. Skip ephemeral things like "user
   asked me to read a file."
-- Use `update_memory` (not `write_memory`) to revise an existing entry —
-  this preserves version history. Use `write_memory` only for new facts.
+- Use `memory(action="update", ...)` (not `memory(action="write", ...)`) to revise an existing entry —
+  this preserves version history. Use `memory(action="write", ...)` only for new facts.
 - Set weights deliberately: `1.0` for critical policies, `0.8-0.9` for
   strong preferences, `0.5-0.7` for nice-to-know context.
 - Add rationale branches via `parent_id` + `branch_type="rationale"` when
@@ -70,6 +70,6 @@ implicit context. Use it for narrow one-shot tooling sessions.
 ## Contradiction handling
 
 When you notice the user's behavior contradicting a memory you have
-loaded, call `report_contradiction` with the memory_id and a one-sentence
+loaded, call `manage_curation(action="report_contradiction", memory_id="...", description="...")` with a one-sentence
 description of the observed behavior. The server tracks contradiction
 counts and surfaces stale memories for review.
