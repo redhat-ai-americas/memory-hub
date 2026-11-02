@@ -18,6 +18,26 @@ What is missing:
 - No project-level policies (TTL defaults, memory quotas)
 - No projects panel in `memoryhub-ui`
 
+### Implemented: lifecycle and policies (#671, migration 033)
+
+Migration `033_project_lifecycle` adds `archived_at`, `archived_by`, `deleted_at`, `deleted_by` and `policies` (JSON, default `{}`) to `projects`. The service layer in `services/project.py` enforces everything; there is still no FK from `memory_nodes.scope_id` (see Referential Integrity, deferred).
+
+| Operation | Who | Effect |
+|---|---|---|
+| `update` | project admins, `memory:admin` / `project:admin` | description, `invite_only`, policies (merged; a key set to `null` is removed) |
+| `archive` / `unarchive` | project admins, `memory:admin` / `project:admin` | archived = read-only: reads and membership stay, `write_memory` / `update_memory` / joins are refused with "archived and read-only" |
+| `delete` | `memory:admin` / `project:admin` only | soft-deletes the project and every project-scoped memory (all versions and branches) in one transaction; the project disappears from lists and membership lookups; the name is reserved and never reused |
+| `set_role` | project admins, `memory:admin` / `project:admin` | `admin` ↔ `member`; the last admin cannot be demoted |
+
+Project admins cannot delete: deletion is destructive, so they archive and ask an administrator.
+
+Policies (all optional, validated on save):
+- `ttl_days` (int ≥ 1) — new root memories get `relevant_until = now + ttl_days` unless the caller passes `relevant_until`. Nothing is expired retroactively.
+- `max_memories` (int ≥ 1) — quota on current, non-deleted root memories (branches and new versions do not count). A new write past the limit fails with "has reached its limit".
+- `default_weight` (0.0–1.0) — weight for project writes that do not pass one (otherwise 0.7).
+
+Surfaces: `manage_project(action="update"|"archive"|"unarchive"|"delete"|"set_role", policies=...)`, the compact `memory(action="update_project"|"archive_project"|"unarchive_project"|"delete_project"|"set_member_role")`, SDK `update_project` / `archive_project` / `unarchive_project` / `delete_project` / `set_project_member_role`, and CLI `memoryhub project update|archive|unarchive|delete|set-role`. The dashboard side follows in a separate PR.
+
 ## Problem Statement
 
 A projects table and auto-enrollment are necessary but not sufficient for governed collaboration. Without explicit lifecycle management, projects accumulate silently — any agent can create one by writing a project-scoped memory, and there is no way to shut one down, transfer ownership, or enforce access to invite-only projects without direct database manipulation. Invite-only is a flag with no enforcement mechanism at the API level: there is no way to add a member to an invite-only project without bypassing the application.

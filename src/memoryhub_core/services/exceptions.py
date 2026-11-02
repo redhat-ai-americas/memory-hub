@@ -132,6 +132,33 @@ class ProjectMembershipRequiredError(Exception):
         )
 
 
+class ProjectArchivedError(Exception):
+    """The project is archived: read-only until a project admin unarchives it."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(
+            f"Project '{project_id}' is archived and read-only. Its memories can still be read; "
+            "ask a project admin to unarchive it before writing."
+        )
+
+
+class ProjectQuotaExceededError(Exception):
+    """The project reached its max_memories policy."""
+
+    def __init__(self, project_id: str, limit: int) -> None:
+        self.project_id = project_id
+        self.limit = limit
+        super().__init__(
+            f"Project '{project_id}' has reached its limit of {limit} memories. Update or delete existing "
+            "project memories, or ask a project admin to raise the limit."
+        )
+
+
+class InvalidProjectPolicyError(ValueError):
+    """A project policy value is out of range."""
+
+
 class ProjectNotFoundError(Exception):
     """Raised when a project does not exist."""
 

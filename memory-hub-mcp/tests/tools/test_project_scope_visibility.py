@@ -139,6 +139,11 @@ class TestAutoEnrollmentClaimsUpdate:
                     return_value=({"all_doctors"}, True),
                 ),
                 patch(
+                    "src.tools.write_memory.project_write_policies",
+                    new_callable=AsyncMock,
+                    return_value={},
+                ),
+                patch(
                     "src.tools.write_memory.PROJECT_ISOLATION_ENABLED",
                     True,
                 ),
@@ -238,6 +243,11 @@ class TestAutoEnrollmentClaimsUpdate:
                     "src.tools.write_memory.ensure_project_membership",
                     new_callable=AsyncMock,
                     return_value=({"all_doctors"}, False),
+                ),
+                patch(
+                    "src.tools.write_memory.project_write_policies",
+                    new_callable=AsyncMock,
+                    return_value={},
                 ),
                 patch(
                     "src.tools.write_memory.PROJECT_ISOLATION_ENABLED",

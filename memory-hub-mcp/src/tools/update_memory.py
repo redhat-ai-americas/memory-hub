@@ -21,10 +21,12 @@ from memoryhub_core.services.exceptions import (
     MemoryAccessDeniedError,
     MemoryNotCurrentError,
     MemoryNotFoundError,
+    ProjectArchivedError,
+    ProjectNotProvisionedError,
 )
 from memoryhub_core.services.memory import read_memory as _read_memory
 from memoryhub_core.services.memory import update_memory as svc_update_memory
-from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.project import assert_project_writable, get_projects_for_user
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
@@ -186,6 +188,13 @@ async def update_memory(
             raise ToolError(
                 f"Not authorized to update this {existing.scope}-scope memory."
             )
+
+        # #671: an archived project is read-only for everyone.
+        if existing.scope == "project" and existing.scope_id:
+            try:
+                await assert_project_writable(session, existing.scope_id)
+            except (ProjectArchivedError, ProjectNotProvisionedError) as exc:
+                raise ToolError(str(exc)) from exc
 
         # Resolve actor/driver identity for audit trail.
         actor_id = claims["sub"]

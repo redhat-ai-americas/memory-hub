@@ -13,6 +13,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from memoryhub_core.services.exceptions import (
+    InvalidProjectPolicyError,
     LastAdminError,
     MembershipNotFoundError,
     ProjectAlreadyExistsError,
@@ -21,12 +22,18 @@ from memoryhub_core.services.exceptions import (
 from memoryhub_core.services.project import (
     provisioning_mode,
     add_project_member,
+    archive_project,
     create_project,
+    delete_project,
     get_project,
     get_project_members,
     list_projects_for_tenant,
     memory_counts,
     remove_project_member,
+    unarchive_project,
+    update_member_role,
+    update_project,
+    validate_policies,
 )
 from src.core.app import mcp
 from src.core.authz import (
@@ -38,7 +45,10 @@ from src.tools._deps import get_db_session, release_db_session
 
 logger = logging.getLogger(__name__)
 
-_VALID_ACTIONS = {"list", "create", "describe", "add_member", "remove_member"}
+_VALID_ACTIONS = {
+    "list", "create", "describe", "add_member", "remove_member",
+    "update", "archive", "unarchive", "delete", "set_role",
+}
 _VALID_FILTERS = {"mine", "all"}
 _VALID_ROLES = {"member", "admin"}
 # Central provisioning: who may create projects and manage any project's members.
@@ -47,8 +57,11 @@ _PROVISIONING_SCOPES = {"memory:admin", "project:admin"}
 
 def _can_provision(claims: dict) -> bool:
     return bool(_PROVISIONING_SCOPES & set(claims.get("scopes", [])))
-_ACTIONS_REQUIRING_PROJECT = {"create", "describe", "add_member", "remove_member"}
-_ACTIONS_REQUIRING_USER = {"add_member", "remove_member"}
+_ACTIONS_REQUIRING_PROJECT = {
+    "create", "describe", "add_member", "remove_member",
+    "update", "archive", "unarchive", "delete", "set_role",
+}
+_ACTIONS_REQUIRING_USER = {"add_member", "remove_member", "set_role"}
 
 
 def _require_param(action: str, name: str, value: str | None) -> str:
@@ -79,7 +92,11 @@ async def manage_project(
                 "'create' (new project), "
                 "'describe' (project details + members), "
                 "'add_member' (add user to project), "
-                "'remove_member' (remove user from project)."
+                "'remove_member' (remove user from project), "
+                "'update' (description, enrollment, policies), "
+                "'archive' / 'unarchive' (read-only on/off), "
+                "'delete' (soft-delete with all project memories), "
+                "'set_role' (member or admin)."
             ),
         ),
     ],
@@ -95,20 +112,20 @@ async def manage_project(
     description: Annotated[
         str | None,
         Field(
-            description="Project description. Used with action='create'.",
+            description="Project description. Used with action='create' or 'update'.",
         ),
     ] = None,
     invite_only: Annotated[
-        bool,
+        bool | None,
         Field(
             description=(
-                "Enrollment policy. Used with action='create'. With central "
+                "Enrollment policy. Used with action='create' or 'update'. With central "
                 "provisioning (the default) members are always added "
                 "explicitly. In self-service mode, False lets anyone join by "
                 "writing a project-scoped memory; True requires an invitation."
             ),
         ),
-    ] = False,
+    ] = None,
     filter: Annotated[  # noqa: A002
         str,
         Field(
@@ -131,14 +148,25 @@ async def manage_project(
         str,
         Field(
             description=(
-                "Role for the user. Used with action='add_member'. "
+                "Role for the user. Used with action='add_member' or 'set_role'. "
                 "One of: 'member' (default), 'admin'."
             ),
         ),
     ] = "member",
+    policies: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description=(
+                "Project policies, used with action='create' or 'update': "
+                "ttl_days (new memories go stale after N days), max_memories "
+                "(cap on current memories), default_weight (0.0-1.0 for writes "
+                "that set no weight). Set a key to null to remove it."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Manage projects: list, create, describe, add/remove members.
+    """Manage projects: list, create, describe, members, lifecycle and policies.
 
     Projects organize memories by team or topic. Use action='list' to discover
     projects, 'create' to start a new one, 'describe' to see details and
@@ -150,6 +178,13 @@ async def manage_project(
     creates or joins it. In self-service mode open projects allow
     auto-enrollment when writing project-scoped memories, and invite-only
     projects require explicit add_member by an admin.
+
+    Lifecycle: project admins (and memory:admin / project:admin holders)
+    update, archive, unarchive and change roles. An archived project is
+    read-only: its memories stay readable, writes and updates are refused.
+    Deleting soft-deletes the project and every memory in it and needs
+    memory:admin or project:admin; prefer archiving. A deleted project's name
+    is never reused.
     """
     try:
         claims = get_claims_from_context()
@@ -197,9 +232,14 @@ async def manage_project(
                     "Ask your admin to create the project and add you, then use "
                     "action='list' to see the projects you belong to."
                 )
-            return await _handle_create(
-                session, tenant, caller, project_name, description, invite_only,
+            result = await _handle_create(
+                session, tenant, caller, project_name, description, bool(invite_only),
             )
+            if policies:
+                await _apply_update(session, project_name, None, None, policies)
+                await session.commit()
+                result["project"]["policies"] = validate_policies(policies)
+            return result
         elif action == "describe":
             return await _handle_describe(session, tenant, project_name)
         elif action == "add_member":
@@ -207,10 +247,17 @@ async def manage_project(
                 session, tenant, caller, project_name, user_id, role,
                 provisioner=_can_provision(claims),
             )
-        else:  # remove_member
+        elif action == "remove_member":
             return await _handle_remove_member(
                 session, caller, project_name, user_id,
                 provisioner=_can_provision(claims),
+            )
+        else:
+            return await _handle_lifecycle(
+                session, tenant, caller, action, project_name,
+                provisioner=_can_provision(claims),
+                description=description, invite_only=invite_only,
+                policies=policies, user_id=user_id, role=role,
             )
 
     except ToolError:
@@ -275,6 +322,94 @@ async def _handle_create(
     }
 
 
+async def _apply_update(session, name, description, invite_only, policies):
+    try:
+        return await update_project(
+            session, name, description=description, invite_only=invite_only, policies=policies,
+        )
+    except InvalidProjectPolicyError as exc:
+        raise ToolError(str(exc)) from None
+
+
+async def _handle_lifecycle(
+    session: Any,
+    tenant: str,
+    caller: str,
+    action: str,
+    name: str,
+    *,
+    provisioner: bool,
+    description: str | None,
+    invite_only: bool | None,
+    policies: dict | None,
+    user_id: str | None,
+    role: str,
+) -> dict[str, Any]:
+    """update / archive / unarchive / set_role (project admins) and delete (provisioners)."""
+    project = await get_project(session, name)
+    if project is None or project.tenant_id != tenant:
+        raise ToolError(f"Project '{name}' not found. Use action='list' to see your projects.")
+    if action == "delete":
+        if not provisioner:
+            raise ToolError(
+                "Deleting a project removes every memory in it, so it needs memory:admin or "
+                "project:admin. Project admins can archive it instead (action='archive')."
+            )
+        result = await delete_project(session, name, tenant, by=caller)
+        await session.commit()
+        return {**result, "message": f"Project '{name}' and {result['memories_deleted']} memories deleted."}
+
+    membership = await _get_membership(session, name, caller)
+    if not provisioner and (membership is None or membership.role != "admin"):
+        raise ToolError(f"Only project admins can {action.replace('_', ' ')} project '{name}'.")
+
+    if action == "update":
+        if description is None and invite_only is None and policies is None:
+            raise ToolError("action='update' needs description, invite_only or policies.")
+        project = await _apply_update(session, name, description, invite_only, policies)
+        await session.commit()
+        return {
+            "project": {
+                "name": project.name,
+                "description": project.description,
+                "invite_only": project.invite_only,
+                "policies": dict(project.policies or {}),
+            },
+            "message": f"Project '{name}' updated.",
+        }
+    if action == "archive":
+        project = await archive_project(session, name, by=caller)
+        await session.commit()
+        return {
+            "project": {"name": name, "archived_at": project.archived_at.isoformat()},
+            "message": f"Project '{name}' archived: its memories stay readable, new writes are refused.",
+        }
+    if action == "unarchive":
+        await unarchive_project(session, name)
+        await session.commit()
+        return {"project": {"name": name, "archived_at": None}, "message": f"Project '{name}' is writable again."}
+
+    # set_role
+    if role not in _VALID_ROLES:
+        raise ToolError(f"Invalid role '{role}'. Must be one of: member, admin.")
+    try:
+        changed = await update_member_role(session, name, user_id, role)
+    except MembershipNotFoundError:
+        raise ToolError(f"User '{user_id}' is not a member of project '{name}'.") from None
+    except LastAdminError:
+        raise ToolError(
+            f"'{user_id}' is the last admin of project '{name}'. Make another member admin first."
+        ) from None
+    await session.commit()
+    return {
+        "message": (
+            f"'{user_id}' is now {role} of project '{name}'."
+            if changed
+            else f"'{user_id}' already is {role} of project '{name}'."
+        ),
+    }
+
+
 async def _handle_describe(
     session: Any, tenant: str, name: str,
 ) -> dict[str, Any]:
@@ -296,6 +431,8 @@ async def _handle_describe(
             "created_at": project.created_at.isoformat() if project.created_at else None,
             "created_by": project.created_by,
             "memory_count": counts.get(name, 0),
+            "archived": getattr(project, "archived_at", None) is not None,
+            "policies": dict(getattr(project, "policies", None) or {}),
         },
         "members": members,
         "total_members": len(members),

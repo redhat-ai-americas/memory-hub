@@ -1826,6 +1826,144 @@ def project_describe(
         console.print("\n[dim]No members.[/dim]")  # noqa: T201
 
 
+
+def _project_simple(output: OutputFormat, call, done: str) -> dict:
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await call(client)
+
+    result = _run_command(_do(), output)
+    if output == OutputFormat.json:
+        json_success(result)
+    elif output != OutputFormat.quiet:
+        console.print(done)  # noqa: T201
+    return result
+
+
+@project_app.command("archive")
+def project_archive(
+    project_name: str = typer.Argument(..., help="Project name"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Make a project read-only. Memories stay readable; writes are refused."""
+    _project_simple(
+        output,
+        lambda c: c.archive_project(project_name),
+        f"[green]Archived[/green] {project_name} — read-only until unarchived.",
+    )
+
+
+@project_app.command("unarchive")
+def project_unarchive(
+    project_name: str = typer.Argument(..., help="Project name"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Make an archived project writable again."""
+    _project_simple(
+        output,
+        lambda c: c.unarchive_project(project_name),
+        f"[green]Unarchived[/green] {project_name}.",
+    )
+
+
+@project_app.command("delete")
+def project_delete(
+    project_name: str = typer.Argument(..., help="Project name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Delete a project and all its memories (memory:admin / project:admin).
+
+    The name is never reused. Prefer `archive` to keep the memories readable.
+    """
+    if not yes:
+        typer.confirm(
+            f"Delete project '{project_name}' and all of its memories?", abort=True,
+        )
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.delete_project(project_name)
+
+    result = _run_command(_do(), output)
+    if output == OutputFormat.json:
+        json_success(result)
+    elif output != OutputFormat.quiet:
+        n = result.get("memories_deleted", 0)
+        console.print(f"[green]Deleted[/green] {project_name} and {n} memories.")  # noqa: T201
+
+
+@project_app.command("update")
+def project_update(
+    project_name: str = typer.Argument(..., help="Project name"),
+    description: str | None = typer.Option(None, "--description", "-d", help="New description"),
+    invite_only: bool | None = typer.Option(
+        None, "--invite-only/--open", help="Enrollment policy",
+    ),
+    ttl_days: int | None = typer.Option(
+        None, "--ttl-days", help="Days new memories stay relevant (0 clears)",
+    ),
+    max_memories: int | None = typer.Option(
+        None, "--max-memories", help="Limit on current memories (0 clears)",
+    ),
+    default_weight: float | None = typer.Option(
+        None, "--default-weight", help="Weight for writes that don't set one (0 clears)",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Change a project's description, enrollment or policies."""
+    policies: dict = {}
+    for key, value in (
+        ("ttl_days", ttl_days), ("max_memories", max_memories), ("default_weight", default_weight),
+    ):
+        if value is not None:
+            policies[key] = None if value == 0 else value
+    if description is None and invite_only is None and not policies:
+        console.print(  # noqa: T201
+            "[red]Nothing to change.[/red] Pass --description, --invite-only/--open or a policy.",
+        )
+        raise typer.Exit(2)
+    _project_simple(
+        output,
+        lambda c: c.update_project(
+            project_name, description=description, invite_only=invite_only,
+            policies=policies or None,
+        ),
+        f"[green]Updated[/green] {project_name}.",
+    )
+
+
+@project_app.command("set-role")
+def project_set_role(
+    project_name: str = typer.Argument(..., help="Project name"),
+    user_id: str = typer.Argument(..., help="Member to change"),
+    role: str = typer.Argument(..., help="admin or member"),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Make a member a project admin, or a regular member."""
+    if role not in ("admin", "member"):
+        console.print("[red]Role must be 'admin' or 'member'.[/red]")  # noqa: T201
+        raise typer.Exit(2)
+    _project_simple(
+        output,
+        lambda c: c.set_project_member_role(project_name, user_id, role),
+        f"[green]{user_id}[/green] is now {role} of {project_name}.",
+    )
+
+
 # ── memoryhub session ─────────────────────────────────────────────────────────
 
 

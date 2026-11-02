@@ -553,3 +553,94 @@ def _fake_return(value):
     async def _inner(*args, **kwargs):
         return value
     return _inner
+
+
+class TestLifecycle:
+    """#671: update / archive / unarchive / set_role for project admins, delete for provisioners."""
+
+    def _setup(self, monkeypatch, role="admin", scopes=None, project_tenant="default"):
+        class FakeProject:
+            name = "team-x"
+            tenant_id = project_tenant
+            description = None
+            invite_only = False
+            policies = {}
+            archived_at = None
+
+        class FakeMembership:
+            pass
+
+        FakeMembership.role = role
+        monkeypatch.setattr(
+            "src.tools.manage_project.get_claims_from_context",
+            lambda: {"sub": "carol", "tenant_id": "default", "scopes": scopes or []},
+        )
+        monkeypatch.setattr("src.tools.manage_project.get_project", _fake_return(FakeProject()))
+        monkeypatch.setattr(
+            "src.tools.manage_project._get_membership", _fake_return(FakeMembership() if role else None)
+        )
+        monkeypatch.setattr("src.tools.manage_project.get_db_session", _fake_db_session)
+        monkeypatch.setattr("src.tools.manage_project.release_db_session", _fake_release)
+        return FakeProject
+
+    async def test_plain_member_cannot_archive(self, monkeypatch):
+        self._setup(monkeypatch, role="member")
+        with pytest.raises(ToolError, match="Only project admins can archive"):
+            await manage_project(action="archive", project_name="team-x")
+
+    async def test_project_admin_archives(self, monkeypatch):
+        from datetime import UTC, datetime
+
+        project = self._setup(monkeypatch)
+        project.archived_at = datetime.now(UTC)
+        monkeypatch.setattr("src.tools.manage_project.archive_project", _fake_return(project))
+        result = await manage_project(action="archive", project_name="team-x")
+        assert "read" in result["message"] and result["project"]["archived_at"]
+
+    async def test_project_admin_cannot_delete(self, monkeypatch):
+        self._setup(monkeypatch)
+        with pytest.raises(ToolError, match="archive it instead"):
+            await manage_project(action="delete", project_name="team-x")
+
+    async def test_provisioner_deletes(self, monkeypatch):
+        self._setup(monkeypatch, role=None, scopes=["memory:admin"])
+        monkeypatch.setattr(
+            "src.tools.manage_project.delete_project",
+            _fake_return({"project": "team-x", "memories_deleted": 7, "deleted_at": "now"}),
+        )
+        result = await manage_project(action="delete", project_name="team-x")
+        assert result["memories_deleted"] == 7
+
+    async def test_update_rejects_bad_policies(self, monkeypatch):
+        from memoryhub_core.services.exceptions import InvalidProjectPolicyError
+
+        self._setup(monkeypatch)
+
+        async def bad(*a, **k):
+            raise InvalidProjectPolicyError("ttl_days must be a whole number of days from 1 to 3650")
+
+        monkeypatch.setattr("src.tools.manage_project.update_project", bad)
+        with pytest.raises(ToolError, match="ttl_days"):
+            await manage_project(action="update", project_name="team-x", policies={"ttl_days": 0})
+
+    async def test_update_needs_something_to_change(self, monkeypatch):
+        self._setup(monkeypatch)
+        with pytest.raises(ToolError, match="needs description"):
+            await manage_project(action="update", project_name="team-x")
+
+    async def test_last_admin_is_kept(self, monkeypatch):
+        from memoryhub_core.services.exceptions import LastAdminError
+
+        self._setup(monkeypatch)
+
+        async def last(*a, **k):
+            raise LastAdminError("team-x")
+
+        monkeypatch.setattr("src.tools.manage_project.update_member_role", last)
+        with pytest.raises(ToolError, match="last admin"):
+            await manage_project(action="set_role", project_name="team-x", user_id="carol", role="member")
+
+    async def test_other_tenants_project_is_not_found(self, monkeypatch):
+        self._setup(monkeypatch, project_tenant="other")
+        with pytest.raises(ToolError, match="not found"):
+            await manage_project(action="archive", project_name="team-x")

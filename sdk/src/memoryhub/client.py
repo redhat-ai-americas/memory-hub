@@ -1520,6 +1520,55 @@ class MemoryHubClient:
             options={"user_id": user_id},
         )
 
+    async def update_project(
+        self,
+        project_name: str,
+        *,
+        description: str | None = None,
+        invite_only: bool | None = None,
+        policies: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Change a project's description, enrollment or policies (project admins).
+
+        Args:
+            project_name: Project identifier.
+            description: New description ("" clears it).
+            invite_only: New enrollment policy.
+            policies: ``ttl_days``, ``max_memories``, ``default_weight``;
+                a key set to None is removed.
+        """
+        opts: dict[str, Any] = {}
+        if description is not None:
+            opts["description"] = description
+        if invite_only is not None:
+            opts["invite_only"] = invite_only
+        if policies is not None:
+            opts["policies"] = policies
+        return await self._call_action("update_project", project_id=project_name, options=opts)
+
+    async def archive_project(self, project_name: str) -> dict[str, Any]:
+        """Make a project read-only; its memories stay readable (project admins)."""
+        return await self._call_action("archive_project", project_id=project_name)
+
+    async def unarchive_project(self, project_name: str) -> dict[str, Any]:
+        """Make an archived project writable again (project admins)."""
+        return await self._call_action("unarchive_project", project_id=project_name)
+
+    async def delete_project(self, project_name: str) -> dict[str, Any]:
+        """Soft-delete a project and every memory in it (memory:admin / project:admin).
+
+        Returns a dict with ``memories_deleted``. The name is never reused.
+        """
+        return await self._call_action("delete_project", project_id=project_name)
+
+    async def set_project_member_role(
+        self, project_name: str, user_id: str, role: str,
+    ) -> dict[str, Any]:
+        """Make a member ``admin`` or ``member`` (project admins; the last admin stays)."""
+        return await self._call_action(
+            "set_member_role", project_id=project_name, options={"user_id": user_id, "role": role}
+        )
+
     async def describe_project(
         self,
         project_name: str,
