@@ -23,6 +23,7 @@ from memoryhub_core.services.project import (
     get_project,
     get_projects_for_user,
     list_projects_for_tenant,
+    lock_project,
     project_memory_count,
     project_write_policies,
     relevant_until_from_policies,
@@ -169,3 +170,18 @@ async def test_member_roles_keep_one_admin(async_session, team):
     assert await update_member_role(async_session, "team-x", "carol", "member") is True
     with pytest.raises(LastAdminError):
         await update_member_role(async_session, "team-x", "alice", "member")
+
+
+
+def test_lock_project_is_select_for_update():
+    """The guards lock the project row so concurrent requests take turns (#671)."""
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql
+
+    stmt = select(Project).where(Project.name == "x").with_for_update()
+    assert "FOR UPDATE" in str(stmt.compile(dialect=postgresql.dialect()))
+
+
+async def test_lock_project_returns_the_row(async_session, team):
+    assert (await lock_project(async_session, "team-x")).name == "team-x"
+    assert await lock_project(async_session, "missing") is None

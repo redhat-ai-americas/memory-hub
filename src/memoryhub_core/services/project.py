@@ -268,6 +268,7 @@ async def get_project_members(
     project = await get_project(session, project_name)
     if project is None:
         raise ProjectNotFoundError(project_name)
+    await lock_project(session, project_name)
 
     stmt = (
         select(ProjectMembership)
@@ -326,6 +327,18 @@ async def add_project_member(
         user_id, project_name, role, added_by,
     )
     return True
+
+
+async def lock_project(session: AsyncSession, name: str) -> Project | None:
+    """Lock the project row until the transaction ends.
+
+    Serialises the check-then-write guards on one project (the last admin,
+    the memory quota) so two concurrent requests cannot both pass them.
+    PostgreSQL ``SELECT ... FOR UPDATE``; a no-op on SQLite.
+    """
+    return (
+        await session.execute(select(Project).where(Project.name == name).with_for_update())
+    ).scalar_one_or_none()
 
 
 async def remove_project_member(
@@ -544,6 +557,8 @@ async def project_write_policies(
     policies = dict(project.policies or {})
     limit = policies.get("max_memories")
     if new_memory and limit:
+        # Concurrent writers to a project with a quota take turns (#671).
+        await lock_project(session, project_id)
         count = (
             await session.execute(
                 select(func.count()).select_from(MemoryNode).where(
@@ -662,6 +677,7 @@ async def update_member_role(session: AsyncSession, name: str, user_id: str, rol
         raise ValueError("role must be 'member' or 'admin'")
     if await get_project(session, name) is None:
         raise ProjectNotFoundError(name)
+    await lock_project(session, name)
     membership = (
         await session.execute(
             select(ProjectMembership).where(
