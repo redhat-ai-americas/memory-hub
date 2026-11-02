@@ -52,6 +52,12 @@ spec:
           value: "INFO"
         - name: MEMORYHUB_USERS_FILE
           value: /config/users.json
+        # Project provisioning (see docs/design/projects-lifecycle.md):
+        # "central" (default) — admins create projects and add members;
+        # writing to a project never creates or joins it.
+        # "self_service" — first write creates the project / joins open ones.
+        - name: MEMORYHUB_PROJECT_PROVISIONING
+          value: "central"
         # JWT verification — issued by the memoryhub-auth service.
         # If these vars are unset, the server runs in session-only auth mode
         # (legacy register_session API key path). Production deployments must

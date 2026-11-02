@@ -19,6 +19,7 @@ from memoryhub_core.services.exceptions import (
     ProjectNotFoundError,
 )
 from memoryhub_core.services.project import (
+    provisioning_mode,
     add_project_member,
     create_project,
     get_project,
@@ -40,6 +41,12 @@ logger = logging.getLogger(__name__)
 _VALID_ACTIONS = {"list", "create", "describe", "add_member", "remove_member"}
 _VALID_FILTERS = {"mine", "all"}
 _VALID_ROLES = {"member", "admin"}
+# Central provisioning: who may create projects and manage any project's members.
+_PROVISIONING_SCOPES = {"memory:admin", "project:admin"}
+
+
+def _can_provision(claims: dict) -> bool:
+    return bool(_PROVISIONING_SCOPES & set(claims.get("scopes", [])))
 _ACTIONS_REQUIRING_PROJECT = {"create", "describe", "add_member", "remove_member"}
 _ACTIONS_REQUIRING_USER = {"add_member", "remove_member"}
 
@@ -95,9 +102,10 @@ async def manage_project(
         bool,
         Field(
             description=(
-                "Enrollment policy. Used with action='create'. "
-                "False (default): anyone can join by writing a project-scoped "
-                "memory. True: members must be added explicitly."
+                "Enrollment policy. Used with action='create'. With central "
+                "provisioning (the default) members are always added "
+                "explicitly. In self-service mode, False lets anyone join by "
+                "writing a project-scoped memory; True requires an invitation."
             ),
         ),
     ] = False,
@@ -136,8 +144,12 @@ async def manage_project(
     projects, 'create' to start a new one, 'describe' to see details and
     members, and 'add_member'/'remove_member' to manage membership.
 
-    Open projects allow auto-enrollment when writing project-scoped memories.
-    Invite-only projects require explicit add_member by an admin.
+    With central provisioning (MEMORYHUB_PROJECT_PROVISIONING=central, the
+    default) only administrators (memory:admin or project:admin) create
+    projects, and project admins add members; writing to a project never
+    creates or joins it. In self-service mode open projects allow
+    auto-enrollment when writing project-scoped memories, and invite-only
+    projects require explicit add_member by an admin.
     """
     try:
         claims = get_claims_from_context()
@@ -179,6 +191,12 @@ async def manage_project(
         if action == "list":
             return await _handle_list(session, tenant, caller, filter)
         elif action == "create":
+            if provisioning_mode() == "central" and not _can_provision(claims):
+                raise ToolError(
+                    "Projects are created by a MemoryHub administrator on this deployment. "
+                    "Ask your admin to create the project and add you, then use "
+                    "action='list' to see the projects you belong to."
+                )
             return await _handle_create(
                 session, tenant, caller, project_name, description, invite_only,
             )
@@ -187,10 +205,12 @@ async def manage_project(
         elif action == "add_member":
             return await _handle_add_member(
                 session, tenant, caller, project_name, user_id, role,
+                provisioner=_can_provision(claims),
             )
         else:  # remove_member
             return await _handle_remove_member(
                 session, caller, project_name, user_id,
+                provisioner=_can_provision(claims),
             )
 
     except ToolError:
@@ -250,7 +270,7 @@ async def _handle_create(
         },
         "message": (
             f"Project '{name}' created. "
-            f"{'Invite-only: members must be added explicitly.' if invite_only else 'Open: anyone can join by writing a project-scoped memory.'}"
+            f"{_enrollment_note(invite_only)}"
         ),
     }
 
@@ -282,6 +302,14 @@ async def _handle_describe(
     }
 
 
+def _enrollment_note(invite_only: bool) -> str:
+    if provisioning_mode() == "central":
+        return "Members are added explicitly with action='add_member'."
+    if invite_only:
+        return "Invite-only: members must be added explicitly."
+    return "Open: anyone can join by writing a project-scoped memory."
+
+
 async def _handle_add_member(
     session: Any,
     tenant: str,
@@ -289,6 +317,7 @@ async def _handle_add_member(
     project_name: str,
     target_user: str,
     role: str,
+    provisioner: bool = False,
 ) -> dict[str, Any]:
     project = await get_project(session, project_name)
     if project is None:
@@ -297,13 +326,22 @@ async def _handle_add_member(
             "Use action='list' with filter='all' to see available projects."
         ) from None
 
-    # Caller must be a member. Invite-only projects require admin role.
+    # Caller must be a member. Invite-only projects require admin role; with
+    # central provisioning every project does, unless the caller provisions.
     caller_membership = await _get_membership(session, project_name, caller)
+    central = provisioning_mode() == "central"
+    if central and provisioner:
+        caller_membership = caller_membership or _Provisioner()
     if caller_membership is None:
         raise ToolError(
             f"You are not a member of project '{project_name}'. "
-            "Join the project first by writing a project-scoped memory, "
-            "or ask an admin to add you."
+            + ("Ask a project admin to add you." if central else
+               "Join the project first by writing a project-scoped memory, "
+               "or ask an admin to add you.")
+        )
+    if central and caller_membership.role != "admin":
+        raise ToolError(
+            f"Only project admins can add members to project '{project_name}'."
         )
     if project.invite_only and caller_membership.role != "admin":
         raise ToolError(
@@ -341,9 +379,11 @@ async def _handle_remove_member(
     caller: str,
     project_name: str,
     target_user: str,
+    provisioner: bool = False,
 ) -> dict[str, Any]:
-    # Authorization: self-removal is always allowed; otherwise require admin.
-    if caller != target_user:
+    # Authorization: self-removal is always allowed; otherwise require admin
+    # (a deployment administrator counts as one under central provisioning).
+    if caller != target_user and not (provisioner and provisioning_mode() == "central"):
         caller_membership = await _get_membership(session, project_name, caller)
         if caller_membership is None or caller_membership.role != "admin":
             raise ToolError(
@@ -390,3 +430,9 @@ async def _get_membership(
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
+
+
+class _Provisioner:
+    """Stand-in membership for a deployment administrator managing any project."""
+
+    role = "admin"

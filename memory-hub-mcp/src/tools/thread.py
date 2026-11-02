@@ -175,11 +175,18 @@ async def _dispatch_create(scope, opts, ctx):
     if scope == "project" and PROJECT_ISOLATION_ENABLED and scope_id_value:
         from src.tools.write_memory import ensure_project_membership
         session_proj, gen_proj = await get_db_session()
+        from memoryhub_core.services.exceptions import (
+            ProjectInviteOnlyError,
+            ProjectMembershipRequiredError,
+            ProjectNotProvisionedError,
+        )
         try:
             project_ids, _ = await ensure_project_membership(
                 session_proj, scope_id_value, caller_id, tenant,
             )
             await session_proj.commit()
+        except (ProjectInviteOnlyError, ProjectNotProvisionedError, ProjectMembershipRequiredError) as exc:
+            raise ToolError(str(exc)) from exc
         finally:
             await release_db_session(gen_proj)
 

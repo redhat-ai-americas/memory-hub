@@ -17,6 +17,12 @@ from src.tools.manage_project import manage_project
 _CLAIMS = {"sub": "wjackson", "tenant_id": "default", "scopes": []}
 
 
+@pytest.fixture
+def self_service(monkeypatch):
+    """Pre-central-provisioning behaviour (MEMORYHUB_PROJECT_PROVISIONING=self_service)."""
+    monkeypatch.setenv("MEMORYHUB_PROJECT_PROVISIONING", "self_service")
+
+
 @pytest.fixture(autouse=True)
 def mock_auth(monkeypatch):
     """Provide a default authenticated session."""
@@ -142,7 +148,7 @@ class TestListAction:
 
 
 class TestCreateAction:
-    async def test_create_success(self, monkeypatch):
+    async def test_create_success(self, monkeypatch, self_service):
         class FakeProject:
             name = "new-proj"
             description = "A new project"
@@ -162,7 +168,7 @@ class TestCreateAction:
         assert result["project"]["name"] == "new-proj"
         assert "created" in result["message"].lower() or "Created" in result["message"]
 
-    async def test_create_duplicate(self, monkeypatch):
+    async def test_create_duplicate(self, monkeypatch, self_service):
         from memoryhub_core.services.exceptions import ProjectAlreadyExistsError
 
         async def fake_create(session, name, tenant_id, created_by, description, invite_only):
@@ -223,7 +229,7 @@ class TestDescribeAction:
 
 
 class TestAddMemberAction:
-    async def test_add_member_open_project(self, monkeypatch):
+    async def test_add_member_open_project(self, monkeypatch, self_service):
         class FakeProject:
             invite_only = False
 
@@ -310,7 +316,7 @@ class TestAddMemberAction:
         )
         assert "newguy" in result["message"]
 
-    async def test_add_member_already_member(self, monkeypatch):
+    async def test_add_member_already_member(self, monkeypatch, self_service):
         """Adding an existing member returns an informative message."""
         class FakeProject:
             invite_only = False
@@ -441,6 +447,97 @@ class _FakeSession:
 class _FakeResult:
     def scalar_one_or_none(self):
         return None
+
+
+class TestCentralProvisioning:
+    """Default mode: admins create projects and add members; writing never joins."""
+
+    def _db(self, monkeypatch):
+        monkeypatch.setattr("src.tools.manage_project.get_db_session", _fake_db_session)
+        monkeypatch.setattr("src.tools.manage_project.release_db_session", _fake_release)
+
+    async def test_regular_user_cannot_create(self, monkeypatch):
+        self._db(monkeypatch)
+        with pytest.raises(ToolError, match="created by a MemoryHub administrator"):
+            await manage_project(action="create", project_name="my-app-2")
+
+    @pytest.mark.parametrize("scope", ["memory:admin", "project:admin"])
+    async def test_admin_creates(self, monkeypatch, scope):
+        class FakeProject:
+            name = "team-x"
+            description = None
+            invite_only = False
+            created_by = "ray"
+
+        monkeypatch.setattr(
+            "src.tools.manage_project.get_claims_from_context",
+            lambda: {"sub": "ray", "tenant_id": "default", "scopes": [scope]},
+        )
+        monkeypatch.setattr("src.tools.manage_project.create_project", _fake_return(FakeProject()))
+        self._db(monkeypatch)
+        result = await manage_project(action="create", project_name="team-x")
+        assert result["project"]["name"] == "team-x"
+        assert "add_member" in result["message"]
+
+    async def test_plain_member_cannot_add_people_to_an_open_project(self, monkeypatch):
+        class FakeProject:
+            invite_only = False
+
+        class FakeMembership:
+            role = "member"
+
+        monkeypatch.setattr("src.tools.manage_project.get_project", _fake_return(FakeProject()))
+        monkeypatch.setattr("src.tools.manage_project._get_membership", _fake_return(FakeMembership()))
+        self._db(monkeypatch)
+        with pytest.raises(ToolError, match="Only project admins"):
+            await manage_project(action="add_member", project_name="proj", user_id="friend")
+
+    async def test_provisioner_adds_members_without_being_one(self, monkeypatch):
+        class FakeProject:
+            invite_only = False
+
+        added = {}
+
+        async def fake_add(session, name, user_id, added_by, role):
+            added.update(name=name, user_id=user_id, role=role)
+            return True
+
+        monkeypatch.setattr(
+            "src.tools.manage_project.get_claims_from_context",
+            lambda: {"sub": "ray", "tenant_id": "default", "scopes": ["memory:admin"]},
+        )
+        monkeypatch.setattr("src.tools.manage_project.get_project", _fake_return(FakeProject()))
+        monkeypatch.setattr("src.tools.manage_project._get_membership", _fake_return(None))
+        monkeypatch.setattr("src.tools.manage_project.add_project_member", fake_add)
+        self._db(monkeypatch)
+        await manage_project(action="add_member", project_name="proj", user_id="kate")
+        assert added == {"name": "proj", "user_id": "kate", "role": "member"}
+
+    async def test_non_member_is_told_to_ask_an_admin(self, monkeypatch):
+        class FakeProject:
+            invite_only = False
+
+        monkeypatch.setattr("src.tools.manage_project.get_project", _fake_return(FakeProject()))
+        monkeypatch.setattr("src.tools.manage_project._get_membership", _fake_return(None))
+        self._db(monkeypatch)
+        with pytest.raises(ToolError, match="Ask a project admin to add you"):
+            await manage_project(action="add_member", project_name="proj", user_id="friend")
+
+    async def test_provisioner_removes_members(self, monkeypatch):
+        removed = {}
+
+        async def fake_remove(session, name, user_id):
+            removed.update(name=name, user_id=user_id)
+
+        monkeypatch.setattr(
+            "src.tools.manage_project.get_claims_from_context",
+            lambda: {"sub": "ray", "tenant_id": "default", "scopes": ["project:admin"]},
+        )
+        monkeypatch.setattr("src.tools.manage_project._get_membership", _fake_return(None))
+        monkeypatch.setattr("src.tools.manage_project.remove_project_member", fake_remove)
+        self._db(monkeypatch)
+        await manage_project(action="remove_member", project_name="proj", user_id="kate")
+        assert removed == {"name": "proj", "user_id": "kate"}
 
 
 async def _fake_db_session():
