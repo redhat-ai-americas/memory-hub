@@ -233,6 +233,16 @@ export async function mockDashboardApi(page: Page, opts: MockOptions = {}) {
     if (path === '/entities') return respond(route, entities);
     if (path === '/settings') return respond(route, settings);
     if (path === '/public-config') return respond(route, { mcp_url: 'https://mcp.test', auth_url: 'https://auth.test' });
+    if (path === '/directory')
+      return respond(route, {
+        items: [
+          { id: 'admin', name: 'Admin User', kind: 'person', owner: null },
+          { id: 'alice', name: 'Alice Ng', kind: 'person', owner: null },
+          { id: 'bob', name: 'bob', kind: 'person', owner: null },
+          { id: 'carol', name: 'Carol Diaz', kind: 'person', owner: null },
+          { id: 'claude-code-alice', name: 'claude-code-alice', kind: 'agent', owner: 'alice' },
+        ],
+      });
     if (path === '/identities') return respond(route, { items: [identity], auth_available: true, roles: [{ name: 'admin', members: 1 }], counts: { all: 1, users: 1, user_agents: 0, service_agents: 0, roles: 1 } });
     if (path.startsWith('/identities/')) return respond(route, { ...identity, grant: 'password', scope_matrix: [], activity_24h: { searches: 1, writes: 1, denied: 0, total: 2 }, hourly: [], agents: [] });
     if (path === '/memories/browse') return respond(route, { items: [commonMemory], total: 1, page: 1, per_page: 20, search_mode: 'none', tab_counts: { current: 1, all: 1, quarantined: 0, deleted: 0 }, facets: { scopes: ['user', 'project', 'campaign', 'role', 'organizational', 'enterprise'].map((value) => ({ value, count: value === 'project' ? 1 : 0 })), writers: [{ value: 'admin', count: 1 }], projects: [{ value: 'memoryhub-ui', count: 1 }], domains: [{ value: 'tooling', count: 1 }], flags: { contradicted: 0, has_branches: 0, near_duplicate: null } } });

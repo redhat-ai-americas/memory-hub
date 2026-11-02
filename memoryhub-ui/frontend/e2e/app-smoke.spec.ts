@@ -465,15 +465,44 @@ test.describe('#676 central project provisioning', () => {
     await page.goto('/#/projects');
     await page.getByRole('button', { name: 'Create project' }).first().click();
     await page.getByLabel('Name').fill('team-x');
-    await page.getByLabel('Project admins').fill('carol');
-    await page.getByLabel('Members').fill('alice, bob carol');
+    await page.getByLabel('Project admins').click();
+    await page.getByRole('option', { name: /Carol Diaz/ }).click();
+    await page.getByRole('button', { name: 'Done' }).click();
+    await page.getByLabel('Members').click();
+    const list = page.getByRole('listbox', { name: 'People and agents' });
+    await expect(list.getByRole('option', { name: /Carol Diaz/ })).toHaveAttribute('aria-disabled', 'true');
+    await expect(list.getByText("alice's agent")).toBeVisible();
+    await page.getByLabel('Search people and agents').fill('ali');
+    await list.getByRole('option', { name: /Alice Ng/ }).click();
+    await list.getByRole('option', { name: /claude-code-alice/ }).click();
+    await page.getByLabel('Search people and agents').fill('dave');
+    await list.getByRole('option', { name: /Add “dave”/ }).click();
+    await page.getByRole('button', { name: 'Done' }).click();
     const req = page.waitForRequest((r) => r.url().endsWith('/api/projects') && r.method() === 'POST');
-    await page.getByRole('button', { name: 'Create with 3 people' }).click();
+    await page.getByRole('button', { name: 'Create with 4 people' }).click();
     expect((await req).postDataJSON().members).toEqual([
       { user_id: 'carol', role: 'admin' },
       { user_id: 'alice', role: 'member' },
-      { user_id: 'bob', role: 'member' },
+      { user_id: 'claude-code-alice', role: 'member' },
+      { user_id: 'dave', role: 'member' },
     ]);
+  });
+
+  test('adding members picks from the list and skips current members', async ({ page }) => {
+    await page.unrouteAll();
+    await mockDashboardApi(page, { role: 'admin' });
+    await page.goto('/#/projects');
+    await page.getByRole('button', { name: '+ Add member' }).click();
+    await page.getByLabel('People and agents').click();
+    const list = page.getByRole('listbox', { name: 'People and agents' });
+    await expect(list.getByRole('option', { name: /Admin User/ })).toHaveAttribute('aria-disabled', 'true');
+    await list.getByRole('option', { name: /bob/ }).click();
+    await list.getByRole('option', { name: /Carol Diaz/ }).click();
+    await page.getByRole('button', { name: 'Done' }).click();
+    const reqs: string[] = [];
+    page.on('request', (r) => r.method() === 'POST' && r.url().includes('/members') && reqs.push(r.postDataJSON().user_id));
+    await page.getByRole('button', { name: 'Add 2 members' }).click();
+    await expect.poll(() => reqs).toEqual(['bob', 'carol']);
   });
 
   test('project admins change member roles', async ({ page }) => {

@@ -617,3 +617,21 @@ button.tag { cursor: pointer; border: 1px solid transparent; font: inherit; font
 .incident-banner { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: #a60000; color: #fff; padding: 8px 24px; font-size: 13px; }
 .incident-banner a { color: #fff; text-decoration: underline; margin-left: auto; }
 .tier-note { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--mh-muted); }
+
+/* ---------- People picker ---------- */
+.pp { position: relative; }
+.pp-field { display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; background: #fff; text-align: left; font: inherit; }
+.pp-field.on { border-color: var(--mh-primary); box-shadow: 0 0 0 1px var(--mh-primary); }
+.pp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pp-pop { position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid var(--mh-border); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.14); overflow: hidden; }
+.pp-search { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--mh-line); color: var(--mh-muted); }
+.pp-search .in { border: 0 !important; box-shadow: none !important; outline: none; padding: 4px 0; min-height: 0; }
+.pp-list { list-style: none; margin: 0; padding: 4px 0; max-height: 260px; overflow-y: auto; }
+.pp-head { padding: 8px 14px 4px; font-size: 12px; font-weight: 600; color: var(--mh-muted); text-transform: uppercase; letter-spacing: .03em; }
+.pp-opt { display: flex; align-items: center; gap: 10px; padding: 7px 14px; cursor: pointer; font-size: 14px; }
+.pp-opt.act { background: #f2f8fd; }
+.pp-opt.off { cursor: default; opacity: .55; }
+.pp-opt .mav { width: 26px; height: 26px; font-size: 11px; flex: none; }
+.pp-name { font-weight: 500; }
+.pp-empty { padding: 12px 14px; font-size: 13px; color: var(--mh-muted); }
+.pp-foot { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-top: 1px solid var(--mh-line); }

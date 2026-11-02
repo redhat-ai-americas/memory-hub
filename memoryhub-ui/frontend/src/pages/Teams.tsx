@@ -3,6 +3,7 @@ import { api } from '@/api/client';
 import { useApp } from '@/components/Shell';
 import { Empty, Modal, SkTable, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
+import { PeoplePicker } from '@/components/PeoplePicker';
 import { buildHash } from '@/hooks/useHashRoute';
 import type { ProjectRow, TeamRow } from '@/types';
 import { avatarColor, errorMessage, fmtRelative, initials } from '@/utils/format';
@@ -285,7 +286,7 @@ export const TeamForm: React.FC<{ existing?: TeamRow; projects: ProjectRow[]; on
   const toast = useToast();
   const [name, setName] = useState(existing?.name ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
-  const [people, setPeople] = useState('');
+  const [people, setPeople] = useState<string[]>([]);
   const [chosen, setChosen] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -301,7 +302,7 @@ export const TeamForm: React.FC<{ existing?: TeamRow; projects: ProjectRow[]; on
         const res = await api.createTeam({
           name: name.trim(),
           description: description.trim() || undefined,
-          members: people.split(/[\s,]+/).map((p) => p.trim()).filter(Boolean),
+          members: people,
           projects: chosen,
         });
         toast(`Team ${res.name} created${res.added ? ` · ${res.added} project memberships granted` : ''}.`);
@@ -340,8 +341,8 @@ export const TeamForm: React.FC<{ existing?: TeamRow; projects: ProjectRow[]; on
         <>
           <div className="f">
             <label htmlFor="tp">People</label>
-            <input id="tp" className="in mono" value={people} onChange={(e) => setPeople(e.target.value)} placeholder="arivera, mchen, jpatel" />
-            <span className="hint">Usernames, comma-separated. You join as team lead.</span>
+            <PeoplePicker id="tp" value={people} onChange={setPeople} kinds={['person']} placeholder="Choose the people on this team" />
+            <span className="hint">You join as team lead.</span>
           </div>
           <div className="f">
             <span className="lbl-t">Works on projects</span>
@@ -368,17 +369,15 @@ export const TeamForm: React.FC<{ existing?: TeamRow; projects: ProjectRow[]; on
 };
 
 const PersonModal: React.FC<{ title: string; exclude: string[]; onClose: () => void; onPick: (user: string, asLead: boolean) => void }> = ({ title, exclude, onClose, onPick }) => {
-  const { data } = useApi(() => api.identities().catch(() => null), []);
-  const [user, setUser] = useState('');
+  const [user, setUser] = useState<string[]>([]);
   const [lead, setLead] = useState(false);
-  const people = (data?.items ?? []).filter((i) => i.type === 'user' && !exclude.includes(i.id)).slice(0, 12);
   return (
     <Modal
       title={title}
       onClose={onClose}
       actions={
         <>
-          <button type="button" className="btn bp" disabled={!user.trim()} onClick={() => onPick(user.trim(), lead)}>
+          <button type="button" className="btn bp" disabled={!user.length} onClick={() => onPick(user[0], lead)}>
             Add
           </button>
           <button type="button" className="btn bg" onClick={onClose}>
@@ -388,18 +387,9 @@ const PersonModal: React.FC<{ title: string; exclude: string[]; onClose: () => v
       }
     >
       <div className="f">
-        <label htmlFor="pu">Username</label>
-        <input id="pu" className="in mono" value={user} onChange={(e) => setUser(e.target.value)} placeholder="OpenShift username" autoFocus />
+        <label htmlFor="pu">Person</label>
+        <PeoplePicker id="pu" value={user} onChange={setUser} multiple={false} exclude={exclude} excludeNote="already on the team" kinds={['person']} placeholder="Choose a person" autoFocus />
       </div>
-      {people.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {people.map((p) => (
-            <button key={p.id} type="button" className="tg" onClick={() => setUser(p.id)}>
-              {p.id}
-            </button>
-          ))}
-        </div>
-      )}
       <label className="tg" style={{ alignSelf: 'flex-start' }}>
         <input type="checkbox" checked={lead} onChange={(e) => setLead(e.target.checked)} /> Team lead (can manage the team)
       </label>

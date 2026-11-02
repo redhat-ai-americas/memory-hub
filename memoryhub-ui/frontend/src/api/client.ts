@@ -63,6 +63,7 @@ import type {
   ProjectDetail,
   ProjectRow,
   ProjectProvisioning,
+  DirectoryEntry,
   PublicConfig,
   ReviewItem,
   ReviewQueue,
@@ -341,6 +342,8 @@ export const api = {
 
   // Identities & credentials
   identities: () => get<IdentitiesResponse>('/identities'),
+  /** People and agents to pick when adding members (respects "Show me in team pickers"). */
+  directory: () => get<{ items: DirectoryEntry[] }>('/directory'),
   identity: (id: string) => get<IdentityDetail>(`/identities/${enc(id)}`),
   assignRole: (user_id: string, role_name: string) => post<{ ok: boolean }>('/roles', { user_id, role_name }),
   linkAgent: (client_id: string, client_secret: string) =>

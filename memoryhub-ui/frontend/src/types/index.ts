@@ -1350,3 +1350,11 @@ export interface BreakGlassReport {
   accesses: { actor: string; incident_ref: string | null; owner: string; reads: number; first: string; last: string }[];
   totals: { grants: number; reads: number; owners: number };
 }
+
+export interface DirectoryEntry {
+  id: string;
+  name: string;
+  kind: 'person' | 'agent' | 'service';
+  /** For agents: the person they belong to. */
+  owner: string | null;
+}

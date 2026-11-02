@@ -1047,6 +1047,78 @@ async def _my_identities(db: AsyncSession, settings: Settings, request: Request)
     return acc.grants.identities if acc.grants else {viewer.username}
 
 
+@router.get("/api/directory")
+async def people_directory(request: Request, db: DbDep, settings: SettingsDep):
+    """People and agents a viewer can pick when adding members to a project or team.
+
+    Platform admins see everyone, including service agents. Users see people and
+    their agents, minus anyone who turned off "Show me in team pickers" in
+    Preferences (their own entry always stays). Never returns memory content.
+    """
+    viewer = viewer_from_request(request, settings)
+    tenant_id = settings.ui_tenant_id
+    rows, _ = await _identity_rows(db, settings)
+    people: dict[str, dict] = {}
+
+    def put(identity: str, name: str | None, kind: str, owner: str | None = None):
+        if not identity:
+            return
+        entry = people.setdefault(identity, {"id": identity, "name": name or identity, "kind": kind, "owner": owner})
+        if name and entry["name"] == identity:
+            entry["name"] = name
+        if owner and not entry["owner"]:
+            entry["owner"] = owner
+
+    for r in rows:
+        kind = {"user agent": "agent", "service": "service"}.get(r["type"], "person")
+        put(r["id"], r.get("name"), kind, r.get("owner") or (r.get("bound_to") if kind == "agent" else None))
+    try:
+        from src.accounts import ACCOUNTS
+        from src.schema import require
+
+        await require(db)
+        for username, display in (
+            await db.execute(
+                text(f"SELECT username, display_name FROM {ACCOUNTS} WHERE tenant_id = :t AND status = 'active'"),
+                {"t": tenant_id},
+            )
+        ).all():
+            put(username, display, "person")
+        hidden = set(
+            (
+                await db.execute(
+                    text(
+                        "SELECT username FROM memoryhub_ui_user_prefs WHERE tenant_id = :t "
+                        "AND (prefs::jsonb #>> '{privacy,show_in_team_directory}') = 'false'"
+                    ),
+                    {"t": tenant_id},
+                )
+            )
+            .scalars()
+            .all()
+        )
+    except Exception as exc:  # pragma: no cover - needs a database
+        logger.info("Directory extras unavailable: %s", exc)
+        await db.rollback()
+        hidden = set()
+    for (user_id,) in (await db.execute(select(ProjectMembership.user_id).distinct())).all():
+        put(user_id, None, "person")
+    put(viewer.username, viewer.name, "person")
+
+    # Project-scope memories are owned by the project name; those are not people.
+    project_names = set((await db.execute(select(Project.name).where(Project.tenant_id == tenant_id))).scalars().all())
+    items = [i for i in people.values() if i["id"] not in project_names or i["id"] == viewer.username]
+    if not viewer.can_admin:
+        items = [
+            i
+            for i in items
+            if i["kind"] != "service"
+            and (i["id"] == viewer.username or (i["id"] not in hidden and (i["owner"] or "") not in hidden))
+        ]
+    items.sort(key=lambda i: ({"person": 0, "agent": 1, "service": 2}[i["kind"]], i["name"].lower()))
+    return {"items": items}
+
+
 @router.get("/api/identities")
 async def list_identities(request: Request, db: DbDep, settings: SettingsDep):
     rows, auth_ok = await _identity_rows(db, settings)

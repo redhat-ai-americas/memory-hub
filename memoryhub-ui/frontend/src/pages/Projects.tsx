@@ -3,6 +3,7 @@ import { api } from '@/api/client';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
 import { Dropdown, Empty, ErrorState, Modal, SkLines, SkTable, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
+import { PeoplePicker } from '@/components/PeoplePicker';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
 import type { CampaignRow, ProjectDetail, ProjectRow } from '@/types';
 import { avatarColor, errorMessage, fmtInt, fmtRelative, initials } from '@/utils/format';
@@ -631,19 +632,16 @@ const CampaignPanel: React.FC<{ campaign: CampaignRow; projects: ProjectRow[]; o
   );
 };
 
-const splitIds = (text: string) => [...new Set(text.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean))];
-
 const ProjectForm: React.FC<{ existing?: ProjectRow; central?: boolean; onClose: () => void; onSaved: (name: string) => void }> = ({ existing, central = true, onClose, onSaved }) => {
   const [name, setName] = useState(existing?.name ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
   const [inviteOnly, setInviteOnly] = useState(existing?.invite_only ?? central);
-  const [admins, setAdmins] = useState('');
-  const [members, setMembers] = useState('');
+  const [admins, setAdmins] = useState<string[]>([]);
+  const [members, setMembers] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { data: ids } = useApi(() => (existing ? Promise.resolve(null) : api.identities()), [existing?.name]);
-  const adminIds = splitIds(admins);
-  const memberIds = splitIds(members).filter((u) => !adminIds.includes(u));
+  const adminIds = admins;
+  const memberIds = members.filter((u) => !adminIds.includes(u));
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -683,23 +681,14 @@ const ProjectForm: React.FC<{ existing?: ProjectRow; central?: boolean; onClose:
           <>
             <div className="f">
               <label htmlFor="pa">Project admins</label>
-              <input id="pa" className="in" list="project-ids" value={admins} onChange={(e) => setAdmins(e.target.value)} placeholder="carol" />
+              <PeoplePicker id="pa" value={admins} onChange={setAdmins} kinds={['person']} placeholder="Choose who manages members" />
               <span className="hint">They manage the project's members. Leave empty to be its admin yourself.</span>
             </div>
             <div className="f">
               <label htmlFor="pm">Members</label>
-              <textarea id="pm" className="in" rows={2} value={members} onChange={(e) => setMembers(e.target.value)} placeholder="alice, bob, claude-code-alice" />
-              <span className="hint">
-                People and agents, separated by commas or spaces. {central ? 'Only members can read and write this project’s memories.' : ''}
-              </span>
+              <PeoplePicker id="pm" value={members} onChange={setMembers} exclude={adminIds} excludeNote="already an admin" placeholder="Choose people and their agents" />
+              <span className="hint">{central ? 'Only members can read and write this project’s memories. Add the agents people use, too.' : 'People and the agents they use.'}</span>
             </div>
-            <datalist id="project-ids">
-              {(ids?.items ?? []).map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
-                </option>
-              ))}
-            </datalist>
           </>
         )}
         {central ? (
@@ -730,31 +719,41 @@ const ProjectForm: React.FC<{ existing?: ProjectRow; central?: boolean; onClose:
 };
 
 const MemberForm: React.FC<{ project: string; onClose: () => void; onSaved: () => void }> = ({ project, onClose, onSaved }) => {
-  const [userId, setUserId] = useState('');
-  const [role, setRole] = useState('member');
+  const [people, setPeople] = useState<string[]>([]);
+  const [role, setRole] = useState<'member' | 'admin'>('member');
   const [err, setErr] = useState<string | null>(null);
-  const { data } = useApi(() => api.identities(), []);
+  const [busy, setBusy] = useState(false);
+  const { data } = useApi(() => api.project(project), [project]);
+  const current = (data?.members_list ?? []).map((m) => m.user_id);
+  const add = async () => {
+    setBusy(true);
+    setErr(null);
+    const failed: string[] = [];
+    for (const user_id of people) {
+      try {
+        await api.addMember(project, { user_id, role });
+      } catch (e) {
+        failed.push(`${user_id}: ${errorMessage(e)}`);
+      }
+    }
+    setBusy(false);
+    if (failed.length) {
+      setErr(failed.join(' · '));
+      setPeople(people.filter((p) => failed.some((f) => f.startsWith(`${p}:`))));
+      if (failed.length < people.length) onSaved();
+      return;
+    }
+    onSaved();
+    onClose();
+  };
   return (
     <Modal
-      title={`Add member to ${project}`}
+      title={`Add members to ${project}`}
       onClose={onClose}
       actions={
         <>
-          <button
-            type="button"
-            className="btn bp"
-            disabled={!userId.trim()}
-            onClick={async () => {
-              try {
-                await api.addMember(project, { user_id: userId.trim(), role });
-                onSaved();
-                onClose();
-              } catch (e) {
-                setErr(errorMessage(e));
-              }
-            }}
-          >
-            Add member
+          <button type="button" className="btn bp" disabled={!people.length || busy} onClick={add}>
+            {busy ? 'Adding…' : people.length > 1 ? `Add ${people.length} members` : 'Add member'}
           </button>
           <button type="button" className="btn bg" onClick={onClose}>
             Cancel
@@ -763,21 +762,14 @@ const MemberForm: React.FC<{ project: string; onClose: () => void; onSaved: () =
       }
     >
       <div className="f">
-        <label htmlFor="mu">User or agent ID</label>
-        <input id="mu" className="in" list="member-ids" value={userId} onChange={(e) => setUserId(e.target.value)} />
-        <datalist id="member-ids">
-          {(data?.items ?? []).map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.name}
-            </option>
-          ))}
-        </datalist>
+        <label htmlFor="mu">People and agents</label>
+        <PeoplePicker id="mu" value={people} onChange={setPeople} exclude={current} placeholder="Choose who to add" autoFocus />
       </div>
       <div className="f">
         <label htmlFor="mr">Role</label>
-        <select id="mr" className="in" value={role} onChange={(e) => setRole(e.target.value)}>
-          <option value="member">member</option>
-          <option value="admin">admin</option>
+        <select id="mr" className="in" value={role} onChange={(e) => setRole(e.target.value as 'member' | 'admin')}>
+          <option value="member">member — reads and writes project memories</option>
+          <option value="admin">admin — also manages members</option>
         </select>
       </div>
       {err && <div className="alert err-a">{err}</div>}
