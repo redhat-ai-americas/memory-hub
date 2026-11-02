@@ -210,7 +210,7 @@ export async function mockDashboardApi(page: Page, opts: MockOptions = {}) {
     const path = url.pathname.replace(/^\/api/, '');
 
     if (path === '/auth/status') return respond(route, { mode: 'api-key', authenticated: true, api_key_login: true, user: 'admin', cluster_domain: 'cluster.test' });
-    if (path === '/me') return respond(route, { username: 'admin', name: 'Admin User', email: 'admin@example.test', initials: 'AU', source: 'api-key', tenant_id: 'demo-tenant', labs, access, ...(role ? { role } : {}) });
+    if (path === '/me') return respond(route, { username: 'admin', name: 'Admin User', email: 'admin@example.test', initials: 'AU', source: 'api-key', tenant_id: 'demo-tenant', labs, access, write: { scopes: role === 'user' ? ['user', 'project', 'campaign'] : role === 'admin' || role === 'superuser' ? [] : ['user', 'project', 'campaign', 'role', 'organizational', 'enterprise'], project_ids: ['memoryhub-ui'], campaign_ids: ['campaign-1'], owner_id: 'admin' }, ...(role ? { role } : {}) });
     if (path === '/break-glass' && request.method() === 'GET') return respond(route, { policy: { enabled: true, hours: 24, pattern: '^[A-Za-z][A-Za-z0-9]{1,15}-[0-9]{1,10}$', notify_owner: true }, active: grant ? activeGrant : null, grants: grant ? [activeGrant] : [] });
     if (path === '/break-glass' && request.method() === 'POST') return respond(route, activeGrant, 201);
     if (path === '/break-glass/end') return respond(route, { ended: 'g1' });
@@ -298,6 +298,7 @@ export async function mockDashboardApi(page: Page, opts: MockOptions = {}) {
         co_mentions: [],
         memories: [{ ...node(memoryId, 'Run the MemoryHub UI locally with npm run dev', 0) }],
       });
+    if (path === '/dreams') return respond(route, { settings: { schedule: 'off', window: '02:00', auto: { connections: false, fading: false }, kinds: { duplicates: true, connections: true, fading: true, contradictions: true, themes: true } }, last: null, history: [] });
     if (path === '/nav-features') return respond(route, { knowledge: 2, documents: 1, packs: 1, checks: 1, check_runs: 1, search_runs: 3, jobs: 2 });
     if (path === '/checks')
       return respond(route, {

@@ -95,6 +95,13 @@ export class ApiError extends Error {
 
 /** Fired when the BFF says the dev API-key session is missing or expired. */
 export const AUTH_REQUIRED_EVENT = 'memoryhub:auth-required';
+export const AUTHORIZATION_CHANGED_EVENT = 'memoryhub:authorization-changed';
+
+function authorizationChanged<T>(result: T): T {
+  window.dispatchEvent(new Event(AUTHORIZATION_CHANGED_EVENT));
+  try { window.localStorage.setItem(AUTHORIZATION_CHANGED_EVENT, String(Date.now())); } catch { /* Storage may be disabled. */ }
+  return result;
+}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let response: Response;
@@ -171,7 +178,7 @@ export const api = {
   entities: (params: { q?: string; type?: EntityType | 'all'; project?: string; page?: number; per_page?: number } = {}) =>
     get<EntitiesResponse>(`/entities${qs(params)}`),
   browse: (params: BrowseParams) => get<BrowseResponse>(`/memories/browse${qs(params as Record<string, unknown>)}`),
-  exportUrl: (scope?: string[]) => `${BASE}/memories/export${qs({ scope })}`,
+  exportUrl: (params: BrowseParams = {}) => `${BASE}/memories/export${qs(params as Record<string, unknown>)}`,
   memoryContext: (id: string) => get<MemoryContext>(`/memory/${enc(id)}/context`),
   memoryAccessLog: (id: string, page = 1) =>
     get<{ total: number; items: AuditEvent[] }>(`/memory/${enc(id)}/access-log${qs({ page })}`),
@@ -211,8 +218,8 @@ export const api = {
     post<{ id: string }>(`/memory/${enc(id)}/promote${qs({ target_scope })}`),
 
   // Graph & search
-  neighbourhood: (params: { focus?: string; depth?: number; types?: string[]; max_nodes?: number }) =>
-    get<GraphNeighbourhood>(`/graph/neighbourhood${qs(params)}`),
+  neighbourhood: (params: BrowseParams & { focus?: string; depth?: number; types?: string[]; max_nodes?: number }) =>
+    get<GraphNeighbourhood>(`/graph/neighbourhood${qs(params as Record<string, unknown>)}`),
   myPrefs: () => get<MyPrefsResponse>('/me/prefs'),
   saveMyPrefs: (body: Partial<MyPrefs>) => put<{ prefs: MyPrefs }>('/me/prefs', body),
   myReads: (days = 30, who: 'others' | 'all' = 'others') => get<MyReads>(`/me/reads${qs({ days, who })}`),
@@ -233,7 +240,7 @@ export const api = {
   decideInsight: (dreamId: string, insightId: string, decision: 'accept' | 'dismiss') =>
     post<DreamInsight>(`/dreams/${enc(dreamId)}/insights/${enc(insightId)}`, { decision }),
   graphAll: (
-    params: {
+    params: BrowseParams & {
       types?: string[];
       include_superseded?: boolean;
       max_nodes?: number;
@@ -243,12 +250,12 @@ export const api = {
       entity?: string;
       prefer?: GraphPrefer;
     } = {},
-  ) => get<GraphAll>(`/graph/all${qs(params)}`),
+  ) => get<GraphAll>(`/graph/all${qs(params as Record<string, unknown>)}`),
 
   // Memory workspace
   restoreMemory: (id: string) => post<{ id: string; restored_rows: number }>(`/memory/${enc(id)}/restore`),
-  timeline: (params: { scope?: string[]; project?: string; entity?: string; min_weight?: number; days?: number; by?: 'created' | 'updated'; max_items?: number }) =>
-    get<TimelineResponse>(`/memories/timeline${qs(params)}`),
+  timeline: (params: BrowseParams & { days?: number; by?: 'created' | 'updated'; max_items?: number }) =>
+    get<TimelineResponse>(`/memories/timeline${qs(params as Record<string, unknown>)}`),
   entity: (id: string) => get<EntityDetail>(`/entities/${enc(id)}`),
   updateEntity: (id: string, body: { name?: string; entity_type?: string; aliases?: string[] }) =>
     patch<{ id: string; name: string; entity_type: string; aliases: string[] }>(`/entities/${enc(id)}`, body),
@@ -308,8 +315,8 @@ export const api = {
   onboarding: () => get<Onboarding>('/me/onboarding'),
   // Super-user incident access (#667)
   breakGlass: () => get<BreakGlassState>('/break-glass'),
-  startBreakGlass: (body: { incident_ref: string; justification: string; hours?: number }) => post<BreakGlassGrant>('/break-glass', body),
-  endBreakGlass: () => post<{ ended: string }>('/break-glass/end'),
+  startBreakGlass: (body: { incident_ref: string; justification: string; hours?: number }) => post<BreakGlassGrant>('/break-glass', body).then(authorizationChanged),
+  endBreakGlass: () => post<{ ended: string }>('/break-glass/end').then(authorizationChanged),
   breakGlassReport: (month?: string) => get<BreakGlassReport>(`/break-glass/report${month ? `?month=${month}` : ''}`),
   // Connection check (R1-024)
   verifyResults: () => get<VerifyList>('/verify'),

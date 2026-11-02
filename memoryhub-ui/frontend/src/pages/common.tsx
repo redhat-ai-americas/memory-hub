@@ -75,7 +75,9 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
   title,
 }) => {
   const toast = useToast();
-  const { me, refreshCounts } = useApp();
+  const { me, refreshCounts, role } = useApp();
+  const restricted = role === 'user';
+  const allowedScopes = me?.write?.scopes ?? (role === 'operator' ? [...SCOPE_ORDER] : []);
   const [content, setContent] = useState(initialContent ?? '');
   const [scope, setScope] = useState('user');
   const [owner, setOwner] = useState('');
@@ -89,7 +91,7 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
       .myPrefs()
       .then((r) => {
         if (!alive) return;
-        setScope(r.prefs.write.default_scope);
+        setScope(allowedScopes.includes(r.prefs.write.default_scope) ? r.prefs.write.default_scope : (allowedScopes[0] ?? ''));
         setWeight(r.prefs.write.default_weight);
       })
       .catch(() => undefined);
@@ -100,6 +102,8 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const needsScopeId = ['project', 'role', 'campaign'].includes(scope);
+  const destinations = restricted ? (scope === 'project' ? me?.write?.project_ids : me?.write?.campaign_ids) : null;
+  const allowedDestination = !needsScopeId || (Boolean(scopeId.trim()) && (destinations == null || destinations.includes(scopeId.trim())));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,7 +114,7 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
         content: content.trim(),
         scope,
         weight,
-        owner_id: owner.trim() || (needsScopeId ? scopeId.trim() : undefined),
+        owner_id: restricted ? (needsScopeId ? scopeId.trim() : me?.write?.owner_id ?? me?.username) : owner.trim() || (needsScopeId ? scopeId.trim() : undefined),
         scope_id: needsScopeId ? scopeId.trim() : undefined,
         domains: domains.split(',').map((d) => d.trim()).filter(Boolean),
       });
@@ -136,8 +140,8 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="f">
             <label htmlFor="wm-scope">Scope</label>
-            <select id="wm-scope" className="in" value={scope} onChange={(e) => setScope(e.target.value)}>
-              {SCOPE_ORDER.map((s) => (
+            <select id="wm-scope" className="in" value={scope} onChange={(e) => { setScope(e.target.value); setScopeId(''); }}>
+              {allowedScopes.map((s) => (
                 <option key={s} value={s}>
                   {scopeMeta(s).label}
                 </option>
@@ -147,12 +151,17 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
           {needsScopeId ? (
             <div className="f">
               <label htmlFor="wm-sid">{scopeMeta(scope).label} ID</label>
-              <input id="wm-sid" className="in" required value={scopeId} onChange={(e) => setScopeId(e.target.value)} placeholder={scope === 'project' ? 'memoryhub-ui' : ''} />
+              {destinations != null ? (
+                <select id="wm-sid" className="in" required value={scopeId} onChange={(e) => setScopeId(e.target.value)}>
+                  <option value="">Select a {scope}</option>
+                  {destinations.map((id) => <option key={id} value={id}>{id}</option>)}
+                </select>
+              ) : <input id="wm-sid" className="in" required value={scopeId} onChange={(e) => setScopeId(e.target.value)} placeholder={scope === 'project' ? 'memoryhub-ui' : ''} />}
             </div>
           ) : (
             <div className="f">
               <label htmlFor="wm-owner">Owner</label>
-              <input id="wm-owner" className="in" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder={scope === 'user' ? me?.username : 'tenant'} />
+              <input id="wm-owner" className="in" value={restricted ? me?.write?.owner_id ?? me?.username ?? '' : owner} readOnly={restricted} onChange={(e) => setOwner(e.target.value)} placeholder={scope === 'user' ? me?.username : 'tenant'} />
             </div>
           )}
         </div>
@@ -166,7 +175,7 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
         </div>
         {error && <div className="alert err-a">{error}</div>}
         <div className="modal-actions">
-          <button type="submit" className="btn bp" disabled={busy || !content.trim()}>
+          <button type="submit" className="btn bp" disabled={busy || !content.trim() || !allowedScopes.includes(scope) || !allowedDestination}>
             {busy ? 'Writing…' : 'Write memory'}
           </button>
           <button type="button" className="btn bg" onClick={onClose}>

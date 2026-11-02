@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from src.access import ContentDep, ViewerDep, access_for
+from src.browse_query import BrowseDep, BrowseQuery
 from src.config import Settings, get_settings
 from src.database import get_db
 from src.ui_common import (
@@ -111,16 +112,12 @@ async def _auth_clients(settings: Settings) -> list[dict] | None:
 @router.get("/api/me")
 async def me(request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
-    access = None
-    if viewer.redacts_content:
-        try:
-            acc = await access_for(db, settings, viewer)
-            access = {"hidden_scopes": list(acc.hidden_scopes), "break_glass": acc.break_glass}
-        except Exception:  # pragma: no cover - needs a database
-            await db.rollback()
+    acc = await access_for(db, settings, viewer)
+    access = {"hidden_scopes": list(acc.hidden_scopes), "break_glass": acc.break_glass}
     return {
         # #667 tier: user, admin (no user-scope content) or superuser (incident grants).
         "access": access,
+        "write": acc.write_capabilities(),
         "username": viewer.username,
         "name": viewer.name,
         "email": viewer.email,
@@ -842,28 +839,19 @@ async def _entities_for(db: AsyncSession, tenant_id: str, ids: list) -> dict[uui
     return out
 
 
-@router.get("/api/memories/browse")
-async def browse_memories(
-    db: DbDep,
-    settings: SettingsDep,
-    viewer: ViewerDep,
-    tab: str = Query(default="current", pattern="^(current|all|quarantined|deleted)$"),
-    q: str | None = Query(default=None, max_length=1000),
-    mode: str = Query(default="semantic", pattern="^(semantic|text)$"),
-    scope: list[str] | None = Query(default=None),
-    actor: list[str] | None = Query(default=None),
-    project: str | None = Query(default=None, max_length=255),
-    domain: list[str] | None = Query(default=None),
-    min_weight: float | None = Query(default=None, ge=0, le=1),
-    flag: list[str] | None = Query(default=None),
-    sort: str = Query(default="updated", pattern="^(relevance|updated|created|weight|version)$"),
-    order: str = Query(default="desc", pattern="^(asc|desc)$"),
-    page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=20, ge=1, le=100),
-    entity: str | None = Query(default=None, max_length=64),
-):
+async def build_browse_filters(db, settings, viewer, acc, params: BrowseQuery):
+    """Resolve identical filters and semantic candidates for every browse representation."""
     tenant_id = settings.ui_tenant_id
-    acc = await access_for(db, settings, viewer)
+    tab = params.tab
+    q = params.q
+    mode = params.mode
+    scope = params.scope
+    actor = params.actor
+    project = params.project
+    domain = params.domain
+    min_weight = params.min_weight
+    flag = params.flag
+    entity = params.entity
     # #667: admins read and search the scopes they may moderate; the rest stays metadata only.
     metadata_only = viewer.redacts_content and not acc.open_scopes
     readable_only = [MemoryNode.scope.in_(acc.open_scopes)] if viewer.redacts_content else []
@@ -944,6 +932,26 @@ async def browse_memories(
             filters.append(or_(MemoryNode.content.ilike(pattern), MemoryNode.stub.ilike(pattern)))
             search_mode = "text"
 
+    return filters, scores, search_mode
+
+
+@router.get("/api/memories/browse")
+async def browse_memories(
+    db: DbDep,
+    settings: SettingsDep,
+    viewer: ViewerDep,
+    query: BrowseDep,
+    sort: str = Query(default="updated", pattern="^(relevance|updated|created|weight|version)$"),
+    order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
+):
+    tenant_id = settings.ui_tenant_id
+    acc = await access_for(db, settings, viewer)
+    filters, scores, search_mode = await build_browse_filters(db, settings, viewer, acc, query)
+    base = _tab_filters(tenant_id, query.tab) + acc.filters()
+    metadata_only = viewer.redacts_content and not acc.open_scopes
+    readable_only = [MemoryNode.scope.in_(acc.open_scopes)] if viewer.redacts_content else []
     total = (await db.execute(select(func.count()).select_from(MemoryNode).where(*filters))).scalar_one()
 
     descending = order == "desc"
@@ -1137,16 +1145,14 @@ async def export_memories(
     db: DbDep,
     settings: SettingsDep,
     viewer: ViewerDep,
-    scope: list[str] | None = Query(default=None),
+    query: BrowseDep,
     mine: bool = Query(default=False),
 ):
-    """JSONL export of current memories (the browser's "Export JSONL")."""
+    """JSONL export of every memory matching the current browser filters."""
     from fastapi.responses import StreamingResponse
 
     acc = await access_for(db, settings, viewer)
-    filters = _tab_filters(settings.ui_tenant_id, "current") + acc.filters()
-    if scope:
-        filters.append(MemoryNode.scope.in_(scope))
+    filters, _, _ = await build_browse_filters(db, settings, viewer, acc, query)
     if mine:
         own = list(acc.grants.identities) if acc.grants else [viewer.username]
         filters += [MemoryNode.scope == "user", MemoryNode.owner_id.in_(own)]
@@ -1928,6 +1934,7 @@ async def graph_neighbourhood(
     db: DbDep,
     settings: SettingsDep,
     viewer: ViewerDep,
+    query: BrowseDep,
     focus: str | None = Query(default=None),
     depth: int = Query(default=2, ge=1, le=4),
     types: list[str] | None = Query(default=None),
@@ -1935,11 +1942,14 @@ async def graph_neighbourhood(
 ):
     tenant_id = settings.ui_tenant_id
     acc = await access_for(db, settings, viewer)
-    visible = live_filters(tenant_id) + [MemoryNode.parent_id.is_(None), MemoryNode.scope != "entity"] + acc.filters()
+    visible, _, _ = await build_browse_filters(db, settings, viewer, acc, query)
 
     if focus:
-        focus_node = await _load_memory(db, tenant_id, focus)
-        acc.ensure_readable(focus_node)
+        focus_node = (
+            await db.execute(select(MemoryNode).where(*visible, MemoryNode.id == parse_uuid(focus, "memory ID")))
+        ).scalar_one_or_none()
+        if focus_node is None:
+            raise HTTPException(status_code=404, detail="The focused memory does not match the current filters")
     else:
         # Default focus: the most connected current memory, else the newest one.
         degree = (
@@ -2009,14 +2019,14 @@ async def graph_neighbourhood(
         if neighbour_ids:
             found = {
                 n.id: n
-                for n in (await db.execute(select(MemoryNode).where(MemoryNode.id.in_(list(neighbour_ids)))))
+                for n in (await db.execute(select(MemoryNode).where(*visible, MemoryNode.id.in_(list(neighbour_ids)))))
                 .scalars()
                 .all()
             }
         next_frontier = set()
         for nid in neighbour_ids:
             n = found.get(nid)
-            if n is None or n.tenant_id != tenant_id or n.deleted_at is not None or not acc.can_read_row(n):
+            if n is None or n.tenant_id != tenant_id or not acc.can_read_row(n):
                 hidden.add(nid)
                 continue
             if n.scope == "entity":
@@ -2051,8 +2061,7 @@ async def graph_neighbourhood(
                         MemoryRelationship.source_id == cursor,
                         MemoryRelationship.relationship_type == "derived_from",
                         MemoryRelationship.valid_until.is_(None),
-                        MemoryNode.tenant_id == tenant_id,
-                        MemoryNode.deleted_at.is_(None),
+                        *visible,
                     )
                     .limit(1)
                 )
@@ -2123,13 +2132,10 @@ async def graph_all(
     db: DbDep,
     settings: SettingsDep,
     viewer: ViewerDep,
+    query: BrowseDep,
     types: list[str] | None = Query(default=None),
     include_superseded: bool = Query(default=False),
     max_nodes: int = Query(default=300, ge=10, le=GRAPH_MAX_NODES),
-    scope: list[str] | None = Query(default=None),
-    min_weight: float = Query(default=0, ge=0, le=1),
-    project: str | None = Query(default=None, max_length=255),
-    entity: str | None = Query(default=None),
     prefer: str = Query(default="connected", pattern="^(connected|recent|weight)$"),
 ):
     """Every readable memory and the links between them, connected or not.
@@ -2145,35 +2151,9 @@ async def graph_all(
     """
     tenant_id = settings.ui_tenant_id
     acc = await access_for(db, settings, viewer)
-    filters = (
-        live_filters(tenant_id, current=not include_superseded)
-        + [
-            MemoryNode.parent_id.is_(None),
-            MemoryNode.scope != "entity",
-            MemoryNode.status != "quarantined",
-        ]
-        + acc.filters()
-    )
-    if scope:
-        filters.append(MemoryNode.scope.in_(scope))
-    if min_weight:
-        filters.append(MemoryNode.weight >= min_weight)
-    if project:
-        filters.append(
-            or_(
-                and_(MemoryNode.scope == "project", MemoryNode.scope_id == project),
-                MemoryNode.metadata_["project"].as_string() == project,
-            )
-        )
-    if entity:
-        filters.append(
-            exists().where(
-                MemoryRelationship.source_id == MemoryNode.id,
-                MemoryRelationship.target_id == parse_uuid(entity, "entity ID"),
-                MemoryRelationship.relationship_type == "mentions",
-                MemoryRelationship.valid_until.is_(None),
-            )
-        )
+    if include_superseded and query.tab == "current":
+        query = query.model_copy(update={"tab": "all"})
+    filters, _, _ = await build_browse_filters(db, settings, viewer, acc, query)
     total = (await db.execute(select(func.count()).select_from(MemoryNode).where(*filters))).scalar_one()
     stmt = select(MemoryNode).where(*filters)
     if prefer == "connected" and total > max_nodes:

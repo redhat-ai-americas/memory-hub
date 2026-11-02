@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { api } from '@/api/client';
+import { api, AUTHORIZATION_CHANGED_EVENT } from '@/api/client';
 import type { BreakGlassGrant, Me, NavFeatures, NotificationsResponse, Role, SwitchTargets } from '@/types';
 import { buildHash } from '@/hooks/useHashRoute';
 import { Dropdown, Icon } from './ui';
@@ -42,19 +42,71 @@ export const useApp = () => useContext(AppContext);
 
 const POLL_EMPTY_MS = 5000;
 const POLL_IDLE_MS = 60000;
+const POLL_ACCESS_MS = 15000;
+
+function expireGrant(viewer: Me): Me {
+  const grant = viewer.access?.break_glass;
+  if (!grant || Date.parse(grant.expires_at) > Date.now()) return viewer;
+  return { ...viewer, access: { hidden_scopes: [...new Set([...(viewer.access?.hidden_scopes ?? []), 'user'])], break_glass: null } };
+}
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [me, setMe] = useState<Me | null>(null);
+  const [accessCheck, setAccessCheck] = useState(0);
+  const [accessError, setAccessError] = useState(false);
   const [memoryCount, setMemoryCount] = useState<number | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
   const [token, setToken] = useState(0);
   const [features, setFeatures] = useState<NavFeatures | null>(null);
 
   useEffect(() => {
-    api.me().then(setMe).catch(() => undefined);
-  }, []);
+    let cancelled = false;
+    api.me().then((viewer) => {
+      if (cancelled) return;
+      setMe(expireGrant(viewer));
+      setAccessError(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setMe(null);
+      setAccessError(true);
+    });
+    return () => { cancelled = true; };
+  }, [accessCheck]);
 
   useEffect(() => {
+    const refresh = () => setAccessCheck((value) => value + 1);
+    const visible = () => { if (document.visibilityState === 'visible') refresh(); };
+    const storage = (event: StorageEvent) => { if (event.key === AUTHORIZATION_CHANGED_EVENT) refresh(); };
+    const interval = window.setInterval(refresh, POLL_ACCESS_MS);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('storage', storage);
+    window.addEventListener(AUTHORIZATION_CHANGED_EVENT, refresh);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('storage', storage);
+      window.removeEventListener(AUTHORIZATION_CHANGED_EVENT, refresh);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, []);
+
+  const grantExpiry = me?.access?.break_glass?.expires_at;
+  useEffect(() => {
+    if (!grantExpiry) return;
+    const timer = window.setTimeout(() => {
+      // Remove content locally even if the next network request fails.
+      setMe((viewer) => viewer ? expireGrant(viewer) : null);
+      setAccessCheck((value) => value + 1);
+    }, Math.max(0, Date.parse(grantExpiry) - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [grantExpiry]);
+
+  // Remount every screen on an authorization change to discard cached content.
+  const authorizationKey = JSON.stringify([me?.tenant_id, me?.username, me?.role, me?.real_username, me?.access, me?.write]);
+
+  useEffect(() => {
+    if (!me) return;
     let cancelled = false;
     api
       .navCounts()
@@ -71,7 +123,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       cancelled = true;
     };
-  }, [token, me?.role, me?.username]);
+  }, [token, authorizationKey]);
 
   // Poll every 5 s while waiting for the first write_memory, then slowly.
   useEffect(() => {
@@ -94,7 +146,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshCounts,
       }}
     >
-      {children}
+      {me ? <React.Fragment key={authorizationKey}>{children}</React.Fragment> : (
+        <div className="body" role="status">
+          {accessError ? 'Unable to verify your access. Retrying…' : 'Checking access…'}
+          {accessError && <button className="btn bg" onClick={() => setAccessCheck((value) => value + 1)}>Retry</button>}
+        </div>
+      )}
     </AppContext.Provider>
   );
 };

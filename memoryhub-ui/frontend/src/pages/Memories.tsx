@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '@/api/client';
+import { browseParams } from '@/utils/browse';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
 import { Dropdown, Empty, ErrorState, Icon, Modal, Pager, ScopeLabel, SelectMenu, SkTable, SkLines, Standby, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { BrowseParams, BrowseResponse, MemoryRow, MyPrefsResponse } from '@/types';
+import type { BrowseResponse, MemoryRow, MyPrefsResponse } from '@/types';
 import { errorMessage, fmtCompact, fmtInt, fmtRelative, fmtWeight, SCOPE_ORDER, scopeMeta, shortId } from '@/utils/format';
 import { ConfirmModal, memoryHref, RelationshipModal, WriteMemoryModal } from './common';
 import MemoryGraph, { LockIcon } from './MemoryGraph';
@@ -68,22 +69,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
     navigate('/memories', next, { replace: true });
   };
 
-  const params: BrowseParams = {
-    tab: state.tab,
-    q: state.q || undefined,
-    mode: state.mode,
-    scope: state.scope,
-    actor: state.actor,
-    project: state.project || undefined,
-    domain: state.domain,
-    min_weight: state.minWeight || undefined,
-    flag: state.flag,
-    sort,
-    order: 'desc',
-    page: state.page,
-    per_page: state.per,
-    entity: state.entity || undefined,
-  };
+  const params = browseParams(p);
   const key = JSON.stringify(params);
   const { data, error, loading, reload } = useApi<BrowseResponse>(
     () => (view === 'table' ? api.browse(params) : Promise.resolve(null as unknown as BrowseResponse)),
@@ -188,7 +174,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
         actions={
           <>
             {view === 'table' && (
-              <a className="btn bg" href={api.exportUrl(state.scope)} download aria-disabled={standby}>
+              <a className="btn bg" href={api.exportUrl(params)} download aria-disabled={standby}>
                 {isAdmin ? 'Export metadata' : 'Export JSONL'}
               </a>
             )}

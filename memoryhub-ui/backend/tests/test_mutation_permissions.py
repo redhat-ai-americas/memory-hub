@@ -142,3 +142,22 @@ async def test_personal_audit_is_available_and_all_queries_are_scoped(mutation_c
         c.db.execute.reset_mock()
         assert (await client.get("/api/audit?actor=bob")).status_code == 200
         assert all("WHERE false" in str(call.args[0]) for call in c.db.execute.call_args_list)
+
+
+def test_write_capabilities_match_memberships(mutation_context, monkeypatch):
+    c = mutation_context
+    capabilities = c.access.write_capabilities()
+    assert capabilities == {
+        "scopes": ["user", "project", "campaign"],
+        "owner_id": "alice",
+        "project_ids": ["p1"],
+        "campaign_ids": ["c1"],
+    }
+    c.access.grants.projects.clear()
+    c.access.grants.campaigns.clear()
+    assert c.access.write_capabilities()["scopes"] == ["user"]
+    monkeypatch.setenv("MEMORYHUB_PROJECT_ISOLATION_ENABLED", "false")
+    assert c.access.write_capabilities()["project_ids"] is None
+    assert c.access.write_capabilities()["scopes"] == ["user", "project"]
+    c.viewer.role = "admin"
+    assert c.access.write_capabilities()["scopes"] == []

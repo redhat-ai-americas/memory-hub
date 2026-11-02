@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/api/client';
+import { browseParams } from '@/utils/browse';
 import { useApp } from '@/components/Shell';
 import { Empty, ErrorState, Icon, Modal, ScopeLabel, Sk, SkLines, Standby, Switch, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
@@ -17,7 +18,7 @@ import { MemoryPicker, RelationshipModal } from './common';
  * Layouts: Force and Provenance tree (derived_from / supersedes by scope
  * tier). Time has its own view next to Table and Graph (MemoryTimeline).
  *
- * Scope, project, entity, weight and the selected memory live in the URL and
+ * All browser filters and the selected memory live in the URL and
  * are shared with the table and the timeline, so switching views keeps them.
  * "All memories" draws up to a node limit the viewer picks; when more match,
  * the canvas says how many were left out and which ones were kept.
@@ -230,14 +231,14 @@ const MemoryGraph: React.FC<{
   const colorBy: ColorBy = (p.get('color') as ColorBy) || 'scope';
   const limit = Number(p.get('glimit') || 300);
   const prefer = (p.get('gprefer') as GraphPrefer) || 'connected';
-  const scopes = (p.get('scope') || '').split(',').filter(Boolean);
-  const project = p.get('project') || undefined;
-  const entity = p.get('entity') || undefined;
+  const filters = browseParams(p);
+  const filterKey = JSON.stringify(filters);
   const minWeight = p.get('minw') ? Number(p.get('minw')) : 0;
 
   const [types, setTypes] = useState<Set<string>>(new Set(EDGE_TYPES));
   const [showOrphans, setShowOrphans] = useState(true);
-  const [superseded, setSuperseded] = useState(false);
+  const superseded = filters.tab === 'all';
+  const setSuperseded = (value: boolean) => setParams({ tab: value ? 'all' : 'current' });
   const [labels, setLabels] = useState(true);
   const [fade, setFade] = useState(true);
   const selected = p.get('sel') || (focusMode === 'memory' ? focusId ?? null : null);
@@ -251,14 +252,14 @@ const MemoryGraph: React.FC<{
   const all = useApi<GraphAll>(
     () =>
       focusMode === 'all'
-        ? api.graphAll({ include_superseded: superseded, max_nodes: limit, prefer, scope: scopes, project, entity, min_weight: minWeight || undefined })
+        ? api.graphAll({ ...filters, max_nodes: limit, prefer })
         : Promise.resolve(null as unknown as GraphAll),
-    [focusMode, superseded, limit, prefer, scopes.join(','), project, entity, minWeight],
+    [focusMode, limit, prefer, filterKey],
     standby ? 5000 : null,
   );
   const hood = useApi<GraphNeighbourhood>(
-    () => (focusMode === 'memory' ? api.neighbourhood({ focus: focusId, depth, max_nodes: 300 }) : Promise.resolve(null as unknown as GraphNeighbourhood)),
-    [focusMode, focusId, depth],
+    () => (focusMode === 'memory' ? api.neighbourhood({ ...filters, focus: focusId, depth, max_nodes: 300 }) : Promise.resolve(null as unknown as GraphNeighbourhood)),
+    [focusMode, focusId, depth, filterKey],
     standby ? 5000 : null,
   );
   const active = focusMode === 'all' ? all : hood;

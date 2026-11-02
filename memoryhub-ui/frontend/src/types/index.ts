@@ -18,6 +18,7 @@ export interface Me {
   role: Role | 'superuser';
   /** Admins and super-users: what they cannot read, and the active incident grant. */
   access?: { hidden_scopes: string[]; break_glass: BreakGlassGrant | null } | null;
+  write?: { scopes: string[]; project_ids: string[] | null; campaign_ids: string[] | null; owner_id: string };
   /** Test mode: who is really signed in while viewing as someone else. */
   real_username?: string | null;
   real_role?: Role | 'superuser' | null;

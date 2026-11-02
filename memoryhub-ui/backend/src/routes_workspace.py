@@ -23,11 +23,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from memoryhub_core.models.audit import AuditLog
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from src.access import ContentDep, LabsDep, ViewerDep, access_for
+from src.browse_query import BrowseDep
 from src.config import Settings, get_settings
 from src.database import get_db
 from src.ui_common import audit, clean_stub, live_filters, now_utc, parse_uuid, viewer_from_request
@@ -151,46 +152,17 @@ async def timeline(
     db: DbDep,
     settings: SettingsDep,
     viewer: ViewerDep,
-    scope: list[str] | None = Query(default=None),
-    project: str | None = Query(default=None, max_length=255),
-    entity: str | None = Query(default=None),
-    min_weight: float = Query(default=0, ge=0, le=1),
-    days: int = Query(default=90, ge=0, le=3650),
+    query: BrowseDep,
+    days: int = Query(default=0, ge=0, le=3650),
     by: str = Query(default="created", pattern="^(created|updated)$"),
     max_items: int = Query(default=600, ge=10, le=2000),
 ):
     """Memories on a time axis, filtered like the table; ``days=0`` means all time."""
-    tenant_id = settings.ui_tenant_id
+    from src.routes_dashboard import build_browse_filters
+
     acc = await access_for(db, settings, viewer)
     col = MemoryNode.created_at if by == "created" else MemoryNode.updated_at
-    filters = (
-        live_filters(tenant_id)
-        + [MemoryNode.parent_id.is_(None), MemoryNode.scope != "entity", MemoryNode.status != "quarantined"]
-        + acc.filters()
-    )
-    if scope:
-        filters.append(MemoryNode.scope.in_(scope))
-    if min_weight:
-        filters.append(MemoryNode.weight >= min_weight)
-    if project:
-        filters.append(
-            or_(
-                and_(MemoryNode.scope == "project", MemoryNode.scope_id == project),
-                MemoryNode.metadata_["project"].as_string() == project,
-            )
-        )
-    if entity:
-        eid = parse_uuid(entity, "entity ID")
-        filters.append(
-            select(MemoryRelationship.id)
-            .where(
-                MemoryRelationship.source_id == MemoryNode.id,
-                MemoryRelationship.target_id == eid,
-                MemoryRelationship.relationship_type == "mentions",
-                MemoryRelationship.valid_until.is_(None),
-            )
-            .exists()
-        )
+    filters, _, _ = await build_browse_filters(db, settings, viewer, acc, query)
     if days:
         filters.append(col >= now_utc() - timedelta(days=days))
     total = (await db.execute(select(func.count()).select_from(MemoryNode).where(*filters))).scalar_one()

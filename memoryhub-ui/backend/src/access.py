@@ -236,6 +236,28 @@ class Access:
                 ),
             )
 
+    def write_capabilities(self) -> dict:
+        """Expose exactly the destinations accepted by the server's write policy."""
+        from src.authz import project_isolation
+
+        if self.viewer.redacts_content:
+            return {"scopes": [], "project_ids": [], "campaign_ids": [], "owner_id": self.viewer.username}
+        if self.grants is None:
+            return {
+                "scopes": ["user", *ADMIN_SCOPES],
+                "project_ids": None,
+                "campaign_ids": None,
+                "owner_id": self.viewer.username,
+            }
+        projects = sorted(self.grants.projects) if project_isolation() else None
+        campaigns = sorted(self.grants.campaigns)
+        scopes = ["user"]
+        if projects is None or projects:
+            scopes.append("project")
+        if campaigns:
+            scopes.append("campaign")
+        return {"scopes": scopes, "project_ids": projects, "campaign_ids": campaigns, "owner_id": self.viewer.username}
+
     def moderation_metadata(self, nodes: list[Any]) -> dict:
         private = [n for n in nodes if n.scope == "user"]
         if not (self.viewer.is_superuser and private and self.break_glass):

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { api } from '@/api/client';
+import { browseParams } from '@/utils/browse';
 import { useApp } from '@/components/Shell';
 import { Empty, ErrorState, ScopeLabel, Sk, Standby } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
@@ -41,19 +42,17 @@ const MemoryTimeline: React.FC<{
 }> = ({ route, setParams }) => {
   const { standby } = useApp();
   const p = route.params;
-  const days = p.get('tdays') === null ? 90 : Number(p.get('tdays'));
+  const days = p.get('tdays') === null ? 0 : Number(p.get('tdays'));
   const by: 'created' | 'updated' = p.get('tby') === 'updated' ? 'updated' : 'created';
   const colorBy: ColorBy = p.get('tcolor') === 'scope' ? 'scope' : 'recency';
-  const scopes = (p.get('scope') || '').split(',').filter(Boolean);
-  const project = p.get('project') || undefined;
-  const entity = p.get('entity') || undefined;
-  const minWeight = p.get('minw') ? Number(p.get('minw')) : 0;
+  const filters = browseParams(p);
+  const filterKey = JSON.stringify(filters);
   const selected = p.get('sel');
   const [hover, setHover] = useState<string | null>(null);
 
   const { data, error, loading, reload } = useApi<TimelineResponse>(
-    () => api.timeline({ scope: scopes, project, entity, min_weight: minWeight || undefined, days, by, max_items: 1500 }),
-    [scopes.join(','), project, entity, minWeight, days, by],
+    () => api.timeline({ ...filters, days, by, max_items: 1500 }),
+    [filterKey, days, by],
     standby ? 5000 : null,
   );
   const items = data?.items ?? [];
@@ -175,7 +174,7 @@ const MemoryTimeline: React.FC<{
         </div>
         <hr className="sep" />
         <p className="hint" style={{ margin: 0 }}>
-          Scope, project, entity and weight filters from the table apply here too. The selected memory stays selected when you switch views.
+          All filters from the table apply here too. The selected memory stays selected when you switch views.
         </p>
       </aside>
 
