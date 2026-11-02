@@ -447,3 +447,39 @@ test.describe('#667 role tiers', () => {
     await expect(page.getByText('Only super-users can open this')).toBeVisible();
   });
 });
+
+test.describe('#676 central project provisioning', () => {
+  test('users cannot create projects or manage members', async ({ page }) => {
+    await page.unrouteAll();
+    await mockDashboardApi(page, { role: 'user' });
+    await page.goto('/#/projects');
+    await expect(page.getByRole('heading', { name: 'memoryhub-ui' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create project' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '+ Add member' })).toHaveCount(0);
+    await expect(page.getByText('writing to the project does not join it', { exact: false })).toBeVisible();
+  });
+
+  test('admins create a project with its members', async ({ page }) => {
+    await page.unrouteAll();
+    await mockDashboardApi(page, { role: 'admin' });
+    await page.goto('/#/projects');
+    await page.getByRole('button', { name: 'Create project' }).first().click();
+    await page.getByLabel('Name').fill('team-x');
+    await page.getByLabel('Project admins').fill('carol');
+    await page.getByLabel('Members').fill('alice, bob carol');
+    const req = page.waitForRequest((r) => r.url().endsWith('/api/projects') && r.method() === 'POST');
+    await page.getByRole('button', { name: 'Create with 3 people' }).click();
+    expect((await req).postDataJSON().members).toEqual([
+      { user_id: 'carol', role: 'admin' },
+      { user_id: 'alice', role: 'member' },
+      { user_id: 'bob', role: 'member' },
+    ]);
+  });
+
+  test('project admins change member roles', async ({ page }) => {
+    await page.unrouteAll();
+    await mockDashboardApi(page, { role: 'admin' });
+    await page.goto('/#/projects');
+    await expect(page.getByLabel('Role of admin')).toHaveValue('admin');
+  });
+});

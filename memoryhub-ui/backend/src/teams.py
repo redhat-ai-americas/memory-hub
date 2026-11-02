@@ -217,6 +217,22 @@ async def _can_grant_project(db: AsyncSession, viewer: Viewer, tenant_id: str, p
         raise HTTPException(status_code=403, detail=f"Only an admin of {project} can give a team access to it")
 
 
+async def _can_grant_linked_projects(db: AsyncSession, viewer: Viewer, settings, team_id: uuid.UUID) -> None:
+    """Adding someone to a team gives them its projects (sync_project_access).
+
+    With central provisioning (#676) that is a project grant, so a team lead
+    needs to be an admin of every project the team is linked to; otherwise a
+    lead could hand out project access the project's admins never approved.
+    """
+    if viewer.can_admin or (settings.project_provisioning or "central").strip().lower() == "self_service":
+        return
+    linked = (
+        (await db.execute(text(f"SELECT project_id FROM {LINKS} WHERE team_id = :id"), {"id": team_id})).scalars().all()
+    )
+    for project in linked:
+        await _can_grant_project(db, viewer, settings.ui_tenant_id, project)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -357,6 +373,7 @@ async def add_team_member(team_id: str, body: TeamMemberRequest, request: Reques
     viewer = viewer_from_request(request, settings)
     team = await _team(db, settings.ui_tenant_id, team_id)
     await _can_manage(db, viewer, team["id"])
+    await _can_grant_linked_projects(db, viewer, settings, team["id"])
     await db.execute(
         text(
             f"""

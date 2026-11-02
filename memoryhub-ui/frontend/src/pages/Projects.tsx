@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '@/api/client';
-import { PageHeader, Tabs } from '@/components/Shell';
+import { PageHeader, Tabs, useApp } from '@/components/Shell';
 import { Dropdown, Empty, ErrorState, Modal, SkLines, SkTable, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
@@ -11,6 +11,7 @@ import { ProjectTeams, TeamForm, TeamPanel, TeamsTable } from './Teams';
 
 const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
+  const { role } = useApp();
   const kindParam = route.params.get('kind');
   const kind = kindParam === 'campaigns' ? 'campaigns' : kindParam === 'teams' ? 'teams' : 'projects';
   const selectedTeam = route.params.get('team');
@@ -27,6 +28,10 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
   const rows = (projects.data?.items ?? []).filter((p) => p.name.toLowerCase().includes(filter.toLowerCase()) || (p.description ?? '').toLowerCase().includes(filter.toLowerCase()));
   const camps = (campaigns.data?.items ?? []).filter((c) => c.name.toLowerCase().includes(filter.toLowerCase()));
   const activeProject = selectedName ?? rows[0]?.name ?? null;
+  // #676: with central provisioning only platform admins create projects.
+  const canCreate = projects.data?.can_create ?? role !== 'user';
+  const central = (projects.data?.provisioning ?? 'central') === 'central';
+  const manages = (p: ProjectRow) => role !== 'user' || p.my_role === 'admin';
   const activeCampaign = camps.find((c) => c.id === selectedCampaign) ?? camps[0] ?? null;
 
   const setParam = (changes: Record<string, string | undefined>) => {
@@ -57,9 +62,11 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                 Create team
               </button>
             )}
-            <button type="button" className="btn bp" onClick={() => setModal('project')}>
-              Create project
-            </button>
+            {canCreate && (
+              <button type="button" className="btn bp" onClick={() => setModal('project')}>
+                Create project
+              </button>
+            )}
           </>
         }
         tabs={
@@ -112,14 +119,21 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                 <Empty
                   title={filter ? 'No projects match' : mine ? 'You are not in any project yet' : 'No projects yet'}
                   action={
-                    !filter && (
+                    !filter &&
+                    canCreate && (
                       <button type="button" className="btn bp" onClick={() => setModal('project')}>
                         Create project
                       </button>
                     )
                   }
                 >
-                  {filter ? 'Try another name.' : 'Agents create open projects on their first project-scope write, or you can create one here.'}
+                  {filter
+                    ? 'Try another name.'
+                    : central
+                      ? canCreate
+                        ? 'Create a project for each shared context and add its members; agents cannot create projects on this deployment.'
+                        : 'Projects are created by platform admins, who add their members. Ask an admin to add you to your team’s project.'
+                      : 'Agents create open projects on their first project-scope write, or you can create one here.'}
                 </Empty>
               ) : (
                 <div className="scroll">
@@ -151,7 +165,7 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                             </a>
                             <div className="sm muted">{p.description || '—'}</div>
                           </td>
-                          <td>{p.invite_only ? <span className="lbl blue">Invite-only</span> : <span className="lbl g">Open</span>}</td>
+                          <td>{central ? <span className="lbl blue">Members only</span> : p.invite_only ? <span className="lbl blue">Invite-only</span> : <span className="lbl g">Open</span>}</td>
                           <td>{fmtInt(p.members)}</td>
                           <td>
                             <a href={buildHash('/memories', { project: p.name })} onClick={(e) => e.stopPropagation()} className="link-plain" style={{ color: 'inherit' }}>
@@ -179,12 +193,16 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                             >
                               {(close) => (
                                 <>
-                                  <button type="button" onClick={() => { close(); setParam({ project: p.name }); setModal('edit'); }}>
-                                    Edit
-                                  </button>
-                                  <button type="button" onClick={() => { close(); setParam({ project: p.name }); setModal('member'); }}>
-                                    Add member
-                                  </button>
+                                  {manages(p) && (
+                                    <>
+                                      <button type="button" onClick={() => { close(); setParam({ project: p.name }); setModal('edit'); }}>
+                                        Edit
+                                      </button>
+                                      <button type="button" onClick={() => { close(); setParam({ project: p.name }); setModal('member'); }}>
+                                        Add member
+                                      </button>
+                                    </>
+                                  )}
                                   <a href={buildHash('/memories', { project: p.name })}>Browse memories</a>
                                 </>
                               )}
@@ -289,6 +307,7 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
 
       {modal === 'project' && (
         <ProjectForm
+          central={central}
           onClose={() => setModal(null)}
           onSaved={(name) => {
             toast(`Project ${name} created.`);
@@ -299,6 +318,7 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
       )}
       {modal === 'edit' && activeProject && (
         <ProjectForm
+          central={central}
           existing={projects.data?.items.find((p) => p.name === activeProject)}
           onClose={() => setModal(null)}
           onSaved={() => {
@@ -362,6 +382,16 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
   const { data, error, loading, reload } = useApi<ProjectDetail>(() => api.project(name), [name, route]);
   const [showAll, setShowAll] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const { me } = useApp();
+  const changeRole = async (userId: string, next: 'member' | 'admin') => {
+    try {
+      await api.setMemberRole(name, userId, next);
+      toast(next === 'admin' ? `${userId} is now an admin of ${name}.` : `${userId} is now a member of ${name}.`);
+      reload();
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+    }
+  };
   if (error && !data) return <div className="card"><ErrorState error={error} onRetry={reload} compact /></div>;
   if (loading && !data) return <div className="card"><SkLines lines={10} /></div>;
   if (!data) return null;
@@ -375,13 +405,19 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
             <span className="lbl s-project">Project</span>
             <h3 style={{ fontSize: 20, marginTop: 8 }}>{data.name}</h3>
           </div>
-          <button type="button" className="btn bg" onClick={onEdit}>
-            Edit
-          </button>
+          {data.can_manage !== false && (
+            <button type="button" className="btn bg" onClick={onEdit}>
+              Edit
+            </button>
+          )}
         </div>
         <p className="sm muted" style={{ margin: '0 0 14px' }}>
           {data.description ? `${data.description}. ` : ''}
-          {data.invite_only ? 'Invite-only — members are added by a project admin.' : 'Open enrollment — agents join on first project-scope write.'}
+          {data.provisioning !== 'self_service'
+            ? 'Members are added by a project admin or a platform admin; writing to the project does not join it.'
+            : data.invite_only
+              ? 'Invite-only — members are added by a project admin.'
+              : 'Open enrollment — agents join on first project-scope write.'}
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginBottom: 18 }}>
           <div>
@@ -399,9 +435,11 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
         </div>
         <div className="ch" style={{ marginBottom: 10 }}>
           <b className="sm">Members</b>
-          <button type="button" className="btn bl sm" onClick={onAddMember}>
-            + Add member
-          </button>
+          {data.can_manage !== false && (
+            <button type="button" className="btn bl sm" onClick={onAddMember}>
+              + Add member
+            </button>
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
           {data.members_list.length === 0 && <span className="sm muted">No members yet.</span>}
@@ -415,10 +453,31 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
                 {m.joined_by === m.user_id && <span className="sm muted"> · auto-enrolled</span>}
                 {m.via_team && <span className="sm muted"> · via team {m.via_team}</span>}
               </span>
-              <span className={`lbl ${m.role === 'admin' ? 'blue' : 'g'}`}>{m.role}</span>
-              <button type="button" className="btn bl sm" aria-label={`Remove ${m.user_id}`} style={{ padding: '2px 6px' }} onClick={() => setRemoving(m.user_id)}>
-                ✕
-              </button>
+              {data.can_manage !== false ? (
+                <select
+                  className="in auto sm"
+                  aria-label={`Role of ${m.user_id}`}
+                  value={m.role}
+                  onChange={(e) => changeRole(m.user_id, e.target.value as 'member' | 'admin')}
+                  style={{ width: 'auto', padding: '2px 8px' }}
+                >
+                  <option value="member">member</option>
+                  <option value="admin">admin</option>
+                </select>
+              ) : (
+                <span className={`lbl ${m.role === 'admin' ? 'blue' : 'g'}`}>{m.role}</span>
+              )}
+              {(data.can_manage !== false || m.user_id === me?.username) && (
+                <button
+                  type="button"
+                  className="btn bl sm"
+                  aria-label={m.user_id === me?.username ? `Leave ${name}` : `Remove ${m.user_id}`}
+                  style={{ padding: '2px 6px' }}
+                  onClick={() => setRemoving(m.user_id)}
+                >
+                  ✕
+                </button>
+              )}
             </div>
           ))}
           {data.members_list.length > 3 && (
@@ -572,19 +631,32 @@ const CampaignPanel: React.FC<{ campaign: CampaignRow; projects: ProjectRow[]; o
   );
 };
 
-const ProjectForm: React.FC<{ existing?: ProjectRow; onClose: () => void; onSaved: (name: string) => void }> = ({ existing, onClose, onSaved }) => {
+const splitIds = (text: string) => [...new Set(text.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean))];
+
+const ProjectForm: React.FC<{ existing?: ProjectRow; central?: boolean; onClose: () => void; onSaved: (name: string) => void }> = ({ existing, central = true, onClose, onSaved }) => {
   const [name, setName] = useState(existing?.name ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
-  const [inviteOnly, setInviteOnly] = useState(existing?.invite_only ?? false);
+  const [inviteOnly, setInviteOnly] = useState(existing?.invite_only ?? central);
+  const [admins, setAdmins] = useState('');
+  const [members, setMembers] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { data: ids } = useApi(() => (existing ? Promise.resolve(null) : api.identities()), [existing?.name]);
+  const adminIds = splitIds(admins);
+  const memberIds = splitIds(members).filter((u) => !adminIds.includes(u));
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErr(null);
     try {
       if (existing) await api.updateProject(existing.name, { description: description || null, invite_only: inviteOnly });
-      else await api.createProject({ name: name.trim(), description: description.trim() || undefined, invite_only: inviteOnly });
+      else
+        await api.createProject({
+          name: name.trim(),
+          description: description.trim() || undefined,
+          invite_only: inviteOnly,
+          members: [...adminIds.map((u) => ({ user_id: u, role: 'admin' as const })), ...memberIds.map((u) => ({ user_id: u, role: 'member' as const }))],
+        });
       onSaved(existing?.name ?? name.trim());
       onClose();
     } catch (e2) {
@@ -600,24 +672,53 @@ const ProjectForm: React.FC<{ existing?: ProjectRow; onClose: () => void; onSave
           <div className="f">
             <label htmlFor="pn">Name</label>
             <input id="pn" className="in" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" value={name} onChange={(e) => setName(e.target.value)} placeholder="memoryhub-ui" />
-            <span className="hint">Letters, numbers, dots, dashes and underscores. Agents use this as the project ID.</span>
+            <span className="hint">Letters, numbers, dots, dashes and underscores. Agents use this as the project ID in .memoryhub.yaml.</span>
           </div>
         )}
         <div className="f">
           <label htmlFor="pd">Description</label>
           <input id="pd" className="in" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
-        <label className="swrow">
-          <span>
-            <b>Invite-only</b>
-            <div className="hint">Agents must be added by a project admin before they can read or write.</div>
-          </span>
-          <input type="checkbox" checked={inviteOnly} onChange={(e) => setInviteOnly(e.target.checked)} />
-        </label>
+        {!existing && (
+          <>
+            <div className="f">
+              <label htmlFor="pa">Project admins</label>
+              <input id="pa" className="in" list="project-ids" value={admins} onChange={(e) => setAdmins(e.target.value)} placeholder="carol" />
+              <span className="hint">They manage the project's members. Leave empty to be its admin yourself.</span>
+            </div>
+            <div className="f">
+              <label htmlFor="pm">Members</label>
+              <textarea id="pm" className="in" rows={2} value={members} onChange={(e) => setMembers(e.target.value)} placeholder="alice, bob, claude-code-alice" />
+              <span className="hint">
+                People and agents, separated by commas or spaces. {central ? 'Only members can read and write this project’s memories.' : ''}
+              </span>
+            </div>
+            <datalist id="project-ids">
+              {(ids?.items ?? []).map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}
+                </option>
+              ))}
+            </datalist>
+          </>
+        )}
+        {central ? (
+          <p className="hint" style={{ margin: 0 }}>
+            Central provisioning: members are always added explicitly, by a project admin or a platform admin. Writing to the project never joins it.
+          </p>
+        ) : (
+          <label className="swrow">
+            <span>
+              <b>Invite-only</b>
+              <div className="hint">Agents must be added by a project admin before they can read or write.</div>
+            </span>
+            <input type="checkbox" checked={inviteOnly} onChange={(e) => setInviteOnly(e.target.checked)} />
+          </label>
+        )}
         {err && <div className="alert err-a">{err}</div>}
         <div className="modal-actions">
           <button type="submit" className="btn bp" disabled={busy}>
-            {existing ? 'Save' : 'Create project'}
+            {existing ? 'Save' : adminIds.length + memberIds.length ? `Create with ${adminIds.length + memberIds.length} ${adminIds.length + memberIds.length === 1 ? 'person' : 'people'}` : 'Create project'}
           </button>
           <button type="button" className="btn bg" onClick={onClose}>
             Cancel

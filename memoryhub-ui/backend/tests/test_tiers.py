@@ -115,3 +115,67 @@ async def test_users_change_only_their_own_rules(monkeypatch):
     assert exc.value.status_code == 403 and "Organizational rules" in exc.value.detail
     rule.layer, rule.owner_id = "user", "ar"
     await routes._own_rule_guard(str(uuid.uuid4()), request=None, db=_Db(), settings=get_settings())
+
+
+# --- #671 / #676: central project provisioning in the dashboard ------------
+
+
+def test_central_provisioning_is_the_default():
+    from src.config import Settings
+    from src.routes_admin import _can_create_projects, _central
+
+    central = Settings()
+    assert _central(central)
+    assert _can_create_projects(_viewer("admin"), central)
+    assert _can_create_projects(_viewer("superuser"), central)
+    assert not _can_create_projects(_viewer("user"), central)
+    open_mode = Settings(project_provisioning="self_service")
+    assert not _central(open_mode)
+    assert _can_create_projects(_viewer("user"), open_mode)
+    anon = Viewer(username="dashboard", name="d", email=None, source="anonymous", role="user")
+    assert not _can_create_projects(anon, open_mode)
+
+
+@pytest.mark.asyncio
+async def test_project_admin_rights(monkeypatch):
+    from src import routes_admin
+
+    project = SimpleNamespace(name="team-x", invite_only=False)
+    roles = {"carol": "admin", "alice": "member"}
+
+    async def fake_role(db, name, user):
+        return roles.get(user)
+
+    monkeypatch.setattr(routes_admin, "_project_role", fake_role)
+    await routes_admin._require_project_admin(None, _viewer("user", "carol"), project)
+    await routes_admin._require_project_admin(None, _viewer("admin", "ray"), project)
+    with pytest.raises(HTTPException) as exc:
+        await routes_admin._require_project_admin(None, _viewer("user", "alice"), project)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_team_leads_cannot_hand_out_project_access(monkeypatch):
+    """Adding someone to a linked team grants its projects: needs a project admin (#676)."""
+    from src import teams
+    from src.config import Settings
+
+    class _Db:
+        async def execute(self, *a, **k):
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: ["team-z"]))
+
+    granted = []
+
+    async def fake_grant(db, viewer, tenant_id, project):
+        granted.append(project)
+        raise HTTPException(status_code=403, detail=f"Only an admin of {project} can give a team access to it")
+
+    monkeypatch.setattr(teams, "_can_grant_project", fake_grant)
+    with pytest.raises(HTTPException):
+        await teams._can_grant_linked_projects(_Db(), _viewer("user", "lead"), Settings(), uuid.uuid4())
+    assert granted == ["team-z"]
+    # Platform admins and self-service deployments are not limited.
+    await teams._can_grant_linked_projects(_Db(), _viewer("admin"), Settings(), uuid.uuid4())
+    await teams._can_grant_linked_projects(
+        _Db(), _viewer("user"), Settings(project_provisioning="self_service"), uuid.uuid4()
+    )

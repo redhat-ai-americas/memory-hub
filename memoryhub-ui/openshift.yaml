@@ -70,6 +70,10 @@ spec:
         # can open user memories for an incident). Assigned here only.
         - name: MEMORYHUB_UI_SUPERUSER_GROUP
           value: "memoryhub-superusers"
+        # Same setting as the MCP server: "central" (only platform admins create
+        # projects and members are added explicitly) or "self_service".
+        - name: MEMORYHUB_PROJECT_PROVISIONING
+          value: "central"
         # Release 1 surface: features beyond R1 (knowledge pages, packs,
         # retrieval checks, entity merge…) stay hidden unless set to "true".
         - name: MEMORYHUB_UI_LABS

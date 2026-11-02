@@ -278,6 +278,8 @@ class ProjectRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     description: str | None = None
     invite_only: bool = False
+    # Central provisioning: the team is chosen when the project is created.
+    members: list[MemberRequest] = Field(default_factory=list, max_length=200)
 
 
 class ProjectUpdate(BaseModel):
@@ -288,6 +290,10 @@ class ProjectUpdate(BaseModel):
 class MemberRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=255)
     role: str = Field(default="member", pattern="^(member|admin)$")
+
+
+class MemberRoleRequest(BaseModel):
+    role: str = Field(pattern="^(member|admin)$")
 
 
 class CampaignRequest(BaseModel):
@@ -338,6 +344,69 @@ async def _project_stats(db: AsyncSession, tenant_id: str, names: list[str]) -> 
     return stats
 
 
+# ---------------------------------------------------------------------------
+# Who may do what with a project (#671 / #676)
+# ---------------------------------------------------------------------------
+
+
+def _central(settings: Settings) -> bool:
+    return (settings.project_provisioning or "central").strip().lower() != "self_service"
+
+
+def _can_create_projects(viewer, settings: Settings) -> bool:
+    if viewer.can_admin:
+        return True
+    return not _central(settings) and viewer.source != "anonymous"
+
+
+async def _project_role(db: AsyncSession, project: str, user: str) -> str | None:
+    return (
+        await db.execute(
+            select(ProjectMembership.role).where(
+                ProjectMembership.project_id == project, ProjectMembership.user_id == user
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _load_project(db: AsyncSession, settings: Settings, name: str) -> Project:
+    project = (
+        await db.execute(select(Project).where(Project.name == name, Project.tenant_id == settings.ui_tenant_id))
+    ).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project {name!r} not found")
+    return project
+
+
+async def _require_project_admin(db: AsyncSession, viewer, project: Project) -> None:
+    if viewer.can_admin or await _project_role(db, project.name, viewer.username) == "admin":
+        return
+    raise HTTPException(status_code=403, detail=f"Only an admin of {project.name} or a platform admin can change it")
+
+
+async def _ensure_not_last_admin(db: AsyncSession, project: str, user: str) -> None:
+    admins = (
+        await db.execute(
+            select(func.count())
+            .select_from(ProjectMembership)
+            .where(ProjectMembership.project_id == project, ProjectMembership.role == "admin")
+        )
+    ).scalar_one()
+    if admins <= 1 and await _project_role(db, project, user) == "admin":
+        raise HTTPException(
+            status_code=409, detail=f"{user} is the last admin of {project}; make someone else admin first"
+        )
+
+
+async def _visible_to(db: AsyncSession, viewer, settings: Settings, project: Project) -> bool:
+    """Users see projects they belong to; in self-service mode also open ones."""
+    if not viewer.restricted:
+        return True
+    if await _project_role(db, project.name, viewer.username) is not None:
+        return True
+    return not _central(settings) and not project.invite_only
+
+
 @router.get("/api/projects")
 async def list_projects(request: Request, db: DbDep, settings: SettingsDep, mine: bool = Query(default=False)):
     tenant_id = settings.ui_tenant_id
@@ -348,6 +417,17 @@ async def list_projects(request: Request, db: DbDep, settings: SettingsDep, mine
             Project.name.in_(select(ProjectMembership.project_id).where(ProjectMembership.user_id == viewer.username))
         )
     projects = (await db.execute(stmt)).scalars().all()
+    roles = dict(
+        (
+            await db.execute(
+                select(ProjectMembership.project_id, ProjectMembership.role).where(
+                    ProjectMembership.user_id == viewer.username
+                )
+            )
+        ).all()
+    )
+    if viewer.restricted:
+        projects = [p for p in projects if p.name in roles or (not _central(settings) and not p.invite_only)]
     stats = await _project_stats(db, tenant_id, [p.name for p in projects])
     total = (
         await db.execute(select(func.count()).select_from(Project).where(Project.tenant_id == tenant_id))
@@ -362,12 +442,22 @@ async def list_projects(request: Request, db: DbDep, settings: SettingsDep, mine
             "invite_only": p.invite_only,
             "created_at": p.created_at,
             "created_by": p.created_by,
+            "my_role": roles.get(p.name),
             **stats[p.name],
         }
         for p in projects
     ]
     rows.sort(key=lambda r: r["last_write"] or r["created_at"], reverse=True)
-    return {"items": rows, "total": total, "campaign_total": campaigns, "viewer": viewer.username}
+    if viewer.restricted:
+        total = len(rows)
+    return {
+        "items": rows,
+        "total": total,
+        "campaign_total": campaigns,
+        "viewer": viewer.username,
+        "provisioning": "central" if _central(settings) else "self_service",
+        "can_create": _can_create_projects(viewer, settings),
+    }
 
 
 async def _project_teams(db: AsyncSession, tenant_id: str, name: str) -> list[dict]:
@@ -382,13 +472,13 @@ async def _project_teams(db: AsyncSession, tenant_id: str, name: str) -> list[di
 
 
 @router.get("/api/projects/{name}")
-async def project_detail(name: str, db: DbDep, settings: SettingsDep):
+async def project_detail(name: str, request: Request, db: DbDep, settings: SettingsDep):
     tenant_id = settings.ui_tenant_id
-    project = (
-        await db.execute(select(Project).where(Project.name == name, Project.tenant_id == tenant_id))
-    ).scalar_one_or_none()
-    if project is None:
+    viewer = viewer_from_request(request, settings)
+    project = await _load_project(db, settings, name)
+    if not await _visible_to(db, viewer, settings, project):
         raise HTTPException(status_code=404, detail=f"Project {name!r} not found")
+    my_role = await _project_role(db, name, viewer.username)
     stats = (await _project_stats(db, tenant_id, [name]))[name]
     members = (
         (
@@ -460,15 +550,29 @@ async def project_detail(name: str, db: DbDep, settings: SettingsDep):
         "focus_history": focus,
         "focus_available": focus is not None,
         "loading_policy": policy,
+        "my_role": my_role,
+        "can_manage": viewer.can_admin or my_role == "admin",
+        "provisioning": "central" if _central(settings) else "self_service",
     }
 
 
 @router.post("/api/projects", status_code=201)
 async def create_project(body: ProjectRequest, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
+    if not _can_create_projects(viewer, settings):
+        raise HTTPException(
+            status_code=403,
+            detail="Projects are created by platform admins on this deployment. Ask an admin to create it and add you.",
+        )
+    # Project names are unique across tenants (primary key); never say which tenant holds one.
     exists_ = (await db.execute(select(Project).where(Project.name == body.name))).scalar_one_or_none()
     if exists_ is not None:
-        raise HTTPException(status_code=409, detail=f"Project {body.name!r} already exists")
+        detail = (
+            f"Project {body.name!r} already exists"
+            if exists_.tenant_id == settings.ui_tenant_id
+            else f"The name {body.name!r} is taken; choose another"
+        )
+        raise HTTPException(status_code=409, detail=detail)
     db.add(
         Project(
             name=body.name,
@@ -479,7 +583,16 @@ async def create_project(body: ProjectRequest, request: Request, db: DbDep, sett
         )
     )
     await db.flush()
-    db.add(ProjectMembership(project_id=body.name, user_id=viewer.username, role="admin", joined_by=viewer.username))
+    people: dict[str, str] = {}
+    for m in body.members:
+        uid = m.user_id.strip()
+        if uid and (people.get(uid) != "admin"):
+            people[uid] = m.role
+    # The creator administers the project unless a platform admin named other admins.
+    if not any(r == "admin" for r in people.values()):
+        people[viewer.username] = "admin"
+    for uid, role in people.items():
+        db.add(ProjectMembership(project_id=body.name, user_id=uid, role=role, joined_by=viewer.username))
     await audit(
         db,
         tenant_id=settings.ui_tenant_id,
@@ -488,7 +601,7 @@ async def create_project(body: ProjectRequest, request: Request, db: DbDep, sett
         scope="project",
         owner_id=body.name,
         memory_id=None,
-        metadata={"invite_only": body.invite_only},
+        metadata={"invite_only": body.invite_only, "members": people},
     )
     await db.commit()
     return {"name": body.name}
@@ -497,11 +610,8 @@ async def create_project(body: ProjectRequest, request: Request, db: DbDep, sett
 @router.patch("/api/projects/{name}")
 async def update_project(name: str, body: ProjectUpdate, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
-    project = (
-        await db.execute(select(Project).where(Project.name == name, Project.tenant_id == settings.ui_tenant_id))
-    ).scalar_one_or_none()
-    if project is None:
-        raise HTTPException(status_code=404, detail=f"Project {name!r} not found")
+    project = await _load_project(db, settings, name)
+    await _require_project_admin(db, viewer, project)
     changes = body.model_dump(exclude_unset=True)
     for key, value in changes.items():
         setattr(project, key, value)
@@ -522,11 +632,13 @@ async def update_project(name: str, body: ProjectUpdate, request: Request, db: D
 @router.post("/api/projects/{name}/members", status_code=201)
 async def add_member(name: str, body: MemberRequest, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
-    project = (
-        await db.execute(select(Project).where(Project.name == name, Project.tenant_id == settings.ui_tenant_id))
-    ).scalar_one_or_none()
-    if project is None:
-        raise HTTPException(status_code=404, detail=f"Project {name!r} not found")
+    project = await _load_project(db, settings, name)
+    if _central(settings) or project.invite_only:
+        await _require_project_admin(db, viewer, project)
+    elif not viewer.can_admin and await _project_role(db, name, viewer.username) is None:
+        raise HTTPException(status_code=403, detail=f"Join {name} before adding others to it")
+    if body.role == "admin":
+        await _require_project_admin(db, viewer, project)
     db.add(ProjectMembership(project_id=name, user_id=body.user_id, role=body.role, joined_by=viewer.username))
     try:
         await db.flush()
@@ -550,6 +662,10 @@ async def add_member(name: str, body: MemberRequest, request: Request, db: DbDep
 @router.delete("/api/projects/{name}/members/{user_id}", status_code=204)
 async def remove_member(name: str, user_id: str, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
+    project = await _load_project(db, settings, name)
+    if user_id != viewer.username:
+        await _require_project_admin(db, viewer, project)
+    await _ensure_not_last_admin(db, name, user_id)
     membership = (
         await db.execute(
             select(ProjectMembership)
@@ -575,6 +691,40 @@ async def remove_member(name: str, user_id: str, request: Request, db: DbDep, se
         metadata={"user_id": user_id},
     )
     await db.commit()
+
+
+@router.patch("/api/projects/{name}/members/{user_id}")
+async def set_member_role(
+    name: str, user_id: str, body: MemberRoleRequest, request: Request, db: DbDep, settings: SettingsDep
+):
+    viewer = viewer_from_request(request, settings)
+    project = await _load_project(db, settings, name)
+    await _require_project_admin(db, viewer, project)
+    membership = (
+        await db.execute(
+            select(ProjectMembership).where(ProjectMembership.project_id == name, ProjectMembership.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    if membership.role == body.role:
+        return {"user_id": user_id, "role": body.role}
+    if body.role == "member":
+        await _ensure_not_last_admin(db, name, user_id)
+    previous = membership.role
+    membership.role = body.role
+    await audit(
+        db,
+        tenant_id=settings.ui_tenant_id,
+        viewer=viewer,
+        event_type="project.member_role",
+        scope="project",
+        owner_id=name,
+        memory_id=None,
+        metadata={"user_id": user_id, "from": previous, "to": body.role},
+    )
+    await db.commit()
+    return {"user_id": user_id, "role": body.role}
 
 
 def _campaign_row(c: Campaign, projects: list[str], memories: int) -> dict:

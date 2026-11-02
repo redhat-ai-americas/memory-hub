@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     # A super-user is also a platform admin.
     ui_superuser_group: str = "memoryhub-superusers"
     ui_superuser_users: str = ""
+    # Project provisioning, same variable as the MCP server (#676):
+    # "central" (default) — only platform admins create projects, project admins
+    # manage members, writing never joins; "self_service" — any signed-in user
+    # creates projects and members of open projects may add people.
+    project_provisioning: str = "central"
     # Where "Log out" sends the browser behind the OAuth proxy. Empty = derive
     # https://oauth-openshift.apps.<cluster>/logout from the route host.
     ui_oauth_logout_url: str = ""

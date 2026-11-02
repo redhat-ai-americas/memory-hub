@@ -62,6 +62,7 @@ import type {
   Overview,
   ProjectDetail,
   ProjectRow,
+  ProjectProvisioning,
   PublicConfig,
   ReviewItem,
   ReviewQueue,
@@ -318,15 +319,19 @@ export const api = {
 
   // Projects & campaigns
   projects: (mine: boolean) =>
-    get<{ items: ProjectRow[]; total: number; campaign_total: number; viewer: string }>(`/projects${qs({ mine })}`),
+    get<{ items: ProjectRow[]; total: number; campaign_total: number; viewer: string; provisioning?: ProjectProvisioning; can_create?: boolean }>(
+      `/projects${qs({ mine })}`,
+    ),
   project: (name: string) => get<ProjectDetail>(`/projects/${enc(name)}`),
-  createProject: (body: { name: string; description?: string; invite_only: boolean }) =>
+  createProject: (body: { name: string; description?: string; invite_only: boolean; members?: { user_id: string; role: 'member' | 'admin' }[] }) =>
     post<{ name: string }>('/projects', body),
   updateProject: (name: string, body: { description?: string | null; invite_only?: boolean }) =>
     patch<{ name: string }>(`/projects/${enc(name)}`, body),
   addMember: (name: string, body: { user_id: string; role: string }) =>
     post<{ ok: boolean }>(`/projects/${enc(name)}/members`, body),
   removeMember: (name: string, userId: string) => del<void>(`/projects/${enc(name)}/members/${enc(userId)}`),
+  setMemberRole: (name: string, userId: string, role: 'member' | 'admin') =>
+    patch<{ user_id: string; role: string }>(`/projects/${enc(name)}/members/${enc(userId)}`, { role }),
   campaigns: () => get<{ items: CampaignRow[] }>('/campaigns'),
   createCampaign: (body: { name: string; description?: string; default_ttl_days?: number; projects: string[] }) =>
     post<{ id: string }>('/campaigns', body),

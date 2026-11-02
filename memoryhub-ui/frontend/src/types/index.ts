@@ -485,9 +485,16 @@ export interface ProjectRow {
   last_write: string | null;
   members: number;
   campaigns: { id: string; name: string; status: string }[];
+  /** The viewer's own role in the project, if they are a member. */
+  my_role?: 'admin' | 'member' | null;
 }
 
+export type ProjectProvisioning = 'central' | 'self_service';
+
 export interface ProjectDetail extends ProjectRow {
+  /** Platform admin or project admin: may edit, add, remove and change roles. */
+  can_manage?: boolean;
+  provisioning?: ProjectProvisioning;
   agents_today: number;
   members_list: { user_id: string; role: string; joined_at: string; joined_by: string; via_team?: string | null }[];
   teams?: { id: string; name: string; members: number }[];
