@@ -128,7 +128,7 @@ async def test_signed_in_user_is_forbidden_from_admin_endpoints(monkeypatch):
     user = Viewer(username="ar", name="ar", email=None, source="account", role="user")
     monkeypatch.setattr("src.access.viewer_from_request", lambda request, settings: user)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/api/audit")
+        resp = await client.get("/api/accounts")
     assert resp.status_code == 403
     assert ui_common.SESSION_COOKIE
 

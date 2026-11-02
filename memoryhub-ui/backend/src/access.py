@@ -202,13 +202,31 @@ class Access:
     def can_moderate(self, n: Any) -> bool:
         """Quarantine, restore or delete: admins only where they can read the content."""
         if not self.viewer.redacts_content:
-            return self.can_read_row(n)
+            return self.can_write(n)
         return n.scope in self.open_scopes
 
+    def can_write(self, n: Any) -> bool:
+        from src.authz import person_can_write
+
+        if self.viewer.redacts_content:
+            return False
+        if self.grants is None:
+            return self.viewer.role == "operator"
+        tenant = getattr(n, "tenant_id", None) or self.grants.tenant_id
+        return tenant == self.grants.tenant_id and person_can_write(
+            self.grants, tenant, n.scope, n.owner_id, getattr(n, "scope_id", None)
+        )
+
+    def ensure_writable(self, n: Any) -> None:
+        self.ensure_readable(n)
+        if not self.can_write(n):
+            raise HTTPException(status_code=403, detail="You do not have write access to this memory")
+
     def ensure_moderatable(self, n: Any) -> None:
-        if n is None:
-            raise HTTPException(status_code=404, detail="Memory not found")
-        if not self.can_moderate(n):
+        self.ensure_readable(n)
+        if not self.viewer.redacts_content:
+            self.ensure_writable(n)
+        elif not self.can_moderate(n):
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -217,6 +235,20 @@ class Access:
                     else f"Admins on this tenant cannot moderate {n.scope} memories"
                 ),
             )
+
+    def moderation_metadata(self, nodes: list[Any]) -> dict:
+        private = [n for n in nodes if n.scope == "user"]
+        if not (self.viewer.is_superuser and private and self.break_glass):
+            return {}
+        return {
+            "break_glass": True,
+            "privacy_invasive": True,
+            "severity": "HIGH",
+            "incident_ref": self.break_glass["incident_ref"],
+            "justification": self.break_glass["justification"],
+            "grant_id": self.break_glass["id"],
+            "affected_owners": sorted({n.owner_id for n in private}),
+        }
 
     def _reveal(self, item: dict, scope: str | None) -> None:
         if self.break_glass and scope == "user" and item.get("id"):

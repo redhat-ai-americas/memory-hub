@@ -1528,13 +1528,8 @@ def _embedding_service(settings: Settings):
 
 
 async def _writable(db: AsyncSession, settings: Settings, viewer, node: MemoryNode) -> None:
-    """Admins never change memory content; users only touch what they can read."""
-    if viewer.redacts_content:
-        raise HTTPException(
-            status_code=403, detail="Platform admins cannot change memories; their content is confidential"
-        )
-    if viewer.restricted:
-        (await access_for(db, settings, viewer)).ensure_readable(node)
+    """Use write permissions for every mutation, independently of read access."""
+    (await access_for(db, settings, viewer)).ensure_writable(node)
 
 
 async def _writable_scope(db: AsyncSession, settings: Settings, viewer, scope: str, scope_id: str | None) -> None:
@@ -1821,22 +1816,6 @@ async def _propose_promotion(
     return new_id
 
 
-def _moderation_meta(viewer, node) -> dict:
-    """Super-user actions on user memories carry the incident (#667 audit requirements)."""
-    if not (viewer.is_superuser and node.scope == "user"):
-        return {}
-    from src.breakglass import _request
-
-    grant = (_request.get() or {}).get("grant") or {}
-    return {
-        "break_glass": True,
-        "privacy_invasive": True,
-        "severity": "HIGH",
-        "incident_ref": grant.get("incident_ref"),
-        "grant_id": grant.get("id"),
-    }
-
-
 @router.post("/api/memories/bulk")
 async def bulk_action(body: BulkRequest, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
@@ -1852,9 +1831,10 @@ async def bulk_action(body: BulkRequest, request: Request, db: DbDep, settings: 
 
                 done.append((await restore_memory(db, settings, viewer, raw_id))["id"])
                 continue
-            if body.action in ("delete", "quarantine") and viewer.redacts_content:
+            acc = await access_for(db, settings, viewer)
+            if body.action in ("delete", "quarantine"):
                 # #667: admins moderate the scopes they can read, never user memories without a grant.
-                (await access_for(db, settings, viewer)).ensure_moderatable(node)
+                acc.ensure_moderatable(node)
             else:
                 await _writable(db, settings, viewer, node)
             if body.action == "quarantine":
@@ -1873,7 +1853,7 @@ async def bulk_action(body: BulkRequest, request: Request, db: DbDep, settings: 
                     scope=node.scope,
                     owner_id=node.owner_id,
                     memory_id=node.id,
-                    metadata={"reason": body.reason, **_moderation_meta(viewer, node)},
+                    metadata={"reason": body.reason, **acc.moderation_metadata([node])},
                 )
                 done.append(raw_id)
             elif body.action == "weight":
@@ -1905,16 +1885,6 @@ async def bulk_action(body: BulkRequest, request: Request, db: DbDep, settings: 
                 from src.routes import forget_memory
 
                 forgotten.append(await forget_memory(raw_id, db, settings, viewer))
-                await audit(
-                    db,
-                    tenant_id=tenant_id,
-                    viewer=viewer,
-                    event_type="memory.delete",
-                    scope=node.scope,
-                    owner_id=node.owner_id,
-                    memory_id=node.id,
-                    metadata=_moderation_meta(viewer, node) or None,
-                )
                 done.append(raw_id)
             elif body.action == "promote":
                 new_id = await _propose_promotion(

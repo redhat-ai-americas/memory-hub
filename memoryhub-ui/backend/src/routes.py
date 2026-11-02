@@ -674,11 +674,9 @@ async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, vi
     node = result.scalar_one_or_none()
     if node is None:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
-    if viewer.redacts_content:
-        # #667: admins moderate the scopes they can read; user memories need a super-user grant.
-        (await access_for(db, settings, viewer)).ensure_moderatable(node)
-    if viewer.restricted and not (await access_for(db, settings, viewer)).can_read_row(node):
-        raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
+    acc = await access_for(db, settings, viewer)
+    acc.ensure_moderatable(node)
+    affected = [node]
     if node.deleted_at is not None:
         raise HTTPException(status_code=409, detail=f"Memory {memory_id!r} is already deleted")
 
@@ -698,6 +696,8 @@ async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, vi
         current = prev_result.scalar_one_or_none()
         if current is None:
             break
+        acc.ensure_moderatable(current)
+        affected.append(current)
 
     # Walk forward through newer versions
     changed = True
@@ -711,6 +711,8 @@ async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, vi
             )
         )
         for fwd_node in fwd_result.scalars().all():
+            acc.ensure_moderatable(fwd_node)
+            affected.append(fwd_node)
             version_ids.add(fwd_node.id)
             changed = True
 
@@ -721,7 +723,11 @@ async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, vi
             MemoryNode.parent_id.in_(list(version_ids)),
         )
     )
-    child_ids = {child.id for child in child_result.scalars().all()}
+    children = child_result.scalars().all()
+    for child in children:
+        acc.ensure_moderatable(child)
+    affected.extend(children)
+    child_ids = {child.id for child in children}
     all_ids = version_ids | child_ids
 
     # Bulk soft-delete
@@ -732,6 +738,24 @@ async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, vi
             MemoryNode.id.in_(list(all_ids)),
         )
         .values(deleted_at=now, is_current=False)
+    )
+    from src.ui_common import audit
+
+    await audit(
+        db,
+        tenant_id=tenant_id,
+        viewer=viewer,
+        event_type="memory.delete",
+        scope=node.scope,
+        owner_id=node.owner_id,
+        memory_id=node.id,
+        metadata={
+            "affected_ids": sorted(str(i) for i in all_ids),
+            "rows": len(all_ids),
+            "versions": len(version_ids),
+            "branches": len(child_ids),
+            **acc.moderation_metadata(affected),
+        },
     )
     await db.commit()
     # What was actually forgotten — the UI reports exactly this (R1-022).
@@ -751,11 +775,20 @@ async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, vi
 # Client management (proxy to auth service admin API)
 # ---------------------------------------------------------------------------
 
-SELF_SERVICE_SCOPES = frozenset({
-    "memory:read", "memory:read:user", "memory:read:project", "memory:read:campaign",
-    "memory:read:role", "memory:read:organizational", "memory:read:enterprise",
-    "memory:write:user", "memory:write:project", "memory:write:campaign",
-})
+SELF_SERVICE_SCOPES = frozenset(
+    {
+        "memory:read",
+        "memory:read:user",
+        "memory:read:project",
+        "memory:read:campaign",
+        "memory:read:role",
+        "memory:read:organizational",
+        "memory:read:enterprise",
+        "memory:write:user",
+        "memory:write:project",
+        "memory:write:campaign",
+    }
+)
 
 
 def _validate_client_scopes(viewer: Viewer, scopes: list[str] | None) -> None:

@@ -91,6 +91,7 @@ def _make_db_session(execute_side_effects: list):
     test helper.
     """
     session = AsyncMock()
+    session.add = MagicMock()
     session.executed_statements = []
 
     results = list(execute_side_effects)

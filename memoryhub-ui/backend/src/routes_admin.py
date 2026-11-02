@@ -1883,10 +1883,9 @@ async def review_decision(memory_id: str, body: ReviewDecision, request: Request
     tenant_id = settings.ui_tenant_id
     viewer = viewer_from_request(request, settings)
     node = await _load_memory(db, tenant_id, memory_id)
+    acc = await access_for(db, settings, viewer)
+    acc.ensure_moderatable(node)
     tenant_settings = await load_tenant_settings(db, tenant_id)
-    if viewer.redacts_content and node.status == "quarantined":
-        # #667: quarantined user memories are moderated by super-users under an incident grant.
-        (await access_for(db, settings, viewer)).ensure_moderatable(node)
 
     if body.decision in ("approve", "reject", "request_changes") and node.status not in ("pending", "quarantined"):
         # Contradiction reviews resolve the reports instead.
@@ -1973,7 +1972,7 @@ async def review_decision(memory_id: str, body: ReviewDecision, request: Request
         scope=node.scope,
         owner_id=node.owner_id,
         memory_id=node.id,
-        metadata={"comment": body.comment, "status": node.status},
+        metadata={"comment": body.comment, "status": node.status, **acc.moderation_metadata([node])},
     )
     await db.commit()
     return {"id": str(node.id), "status": node.status}
@@ -1984,7 +1983,7 @@ async def review_decision(memory_id: str, body: ReviewDecision, request: Request
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/audit", dependencies=[Depends(admin_viewer)])
+@router.get("/api/audit")
 async def audit_log(
     request: Request,
     db: DbDep,

@@ -96,7 +96,7 @@ def heads(rows: list) -> set:
 
 
 async def restore_memory(db: AsyncSession, settings: Settings, viewer, memory_id: str) -> dict:
-    from src.routes_dashboard import _load_memory, _writable
+    from src.routes_dashboard import _load_memory
 
     tenant_id = settings.ui_tenant_id
     node = await _load_memory(db, tenant_id, memory_id)
@@ -104,11 +104,10 @@ async def restore_memory(db: AsyncSession, settings: Settings, viewer, memory_id
     acc.ensure_readable(node)
     if node.deleted_at is None:
         raise HTTPException(status_code=409, detail="This memory is not deleted")
-    if viewer.redacts_content:
-        acc.ensure_moderatable(node)  # #667 moderation
-    else:
-        await _writable(db, settings, viewer, node)
+    acc.ensure_moderatable(node)
     rows = await _deleted_batch(db, tenant_id, node)
+    for restored in rows:
+        acc.ensure_moderatable(restored)
     current = heads(rows)
     ids = [r.id for r in rows]
     await db.execute(
@@ -128,7 +127,7 @@ async def restore_memory(db: AsyncSession, settings: Settings, viewer, memory_id
         scope=node.scope,
         owner_id=node.owner_id,
         memory_id=node.id,
-        metadata={"rows": len(ids)},
+        metadata={"rows": len(ids), "affected_ids": sorted(str(i) for i in ids), **acc.moderation_metadata(rows)},
     )
     head = next((r for r in rows if r.id in current and r.parent_id is None), node)
     return {"id": str(head.id), "restored_rows": len(ids)}
