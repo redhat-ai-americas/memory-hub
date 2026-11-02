@@ -751,6 +751,17 @@ async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, vi
 # Client management (proxy to auth service admin API)
 # ---------------------------------------------------------------------------
 
+SELF_SERVICE_SCOPES = frozenset({
+    "memory:read", "memory:read:user", "memory:read:project", "memory:read:campaign",
+    "memory:read:role", "memory:read:organizational", "memory:read:enterprise",
+    "memory:write:user", "memory:write:project", "memory:write:campaign",
+})
+
+
+def _validate_client_scopes(viewer: Viewer, scopes: list[str] | None) -> None:
+    if viewer.restricted and scopes is not None and set(scopes) - SELF_SERVICE_SCOPES:
+        raise HTTPException(status_code=403, detail="Only platform admins can assign privileged client scopes")
+
 
 async def _client_viewer(
     request: Request, db: AsyncSession, settings: Settings, client_id: str | None = None
@@ -783,6 +794,7 @@ async def create_client(body: CreateClientRequest, request: Request, db: DbDep, 
         raise HTTPException(status_code=403, detail="Users can register their own agents; admins create service agents")
     if viewer.restricted:
         body.tenant_id = settings.ui_tenant_id
+    _validate_client_scopes(viewer, body.default_scopes)
     resp = await _admin_request(
         settings,
         "POST",
@@ -811,7 +823,10 @@ async def create_client(body: CreateClientRequest, request: Request, db: DbDep, 
 
 @router.patch("/api/clients/{client_id}", response_model=ClientResponse)
 async def update_client(client_id: str, body: UpdateClientRequest, request: Request, db: DbDep, settings: SettingsDep):
-    await _client_viewer(request, db, settings, client_id)
+    viewer = await _client_viewer(request, db, settings, client_id)
+    _validate_client_scopes(viewer, body.default_scopes)
+    if viewer.restricted and body.active is True:
+        raise HTTPException(status_code=403, detail="Only platform admins can reactivate a revoked client")
     payload = body.model_dump(exclude_none=True)
     resp = await _admin_request(
         settings,

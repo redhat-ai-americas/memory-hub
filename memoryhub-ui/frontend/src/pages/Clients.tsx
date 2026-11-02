@@ -23,6 +23,12 @@ const SCOPE_OPTIONS = [
   'memory:admin',
 ];
 
+const USER_SCOPE_OPTIONS = [
+  'memory:read', 'memory:read:user', 'memory:read:project', 'memory:read:campaign',
+  'memory:read:role', 'memory:read:organizational', 'memory:read:enterprise',
+  'memory:write:user', 'memory:write:project', 'memory:write:campaign',
+];
+
 /** Freshly issued credentials, shown once. */
 export interface Revealed {
   title: string;
@@ -42,6 +48,7 @@ const STATUS: Record<CredentialRow['status'], { cls: string; label: string }> = 
 
 const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
+  const { role } = useApp();
   const tab = route.params.get('tab') || 'clients';
   const focusClient = route.params.get('client');
   const { data, error, loading, reload } = useApi(() => api.credentials(), []);
@@ -194,11 +201,11 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
                                   <button type="button" className="danger" onClick={() => { close(); setConfirm({ kind: 'revoke', row: c }); }}>
                                     Revoke
                                   </button>
-                                ) : (
+                                ) : role !== 'user' ? (
                                   <button type="button" onClick={() => { close(); setConfirm({ kind: 'restore', row: c }); }}>
                                     Re-activate
                                   </button>
-                                )}
+                                ) : <span className="sm muted">Ask an admin to reactivate</span>}
                               </>
                             )}
                           </Dropdown>
@@ -492,7 +499,7 @@ export const CreateClientModal: React.FC<{
         <div className="f">
           <label>Default scopes</label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {SCOPE_OPTIONS.map((s) => (
+            {(userOnly ? USER_SCOPE_OPTIONS : SCOPE_OPTIONS).map((s) => (
               <label key={s} className="tg" style={{ background: scopes.includes(s) ? '#e7f1fa' : '#fff' }}>
                 <input type="checkbox" checked={scopes.includes(s)} onChange={() => setScopes(scopes.includes(s) ? scopes.filter((x) => x !== s) : [...scopes, s])} />
                 <span className="mono" style={{ fontSize: 12 }}>
@@ -518,6 +525,8 @@ export const CreateClientModal: React.FC<{
 
 const EditClientModal: React.FC<{ row: CredentialRow; onClose: () => void; onSaved: () => void }> = ({ row, onClose, onSaved }) => {
   const toast = useToast();
+  const { role } = useApp();
+  const managedScopes = role === 'user' && row.default_scopes.some((s) => !USER_SCOPE_OPTIONS.includes(s));
   const [name, setName] = useState(row.client_name);
   const [scopes, setScopes] = useState<string[]>(row.default_scopes);
   const [err, setErr] = useState<string | null>(null);
@@ -532,7 +541,7 @@ const EditClientModal: React.FC<{ row: CredentialRow; onClose: () => void; onSav
             className="btn bp"
             onClick={async () => {
               try {
-                await api.updateClient(row.client_id, { client_name: name, default_scopes: scopes });
+                await api.updateClient(row.client_id, { client_name: name, ...(managedScopes ? {} : { default_scopes: scopes }) });
                 toast('Client updated. New tokens use the new scopes.');
                 onSaved();
                 onClose();
@@ -556,9 +565,9 @@ const EditClientModal: React.FC<{ row: CredentialRow; onClose: () => void; onSav
       <div className="f">
         <label>Default scopes</label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {[...new Set([...SCOPE_OPTIONS, ...row.default_scopes])].map((s) => (
+          {[...new Set([...(role === 'user' ? USER_SCOPE_OPTIONS : SCOPE_OPTIONS), ...row.default_scopes])].map((s) => (
             <label key={s} className="tg" style={{ background: scopes.includes(s) ? '#e7f1fa' : '#fff' }}>
-              <input type="checkbox" checked={scopes.includes(s)} onChange={() => setScopes(scopes.includes(s) ? scopes.filter((x) => x !== s) : [...scopes, s])} />
+              <input type="checkbox" disabled={managedScopes} checked={scopes.includes(s)} onChange={() => setScopes(scopes.includes(s) ? scopes.filter((x) => x !== s) : [...scopes, s])} />
               <span className="mono" style={{ fontSize: 12 }}>
                 {s}
               </span>
@@ -566,6 +575,7 @@ const EditClientModal: React.FC<{ row: CredentialRow; onClose: () => void; onSav
           ))}
         </div>
       </div>
+      {managedScopes && <p className="hint">These scopes are managed by a platform admin. You can change the display name.</p>}
       {err && <div className="alert err-a">{err}</div>}
     </Modal>
   );
