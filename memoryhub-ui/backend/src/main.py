@@ -2,7 +2,7 @@
 
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -14,6 +14,7 @@ from src.accounts import router as accounts_router
 from src.breakglass import BreakGlassAuditMiddleware
 from src.breakglass import router as breakglass_router
 from src.config import get_settings
+from src.database import get_db
 from src.documents import router as documents_router
 from src.dreaming import router as dreams_router
 from src.features import router as features_router
@@ -29,7 +30,7 @@ from src.routes_admin import router as admin_router
 from src.routes_dashboard import router as dashboard_router
 from src.routes_workspace import router as workspace_router
 from src.teams import router as teams_router
-from src.ui_common import auth_enabled, read_session_cookie
+from src.ui_common import auth_enabled, proxy_auth_enabled, read_session
 from src.verify import router as verify_router
 
 # Reachable without a session when development API-key login is enabled.
@@ -87,21 +88,42 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def require_dev_session(request: Request, call_next):
-        """Gate /api behind a session when local accounts or the dev API key
-        are enabled.
-
-        Behind the OpenShift OAuth proxy (X-Forwarded-User present) or with
-        neither enabled (open development mode), this is a no-op.
-        """
-        current = get_settings()
+        """Validate local accounts on every request; trust headers only in proxy mode."""
+        current = app.dependency_overrides.get(get_settings, get_settings)()
         path = request.url.path
-        if (
-            auth_enabled(current)
-            and path.startswith("/api/")
-            and not path.startswith(_PUBLIC_API)
-            and not request.headers.get("x-forwarded-user")
-            and not read_session_cookie(request, current)
-        ):
+        if not path.startswith("/api/"):
+            return await call_next(request)
+        session = read_session(request, current)
+        if session and session.source == "account":
+            from sqlalchemy import text
+
+            from src.accounts import ACCOUNTS, ensure_tables
+
+            provider = app.dependency_overrides.get(get_db, get_db)
+            async with aclosing(provider()) as connection:
+                db = await anext(connection)
+                await ensure_tables(db)
+                row = (
+                    await db.execute(
+                        text(
+                            f"SELECT role, status, session_version FROM {ACCOUNTS} "
+                            "WHERE tenant_id = :tenant AND username = :username"
+                        ),
+                        {"tenant": current.ui_tenant_id, "username": session.username},
+                    )
+                ).first()
+                if (
+                    row is None
+                    or row._mapping["status"] != "active"
+                    or row._mapping["role"] != session.role
+                    or row._mapping["session_version"] != session.version
+                ):
+                    session = None
+            request.state.account_session = session
+        proxy_identity = proxy_auth_enabled(current) and (
+            request.headers.get("x-forwarded-preferred-username") or request.headers.get("x-forwarded-user")
+        )
+        if auth_enabled(current) and not path.startswith(_PUBLIC_API) and not (proxy_identity or session):
             return JSONResponse({"detail": "Log in to the dashboard first"}, status_code=401)
         return await call_next(request)
 

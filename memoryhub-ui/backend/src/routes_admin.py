@@ -76,7 +76,7 @@ class LoginRequest(BaseModel):
 @router.get("/api/auth/status")
 async def auth_status(request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
-    if viewer.source == "oauth-proxy":
+    if settings.ui_trust_proxy_headers and not (settings.ui_local_accounts or settings.ui_dev_api_key):
         mode = "oauth-proxy"
     elif settings.ui_local_accounts:
         mode = "accounts"
@@ -86,7 +86,7 @@ async def auth_status(request: Request, db: DbDep, settings: SettingsDep):
         mode = "open"
     body = {
         "mode": mode,
-        "authenticated": mode in ("open", "oauth-proxy") or viewer.source in ("api-key", "account"),
+        "authenticated": mode == "open" or viewer.source in ("oauth-proxy", "api-key", "account"),
         "api_key_login": bool(settings.ui_dev_api_key),
         "local_accounts": settings.ui_local_accounts,
         "user": viewer.username if viewer.source != "anonymous" else None,

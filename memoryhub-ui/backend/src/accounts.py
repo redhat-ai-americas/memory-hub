@@ -167,10 +167,12 @@ async def _insert(db: AsyncSession, tenant_id: str, **values) -> uuid.UUID:
     return account_id
 
 
-def _set_session(response: Response, settings: Settings, *, username: str, role: str, name: str, hours: int) -> None:
+def _set_session(
+    response: Response, settings: Settings, *, username: str, role: str, name: str, hours: int, version: int = 0
+) -> None:
     response.set_cookie(
         SESSION_COOKIE,
-        make_session_cookie(username, settings, role=role, source="account", name=name, hours=hours),
+        make_session_cookie(username, settings, role=role, source="account", name=name, hours=hours, version=version),
         httponly=True,
         samesite="lax",
         secure=False,
@@ -457,7 +459,15 @@ async def password_login(db: AsyncSession, settings: Settings, response: Respons
     )
     await db.commit()
     hours = int((await load_tenant_settings(db, tenant_id))["security"]["session_hours"])
-    _set_session(response, settings, username=m["username"], role=m["role"], name=m["display_name"], hours=hours)
+    _set_session(
+        response,
+        settings,
+        username=m["username"],
+        role=m["role"],
+        name=m["display_name"],
+        hours=hours,
+        version=m["session_version"],
+    )
     return {"ok": True, "user": m["username"], "role": m["role"]}
 
 
@@ -544,6 +554,8 @@ async def update_account(account_id: str, body: AccountUpdate, db: DbDep, settin
     if not changes:
         return _account_row(row)
     sets = ", ".join(f"{k} = :{k}" for k in changes)
+    if any(m[k] != value for k, value in changes.items()):
+        sets += ", session_version = session_version + 1"
     extra = ", approved_by = :approver" if changes.get("status") == "active" and m["status"] == "pending" else ""
     await db.execute(
         text(f"UPDATE {ACCOUNTS} SET {sets}{extra} WHERE id = :id"),

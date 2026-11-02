@@ -46,14 +46,16 @@ def test_session_cookie_carries_role_and_rejects_tampering():
 def test_oauth_proxy_admin_group():
     from src.ui_common import viewer_from_request
 
-    settings = Settings(ui_admin_group="memoryhub-admins")
+    settings = Settings(ui_trust_proxy_headers=True, ui_admin_group="memoryhub-admins")
     admin = viewer_from_request(
         _request(headers={"x-forwarded-user": "dk", "x-forwarded-groups": "dev,memoryhub-admins"}), settings
     )
     user = viewer_from_request(_request(headers={"x-forwarded-user": "ar", "x-forwarded-groups": "dev"}), settings)
     assert admin.is_admin and admin.redacts_content and not admin.restricted
     assert user.role == "user" and user.restricted and not user.can_admin
-    listed = viewer_from_request(_request(headers={"x-forwarded-user": "ops"}), Settings(ui_admin_users="ops, dk"))
+    listed = viewer_from_request(
+        _request(headers={"x-forwarded-user": "ops"}), Settings(ui_trust_proxy_headers=True, ui_admin_users="ops, dk")
+    )
     assert listed.is_admin
 
 
@@ -163,11 +165,15 @@ async def test_logout_clears_cookies_and_returns_login_page():
 
 
 @pytest.mark.asyncio
-async def test_oauth_proxy_logout_is_a_post_form():
+async def test_oauth_proxy_logout_is_a_post_form(monkeypatch):
+    from src.config import get_settings
+
+    app.dependency_overrides[get_settings] = lambda: Settings(ui_trust_proxy_headers=True)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         body = (
             await client.post("/api/auth/logout", headers={"x-forwarded-user": "kr", "host": "ui.apps.c.example.io"})
         ).json()
+    app.dependency_overrides.clear()
     assert body["method"] == "POST"
     assert body["redirect"] == "https://oauth-openshift.apps.c.example.io/logout"
     assert body["fields"] == {"then": "https://ui.apps.c.example.io/"}
@@ -176,13 +182,13 @@ async def test_oauth_proxy_logout_is_a_post_form():
 def test_test_mode_switcher_overrides_viewer_only_in_test_mode():
     from src.ui_common import VIEW_AS_COOKIE, make_view_as_cookie, viewer_from_request
 
-    on = Settings(ui_test_mode=True, ui_session_secret="k")
+    on = Settings(ui_trust_proxy_headers=True, ui_test_mode=True, ui_session_secret="k")
     cookie = make_view_as_cookie("alice", "admin", on)
     req = _request(headers={"x-forwarded-user": "kr"})
     req.cookies = {VIEW_AS_COOKIE: cookie}
     v = viewer_from_request(req, on)
     assert v.username == "alice" and v.role == "admin" and v.real_username == "kr"
-    off = Settings(ui_test_mode=False, ui_session_secret="k")
+    off = Settings(ui_trust_proxy_headers=True, ui_test_mode=False, ui_session_secret="k")
     assert viewer_from_request(req, off).username == "kr"
     req.cookies = {VIEW_AS_COOKIE: cookie.replace("|admin|", "|user|")}
     assert viewer_from_request(req, on).username == "kr"

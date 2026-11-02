@@ -57,6 +57,9 @@ spec:
         # when the proxy forwards X-Forwarded-Groups) are platform admins and
         # see memory metadata only; everyone else is a user and sees only the
         # memories RBAC lets them read.
+        # The OAuth sidecar is the only public entry point for this deployment.
+        - name: MEMORYHUB_UI_TRUST_PROXY_HEADERS
+          value: "true"
         - name: MEMORYHUB_UI_ADMIN_USERS
           value: ""
         # TEST DEPLOYMENTS ONLY: account switcher in the user menu (view the

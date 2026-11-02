@@ -187,7 +187,7 @@ def real_viewer(request: Request, settings: Settings) -> Viewer:
     headers = request.headers
     username = headers.get("x-forwarded-preferred-username") or headers.get("x-forwarded-user")
     email = headers.get("x-forwarded-email")
-    if username:
+    if proxy_auth_enabled(settings) and username:
         in_group = bool(settings.ui_admin_group) and settings.ui_admin_group in _groups(
             headers.get("x-forwarded-groups")
         )
@@ -198,6 +198,8 @@ def real_viewer(request: Request, settings: Settings) -> Viewer:
             role = "superuser"
         return Viewer(username=username, name=username, email=email, source="oauth-proxy", role=role)
     session = read_session(request, settings)
+    if session and session.source == "account":
+        session = request.scope.get("state", {}).get("account_session")
     if session:
         role = session.role
         if role == "admin" and _is_superuser(session.username, [], settings):
@@ -220,8 +222,12 @@ SESSION_COOKIE = "memoryhub_ui_session"
 SESSION_HOURS = 12
 
 
+def proxy_auth_enabled(settings: Settings) -> bool:
+    return settings.ui_trust_proxy_headers and not (settings.ui_local_accounts or settings.ui_dev_api_key)
+
+
 def auth_enabled(settings: Settings) -> bool:
-    return bool(settings.ui_dev_api_key or settings.ui_local_accounts)
+    return bool(settings.ui_dev_api_key or settings.ui_local_accounts or proxy_auth_enabled(settings))
 
 
 def session_secret(settings: Settings) -> str:
@@ -243,6 +249,7 @@ class Session:
     role: str
     source: str
     name: str | None = None
+    version: int = 0
 
 
 def _clean(part: str) -> str:
@@ -257,9 +264,10 @@ def make_session_cookie(
     source: str = "api-key",
     name: str | None = None,
     hours: int = SESSION_HOURS,
+    version: int = 0,
 ) -> str:
     expires = str(int(time.time()) + max(1, hours) * 3600)
-    payload = "|".join([_clean(username), role, source, _clean(name or username), expires])
+    payload = "|".join([_clean(username), role, source, _clean(name or username), expires, str(version)])
     return f"{payload}|{_sign(payload, session_secret(settings))}"
 
 
@@ -267,16 +275,17 @@ def read_session(request: Request, settings: Settings) -> Session | None:
     if not auth_enabled(settings):
         return None
     raw = request.cookies.get(SESSION_COOKIE)
-    if not raw or raw.count("|") != 5:
+    if not raw or raw.count("|") != 6:
         return None
-    username, role, source, name, expires, signature = raw.split("|")
-    payload = "|".join([username, role, source, name, expires])
+    username, role, source, name, expires, version, signature = raw.split("|")
+    payload = "|".join([username, role, source, name, expires, version])
     if not hmac.compare_digest(signature, _sign(payload, session_secret(settings))):
         return None
     if role not in ("admin", "user") or source not in ("account", "api-key"):
         return None
     try:
-        if time.time() > int(expires):
+        version_number = int(version)
+        if version_number < 0 or time.time() > int(expires):
             return None
     except ValueError:
         return None
@@ -284,7 +293,7 @@ def read_session(request: Request, settings: Settings) -> Session | None:
         return None
     if source == "account" and not settings.ui_local_accounts:
         return None
-    return Session(username=username, role=role, source=source, name=name)
+    return Session(username=username, role=role, source=source, name=name, version=version_number)
 
 
 def read_session_cookie(request: Request, settings: Settings) -> str | None:

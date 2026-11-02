@@ -23,6 +23,7 @@ def _request(headers):
 
 def test_roles_from_openshift_groups(monkeypatch):
     monkeypatch.setenv("MEMORYHUB_UI_SUPERUSER_USERS", "sec-lead")
+    monkeypatch.setenv("MEMORYHUB_UI_TRUST_PROXY_HEADERS", "true")
     get_settings.cache_clear()
     try:
         s = get_settings()

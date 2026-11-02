@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     # Behind the OpenShift OAuth proxy leave it false: identities come from
     # X-Forwarded-* headers and the admin role from ui_admin_group.
     ui_local_accounts: bool = False
+    # Enable only behind a trusted proxy that strips incoming identity headers.
+    # Local accounts and API-key login always ignore proxy identity headers.
+    ui_trust_proxy_headers: bool = False
     # HMAC key for session cookies. Set it in production (a Secret). When empty
     # the BFF falls back to the dev API key, then to a key derived from the DB
     # credentials, so sessions survive restarts but rotate with the password.
