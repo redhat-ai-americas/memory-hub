@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { memoryId, mockDashboardApi } from './fixtures';
+import { commonMemory, memoryId, mockDashboardApi } from './fixtures';
 
 const filterQuery = 'tab=deleted&q=needle&mode=text&scope=project&actor=alice&project=p1&domain=security&minw=0.75&flag=contradicted&entity=33333333-3333-4333-8333-333333333333';
 function expectFilters(url: string) {
@@ -8,6 +8,52 @@ function expectFilters(url: string) {
     expect(params.get(key === 'minw' ? 'min_weight' : key)).toBe(value);
   }
 }
+
+for (const scenario of [
+  { name: 'read-only shared memory', role: 'user', write: false, moderate: false },
+  { name: 'moderator', role: 'admin', write: false, moderate: true },
+  { name: 'writer', role: 'user', write: true, moderate: true },
+] as const) {
+  test(`memory detail actions follow server permissions for ${scenario.name}`, async ({ page }) => {
+    await mockDashboardApi(page, { role: scenario.role });
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    const memory = {
+      ...commonMemory, content: 'Shared context', logical_id: memoryId, parent_id: null, branch_type: null,
+      tenant_id: 'demo-tenant', source: 'agent', metadata: null, expires_at: null, embedding_dims: null,
+      injection: 'full', full_content_threshold: 0.8,
+      capabilities: { write: scenario.write, moderate: scenario.moderate },
+    };
+    await page.route('**/api/memory/*/context', (route) => route.fulfill({ json: {
+      memory, versions: [memory], branches: [], relationships: [], relationships_omitted: 0,
+      contradictions: [], contradiction_threshold: 3, similar: [], access_count: 0,
+    } }));
+    await page.goto(`/#/memory/${memoryId}`);
+    await expect(page.getByRole('heading', { name: 'Shared context', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Edit · new version', exact: true })).toHaveCount(scenario.write ? 1 : 0);
+    await expect(page.getByRole('button', { name: 'Report contradiction', exact: true })).toHaveCount(scenario.write ? 1 : 0);
+    await expect(page.getByRole('button', { name: 'Add branch', exact: true })).toHaveCount(scenario.write ? 1 : 0);
+    await expect(page.getByRole('button', { name: 'Delete memory', exact: true })).toHaveCount(scenario.moderate ? 1 : 0);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('read-only selections cannot start bulk mutations', async ({ page }) => {
+  await mockDashboardApi(page, { role: 'user' });
+  await page.route('**/api/memories/browse?**', (route) => route.fulfill({ json: {
+    items: [{ ...commonMemory, capabilities: { write: false, moderate: false } }],
+    total: 1, page: 1, per_page: 20, search_mode: 'none',
+    tab_counts: { current: 1, all: 1, quarantined: 0, deleted: 0 },
+    facets: { scopes: [], writers: [], projects: [], domains: [], flags: {} },
+  } }));
+  await page.goto('/#/memories');
+  await page.getByRole('checkbox', { name: 'Select memory', exact: true }).check();
+  for (const name of ['Change weight', 'Add relationship', 'Propose promotion', 'Delete']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeDisabled();
+  }
+  await page.getByRole('button', { name: 'Actions', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(1);
+});
 
 test('switching browser views and exporting preserves every filter', async ({ page }) => {
   await mockDashboardApi(page);

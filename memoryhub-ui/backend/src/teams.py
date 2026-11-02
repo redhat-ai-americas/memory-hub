@@ -80,7 +80,15 @@ async def sync_project_access(db: AsyncSession, tenant_id: str) -> dict[str, int
         (await db.execute(select(Project.name).where(Project.tenant_id == tenant_id))).scalars().all()
     )
     existing = (
-        (await db.execute(select(ProjectMembership).where(ProjectMembership.project_id.in_(tenant_projects or {""}))))
+        (
+            await db.execute(
+                select(ProjectMembership)
+                .where(ProjectMembership.project_id.in_(tenant_projects or {""}))
+                .order_by(ProjectMembership.project_id, ProjectMembership.user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
         .scalars()
         .all()
     )
@@ -88,6 +96,11 @@ async def sync_project_access(db: AsyncSession, tenant_id: str) -> dict[str, int
     added = removed = 0
     for m in existing:
         if (m.joined_by or "").startswith(TEAM_PREFIX) and (m.project_id, m.user_id) not in desired:
+            if m.role == "admin":
+                # A project promotion is an explicit grant, independent of
+                # team membership. Preserve older rows promoted before this rule.
+                m.joined_by = "project-admin"
+                continue
             await db.delete(m)
             removed += 1
     for (project_id, user_id), team in desired.items():

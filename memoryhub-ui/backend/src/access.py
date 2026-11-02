@@ -222,6 +222,10 @@ class Access:
         if not self.can_write(n):
             raise HTTPException(status_code=403, detail="You do not have write access to this memory")
 
+    def memory_capabilities(self, n: Any) -> dict[str, bool]:
+        """Keep visible memory actions aligned with server authorization."""
+        return {"write": self.can_write(n), "moderate": self.can_moderate(n)}
+
     def ensure_moderatable(self, n: Any) -> None:
         self.ensure_readable(n)
         if not self.viewer.redacts_content:

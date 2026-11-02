@@ -702,7 +702,10 @@ async def set_member_role(
     await _require_project_admin(db, viewer, project)
     membership = (
         await db.execute(
-            select(ProjectMembership).where(ProjectMembership.project_id == name, ProjectMembership.user_id == user_id)
+            select(ProjectMembership)
+            .where(ProjectMembership.project_id == name, ProjectMembership.user_id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if membership is None:
@@ -713,6 +716,8 @@ async def set_member_role(
         await _ensure_not_last_admin(db, name, user_id)
     previous = membership.role
     membership.role = body.role
+    if body.role == "admin" and (membership.joined_by or "").startswith("team:"):
+        membership.joined_by = viewer.username
     await audit(
         db,
         tenant_id=settings.ui_tenant_id,

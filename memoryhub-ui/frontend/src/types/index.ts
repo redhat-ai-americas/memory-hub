@@ -208,6 +208,7 @@ export interface EntitiesResponse {
 }
 
 export interface MemoryRow {
+  capabilities: { write: boolean; moderate: boolean };
   id: string;
   stub: string;
   content_preview: string;
@@ -301,6 +302,7 @@ export interface NodeBrief {
 
 export interface MemoryContext {
   memory: NodeBrief & {
+    capabilities: { write: boolean; moderate: boolean };
     content: string;
     logical_id: string | null;
     parent_id: string | null;

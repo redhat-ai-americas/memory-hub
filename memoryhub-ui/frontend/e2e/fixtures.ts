@@ -62,6 +62,7 @@ const settings = {
 };
 
 const commonMemory = {
+  capabilities: { write: true, moderate: true },
   id: memoryId,
   stub: 'Run the MemoryHub UI locally with npm run dev',
   content_preview: 'Run the MemoryHub UI locally with npm run dev.',
@@ -359,4 +360,4 @@ export async function mockDashboardApi(page: Page, opts: MockOptions = {}) {
   });
 }
 
-export { memoryId };
+export { memoryId, commonMemory };

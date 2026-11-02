@@ -32,6 +32,7 @@ from src.access import ContentDep, ViewerDep, access_for
 from src.browse_query import BrowseDep, BrowseQuery
 from src.config import Settings, get_settings
 from src.database import get_db
+from src.memory_content import full_memory_content, get_memory_storage
 from src.ui_common import (
     SCOPES,
     SEARCH_EVENTS,
@@ -1063,6 +1064,7 @@ async def browse_memories(
                 "deleted_at": n.deleted_at,
                 "score": round(scores[n.id], 4) if n.id in scores else None,
                 "entities": entities_by_memory.get(n.id, []),
+                "capabilities": acc.memory_capabilities(n),
             }
         )
     items = [acc.redact(i) for i in items]
@@ -1366,10 +1368,17 @@ async def memory_context(memory_id: str, db: DbDep, settings: SettingsDep, viewe
             dims = None
 
     full_threshold = float(tenant_settings["retrieval"]["full_content_threshold"])
+    contents = {}
+    content_cache = {}
+    for memory in [node, *versions, *branches]:
+        if memory.id not in contents:
+            contents[memory.id] = (
+                memory.content if acc.hides(memory.scope) else await full_memory_content(memory, content_cache)
+            )
     result = {
         "memory": {
             **_node_brief(node),
-            "content": node.content,
+            "content": contents[node.id],
             "logical_id": str(logical_id) if logical_id else None,
             "parent_id": str(node.parent_id) if node.parent_id else None,
             "branch_type": node.branch_type,
@@ -1387,13 +1396,14 @@ async def memory_context(memory_id: str, db: DbDep, settings: SettingsDep, viewe
             "embedding_dims": dims,
             "injection": "full" if node.weight >= full_threshold else "stub",
             "full_content_threshold": full_threshold,
+            "capabilities": acc.memory_capabilities(node),
         },
         "versions": [
             {
                 "id": str(v.id),
                 "version": v.version,
                 "is_current": v.is_current,
-                "content": v.content,
+                "content": contents[v.id],
                 "weight": v.weight,
                 "actor_id": v.actor_id,
                 "driver_id": v.driver_id,
@@ -1407,7 +1417,7 @@ async def memory_context(memory_id: str, db: DbDep, settings: SettingsDep, viewe
             {
                 "id": str(b.id),
                 "branch_type": b.branch_type,
-                "content": b.content,
+                "content": contents[b.id],
                 "actor_id": b.actor_id or b.owner_id,
                 "created_at": b.created_at,
             }
@@ -1637,6 +1647,7 @@ async def new_version(memory_id: str, body: NewVersionRequest, request: Request,
         MemoryNodeUpdate(content=body.content, weight=body.weight, domains=body.domains),
         db,
         _embedding_service(settings),
+        s3_adapter=get_memory_storage(),
         actor_id=viewer.username,
         driver_id=viewer.username,
     )
@@ -1779,7 +1790,7 @@ async def _propose_promotion(
     promoted = MemoryNode(
         id=new_id,
         logical_id=new_id,
-        content=node.content,
+        content=await full_memory_content(node),
         stub=node.stub,
         storage_type="inline",
         weight=node.weight,
@@ -1865,17 +1876,24 @@ async def bulk_action(body: BulkRequest, request: Request, db: DbDep, settings: 
             elif body.action == "weight":
                 if body.weight is None:
                     raise HTTPException(status_code=422, detail="weight is required")
+                if not node.is_current or node.deleted_at is not None:
+                    raise HTTPException(status_code=409, detail="Only the current version can be edited")
                 from memoryhub_core.models.schemas import MemoryNodeUpdate
+                from memoryhub_core.services.exceptions import MemoryNotCurrentError, MemoryNotFoundError
                 from memoryhub_core.services.memory import update_memory
 
-                updated = await update_memory(
-                    node.id,
-                    MemoryNodeUpdate(weight=body.weight),
-                    db,
-                    _embedding_service(settings),
-                    actor_id=viewer.username,
-                    driver_id=viewer.username,
-                )
+                try:
+                    updated = await update_memory(
+                        node.id,
+                        MemoryNodeUpdate(weight=body.weight),
+                        db,
+                        _embedding_service(settings),
+                        s3_adapter=get_memory_storage(),
+                        actor_id=viewer.username,
+                        driver_id=viewer.username,
+                    )
+                except (MemoryNotCurrentError, MemoryNotFoundError) as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from None
                 await audit(
                     db,
                     tenant_id=tenant_id,

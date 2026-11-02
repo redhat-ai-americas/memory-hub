@@ -107,6 +107,10 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
   const items = data?.items ?? [];
   const allSelected = items.length > 0 && items.every((i) => selected.has(i.id));
   const ids = [...selected];
+  const selectedItems = items.filter((item) => selected.has(item.id));
+  const selectionKnown = ids.length > 0 && selectedItems.length === ids.length;
+  const selectionCanWrite = selectionKnown && selectedItems.every((item) => item.capabilities?.write);
+  const selectionCanModerate = selectionKnown && selectedItems.every((item) => item.capabilities?.moderate);
 
   const chips = useMemo(() => {
     const out: { label: string; clear: () => void }[] = [];
@@ -491,6 +495,8 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                     <button
                       type="button"
                       className="btn bp"
+                      disabled={!selectionCanModerate}
+                      title={!selectionCanModerate ? 'Restore requires moderation access to every selected memory.' : undefined}
                       onClick={() =>
                         runBulk({ action: 'restore', ids }, `${fmtInt(ids.length)} restored — agents get ${ids.length === 1 ? 'it' : 'them'} again.`).catch((e) =>
                           toast(errorMessage(e), 'err'),
@@ -509,6 +515,8 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                       <button
                         type="button"
                         className="btn bp"
+                        disabled={!selectionCanModerate}
+                        title={!selectionCanModerate ? 'Restore requires moderation access to every selected memory.' : undefined}
                         onClick={() => runBulk({ action: 'restore', ids }, `${fmtInt(ids.length)} restored.`).catch((e) => toast(errorMessage(e), 'err'))}
                       >
                         Restore
@@ -516,11 +524,11 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                     ) : (
                       <>
                         {state.tab !== 'quarantined' && (
-                          <button type="button" className="btn bl" onClick={() => setModal('quarantine')}>
+                          <button type="button" className="btn bl" disabled={!selectionCanModerate} title={!selectionCanModerate ? 'Moderation access is required for every selected memory.' : undefined} onClick={() => setModal('quarantine')}>
                             Quarantine
                           </button>
                         )}
-                        <button type="button" className="btn bl danger" onClick={() => setModal('delete')}>
+                        <button type="button" className="btn bl danger" disabled={!selectionCanModerate} title={!selectionCanModerate ? 'Moderation access is required for every selected memory.' : undefined} onClick={() => setModal('delete')}>
                           Delete
                         </button>
                       </>
@@ -538,16 +546,16 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                   </>
                 ) : (
                 <>
-                <button type="button" className="btn bl" onClick={() => setModal('weight')}>
+                <button type="button" className="btn bl" disabled={!selectionCanWrite} title={!selectionCanWrite ? 'Write access is required for every selected memory.' : undefined} onClick={() => setModal('weight')}>
                   Change weight
                 </button>
-                <button type="button" className="btn bl" onClick={() => setModal('relate')}>
+                <button type="button" className="btn bl" disabled={!selectionCanWrite} title={!selectionCanWrite ? 'Write access is required for every selected memory.' : undefined} onClick={() => setModal('relate')}>
                   Add relationship
                 </button>
-                <button type="button" className="btn bl" onClick={() => setModal('promote')}>
+                <button type="button" className="btn bl" disabled={!selectionCanWrite} title={!selectionCanWrite ? 'Write access is required for every selected memory.' : undefined} onClick={() => setModal('promote')}>
                   Propose promotion
                 </button>
-                <button type="button" className="btn bl danger" onClick={() => setModal('delete')}>
+                <button type="button" className="btn bl danger" disabled={!selectionCanModerate} title={!selectionCanModerate ? 'Moderation access is required for every selected memory.' : undefined} onClick={() => setModal('delete')}>
                   Delete
                 </button>
                 <button type="button" className="btn bl" onClick={() => setParams({ view: 'graph', gfocus: 'memory', focus: ids[0] }, false)}>
@@ -745,7 +753,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                                   <a href={buildHash('/memories', { ...Object.fromEntries(p), view: 'graph', gfocus: 'memory', focus: m.id, sel: m.id })}>Open in graph</a>
                                   <a href={buildHash('/memories', { ...Object.fromEntries(p), view: 'timeline', sel: m.id })}>Show on timeline</a>
                                   <a href={buildHash(`/memory/${m.id}`, { tab: 'access' })}>Access log</a>
-                                  {isAdmin && !m.redacted && (
+                                  {isAdmin && m.capabilities?.moderate && (
                                     <>
                                       <hr />
                                       {state.tab === 'deleted' ? (
@@ -786,7 +794,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                                       )}
                                     </>
                                   )}
-                                  {state.tab === 'deleted' && !isAdmin && (
+                                  {state.tab === 'deleted' && !isAdmin && m.capabilities?.moderate && (
                                     <>
                                       <hr />
                                       <button
@@ -800,7 +808,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                                       </button>
                                     </>
                                   )}
-                                  {state.tab !== 'deleted' && !isAdmin && (
+                                  {state.tab !== 'deleted' && !isAdmin && m.capabilities?.moderate && (
                                     <>
                                       <hr />
                                       <button

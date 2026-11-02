@@ -91,9 +91,32 @@ async def _deleted_batch(db: AsyncSession, tenant_id: str, node: MemoryNode) -> 
 
 
 def heads(rows: list) -> set:
-    """Rows no other row in the batch supersedes — the ones to make current again."""
+    """Restore one current revision per logical memory under current parents."""
     superseded = {r.previous_version_id for r in rows if r.previous_version_id}
-    return {r.id for r in rows if r.id not in superseded}
+    candidates = {r.id: r for r in rows if r.id not in superseded}
+    batch_ids = {r.id for r in rows}
+    # Deep-copied branches have no previous_version_id, but their historical
+    # parent still identifies them as retired revisions.
+    while True:
+        obsolete = {
+            r.id for r in candidates.values()
+            if getattr(r, "parent_id", None) in batch_ids and r.parent_id not in candidates
+        }
+        if not obsolete:
+            break
+        for memory_id in obsolete:
+            candidates.pop(memory_id)
+    latest = {}
+    for row in candidates.values():
+        key = getattr(row, "logical_id", None) or row.id
+        rank = (
+            getattr(row, "version", 0),
+            str(getattr(row, "updated_at", "")),
+            str(row.id),
+        )
+        if key not in latest or rank > latest[key][0]:
+            latest[key] = (rank, row.id)
+    return {memory_id for _, memory_id in latest.values()}
 
 
 async def restore_memory(db: AsyncSession, settings: Settings, viewer, memory_id: str) -> dict:

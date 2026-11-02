@@ -56,7 +56,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   const id = decodeURIComponent(route.path.replace(/^\/memory\//, ''));
   const tab = route.params.get('tab') || 'details';
   const toast = useToast();
-  const { refreshCounts, role } = useApp();
+  const { refreshCounts } = useApp();
   const [restoring, setRestoring] = useState(false);
   const { data, error, loading, reload } = useApi<MemoryContext>(() => api.memoryContext(id), [id]);
   const [modal, setModal] = useState<null | 'contradiction' | 'branch' | 'edit' | 'delete' | 'relate'>(null);
@@ -103,6 +103,8 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   const unresolved = data?.contradictions.filter((c) => !c.resolved) ?? [];
   const threshold = data?.contradiction_threshold ?? 5;
   const deleted = Boolean(m?.deleted_at);
+  const canWrite = Boolean(m?.capabilities?.write);
+  const canModerate = Boolean(m?.capabilities?.moderate);
 
   return (
     <>
@@ -142,7 +144,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           ) : null
         }
         actions={
-          m && deleted && (role !== 'admin' || !m.redacted) ? (
+          m && deleted && canModerate ? (
             <button
               type="button"
               className="btn bp"
@@ -166,18 +168,24 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
             </button>
           ) : m && !deleted ? (
             <>
-              <button type="button" className="btn bg" onClick={() => setModal('contradiction')}>
-                Report contradiction
-              </button>
-              <button type="button" className="btn bs" onClick={() => setModal('branch')}>
-                Add branch
-              </button>
-              <button type="button" className="btn bp" disabled={!m.is_current} onClick={() => setModal('edit')}>
-                Edit · new version
-              </button>
-              <button type="button" className="btn bd outline" aria-label="Delete memory" onClick={() => setModal('delete')}>
-                Delete
-              </button>
+              {canWrite && (
+                <>
+                  <button type="button" className="btn bg" onClick={() => setModal('contradiction')}>
+                    Report contradiction
+                  </button>
+                  <button type="button" className="btn bs" onClick={() => setModal('branch')}>
+                    Add branch
+                  </button>
+                  <button type="button" className="btn bp" disabled={!m.is_current} onClick={() => setModal('edit')}>
+                    Edit · new version
+                  </button>
+                </>
+              )}
+              {canModerate && (
+                <button type="button" className="btn bd outline" aria-label="Delete memory" onClick={() => setModal('delete')}>
+                  Delete
+                </button>
+              )}
             </>
           ) : undefined
         }
@@ -331,7 +339,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                           {b.content}
                         </div>
                       ))}
-                      {!deleted && (
+                      {!deleted && canWrite && (
                         <button type="button" className="btn bl" style={{ alignSelf: 'flex-start' }} onClick={() => setModal('branch')}>
                           + Add provenance, evidence or description branch
                         </button>
@@ -345,7 +353,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                     <div className="ch">
                       <h3>Relationships</h3>
                       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                        {!deleted && (
+                        {!deleted && canWrite && (
                           <button type="button" className="btn bl sm" onClick={() => setModal('relate')}>
                             + Add relationship
                           </button>
@@ -385,7 +393,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                   <div className="alert" role="note">
                     <div>
                       <b>Deleted {fmtRelative(m.deleted_at as string).toLowerCase()}.</b> Agents no longer receive it.
-                      {role !== 'admin' || !m.redacted ? ' Restore brings back every version deleted with it and makes the newest one current.' : ''}
+                      {canModerate ? ' Restore brings back every version deleted with it and makes the newest one current.' : ''}
                     </div>
                   </div>
                 )}
@@ -476,7 +484,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                         <span className="mono">{s.score.toFixed(2)}</span>
                       </div>
                     ))}
-                    {data.similar.length > 0 && !deleted && (
+                    {data.similar.length > 0 && !deleted && canWrite && (
                       <button type="button" className="btn bs" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => setModal('relate')}>
                         Suggest merge
                       </button>
@@ -489,9 +497,9 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
         ) : null}
       </div>
 
-      {modal === 'contradiction' && <ContradictionModal id={id} onClose={() => setModal(null)} onDone={reload} />}
-      {modal === 'branch' && <BranchModal id={id} onClose={() => setModal(null)} onDone={reload} />}
-      {modal === 'edit' && m && (
+      {modal === 'contradiction' && canWrite && <ContradictionModal id={id} onClose={() => setModal(null)} onDone={reload} />}
+      {modal === 'branch' && canWrite && <BranchModal id={id} onClose={() => setModal(null)} onDone={reload} />}
+      {modal === 'edit' && m && canWrite && (
         <EditModal
           id={id}
           content={m.content}
@@ -504,8 +512,8 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           }}
         />
       )}
-      {modal === 'relate' && <RelationshipModal sourceIds={[id]} onClose={() => setModal(null)} onDone={reload} />}
-      {modal === 'delete' && m && (
+      {modal === 'relate' && canWrite && <RelationshipModal sourceIds={[id]} onClose={() => setModal(null)} onDone={reload} />}
+      {modal === 'delete' && m && canModerate && (
         <ConfirmModal
           title="Delete memory?"
           confirmLabel="Delete"
