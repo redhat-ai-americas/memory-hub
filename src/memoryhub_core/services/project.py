@@ -4,13 +4,22 @@ Provides helpers that resolve which projects a user has access to,
 based on project_memberships rows. Used by the authz layer and search
 filters to include project-scoped memories in results.
 
-Also provides auto-enrollment: when a user writes to a project they
-are not yet a member of, ``ensure_project_membership`` creates the
-project (if needed) and the membership row automatically — unless the
-project is invite-only.
+Project provisioning has two modes (``MEMORYHUB_PROJECT_PROVISIONING``):
+
+* ``central`` (default): projects are created by administrators, with their
+  members, through the dashboard, the CLI or ``manage_project(create)`` with
+  admin rights. Writing to a project never creates or joins it; callers
+  must already be members. This stops look-alike projects from piling up and
+  stops anyone who knows a project's name from joining it and reading its
+  memories.
+* ``self_service``: the earlier behaviour for sandboxes and personal use —
+  when a user writes to a project they are not yet a member of,
+  ``ensure_project_membership`` creates the project (if needed) and the
+  membership row automatically, unless the project is invite-only.
 """
 
 import logging
+import os
 import uuid
 
 from sqlalchemy import func, select
@@ -24,10 +33,24 @@ from memoryhub_core.services.exceptions import (
     MembershipNotFoundError,
     ProjectAlreadyExistsError,
     ProjectInviteOnlyError,
+    ProjectMembershipRequiredError,
     ProjectNotFoundError,
+    ProjectNotProvisionedError,
 )
 
 logger = logging.getLogger(__name__)
+
+PROVISIONING_MODES = ("central", "self_service")
+
+
+def provisioning_mode() -> str:
+    """``central`` (default) or ``self_service``; read on every call so tests and
+    restarts pick up the environment."""
+    mode = os.environ.get("MEMORYHUB_PROJECT_PROVISIONING", "central").strip().lower()
+    if mode not in PROVISIONING_MODES:
+        logger.warning("Unknown MEMORYHUB_PROJECT_PROVISIONING=%r; using 'central'", mode)
+        return "central"
+    return mode
 
 
 async def get_projects_for_user(
@@ -102,8 +125,12 @@ async def ensure_project_membership(
     user_id: str,
     tenant_id: str,
     description: str | None = None,
+    mode: str | None = None,
 ) -> tuple[set[str], bool]:
     """Ensure the user is a member of the project, auto-enrolling if allowed.
+
+    In ``central`` provisioning mode (the default, see ``provisioning_mode``)
+    nothing is created or joined: members pass, everyone else is refused.
 
     Returns:
         A tuple of (project_ids, was_auto_enrolled) where project_ids is
@@ -111,6 +138,8 @@ async def ensure_project_membership(
 
     Raises:
         ProjectInviteOnlyError: If the project exists and is invite-only.
+        ProjectNotProvisionedError: Central mode, the project does not exist.
+        ProjectMembershipRequiredError: Central mode, the caller is not a member.
     """
     # Fast path: user is already a member.
     project_ids = await get_projects_for_user(session, user_id)
@@ -119,6 +148,10 @@ async def ensure_project_membership(
 
     # Fetch or create the project.
     project = await get_project(session, project_id)
+    if (mode or provisioning_mode()) == "central":
+        if project is None or project.tenant_id != tenant_id:
+            raise ProjectNotProvisionedError(project_id)
+        raise ProjectMembershipRequiredError(project_id)
     if project is not None and project.invite_only:
         raise ProjectInviteOnlyError(project_id)
 

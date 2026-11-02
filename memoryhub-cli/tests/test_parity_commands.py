@@ -534,3 +534,36 @@ class TestBackfillEntities:
         mock_backfill.assert_called_once()
         call_kwargs = mock_backfill.call_args[1]
         assert call_kwargs["limit"] == 5
+
+
+# ── project create with members (central provisioning) ───────────────────────
+
+
+class TestProjectCreateWithMembers:
+    def test_adds_admins_then_members(self):
+        mock_client = _mock_client(
+            create_project=AsyncMock(return_value={"project": {"name": "team-x"}}),
+            add_project_member=AsyncMock(return_value={"message": "ok"}),
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                [
+                    "project", "create", "team-x", "--invite-only",
+                    "--admin", "carol", "--member", "alice", "--member", "carol",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        awaited = mock_client.add_project_member.await_args_list
+        calls = [(c.args[1], c.kwargs["role"]) for c in awaited]
+        # carol is added once, as admin
+        assert calls == [("carol", "admin"), ("alice", "member")]
+        assert "Added alice as member" in result.output
+
+    def test_without_members_only_creates(self):
+        created = AsyncMock(return_value={"project": {"name": "solo"}})
+        mock_client = _mock_client(create_project=created)
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["project", "create", "solo"])
+        assert result.exit_code == 0, result.output
+        mock_client.add_project_member.assert_not_called()

@@ -1461,11 +1461,16 @@ class MemoryHubClient:
     ) -> dict[str, Any]:
         """Create a new project.
 
+        With central provisioning (the server default) this needs the
+        ``memory:admin`` or ``project:admin`` scope, and members are always
+        added explicitly with ``add_project_member``.
+
         Args:
             project_name: Project identifier.
             description: Optional project description.
             invite_only: If True, members must be added explicitly.
-                Default False allows auto-enrollment.
+                Default False allows auto-enrollment on servers running in
+                self-service mode.
         """
         # The dispatcher accepts the project name at the top level as
         # `project_id` for consistency with other project actions.

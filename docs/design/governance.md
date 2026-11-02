@@ -12,7 +12,7 @@ Fully automatic creation and update. The agent writes memories on behalf of its 
 
 ### Project-scope memories
 
-Project-scope memories are shared among project members. A `project_id` in an MCP request identifies the requested project; it does not by itself prove that the caller may access it. For reads, the caller must be a member of that project in the resolved tenant. `list_memory` and `search_memory` verify membership before resolving project campaigns or returning project-wide results. This check applies even when `MEMORYHUB_PROJECT_ISOLATION_ENABLED` is disabled: the flag controls result filtering, not membership authorization. Project write behavior and its existing auto-enrollment rules are unchanged. Operations remain logged and auditable.
+Project-scope memories are shared among project members. A `project_id` in an MCP request identifies the requested project; it does not by itself prove that the caller may access it. For reads, the caller must be a member of that project in the resolved tenant. `list_memory` and `search_memory` verify membership before resolving project campaigns or returning project-wide results. This check applies even when `MEMORYHUB_PROJECT_ISOLATION_ENABLED` is disabled: the flag controls result filtering, not membership authorization. Project writes require membership too: with central provisioning (`MEMORYHUB_PROJECT_PROVISIONING=central`, the default) writing to a project never creates or joins it; self-service mode keeps the earlier auto-enrollment rules (see `projects-lifecycle.md`). Operations remain logged and auditable.
 
 ### Campaign-scope memories
 

@@ -1675,18 +1675,39 @@ def project_create(
     invite_only: bool = typer.Option(
         False, "--invite-only", help="Restrict membership to invites",
     ),
+    members: list[str] | None = typer.Option(
+        None, "--member", "-m", help="Add this user as a member (repeatable)",
+    ),
+    admins: list[str] | None = typer.Option(
+        None, "--admin", help="Add this user as a project admin (repeatable)",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
     ),
 ):
-    """Create a new project."""
+    """Create a new project, optionally with its members.
+
+    With central provisioning (the server default) only MemoryHub
+    administrators can create projects, and writing to a project never joins
+    it, so add the team here: --member alice --member bob --admin carol.
+    """
     client = _get_client(output)
+    admins = admins or []
+    people = [(u, "admin") for u in admins]
+    people += [(u, "member") for u in members or [] if u not in admins]
 
     async def _do():
         async with client:
-            return await client.create_project(
+            created = await client.create_project(
                 name, description=description, invite_only=invite_only
             )
+            added = []
+            for user_id, role in people:
+                await client.add_project_member(name, user_id, role=role)
+                added.append({"user_id": user_id, "role": role})
+            if isinstance(created, dict):
+                created = {**created, "members_added": added}
+            return created
 
     result = _run_command(_do(), output)
 
@@ -1701,6 +1722,8 @@ def project_create(
         console.print(f"  Description: {description}")  # noqa: T201
     policy = "invite-only" if invite_only else "open"
     console.print(f"  Policy: {policy}")  # noqa: T201
+    for user_id, role in people:
+        console.print(f"  Added {user_id} as {role}")  # noqa: T201
 
 
 @project_app.command("add-member")

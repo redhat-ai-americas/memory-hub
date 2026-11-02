@@ -89,8 +89,9 @@ _INSTRUCTIONS_FULL = (
     "query relationships, and find similar memories. Use "
     "manage_curation to report and resolve contradictions and tune "
     "curation rules. Use manage_project to discover, create, and "
-    "manage projects and their members; writing to a new project "
-    "auto-enrolls you. Use persona(action='get') to load the standing user "
+    "manage projects and their members; projects are created by "
+    "administrators and members are added explicitly (unless the server "
+    "runs in self-service mode). Use persona(action='get') to load the standing user "
     "profile, persona(action='compile') to refresh it, and "
     "persona(action='edit') to manage user-declared pins."
 )

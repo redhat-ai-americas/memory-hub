@@ -40,6 +40,8 @@ from memoryhub_core.services.exceptions import (
     MemoryAccessDeniedError,
     MemoryNotFoundError,
     ProjectInviteOnlyError,
+    ProjectMembershipRequiredError,
+    ProjectNotProvisionedError,
 )
 from memoryhub_core.services.memory import create_fact_children, create_memory
 from memoryhub_core.services.project import ensure_project_membership
@@ -409,7 +411,8 @@ async def write_memory(
             await release_db_session(gen_for_campaign)
 
     # Resolve project membership when writing to project scope.
-    # Auto-enrolls the user if the project is open (or creates it).
+    # Central provisioning (default): members only. Self-service: auto-enrolls
+    # the user if the project is open (or creates it).
     project_ids: set[str] | None = None
     scope_id_value: str | None = None
     was_auto_enrolled = False
@@ -460,7 +463,7 @@ async def write_memory(
                         existing = set(user.get("project_memberships", []))
                         existing.add(project_id)
                         user["project_memberships"] = sorted(existing)
-            except ProjectInviteOnlyError as exc:
+            except (ProjectInviteOnlyError, ProjectNotProvisionedError, ProjectMembershipRequiredError) as exc:
                 raise ToolError(str(exc)) from exc
             finally:
                 await release_db_session(gen_for_project)
