@@ -384,7 +384,7 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
   const [showAll, setShowAll] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const { me } = useApp();
-  const changeRole = async (userId: string, current: 'member' | 'admin', next: 'member' | 'admin') => {
+  const changeRole = async (userId: string, current: string, next: 'member' | 'admin') => {
     if (current === 'admin' && next === 'member' && !window.confirm(`Make ${userId} a project member? They will lose permission to manage ${name}'s members and settings.`)) return;
     try {
       await api.setMemberRole(name, userId, next);
