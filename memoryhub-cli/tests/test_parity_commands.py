@@ -534,3 +534,111 @@ class TestBackfillEntities:
         mock_backfill.assert_called_once()
         call_kwargs = mock_backfill.call_args[1]
         assert call_kwargs["limit"] == 5
+
+
+# ── project create with members (central provisioning) ───────────────────────
+
+
+class TestProjectCreateWithMembers:
+    def test_adds_admins_then_members(self):
+        mock_client = _mock_client(
+            create_project=AsyncMock(return_value={"project": {"name": "team-x"}}),
+            add_project_member=AsyncMock(return_value={"message": "ok"}),
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                [
+                    "project", "create", "team-x", "--invite-only",
+                    "--admin", "carol", "--member", "alice", "--member", "carol",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        awaited = mock_client.add_project_member.await_args_list
+        calls = [(c.args[1], c.kwargs["role"]) for c in awaited]
+        # carol is added once, as admin
+        assert calls == [("carol", "admin"), ("alice", "member")]
+        assert "Added alice as member" in result.output
+
+    def test_without_members_only_creates(self):
+        created = AsyncMock(return_value={"project": {"name": "solo"}})
+        mock_client = _mock_client(create_project=created)
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["project", "create", "solo"])
+        assert result.exit_code == 0, result.output
+        mock_client.add_project_member.assert_not_called()
+
+
+class TestProjectLifecycle:
+    def _invoke(self, args, **methods):
+        mock_client = _mock_client(**methods)
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, args)
+        return mock_client, result
+
+    def test_archive(self):
+        client, result = self._invoke(
+            ["project", "archive", "team-x"],
+            archive_project=AsyncMock(return_value={"archived": True}),
+        )
+        assert result.exit_code == 0, result.output
+        client.archive_project.assert_awaited_once_with("team-x")
+        assert "read-only" in result.output
+
+    def test_unarchive(self):
+        client, result = self._invoke(
+            ["project", "unarchive", "team-x"],
+            unarchive_project=AsyncMock(return_value={"archived": False}),
+        )
+        assert result.exit_code == 0, result.output
+        client.unarchive_project.assert_awaited_once_with("team-x")
+
+    def test_delete_asks_first(self):
+        mock_client = _mock_client(delete_project=AsyncMock(return_value={"memories_deleted": 3}))
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["project", "delete", "team-x"], input="n\n")
+        assert result.exit_code != 0
+        mock_client.delete_project.assert_not_called()
+
+    def test_delete_with_yes(self):
+        client, result = self._invoke(
+            ["project", "delete", "team-x", "--yes"],
+            delete_project=AsyncMock(return_value={"memories_deleted": 3}),
+        )
+        assert result.exit_code == 0, result.output
+        client.delete_project.assert_awaited_once_with("team-x")
+        assert "3 memories" in result.output
+
+    def test_update_policies(self):
+        client, result = self._invoke(
+            ["project", "update", "team-x", "--ttl-days", "30", "--max-memories", "0", "--open"],
+            update_project=AsyncMock(return_value={"project": {}}),
+        )
+        assert result.exit_code == 0, result.output
+        client.update_project.assert_awaited_once_with(
+            "team-x", description=None, invite_only=False,
+            policies={"ttl_days": 30, "max_memories": None},
+        )
+
+    def test_update_needs_something(self):
+        client, result = self._invoke(
+            ["project", "update", "team-x"], update_project=AsyncMock(),
+        )
+        assert result.exit_code == 2
+        client.update_project.assert_not_called()
+
+    def test_set_role(self):
+        client, result = self._invoke(
+            ["project", "set-role", "team-x", "bob", "admin"],
+            set_project_member_role=AsyncMock(return_value={"message": "ok"}),
+        )
+        assert result.exit_code == 0, result.output
+        client.set_project_member_role.assert_awaited_once_with("team-x", "bob", "admin")
+
+    def test_set_role_rejects_unknown(self):
+        client, result = self._invoke(
+            ["project", "set-role", "team-x", "bob", "owner"],
+            set_project_member_role=AsyncMock(),
+        )
+        assert result.exit_code == 2
+        client.set_project_member_role.assert_not_called()

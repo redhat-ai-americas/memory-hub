@@ -109,6 +109,56 @@ class ProjectInviteOnlyError(Exception):
         super().__init__(f"Project '{project_id}' requires an invitation. Contact a project admin to be added.")
 
 
+class ProjectNotProvisionedError(Exception):
+    """Central provisioning: the project does not exist and only admins create projects."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(
+            f"Project '{project_id}' does not exist. Projects are created by a MemoryHub administrator "
+            "(dashboard or `memoryhub project create`) with their members; ask your admin to create it "
+            "and add you, or use memory(action='list_projects') to see the projects you belong to."
+        )
+
+
+class ProjectMembershipRequiredError(Exception):
+    """Central provisioning: the project exists but the caller is not a member."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(
+            f"You are not a member of project '{project_id}'. Ask a project admin to add you; "
+            "members are added explicitly, writing to a project does not join it."
+        )
+
+
+class ProjectArchivedError(Exception):
+    """The project is archived: read-only until a project admin unarchives it."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(
+            f"Project '{project_id}' is archived and read-only. Its memories can still be read; "
+            "ask a project admin to unarchive it before writing."
+        )
+
+
+class ProjectQuotaExceededError(Exception):
+    """The project reached its max_memories policy."""
+
+    def __init__(self, project_id: str, limit: int) -> None:
+        self.project_id = project_id
+        self.limit = limit
+        super().__init__(
+            f"Project '{project_id}' has reached its limit of {limit} memories. Update or delete existing "
+            "project memories, or ask a project admin to raise the limit."
+        )
+
+
+class InvalidProjectPolicyError(ValueError):
+    """A project policy value is out of range."""
+
+
 class ProjectNotFoundError(Exception):
     """Raised when a project does not exist."""
 

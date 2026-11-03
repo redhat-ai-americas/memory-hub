@@ -2148,3 +2148,41 @@ def test_get_injection_block_guidance_mixed_with_ranked_results():
     assert "Use Podman, not Docker." in block
     assert "Check staging health before promoting." in block
     assert "\n---\n" in block
+
+
+# ── project lifecycle ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "kwargs", "action", "expected"),
+    [
+        ("archive_project", ("team-x",), {}, "archive_project", {}),
+        ("unarchive_project", ("team-x",), {}, "unarchive_project", {}),
+        ("delete_project", ("team-x",), {}, "delete_project", {}),
+        (
+            "update_project",
+            ("team-x",),
+            {"invite_only": True, "policies": {"ttl_days": 30}},
+            "update_project",
+            {"invite_only": True, "policies": {"ttl_days": 30}},
+        ),
+        (
+            "set_project_member_role",
+            ("team-x", "bob", "admin"),
+            {},
+            "set_member_role",
+            {"user_id": "bob", "role": "admin"},
+        ),
+    ],
+)
+async def test_project_lifecycle_actions(client, method, args, kwargs, action, expected):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(structured_content={"ok": True})
+
+    await getattr(c, method)(*args, **kwargs)
+
+    assert _tool_and_action(mock_mcp) == ("memory", action)
+    payload = _payload(mock_mcp)
+    assert payload["project_id"] == "team-x"
+    for key, value in expected.items():
+        assert payload[key] == value

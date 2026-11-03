@@ -1,7 +1,7 @@
 """Unit tests for the project service layer.
 
-Tests auto-enrollment, invite-only rejection, concurrent enrollment
-handling, and project listing.
+Tests central provisioning (the default), self-service auto-enrollment,
+invite-only rejection, concurrent enrollment handling, and project listing.
 """
 
 import uuid
@@ -9,7 +9,12 @@ import uuid
 import pytest
 
 from memoryhub_core.models.project import Project, ProjectMembership
-from memoryhub_core.services.exceptions import MembershipNotFoundError, ProjectInviteOnlyError
+from memoryhub_core.services.exceptions import (
+    MembershipNotFoundError,
+    ProjectInviteOnlyError,
+    ProjectMembershipRequiredError,
+    ProjectNotProvisionedError,
+)
 from memoryhub_core.services.project import (
     assert_project_membership,
     ensure_project_membership,
@@ -17,9 +22,16 @@ from memoryhub_core.services.project import (
     get_projects_for_user,
     get_projects_for_user_in_tenant,
     list_projects_for_tenant,
+    provisioning_mode,
 )
 
 _TENANT = "default"
+
+
+@pytest.fixture
+def self_service(monkeypatch):
+    """The pre-#676 behaviour: writing to a project creates or joins it."""
+    monkeypatch.setenv("MEMORYHUB_PROJECT_PROVISIONING", "self_service")
 
 
 @pytest.fixture
@@ -171,7 +183,7 @@ async def test_ensure_existing_member_returns_false(async_session, seed_project)
 
 
 @pytest.mark.asyncio
-async def test_ensure_auto_enrolls_in_open_project(async_session, seed_project):
+async def test_ensure_auto_enrolls_in_open_project(self_service, async_session, seed_project):
     """Project exists and is open — auto-enroll a new user."""
     project_ids, enrolled = await ensure_project_membership(
         async_session, "alpha", "bob", _TENANT,
@@ -185,7 +197,7 @@ async def test_ensure_auto_enrolls_in_open_project(async_session, seed_project):
 
 
 @pytest.mark.asyncio
-async def test_ensure_creates_project_and_enrolls(async_session):
+async def test_ensure_creates_project_and_enrolls(self_service, async_session):
     """Project does not exist — create it and enroll the user."""
     project_ids, enrolled = await ensure_project_membership(
         async_session, "new-proj", "carol", _TENANT,
@@ -202,7 +214,7 @@ async def test_ensure_creates_project_and_enrolls(async_session):
 
 
 @pytest.mark.asyncio
-async def test_ensure_rejects_invite_only_project(async_session, invite_only_project):
+async def test_ensure_rejects_invite_only_project(self_service, async_session, invite_only_project):
     """Invite-only project — raise ProjectInviteOnlyError."""
     with pytest.raises(ProjectInviteOnlyError) as exc_info:
         await ensure_project_membership(
@@ -213,7 +225,7 @@ async def test_ensure_rejects_invite_only_project(async_session, invite_only_pro
 
 
 @pytest.mark.asyncio
-async def test_ensure_idempotent_double_call(async_session, seed_project):
+async def test_ensure_idempotent_double_call(self_service, async_session, seed_project):
     """Calling ensure twice for the same user/project is safe."""
     _, enrolled1 = await ensure_project_membership(
         async_session, "alpha", "eve", _TENANT,
@@ -227,7 +239,7 @@ async def test_ensure_idempotent_double_call(async_session, seed_project):
 
 
 @pytest.mark.asyncio
-async def test_ensure_records_auto_enroll_joined_by(async_session, seed_project):
+async def test_ensure_records_auto_enroll_joined_by(self_service, async_session, seed_project):
     """The joined_by field should be 'auto-enroll' for auto-enrolled members."""
     await ensure_project_membership(async_session, "alpha", "frank", _TENANT)
 
@@ -240,6 +252,46 @@ async def test_ensure_records_auto_enroll_joined_by(async_session, seed_project)
     result = await async_session.execute(stmt)
     membership = result.scalar_one()
     assert membership.joined_by == "auto-enroll"
+
+
+# -- central provisioning (default) --
+
+
+def test_central_is_the_default(monkeypatch):
+    monkeypatch.delenv("MEMORYHUB_PROJECT_PROVISIONING", raising=False)
+    assert provisioning_mode() == "central"
+    monkeypatch.setenv("MEMORYHUB_PROJECT_PROVISIONING", "bogus")
+    assert provisioning_mode() == "central"
+    monkeypatch.setenv("MEMORYHUB_PROJECT_PROVISIONING", "Self_Service")
+    assert provisioning_mode() == "self_service"
+
+
+@pytest.mark.asyncio
+async def test_central_member_passes(async_session, seed_project):
+    project_ids, enrolled = await ensure_project_membership(async_session, "alpha", "alice", _TENANT, mode="central")
+    assert "alpha" in project_ids and enrolled is False
+
+
+@pytest.mark.asyncio
+async def test_central_never_creates_a_project(async_session):
+    with pytest.raises(ProjectNotProvisionedError) as exc_info:
+        await ensure_project_membership(async_session, "my-app-2", "carol", _TENANT, mode="central")
+    assert "administrator" in str(exc_info.value)
+    assert await get_project(async_session, "my-app-2") is None
+
+
+@pytest.mark.asyncio
+async def test_central_never_joins_an_open_project(async_session, seed_project):
+    """Knowing an open project's name is not enough to read its memories."""
+    with pytest.raises(ProjectMembershipRequiredError):
+        await ensure_project_membership(async_session, "alpha", "mallory", _TENANT, mode="central")
+    assert "alpha" not in await get_projects_for_user(async_session, "mallory")
+
+
+@pytest.mark.asyncio
+async def test_central_hides_other_tenants_projects(async_session, seed_project):
+    with pytest.raises(ProjectNotProvisionedError):
+        await ensure_project_membership(async_session, "alpha", "bob", "other-tenant", mode="central")
 
 
 # -- list_projects_for_tenant --

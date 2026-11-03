@@ -9,7 +9,7 @@ project (stored in memory_nodes.scope_id).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,6 +39,15 @@ class Project(Base):
         nullable=False,
     )
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Lifecycle (#671, migration 033). Archived: read-only, existing memories
+    # stay visible to members. Deleted: soft-deleted with its project memories;
+    # the name stays reserved (it is the primary key).
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # {"ttl_days": int | None, "max_memories": int | None, "default_weight": float | None}
+    policies: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default=text("'{}'"))
 
     __table_args__ = (
         Index("ix_projects_tenant_id", "tenant_id"),

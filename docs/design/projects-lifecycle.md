@@ -18,6 +18,26 @@ What is missing:
 - No project-level policies (TTL defaults, memory quotas)
 - No projects panel in `memoryhub-ui`
 
+### Implemented: lifecycle and policies (#671, migration 033)
+
+Migration `033_project_lifecycle` adds `archived_at`, `archived_by`, `deleted_at`, `deleted_by` and `policies` (JSON, default `{}`) to `projects`. The service layer in `services/project.py` enforces everything; there is still no FK from `memory_nodes.scope_id` (see Referential Integrity, deferred).
+
+| Operation | Who | Effect |
+|---|---|---|
+| `update` | project admins, `memory:admin` / `project:admin` | description, `invite_only`, policies (merged; a key set to `null` is removed) |
+| `archive` / `unarchive` | project admins, `memory:admin` / `project:admin` | archived = read-only: reads and membership stay, `write_memory` / `update_memory` / joins are refused with "archived and read-only" |
+| `delete` | `memory:admin` / `project:admin` only | soft-deletes the project and every project-scoped memory (all versions and branches) in one transaction; the project disappears from lists and membership lookups; the name is reserved and never reused |
+| `set_role` | project admins, `memory:admin` / `project:admin` | `admin` ↔ `member`; the last admin cannot be demoted |
+
+Project admins cannot delete: deletion is destructive, so they archive and ask an administrator.
+
+Policies (all optional, validated on save):
+- `ttl_days` (int ≥ 1) — new root memories get `relevant_until = now + ttl_days` unless the caller passes `relevant_until`. Nothing is expired retroactively.
+- `max_memories` (int ≥ 1) — quota on current, non-deleted root memories (branches and new versions do not count). A new write past the limit fails with "has reached its limit".
+- `default_weight` (0.0–1.0) — weight for project writes that do not pass one (otherwise 0.7).
+
+Surfaces: `manage_project(action="update"|"archive"|"unarchive"|"delete"|"set_role", policies=...)`, the compact `memory(action="update_project"|"archive_project"|"unarchive_project"|"delete_project"|"set_member_role")`, SDK `update_project` / `archive_project` / `unarchive_project` / `delete_project` / `set_project_member_role`, and CLI `memoryhub project update|archive|unarchive|delete|set-role`. The dashboard side follows in a separate PR.
+
 ## Problem Statement
 
 A projects table and auto-enrollment are necessary but not sufficient for governed collaboration. Without explicit lifecycle management, projects accumulate silently — any agent can create one by writing a project-scoped memory, and there is no way to shut one down, transfer ownership, or enforce access to invite-only projects without direct database manipulation. Invite-only is a flag with no enforcement mechanism at the API level: there is no way to add a member to an invite-only project without bypassing the application.
@@ -30,12 +50,29 @@ This matters because project-scoped memories are visibility-controlled. An invit
 
 Projects have four states:
 
-- **Active** — normal operation; auto-enrollment applies to open projects; invite-only projects reject unenrolled writes
+- **Active** — normal operation; in `self_service` mode auto-enrollment applies to open projects; invite-only projects (and every project in `central` mode) reject unenrolled writes
 - **Invite-only** — open for enrolled members; new members require explicit invite via the membership API
 - **Archived** — read-only; no new writes or enrollments accepted; existing memories remain visible to enrolled members
 - **Deleted** — soft-deleted; memories are archived to S3 (or flagged for retention) before the project row is removed
 
-**Create.** The current implicit creation (first write auto-creates) remains for open projects. Explicit creation via the admin API is required for invite-only projects, since there is no write that would trigger auto-enrollment.
+**Create.** Creation depends on the provisioning mode (`MEMORYHUB_PROJECT_PROVISIONING`, see below). In the default `central` mode projects are created explicitly by administrators, with their members. In `self_service` mode the implicit creation (first write auto-creates) remains for open projects, and explicit creation is required for invite-only projects, since there is no write that would trigger auto-enrollment.
+
+### Provisioning modes
+
+Self-service creation let every agent invent a project name on its first project-scoped write. Teams ended up with one project per person (`my-app`, `my-app-2`, `q4-research`, `research-q4`) and memories fragmented instead of being shared. Worse, any caller who wrote once to an *open* project's name was auto-enrolled and could then read all of its memories: knowing the name was the access control.
+
+`MEMORYHUB_PROJECT_PROVISIONING` selects one of two modes:
+
+| | `central` (default) | `self_service` |
+|---|---|---|
+| Who creates projects | Holders of `memory:admin` or `project:admin` (dashboard, `memoryhub project create`, `manage_project(action="create")`) | Anyone, including implicitly on first write |
+| Writing to a project you are not in | Refused: "does not exist" or "not a member", with what to do next | Creates the project or joins it if open; refused if invite-only |
+| Who adds members | Project admins, and `memory:admin` / `project:admin` holders for any project | Any member of an open project; project admins for invite-only |
+| Self-removal | Always allowed | Always allowed |
+
+`central` is the default for team and cluster deployments: a project is a governed sharing boundary, so it is created on purpose and its members are chosen when it is created (`memoryhub project create team-x --admin carol --member alice --member bob`). `self_service` remains for sandboxes, benchmarks and single-user setups. The personal edition (`memoryhub-local`) does not use this path.
+
+The check lives in `ensure_project_membership` (memoryhub-core), which every project-scoped write path calls (`write_memory`, `thread(create)`), so the two paths cannot disagree. Agents discover their projects with `manage_project(action="list")` and the project in `.memoryhub.yaml`; when the configured project is one the caller is not a member of, the write error says so instead of silently creating a look-alike.
 
 **Archive vs. Delete.** Archiving preserves the project and its memories but stops new writes. Deletion is destructive: project-scoped memories whose `scope_id` matches the project become orphaned unless we add a FK (see Referential Integrity). The lifecycle states map to two new columns on the `projects` table:
 
