@@ -39,6 +39,9 @@ mkdir -p "$BUILD_DIR/backend"
 cp "$PROJECT_ROOT/backend/requirements.txt" "$BUILD_DIR/backend/"
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
     --exclude='.mypy_cache' "$PROJECT_ROOT/backend/src/" "$BUILD_DIR/backend/src/"
+cp "$PROJECT_ROOT/backend/alembic.ini" "$BUILD_DIR/backend/"
+rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
+    --exclude='.mypy_cache' "$PROJECT_ROOT/backend/migrations/" "$BUILD_DIR/backend/migrations/"
 
 # Copy memoryhub_core library (same pattern as MCP server). Previously
 # this script staged to memoryhub-core/ while the Containerfile read from
