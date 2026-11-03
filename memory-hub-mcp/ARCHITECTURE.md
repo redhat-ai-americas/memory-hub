@@ -42,7 +42,7 @@ Tools are **statically registered** in `src/main.py`. Each tool module is explic
 
 ```
 src/main.py
-  ├── imports 14 tool modules from src/tools/
+  ├── imports 15 tool modules from src/tools/
   ├── selects tools based on MEMORYHUB_TOOL_PROFILE
   └── calls mcp.add_tool() for each selected tool
 ```
@@ -53,19 +53,20 @@ The `MEMORYHUB_TOOL_PROFILE` environment variable controls which tools are expos
 
 | Profile | Tools | Use case |
 |---------|-------|----------|
-| **compact** (default) | 4 tools: `register_session` + `memory` (28 actions) + `thread` (9 actions) + `admin_memory` | Frontier models (Claude, GPT-4). Fewer tools, action-dispatch pattern |
-| **full** | 13 tools: `register_session`, 10 flat-parameter tools (`search_memory`, `write_memory`, `read_memory`, etc.), `admin_memory`, `thread` | Smaller models that struggle with action-dispatch |
+| **compact** (default) | 5 tools: `register_session` + `memory` (28 actions) + `thread` (9 actions) + `admin_memory` + `persona` (3 actions) | Frontier models (Claude, GPT-4). Fewer tools, action-dispatch pattern |
+| **full** | 14 tools: `register_session`, 10 flat-parameter tools (`search_memory`, `write_memory`, `read_memory`, etc.), `admin_memory`, `thread`, and `persona` | Smaller models that struggle with action-dispatch |
 | **minimal** | 5 tools: `register_session` + `search_memory` + `write_memory` + `read_memory` + `thread` | Constrained contexts with limited tool slots |
 
-The tool sets are defined in `_PROFILE_MAP` in `src/main.py` — that is the source of truth for counts. Action lists live in `_VALID_ACTIONS` in `src/tools/memory.py` and `src/tools/thread.py`. When these change, update this table, the profile counts in `docs/SYSTEMS.md`, and the headline count in the root `README.md`.
+The tool sets are defined in `_PROFILE_MAP` in `src/main.py` — that is the source of truth for counts. Action lists live in `_VALID_ACTIONS` in `src/tools/memory.py`, `src/tools/thread.py`, and `src/tools/persona.py`. When these change, update this table, the profile counts in `docs/SYSTEMS.md`, and the headline count in the root `README.md`.
 
-### All 14 tool modules
+### All 15 tool modules
 
 | Tool | Purpose |
 |------|---------|
 | `register_session` | Authenticate via API key, start session, init push subscriber |
 | `memory` | Unified action-dispatch, 28 actions (search, read, write, update, delete, set_focus, relate, list, promote, graduate, checkpoint, reconstruct, project + entity + curation management, + more) |
 | `thread` | Conversation persistence, 9 actions (create, append, get, list, archive, extract, fork, share, delete) |
+| `persona` | Persona profile retrieval, compilation, and user-pin management |
 | `admin_memory` | Content moderation (search cross-owner, quarantine, restore, hard delete) |
 | `search_memory` | Vector similarity search with optional cross-encoder reranking |
 | `read_memory` | Read/expand memory details with optional version history |

@@ -6,13 +6,13 @@ designed for FastMCP 2 and doesn't register tools correctly in v3.
 
 Tool profiles (MEMORYHUB_TOOL_PROFILE env var):
 
-  compact  — register_session + memory + thread + admin_memory (4 tools).
+  compact  — register_session + memory + thread + admin_memory + persona (5 tools).
              Action-dispatch with options dict. Best for frontier models
              (Claude, GPT-4) where tool count is the constraint.
 
-  full     — register_session + 12 flat-param tools (13 tools).
-             Each operation is a separate tool with typed parameters.
-             Best for mid-range models that need schema discoverability.
+  full     — 14 tools, including flat memory operations and the
+             thread and persona action dispatchers. Best for mid-range
+             models that need schema discoverability.
 
   minimal  — register_session + search_memory + write_memory +
              read_memory + thread (5 tools). Just the essentials for
@@ -35,6 +35,7 @@ from src.tools.manage_graph import manage_graph
 from src.tools.manage_project import manage_project
 from src.tools.manage_session import manage_session
 from src.tools.memory import memory
+from src.tools.persona import persona
 from src.tools.read_memory import read_memory
 from src.tools.register_session import register_session
 from src.tools.search_memory import search_memory
@@ -68,6 +69,10 @@ _INSTRUCTIONS_COMPACT = (
     "operations — search, read, write, update, delete, and more. "
     "Use thread(action=...) for conversation persistence — create, "
     "append, get, list, and archive governed conversation threads. "
+    "PERSONA: If register_session returns a non-null persona_synopsis_id, call "
+    "persona(action='get') before memory(action='search') to load the user's "
+    "standing profile (preferences, working style, current focus). Use "
+    "persona(action='compile') to refresh the profile when is_stale=True. "
     "See each tool's docstring for the full action reference."
 )
 
@@ -85,7 +90,9 @@ _INSTRUCTIONS_FULL = (
     "manage_curation to report and resolve contradictions and tune "
     "curation rules. Use manage_project to discover, create, and "
     "manage projects and their members; writing to a new project "
-    "auto-enrolls you."
+    "auto-enrolls you. Use persona(action='get') to load the standing user "
+    "profile, persona(action='compile') to refresh it, and "
+    "persona(action='edit') to manage user-declared pins."
 )
 
 _INSTRUCTIONS_MINIMAL = (
@@ -98,13 +105,13 @@ _INSTRUCTIONS_MINIMAL = (
 
 # ── Profile-specific tool sets ─────────────────────────────────────────────
 
-_TOOLS_COMPACT = [register_session, memory, admin_memory, thread]
+_TOOLS_COMPACT = [register_session, memory, admin_memory, thread, persona]
 
 _TOOLS_FULL = [
     register_session, write_memory, read_memory, update_memory,
     delete_memory, search_memory, list_memory,
     manage_session, manage_graph, manage_curation, manage_project,
-    admin_memory, thread,
+    admin_memory, thread, persona,
 ]
 
 _TOOLS_MINIMAL = [register_session, search_memory, write_memory, read_memory, thread]
@@ -143,7 +150,13 @@ def main():
         host = os.getenv("MCP_HTTP_HOST", "0.0.0.0")
         port = int(os.getenv("MCP_HTTP_PORT", "8080"))
         path = os.getenv("MCP_HTTP_PATH", "/mcp/")
-        mcp.run(transport="http", host=host, port=port, path=path)
+        mcp.run(
+            transport="http",
+            host=host,
+            port=port,
+            path=path,
+            stateless_http=False,
+        )
     else:
         mcp.run()
 

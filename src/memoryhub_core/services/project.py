@@ -47,6 +47,45 @@ async def get_projects_for_user(
     return {row[0] for row in result.all()}
 
 
+async def get_projects_for_user_in_tenant(
+    session: AsyncSession,
+    user_id: str,
+    tenant_id: str,
+) -> set[str]:
+    """Return the user's project memberships within one tenant."""
+    stmt = (
+        select(ProjectMembership.project_id)
+        .join(Project, ProjectMembership.project_id == Project.name)
+        .where(
+            ProjectMembership.user_id == user_id,
+            Project.tenant_id == tenant_id,
+        )
+    )
+    result = await session.execute(stmt)
+    return {row[0] for row in result.all()}
+
+async def assert_project_membership(
+    session: AsyncSession,
+    user_id: str,
+    project_id: str,
+    tenant_id: str
+) -> None:
+    """Assert that a user is a member of a project, raising an error if not.
+
+    Raises MembershipNotFoundError if the user is not a member of the project_id in tenant_id.
+    """
+    membership = select(ProjectMembership.id).join(
+        Project, ProjectMembership.project_id == Project.name
+    ).where(
+        ProjectMembership.user_id == user_id,
+        ProjectMembership.project_id == project_id,
+        Project.name == project_id,
+        Project.tenant_id == tenant_id,
+    )
+    if not (await session.execute(membership)).first():
+        raise MembershipNotFoundError(project_id, user_id)
+
+
 async def get_project(
     session: AsyncSession,
     project_name: str,

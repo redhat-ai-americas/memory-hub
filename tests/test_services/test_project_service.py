@@ -9,11 +9,13 @@ import uuid
 import pytest
 
 from memoryhub_core.models.project import Project, ProjectMembership
-from memoryhub_core.services.exceptions import ProjectInviteOnlyError
+from memoryhub_core.services.exceptions import MembershipNotFoundError, ProjectInviteOnlyError
 from memoryhub_core.services.project import (
+    assert_project_membership,
     ensure_project_membership,
     get_project,
     get_projects_for_user,
+    get_projects_for_user_in_tenant,
     list_projects_for_tenant,
 )
 
@@ -74,6 +76,85 @@ async def test_get_projects_for_user_returns_set(async_session, seed_project):
 async def test_get_projects_for_user_empty(async_session):
     ids = await get_projects_for_user(async_session, "nobody")
     assert ids == set()
+
+
+@pytest.mark.asyncio
+async def test_get_projects_for_user_in_tenant_filters_by_tenant(
+    async_session, seed_project
+):
+    beta = Project(name="beta", created_by="admin", tenant_id="other")
+    beta_membership = ProjectMembership(
+        id=uuid.uuid4(),
+        project_id="beta",
+        user_id="alice",
+        joined_by="admin",
+    )
+    async_session.add_all([beta, beta_membership])
+    await async_session.commit()
+
+    assert await get_projects_for_user_in_tenant(
+        async_session, "alice", "default"
+    ) == {"alpha"}
+    assert await get_projects_for_user_in_tenant(
+        async_session, "alice", "other"
+    ) == {"beta"}
+
+
+# -- assert_project_membership --
+
+
+@pytest.mark.asyncio
+async def test_assert_membership_member_passes(async_session, seed_project):
+    await assert_project_membership(
+        async_session, "alice", "alpha", _TENANT
+    )
+
+
+@pytest.mark.asyncio
+async def test_assert_membership_non_member_raises(async_session, seed_project):
+    with pytest.raises(MembershipNotFoundError) as exc_info:
+        await assert_project_membership(
+            async_session, "bob", "alpha", _TENANT
+        )
+    assert exc_info.value.project_id == "alpha"
+    assert exc_info.value.user_id == "bob"
+
+
+@pytest.mark.asyncio
+async def test_assert_membership_wrong_tenant_raises(async_session, seed_project):
+    with pytest.raises(MembershipNotFoundError) as exc_info:
+        await assert_project_membership(
+            async_session, "alice", "alpha", "other"
+        )
+    assert exc_info.value.project_id == "alpha"
+    assert exc_info.value.user_id == "alice"
+
+
+@pytest.mark.asyncio
+async def test_assert_membership_project_not_found(async_session, seed_project):
+    with pytest.raises(MembershipNotFoundError) as exc_info:
+        await assert_project_membership(
+            async_session, "alice", "UNKNOWN", _TENANT
+        )
+    assert exc_info.value.project_id == "UNKNOWN"
+    assert exc_info.value.user_id == "alice"
+
+
+@pytest.mark.asyncio
+async def test_assert_membership_member_of_other_project_raises(
+    async_session, seed_project
+):
+    beta = Project(name="beta", created_by="admin", tenant_id=_TENANT)
+    async_session.add(beta)
+    await async_session.commit()
+
+    with pytest.raises(MembershipNotFoundError) as exc_info:
+        await assert_project_membership(
+            async_session, "alice", "beta", _TENANT
+        )
+
+    assert exc_info.value.project_id == "beta"
+    assert exc_info.value.user_id == "alice"
 
 
 # -- ensure_project_membership --

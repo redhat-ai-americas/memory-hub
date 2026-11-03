@@ -2,6 +2,12 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.16.0] -- 2026-10-13
+
+- `search(current_step_id=...)` requests localized procedural guidance and skips ranking. Omitting it leaves search unchanged, including `content_type="procedural"`.
+- `get_guidance()` calls the guidance action for one step.
+- `get_injection_block()` renders `result_type="guidance"` entries as prose. Previously those entries matched neither the full nor the stub branch and were dropped.
+
 ## [0.15.3] -- 2026-07-29
 
 - Add `get_history(memory_id)` method -- fixes `memoryhub history` CLI crash (#485)

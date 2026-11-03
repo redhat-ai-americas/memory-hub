@@ -18,8 +18,8 @@ import uuid as _uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 import src.tools.auth as auth_mod
+
 from memoryhub_core.models.schemas import (
     MemoryNodeRead,
     MemoryScope,
@@ -58,7 +58,6 @@ def _fake_project_node(
         has_rationale=False,
         branch_count=0,
     )
-
 
 # ---------------------------------------------------------------------------
 # Bug 1 — Session claims updated after auto-enrollment
@@ -123,7 +122,7 @@ class TestAutoEnrollmentClaimsUpdate:
                 ),
                 patch(
                     "src.tools.write_memory.get_embedding_service",
-                    return_value=MagicMock(),
+                    return_value=MagicMock(max_tokens=8192),
                 ),
                 patch(
                     "src.tools.write_memory.create_memory",
@@ -224,7 +223,7 @@ class TestAutoEnrollmentClaimsUpdate:
                 ),
                 patch(
                     "src.tools.write_memory.get_embedding_service",
-                    return_value=MagicMock(),
+                    return_value=MagicMock(max_tokens=8192),
                 ),
                 patch(
                     "src.tools.write_memory.create_memory",
@@ -276,31 +275,47 @@ class TestAutoEnrollmentClaimsUpdate:
 
 
 class TestListProjectScopeOwnerBypass:
-    """list_memory must pass owner_id=None for project-scoped queries."""
+    """list_memory must pass owner_id=None for project-scoped queries.
+    Check behaviour for project members with isolation on and off."""
 
     @pytest.mark.asyncio
-    async def test_list_project_scope_passes_null_owner_id(self):
-        """When scope='project' and project_ids are resolved,
-        list_memories must be called with owner_id=None."""
+    @pytest.mark.parametrize(
+        "isolation_enabled",
+        [
+            pytest.param(True, id="isolation-on"),
+            pytest.param(False, id="isolation-off"),
+        ],
+    )
+    async def test_list_project_member_explicit_project_respects_isolation(
+        self, isolation_enabled
+    ):
         from src.tools.list_memory import list_memory
 
-        items = [
-            _fake_project_node("dr_bob memory", owner_id="dr_bob"),
-            _fake_project_node("dr_alice memory", owner_id="dr_alice"),
-        ]
+        expected_owner_id = None if isolation_enabled else "dr_bob"
+        expected_project_ids = {"all_doctors"} if isolation_enabled else None
+
+        # Bob's own memory is returned in both cases.
+        items = [_fake_project_node("dr_bob memory", owner_id="dr_bob")]
+        expected_contents = {"dr_bob memory"}
+
+        # With project isolation on, Alice's memory in the same project
+        # is also visible to Bob.
+        if isolation_enabled:
+            items.append(
+                _fake_project_node("dr_alice memory", owner_id="dr_alice")
+            )
+            expected_contents.add("dr_alice memory")
+
         fake_claims = {
             "sub": "dr_bob",
             "identity_type": "user",
             "tenant_id": "default",
-            "scopes": [
-                "memory:read:user",
-                "memory:read:project",
-            ],
+            "scopes": ["memory:read:user", "memory:read:project"],
             "project_memberships": ["all_doctors"],
         }
 
-        async def _fake_get_db_session():
-            return (AsyncMock(), AsyncMock())
+        project_session, list_session = AsyncMock(), AsyncMock()
+        project_gen, list_gen = AsyncMock(), AsyncMock()
 
         with (
             patch(
@@ -309,46 +324,70 @@ class TestListProjectScopeOwnerBypass:
             ),
             patch(
                 "src.tools.list_memory.get_db_session",
-                side_effect=_fake_get_db_session,
+                new_callable=AsyncMock,
+                side_effect=[
+                    (project_session, project_gen),
+                    (list_session, list_gen),
+                ],
             ),
             patch(
                 "src.tools.list_memory.release_db_session",
                 new_callable=AsyncMock,
             ),
             patch(
-                "src.tools.list_memory.list_memories",
+                "src.tools.list_memory.assert_project_membership",
                 new_callable=AsyncMock,
-                return_value=(items, None),
-            ) as mock_list,
+            ) as mock_membership,
             patch(
                 "src.tools.list_memory.get_campaigns_for_project",
                 new_callable=AsyncMock,
                 return_value=set(),
-            ),
+            ) as mock_campaigns,
+            patch(
+                "src.tools.list_memory.list_memories",
+                new_callable=AsyncMock,
+                return_value=(items, None),
+            ) as mock_list,
             patch(
                 "src.tools.list_memory.build_authorized_scopes",
                 return_value={"user", "project"},
             ),
             patch(
                 "src.tools.list_memory.PROJECT_ISOLATION_ENABLED",
-                True,
+                isolation_enabled,
             ),
-            patch(
-                "src.tools.list_memory.ROLE_ISOLATION_ENABLED",
-                False,
-            ),
+            patch("src.tools.list_memory.ROLE_ISOLATION_ENABLED", False),
             patch(
                 "src.tools.list_memory.resolve_tenant",
                 return_value="default",
             ),
         ):
-            result = await list_memory(scope="project", project_id="all_doctors")
+            result = await list_memory(
+                scope="project",
+                project_id="all_doctors",
+            )
+
+        mock_membership.assert_awaited_once_with(
+            project_session, "dr_bob", "all_doctors", "default"
+        )
+        mock_campaigns.assert_awaited_once_with(
+            project_session, "all_doctors", "default"
+        )
 
         _, kwargs = mock_list.call_args
-        assert kwargs.get("owner_id") is None, (
-            f"list_memories must be called with owner_id=None for project scope, "
-            f"got owner_id={kwargs.get('owner_id')!r}"
+        assert kwargs["project_ids"] == expected_project_ids
+        assert kwargs["campaign_ids"] == set()
+
+        # This keeps the original owner_id check, with an expectation
+        # appropriate to each isolation setting.
+        assert kwargs.get("owner_id") == expected_owner_id, (
+            f"Expected owner_id={expected_owner_id!r}, "
+            f"got {kwargs.get('owner_id')!r}"
         )
+
+        assert {
+            item["content"] for item in result["results"]
+        } == expected_contents
 
     @pytest.mark.asyncio
     async def test_list_user_scope_passes_caller_owner_id(self):
@@ -426,7 +465,6 @@ class TestSearchFiltersProjectOwnerBypass:
     def test_project_scope_with_project_ids_skips_owner_filter(self):
         """When scope='project' and project_ids is provided,
         the owner_id filter must NOT be applied."""
-        from memoryhub_core.models.memory import MemoryNode
         from memoryhub_core.services.memory import _build_search_filters
 
         filters = _build_search_filters(

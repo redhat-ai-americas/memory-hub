@@ -189,6 +189,7 @@ async def create_memory(
         domains=data.domains,
         content_type=data.content_type,
         source=data.source or "agent",
+        upstream_trust_level=data.upstream_trust_level or "trusted",
         relevant_until=data.relevant_until,
         embedding=embedding,
         is_current=True,
@@ -225,6 +226,7 @@ async def create_memory(
                 owner_id=data.owner_id,
                 tenant_id=tenant_id,
                 domains=data.domains,
+                upstream_trust_level=node.upstream_trust_level,
                 embedding_service=embedding_service,
                 session=session,
                 now=now,
@@ -270,6 +272,7 @@ async def _create_chunk_children(
     embedding_service: EmbeddingService,
     session: AsyncSession,
     now: datetime,
+    upstream_trust_level: str = "trusted",
     chunk_target_tokens: int | None = None,
     chunk_overlap_tokens: int | None = None,
 ) -> bool:
@@ -313,6 +316,7 @@ async def _create_chunk_children(
             branch_type="chunk",
             metadata_={"chunk_index": i, "total_chunks": len(chunks)},
             domains=domains,
+            upstream_trust_level=upstream_trust_level,
             embedding=chunk_emb,
             is_current=True,
             version=1,
@@ -338,6 +342,7 @@ async def create_fact_children(
     embedding_service: EmbeddingService,
     session: AsyncSession,
     now: datetime | None = None,
+    upstream_trust_level: str = "trusted",
 ) -> int:
     """Create fact child nodes from extraction results.
 
@@ -387,6 +392,7 @@ async def create_fact_children(
                 "extraction_run_id": extraction_run_id,
             },
             domains=fact_domains,
+            upstream_trust_level=upstream_trust_level,
             embedding=fact_emb,
             is_current=True,
             version=1,
@@ -597,6 +603,10 @@ async def update_memory(
         content_type=new_content_type,
         source=new_source,
         status=old_node.status,
+        # Trust is set once at write time from the upstream source and
+        # inherited by every later version. A new version is a transform of
+        # the old one, so it cannot be more trusted than what it came from.
+        upstream_trust_level=old_node.upstream_trust_level,
         relevant_until=new_relevant_until,
         embedding=embedding,
         is_current=True,
@@ -663,6 +673,7 @@ async def update_memory(
             status=child.status,
             metadata_=child.metadata_,
             domains=child.domains,
+            upstream_trust_level=child.upstream_trust_level,
             embedding=list(child.embedding) if child.embedding is not None else None,
             is_current=True,
             version=child.version,
@@ -694,6 +705,7 @@ async def update_memory(
                 owner_id=old_node.owner_id,
                 tenant_id=old_node.tenant_id,
                 domains=new_domains,
+                upstream_trust_level=new_node.upstream_trust_level,
                 embedding_service=embedding_service,
                 session=session,
                 now=now,
@@ -1194,6 +1206,7 @@ async def search_memories(
                     has_rationale=has_rationale,
                     content_type=node.content_type,
                     source=getattr(node, 'source', 'agent'),
+                    upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
                     created_at=node.created_at,
                 ), score))
         return results
@@ -1311,6 +1324,7 @@ async def search_memories(
                 has_rationale=has_rationale,
                 content_type=node.content_type,
                 source=getattr(node, 'source', 'agent'),
+                upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
                 created_at=node.created_at,
             ), rrf_score))
     used_reranker = (
@@ -1913,6 +1927,7 @@ async def search_memories_with_focus(
                         has_rationale=has_rationale,
                         content_type=node.content_type,
                         source=getattr(node, 'source', 'agent'),
+                        upstream_trust_level=getattr(node, 'upstream_trust_level', 'trusted'),
                         created_at=node.created_at,
                     ),
                     relevance_score,
@@ -2269,7 +2284,8 @@ def node_to_read(
         tenant_id=node.tenant_id,
         domains=node.domains,
         content_type=node.content_type,
-        source=getattr(node, 'source', 'agent'),
+        source=getattr(node, 'source', None) or 'agent',
+        upstream_trust_level=getattr(node, 'upstream_trust_level', None) or 'trusted',
         content_hash=getattr(node, 'content_hash', None),
         is_current=node.is_current,
         version=node.version,

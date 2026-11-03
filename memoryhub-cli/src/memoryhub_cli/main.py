@@ -43,6 +43,7 @@ from memoryhub_cli.output import (
     handle_error,
     json_success,
 )
+from memoryhub_cli.persona import persona_app
 from memoryhub_cli.project_config import (
     FocusSource,
     InitChoices,
@@ -95,6 +96,9 @@ config_app = typer.Typer(
 )
 app.add_typer(config_app, name="config")
 app.add_typer(admin_app, name="admin", help="Manage agents and OAuth clients")
+app.add_typer(
+    persona_app, name="persona", help="Persona compilation and standing profile management"
+)
 app.add_typer(export_app, name="export", help="Export memories to external formats")
 
 graph_app = typer.Typer(
@@ -305,6 +309,19 @@ def search(
     exclude_source: str | None = typer.Option(
         None, "--exclude-source", help="Exclude memories from a source (e.g. dreaming)",
     ),
+    current_step_id: str | None = typer.Option(
+        None,
+        "--current-step-id",
+        help=(
+            "Current procedural step UUID. When set, skip ranking and return "
+            "localized guidance. The query is required and ignored."
+        ),
+    ),
+    max_hops: int = typer.Option(
+        2,
+        "--max-hops",
+        help="Neighborhood size in edges. Used only with --current-step-id. Default 2, cap 5.",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o",
         help="Output format: table, json, quiet, compact",
@@ -321,6 +338,8 @@ def search(
                 project_id=_project_id, domains=domains or None,
                 content_type=content_type,
                 source=source, exclude_source=exclude_source,
+                current_step_id=current_step_id,
+                max_hops=max_hops,
             )
 
     result = _run_command(_do(), output)
@@ -332,6 +351,16 @@ def search(
         return
     if output == OutputFormat.compact:
         _print_compact(result.results, _project_id)
+        return
+
+    if result.query_ignored:
+        console.print(  # noqa: T201
+            "[yellow]Query ignored.[/yellow] Localized guidance for the current step:"
+        )
+        text = result.results[0].content if result.results else ""
+        console.print(text)  # noqa: T201
+        if result.results and result.results[0].hop_count is not None:
+            console.print(f"[dim]hop_count={result.results[0].hop_count}[/dim]")  # noqa: T201
         return
 
     if not result.results:
@@ -1362,6 +1391,43 @@ def graph_list(
     console.print(table)  # noqa: T201
 
 
+@graph_app.command("guidance")
+def graph_guidance(
+    node_id: str = typer.Argument(..., help="Current procedural step UUID"),
+    max_hops: int = typer.Option(
+        2, "--max-hops", help="Neighborhood size in edges. Default 2, cap 5.",
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID for campaign access",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Localized guidance for one procedural step, plus the neighborhood the model saw."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.get_guidance(
+                node_id, max_hops=max_hops, project_id=_project_id,
+            )
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result.model_dump())
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print(result.guidance_text)  # noqa: T201
+    console.print(f"[dim]hop_count={result.hop_count}[/dim]")  # noqa: T201
+    if result.omitted_count:
+        console.print(f"[dim]omitted_count={result.omitted_count}[/dim]")  # noqa: T201
+
+
 @graph_app.command("similar")
 def graph_similar(
     memory_id: str = typer.Argument(..., help="Memory UUID to find similar memories for"),
@@ -1769,6 +1835,23 @@ def session_status(
         p.get("project_id", p) if isinstance(p, dict) else p
         for p in result.get("projects", [])
     ]
+
+    # Persist user_id so load-persona.sh can auto-detect it.
+    if user_id and user_id != "-":
+        try:
+            import os
+
+            from memoryhub_cli.config import (
+                MEMORYHUB_CONTEXT_ENV,
+                read_credentials_section,
+                write_credentials_section,
+            )
+            section = os.environ.get(MEMORYHUB_CONTEXT_ENV, "").strip() or "default"
+            creds = read_credentials_section() or {}
+            if creds.get("api_key") and creds.get("user_id") != user_id:
+                write_credentials_section(section, creds["api_key"], creds.get("url"), user_id)
+        except Exception:
+            pass  # Never block session status display for credential persistence
 
     console.print(f"Session: {user_id} ({name})")  # noqa: T201
     console.print(f"  Scopes: {', '.join(scopes) if scopes else '-'}")  # noqa: T201

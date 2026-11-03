@@ -41,6 +41,7 @@ from src.tools.auth import (
     AuthServiceUnavailableError,
     authenticate,
     authenticate_remote,
+    get_mcp_session_id,
     set_default_driver_id,
     set_session,
     set_session_id,
@@ -49,9 +50,13 @@ from src.tools.auth import (
 logger = logging.getLogger(__name__)
 
 _QUICK_START = [
-    "Call search_memory(query='...') to load context relevant to your task.",
-    "Pass project_id='<name>' in search_memory and write_memory to scope "
-    "memories to a project.",
+    "When the persona tool is available (compact/full profiles), call "
+    "persona(action='get') FIRST and inject the profile before search results. "
+    "If is_stale=True, call persona(action='compile').",
+    "Use memory(action='search') in compact, or search_memory(query='...') "
+    "in full/minimal, to load context relevant to your task.",
+    "Pass project_id='<name>' to search/write operations to scope memories "
+    "to a project.",
     "Writing to a project you haven't joined? Auto-enrollment handles it.",
 ]
 
@@ -105,6 +110,8 @@ async def _start_push_for_session(session_id: str, ctx: Context | None) -> None:
         )
         return
 
+    # FastMCP 3.4.2 exposes no public close callback; the private ``_exit_stack``
+    # hook below is covered by the session lifecycle regression test.
     # Register session-close cleanup exactly once per session. FastMCP's
     # ``_exit_stack`` unwinds when the streamable-http connection closes,
     # calling our callback which cancels the subscriber task and removes
@@ -164,6 +171,30 @@ async def _fetch_user_projects(
     except Exception as exc:
         logger.debug("Failed to fetch projects for %s: %s", user_id, exc)
         return []
+    finally:
+        if gen is not None:
+            await release_db_session(gen)
+
+
+async def _fetch_persona_synopsis_id(
+    user_id: str, tenant_id: str,
+) -> str | None:
+    """Return the current persona synopsis node ID, or None.
+
+    Non-fatal: returns None on any failure so registration is never blocked.
+    Gives agents a fast path: read_memory(persona_synopsis_id) instead of
+    calling persona(action='get') separately.
+    """
+    gen = None
+    try:
+        from memoryhub_core.services.persona import get_current_synopsis
+
+        session, gen = await get_db_session()
+        node = await get_current_synopsis(user_id, tenant_id, session)
+        return str(node.id) if node is not None else None
+    except Exception as exc:
+        logger.debug("Failed to fetch persona synopsis for %s: %s", user_id, exc)
+        return None
     finally:
         if gen is not None:
             await release_db_session(gen)
@@ -233,7 +264,13 @@ async def register_session(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Register this session with your API key.
+    """Register this session with an API key or attach JWT session metadata.
+
+    API-key registration requires a stateful MCP session and fails closed
+    without one. For HTTP deployments, configure FastMCP with
+    ``stateless_http=False`` so the transport provides a stable session ID.
+    JWT authentication is carried and verified per request; this tool stores
+    optional session and driver metadata for that authenticated connection.
 
     Call this once at the start of every conversation to establish your identity.
     After registration, write_memory and search_memory will automatically scope
@@ -257,11 +294,17 @@ async def register_session(
         jwt_claims = token.claims
         user_id = jwt_claims.get("sub", token.client_id)
         session_id = str(uuid.uuid4())
-        set_session_id(session_id)
-        set_default_driver_id(default_driver_id)
+        session_ttl_seconds = AppSettings().session_ttl_seconds
+        set_session_id(
+            session_id,
+            ctx=ctx,
+            ttl_seconds=session_ttl_seconds,
+        )
+        set_default_driver_id(default_driver_id, ctx=ctx)
         tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
         projects = await _fetch_user_projects(user_id, tenant)
+        persona_synopsis_id = await _fetch_persona_synopsis_id(user_id, tenant)
 
         # Resolve project memberships from DB for JWT users.
         jwt_user_stub = {
@@ -289,12 +332,19 @@ async def register_session(
             "auth_method": "jwt",
             "default_driver_id": default_driver_id,
             "projects": projects,
+            "persona_synopsis_id": persona_synopsis_id,
             "quick_start": _QUICK_START,
             "message": (
                 f"JWT authentication active for {user_id}. "
                 f"Session {session_id} registered."
             ),
         }
+
+    if get_mcp_session_id(ctx) is None:
+        raise ToolError(
+            "API-key registration requires an established MCP client session. "
+            "Reconnect using a stateful MCP transport and call register_session again."
+        )
 
     user = authenticate(api_key)
     if user is None:
@@ -323,6 +373,11 @@ async def register_session(
             "Keys follow the format: mh-dev-<hex>."
         )
 
+    # authenticate() returns a shared cached ConfigMap record. Project
+    # membership resolution below is session data, so do not mutate that
+    # process-wide cached record.
+    user = dict(user)
+
     # Resolve project memberships: merge ConfigMap bootstrap with DB state.
     # This must happen before set_session() so the session user dict
     # carries project_memberships for get_claims_from_context() to extract.
@@ -330,10 +385,20 @@ async def register_session(
 
     app_settings = AppSettings()
     ttl = app_settings.session_ttl_seconds
-    expires_at = set_session(user, ttl_seconds=ttl)
     session_id = str(uuid.uuid4())
-    set_session_id(session_id)
-    set_default_driver_id(default_driver_id)
+    try:
+        expires_at = set_session(
+            user,
+            ttl_seconds=ttl,
+            ctx=ctx,
+            session_id=session_id,
+            default_driver_id=default_driver_id,
+        )
+    except RuntimeError as exc:
+        raise ToolError(
+            "API-key registration requires an established MCP client session. "
+            "Reconnect and call register_session again."
+        ) from exc
     await _start_push_for_session(session_id, ctx)
 
     if ctx:
@@ -343,6 +408,7 @@ async def register_session(
         {"sub": user["user_id"], "tenant_id": user.get("tenant_id", DEFAULT_TENANT_ID)}
     )
     projects = await _fetch_user_projects(user["user_id"], tenant)
+    persona_synopsis_id = await _fetch_persona_synopsis_id(user["user_id"], tenant)
 
     record_event(
         event_type="session.registered",
@@ -365,6 +431,7 @@ async def register_session(
         "session_ttl_seconds": ttl,
         "default_driver_id": default_driver_id,
         "projects": projects,
+        "persona_synopsis_id": persona_synopsis_id,
         "quick_start": _QUICK_START,
         "message": (
             f"Session {session_id} registered for {user['name']} ({user['user_id']}). "

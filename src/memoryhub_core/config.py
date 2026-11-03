@@ -55,7 +55,8 @@ class ValkeySettings(BaseSettings):
     model_config = {"env_prefix": "MEMORYHUB_VALKEY_"}
 
     url: str = "redis://localhost:6379/0"
-    session_ttl_seconds: int = 900  # 15 minutes, matches default JWT lifetime
+    # TTL for focus records in Valkey; distinct from app-level auth metadata TTL.
+    session_ttl_seconds: int = 900
     history_retention_days: int = 30  # per-day list keys auto-expire after this
     broadcast_ttl_seconds: int = 300  # 5 min TTL on per-session broadcast queue (#62)
     broadcast_pop_timeout_seconds: int = 30  # BRPOP timeout = subscriber heartbeat
@@ -72,7 +73,9 @@ class AppSettings(BaseSettings):
     s3_threshold_bytes: int = 102400  # Content above this goes to S3 (if configured)
     s3_prefix_chars: int = 1000       # Chars stored in DB when content is in S3
     embedding_max_tokens: int = 8192  # Fallback; runtime value comes from TEI /info (see EmbeddingService.max_tokens)
-    session_ttl_seconds: int = 3600   # API-key session lifetime; auto-extends on activity
+    # In-process API-key/JWT session metadata inactivity TTL; auto-extends on
+    # authenticated activity. This is separate from Valkey focus-record TTL.
+    session_ttl_seconds: int = 3600
 
     # Conversation thread persistence (#168)
     conv_inline_max_bytes: int = 8192  # Messages above this go to S3

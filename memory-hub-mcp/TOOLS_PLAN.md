@@ -723,3 +723,28 @@ new columns.
 - **Embedding strategy**: all-MiniLM-L6-v2 on OpenShift AI via HTTP API. MockEmbeddingService for tests.
 - **Contradiction threshold**: Default of 5, configurable via curator rules.
 - **Concurrent write handling**: Blocking for user-scope, queued for above-user-scope.
+
+## PR #608 Review: Persona Dispatcher
+
+### `persona`
+
+- **Purpose**: Expose persona retrieval, compilation, and editing through one action-dispatch tool, while reusing the existing persona implementations.
+- **Actions**:
+  - `get`: Retrieve the compiled synopsis. Accepts optional `user_id` and `project_id`.
+  - `compile`: Rebuild the synopsis. Accepts optional `user_id` and `project_id`.
+  - `edit`: Add or list user pins. Accepts optional `user_id`; `options.edit_action` is `add_pin` or `list_pins`, and `options.content` is required for `add_pin`.
+- **Parameters**:
+  - `action` (string, required): `get`, `compile`, or `edit`.
+  - `user_id` (string, optional): Defaults to the authenticated session user.
+  - `project_id` (string, optional): Persona project scope for `get` and `compile`.
+  - `options` (object, optional): For `edit`, contains `edit_action` and, for `add_pin`, `content`.
+- **Returns**: The existing result from the selected persona operation.
+- **Error Cases**: Unknown persona action; missing/unknown `options.edit_action`; missing `options.content` for `add_pin`; otherwise preserve the delegated tool's errors.
+- **Example Usage**:
+  ```
+  persona(action="get")
+  persona(action="compile", project_id="project-a")
+  persona(action="edit", options={"edit_action": "add_pin", "content": "I prefer concise summaries."})
+  ```
+- **Profile registration**: Add `persona` to compact and full profiles, not minimal. Expected counts become compact 5, full 14, minimal 5.
+- **Implementation order**: Generate the dispatcher scaffold; delegate to the existing get/compile/edit tools; update profile instructions, registration quick-start guidance, profile tests, dispatcher tests, and tool-count documentation.

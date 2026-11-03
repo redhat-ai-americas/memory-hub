@@ -8,16 +8,27 @@ reinstalls (see #395).
 ## What This Deploys
 
 - **Namespace**: `memoryhub-storage` (dedicated storage namespace)
-- **Deployment**: Single MinIO pod (`quay.io/minio/minio:latest`)
+- **Deployment**: Single MinIO pod (`cgr.dev/chainguard/minio`, digest-pinned)
+  - `minio/minio` is archived upstream and its images are no longer
+    anonymously pullable. The Chainguard image is still public and builds
+    `chainguard-forks/minio`, Chainguard's own AGPLv3 fork of `minio/minio`,
+    so it carries fixes the archived upstream never got. Digest-pinned
+    because Chainguard's free tier serves only `:latest`; the pin needs a
+    periodic bump. See #611 for replacing MinIO outright.
+  - The image's own labels still point at the archived `minio/minio`. The
+    SPDX attestation is the reliable source for what actually got built:
+    `cosign verify-attestation --type spdxjson cgr.dev/chainguard/minio`.
 - **PVC**: 10Gi persistent volume for object data
 - **Service**: ClusterIP service on port 9000 (S3 API)
 - **Secret**: Root credentials for dev use (`memoryhub` / `memoryhub-dev-password`)
 
 ## Prerequisites
 
-The upstream MinIO image runs as uid 1000. OpenShift's default `restricted`
-SCC assigns a random UID, which breaks the image. Grant `anyuid` to the
-dedicated `memoryhub-minio` ServiceAccount only:
+The image declares uid 65532, and the Deployment overrides it to 1000, the uid
+this Deployment has run as since it was first added, so existing PVC data stays
+readable. Either way OpenShift's default `restricted` SCC assigns a random UID,
+which breaks the image. Grant `anyuid` to the dedicated `memoryhub-minio`
+ServiceAccount only:
 
 ```bash
 oc adm policy add-scc-to-user anyuid -z memoryhub-minio -n memoryhub-storage

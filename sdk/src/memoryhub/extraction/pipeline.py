@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING
 
 from memoryhub.extraction.base import Extractor
 from memoryhub.extraction.dedup import DedupFilter
-from memoryhub.extraction.models import CandidateMemory, ExtractionResult, TraceEvent
+from memoryhub.extraction.models import (
+    CandidateMemory,
+    ExtractionResult,
+    TraceEvent,
+    TraceEventType,
+)
 
 if TYPE_CHECKING:
     from memoryhub.client import MemoryHubClient
@@ -17,6 +22,26 @@ logger = logging.getLogger(__name__)
 
 # Callback for human review of candidates. Returns True to write, False to skip.
 CandidateCallback = Callable[[CandidateMemory], Awaitable[bool]]
+
+_UNTRUSTED_EVENT_TYPES = frozenset({TraceEventType.TOOL_RESULT})
+
+
+def infer_trust_level(event: TraceEvent) -> str:
+    """Determine trust level from a trace event's type and metadata.
+
+    Explicit metadata takes precedence. Otherwise, tool results are
+    untrusted (web scrapes, external APIs) and direct user/assistant
+    messages are trusted.
+    """
+    if event.metadata:
+        explicit = event.metadata.get("upstream_trust_level") or event.metadata.get("trust_level")
+        if explicit in ("trusted", "untrusted", "mixed"):
+            return explicit
+
+    if event.event_type in _UNTRUSTED_EVENT_TYPES:
+        return "untrusted"
+
+    return "trusted"
 
 
 class ExtractionPipeline:
@@ -123,6 +148,11 @@ class ExtractionPipeline:
 
         result.candidates = candidates
 
+        # ── 1b. Trust level inference ──────────────────────────────
+        for candidate in candidates:
+            if candidate.upstream_trust_level == "trusted":
+                candidate.upstream_trust_level = infer_trust_level(candidate.source_event)
+
         # ── 2. Relationship enrichment ──────────────────────────────
         for candidate in candidates:
             for enricher in enrichers:
@@ -206,6 +236,7 @@ class ExtractionPipeline:
                 metadata=candidate.metadata,
                 domains=candidate.domains or self._domains,
                 project_id=self._project_id,
+                upstream_trust_level=candidate.upstream_trust_level,
             )
 
             if write_result.memory is None:

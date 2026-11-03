@@ -168,7 +168,9 @@ def create_agent(
 
     if write_config:
         section = context or os.environ.get("MEMORYHUB_CONTEXT", "").strip() or "default"
-        write_credentials_section(section, data["api_key"])
+        # user_id may be present in the response when the agent is a human identity
+        user_id_to_save = data.get("user_id") or data.get("client_id")
+        write_credentials_section(section, data["api_key"], user_id=user_id_to_save)
         console.print(f"\n  [green]Secret written to {CREDENTIALS_FILE} [{section}][/green]")
 
 

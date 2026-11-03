@@ -1,8 +1,42 @@
-# NOTE: The upstream MinIO image runs as uid 1000. OpenShift assigns random
-# UIDs by default via the restricted SCC, which breaks the image. This
+# NOTE: This image declares uid 65532 (Chainguard's "nonroot" user), not 1000.
+# The securityContext below deliberately overrides it to 1000, which is the uid
+# this Deployment has run as since it was first added, so existing PVC data
+# stays readable. Do not drop the override on the assumption that the image
+# already runs as 1000, because it does not. OpenShift also assigns random UIDs
+# by default via the restricted SCC, which breaks the image either way, so this
 # Deployment uses a dedicated ServiceAccount (memoryhub-minio) granted the
 # "anyuid" SCC, scoping the grant to just this workload rather than the
 # namespace's default SA. See README.md for the prerequisite oc adm command.
+#
+# IMAGE SOURCE: MinIO removed anonymous pulls from both docker.io/minio/minio
+# and quay.io/minio/minio in September 2026, so the previous
+# quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z pin fails with
+# "unauthorized" on every fresh install. The underlying cause is bigger than a
+# registry change: github.com/minio/minio is archived (last push 2026-04-24,
+# last release RELEASE.2025-10-15T17-29-55Z) and MinIO development moved to the
+# closed-source AIStor line.
+#
+# cgr.dev/chainguard/minio is still anonymously pullable, and despite the stale
+# upstream_url in Chainguard's image metadata it does not build the archived
+# repo. Its SPDX attestation names the source as
+# pkg:github/chainguard-forks/minio@RELEASE.2026-09-22T19-25-18Z --
+# chainguard-forks/minio is Chainguard's own AGPLv3 fork of minio/minio, public
+# and still being pushed to, so the binary reports release dates past the
+# archive date and carries fixes the archived upstream never got. The SBOM also
+# shows github.com/minio/console v1.7.7 is still embedded, so the console and
+# the --console-address flag below are intact. Read the provenance yourself
+# with: cosign verify-attestation --type spdxjson cgr.dev/chainguard/minio
+# (the image labels still point at the archived repo and are not reliable).
+# Runtime check: oc exec deploy/memoryhub-minio -- minio --version
+#
+# Pinned by digest because Chainguard's free tier serves only the :latest tag,
+# which floats to a new build daily. Digest pulls themselves stay anonymous on
+# every tier ("all users across all tiers continue to have access to pulling by
+# digest"), so the pin does not expire out from under a fresh install; what a
+# stale pin loses is CVE fixes, not pullability. That still makes the bump a
+# standing chore rather than an optional one. This is a stopgap on two counts:
+# a third-party free tier for distribution, and a vendor fork rather than a
+# first-party upstream for maintenance. See #611 for replacing MinIO outright.
 #
 # Uses strategy.Recreate because the PVC is ReadWriteOnce -- a rolling update
 # would hit a multi-attach error when the old pod still holds the volume.
@@ -34,7 +68,12 @@ spec:
         fsGroup: 1000
       containers:
         - name: minio
-          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          # RELEASE.2026-09-22T19-25-18Z (chainguard-forks/minio), built
+          # 2026-10-11. Keep this comment in step with the digest on every
+          # bump: a bare digest otherwise leaves an operator auditing the
+          # running version with nothing to read but `minio --version`
+          # against a live pod.
+          image: cgr.dev/chainguard/minio@sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
           args:
             - "server"
             - "/data"

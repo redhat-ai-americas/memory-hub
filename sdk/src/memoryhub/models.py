@@ -39,10 +39,15 @@ class Memory(BaseModel):
     current_version_id: str | None = None
     relationships: list[dict[str, Any]] | None = None
     relevance_score: float | None = None
-    result_type: str | None = None  # "full" or "stub"
+    result_type: str | None = None  # "full", "stub", or "guidance"
+    guidance_text: str | None = None
+    hop_count: int | None = None
+    neighborhood: dict[str, Any] | None = None
     is_appendix: bool | None = None  # True when result is cache-stable appendix (#175)
     content_type: str | None = None  # experiential, knowledge, behavioral, procedural
     source: str = "agent"  # "agent", "dreaming", or "import"
+    upstream_trust_level: str = "trusted"
+    taint: dict[str, Any] | None = None
     content_truncated: bool = False
     full_available: bool = False
 
@@ -109,6 +114,10 @@ class SearchResult(BaseModel):
     compilation_hash: str | None = None
     compilation_epoch: int | None = None
     appendix_count: int | None = None
+    # Set when search(current_step_id=...) skips ranking (#553).
+    query_ignored: bool = False
+    ignored_parameters: list[str] | None = None
+    omitted_count: int = 0
 
 
 class VersionEntry(BaseModel):
@@ -178,6 +187,18 @@ class RelationshipsResult(BaseModel):
     relationships: list[RelationshipInfo]
     count: int = 0
     provenance_chain: list[dict[str, Any]] | None = None
+
+
+class GuidanceResult(BaseModel):
+    """Result of get_guidance: prose plus the neighborhood the model saw."""
+
+    model_config = ConfigDict(extra="allow")
+
+    node_id: str
+    guidance_text: str
+    neighborhood: dict[str, Any]
+    hop_count: int = 0
+    omitted_count: int = 0
 
 
 class CurationRule(BaseModel):

@@ -23,11 +23,11 @@ class TestProfileDefinitions:
     def test_three_profiles_defined(self):
         assert {"compact", "full", "minimal"} == _VALID_PROFILES
 
-    def test_compact_has_4_tools(self):
-        assert len(_TOOLS_COMPACT) == 4
+    def test_compact_has_5_tools(self):
+        assert len(_TOOLS_COMPACT) == 5
 
-    def test_full_has_13_tools(self):
-        assert len(_TOOLS_FULL) == 13
+    def test_full_has_14_tools(self):
+        assert len(_TOOLS_FULL) == 14
 
     def test_minimal_has_5_tools(self):
         assert len(_TOOLS_MINIMAL) == 5
@@ -41,13 +41,23 @@ class TestProfileDefinitions:
 
     def test_compact_includes_memory_and_thread_dispatchers(self):
         from src.tools.memory import memory
+        from src.tools.persona import persona
         from src.tools.thread import thread
         assert memory in _TOOLS_COMPACT
         assert thread in _TOOLS_COMPACT
+        assert persona in _TOOLS_COMPACT
 
     def test_compact_excludes_flat_tools(self):
+        from src.tools.compile_persona import compile_persona
+        from src.tools.edit_persona import edit_persona
+        from src.tools.get_persona import get_persona
         from src.tools.search_memory import search_memory
         from src.tools.write_memory import write_memory
+        from src.tools.persona import persona
+        assert persona in _TOOLS_COMPACT
+        assert get_persona not in _TOOLS_COMPACT
+        assert compile_persona not in _TOOLS_COMPACT
+        assert edit_persona not in _TOOLS_COMPACT
         assert write_memory not in _TOOLS_COMPACT
         assert search_memory not in _TOOLS_COMPACT
 
@@ -72,6 +82,17 @@ class TestProfileDefinitions:
                    manage_curation, manage_project, thread]:
             assert fn in _TOOLS_FULL, f"{fn.__name__} missing from full profile"
 
+    def test_full_includes_persona_dispatcher_not_flat_persona_tools(self):
+        from src.tools.compile_persona import compile_persona
+        from src.tools.edit_persona import edit_persona
+        from src.tools.get_persona import get_persona
+        from src.tools.persona import persona
+
+        assert persona in _TOOLS_FULL
+        assert get_persona not in _TOOLS_FULL
+        assert compile_persona not in _TOOLS_FULL
+        assert edit_persona not in _TOOLS_FULL
+
     def test_minimal_has_search_write_read_thread(self):
         from src.tools.read_memory import read_memory
         from src.tools.search_memory import search_memory
@@ -87,10 +108,12 @@ class TestProfileDefinitions:
         from src.tools.manage_curation import manage_curation
         from src.tools.manage_graph import manage_graph
         from src.tools.update_memory import update_memory
+        from src.tools.persona import persona
         assert manage_graph not in _TOOLS_MINIMAL
         assert manage_curation not in _TOOLS_MINIMAL
         assert update_memory not in _TOOLS_MINIMAL
         assert delete_memory not in _TOOLS_MINIMAL
+        assert persona not in _TOOLS_MINIMAL
 
 
 class TestProfileInstructions:
@@ -100,6 +123,10 @@ class TestProfileInstructions:
     def test_compact_does_not_mention_individual_tools(self):
         assert "write_memory" not in _INSTRUCTIONS_COMPACT
         assert "search_memory" not in _INSTRUCTIONS_COMPACT
+        assert "get_persona()" not in _INSTRUCTIONS_COMPACT
+        assert "compile_persona()" not in _INSTRUCTIONS_COMPACT
+        assert "persona(action='get')" in _INSTRUCTIONS_COMPACT
+        assert "persona(action='compile')" in _INSTRUCTIONS_COMPACT
 
     def test_full_mentions_individual_tools(self):
         assert "write_memory" in _INSTRUCTIONS_FULL

@@ -77,12 +77,21 @@ jobs:
         if: github.event_name != 'pull_request' || steps.mcp-changes.outputs.mcp == 'true'
         run: |
           python -m pip install --upgrade pip
-          cd memory-hub-mcp && pip install -r requirements.txt && pip install pytest
+          # The MCP server imports memoryhub_core, and its tests need the root
+          # dev extra (pytest-asyncio, fakeredis, pytest-timeout). Installing
+          # only memory-hub-mcp/requirements.txt leaves both out, which is why
+          # this job used to abort with 20 collection errors.
+          pip install -e '.[dev]'
+          pip install -r memory-hub-mcp/requirements.txt
 
       - name: Run tests with pytest
         if: github.event_name != 'pull_request' || steps.mcp-changes.outputs.mcp == 'true'
-        run: cd memory-hub-mcp && pytest tests/ -v --ignore=tests/test_mcp_tools.py -k "not integration"
-        continue-on-error: true  # MCP tests need PostgreSQL; full suite runs on OpenShift
+        # --timeout keeps one hanging test from burning the job's whole budget;
+        # signal (not thread) so the timeout fails that test instead of the run.
+        run: >
+          cd memory-hub-mcp &&
+          pytest tests/ -v --ignore=tests/test_mcp_tools.py -k "not integration"
+          --timeout=120 --timeout-method=signal
 
   auth-tests:
     name: Auth Service Tests
