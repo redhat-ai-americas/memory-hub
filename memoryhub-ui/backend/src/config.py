@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # vars are missing, rather than silently pointing at localhost.
     public_mcp_url: str = "https://mcp-server.example.com/mcp/"
     public_auth_url: str = "https://auth-server.example.com"
+    # Canonical browser origin used when creating invitations. Set from the
+    # public UI Route instead of trusting an arbitrary incoming Host header.
+    ui_public_base_url: str = ""
     # Tenant this UI deployment serves. All BFF queries filter by this tenant.
     # Set via MEMORYHUB_UI_TENANT_ID env var (one UI instance per tenant --
     # multi-tenant customers run one deployment per tenant). This is the

@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.access import ViewerDep, access_for, admin_viewer
+from src.authz import project_isolation, role_isolation
 from src.config import Settings, get_settings
 from src.database import get_db
 from src.routes_dashboard import _auth_clients, _event_row, _load_memory, _review_counts, tool_name
@@ -1895,6 +1896,7 @@ async def review_item(
     ).scalar_one()
     item["reach_agents"] = agents
     item["approvers_required"] = int(tenant_settings["governance"]["enterprise_approvers"])
+    item["can_decide"] = acc.can_moderate(node)
     return acc.redact_tree(item, node.scope)
 
 
@@ -2278,6 +2280,10 @@ async def get_tenant_settings(db: DbDep, settings: SettingsDep):
     from src.ui_common import probe_components
 
     values = await load_tenant_settings(db, settings.ui_tenant_id)
+    # These controls are deployment policy, shared with the MCP server. Never
+    # display stale tenant JSON as if it were the active authorization state.
+    values["governance"]["project_isolation"] = project_isolation()
+    values["governance"]["role_isolation"] = role_isolation()
     health = {p["key"]: p for p in await probe_components(db, settings)}
     return {
         "values": {k: values[k] for k in DEFAULT_TENANT_SETTINGS},
@@ -2291,6 +2297,7 @@ async def get_tenant_settings(db: DbDep, settings: SettingsDep):
             "internal_url": settings.mcp_server_url,
             **health.get("mcp", {}),
         },
+        "services": {"valkey": health.get("valkey", {"status": "not_configured"})},
         "tenant": {
             "tenant_id": settings.ui_tenant_id,
             "auth_url": settings.public_auth_url,
@@ -2303,6 +2310,18 @@ async def get_tenant_settings(db: DbDep, settings: SettingsDep):
 async def put_tenant_settings(body: SettingsUpdate, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
     current = await load_tenant_settings(db, settings.ui_tenant_id)
+    enforced_isolation = {
+        "project_isolation": project_isolation(),
+        "role_isolation": role_isolation(),
+    }
+    requested_governance = body.governance or {}
+    for key, enforced_value in enforced_isolation.items():
+        if key in requested_governance and requested_governance[key] != enforced_value:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{key} is deployment-controlled and must be changed in the service environment.",
+            )
+        current["governance"][key] = enforced_value
     merged = {k: {**current[k], **(getattr(body, k) or {})} for k in DEFAULT_TENANT_SETTINGS}
     _validate_settings(merged)
     changed = {

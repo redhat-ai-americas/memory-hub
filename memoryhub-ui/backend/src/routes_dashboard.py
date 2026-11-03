@@ -1341,6 +1341,8 @@ async def memory_context(memory_id: str, db: DbDep, settings: SettingsDep, viewe
                 select(MemoryNode, (1 - distance).label("score"))
                 .where(
                     *live_filters(tenant_id),
+                    *acc.filters(),
+                    MemoryNode.scope.not_in(acc.hidden_scopes),
                     MemoryNode.parent_id.is_(None),
                     MemoryNode.id.not_in(version_ids),
                     MemoryNode.embedding.is_not(None),
@@ -1441,7 +1443,6 @@ async def memory_context(memory_id: str, db: DbDep, settings: SettingsDep, viewe
     }
     if acc.grants is not None:
         result["relationships"] = [r for r in result["relationships"] if acc.can_read_row(_Row(r.get("other", {})))]
-        result["similar"] = [x for x in result["similar"] if acc.can_read_row(_Row(x))]
     return acc.redact_tree(result, node.scope)
 
 

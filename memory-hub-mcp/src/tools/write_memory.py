@@ -547,18 +547,14 @@ async def write_memory(
         # Parse relevant_until string to datetime if provided.
         parsed_relevant_until = None
         if relevant_until is not None:
-            from datetime import UTC as _UTC
-            from datetime import datetime as dt
-
             try:
-                parsed_relevant_until = dt.fromisoformat(relevant_until)
-                # Ensure timezone-aware
-                if parsed_relevant_until.tzinfo is None:
-                    parsed_relevant_until = parsed_relevant_until.replace(tzinfo=_UTC)
+                from src.tools._temporal import parse_relevant_until
+
+                parsed_relevant_until = parse_relevant_until(relevant_until)
             except (ValueError, TypeError):
                 raise ToolError(
                     f"Invalid relevant_until format: '{relevant_until}'. "
-                    "Must be a valid ISO 8601 timestamp (e.g. '2026-12-31T23:59:59Z')."
+                    "Use an ISO 8601 timestamp or date (for example, '2026-12-31T23:59:59Z' or '2026-12-31')."
                 ) from None
 
         # Build the create schema with validation

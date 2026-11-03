@@ -564,7 +564,7 @@ const MemoryGraph: React.FC<{
               <option value="weight">Strongest (highest weight)</option>
             </select>
             <p className="hint" style={{ margin: '6px 0 0' }}>
-              Large graphs draw slower. Narrow by scope or project in the table filters — they apply here too.
+              Large graphs draw slower. Scope and project filters in the memory browser apply to the graph as well.
             </p>
           </div>
         )}

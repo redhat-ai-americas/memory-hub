@@ -82,6 +82,7 @@ async def search_memory_admin(
     regex: str | None = None,
     cross_tenant: bool = False,
     scope_filter: str | None = None,
+    exclude_scopes: list[str] | None = None,
     max_results: int = 50,
     include_statuses: list[str] | None = None,
 ) -> list[dict]:
@@ -107,6 +108,8 @@ async def search_memory_admin(
 
     if scope_filter:
         filters.append(MemoryNode.scope == scope_filter)
+    if exclude_scopes:
+        filters.append(MemoryNode.scope.not_in(exclude_scopes))
 
     # Semantic search via pgvector
     query_embedding = await embedding_service.embed(query)

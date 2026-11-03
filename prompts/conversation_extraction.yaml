@@ -40,6 +40,10 @@ system_prompt: |
     is running right now").
   - Merge related facts into a single extraction rather than creating
     near-duplicates.
+  - Preserve named responsibility owners. Do not claim that a task or plan
+    has no owner when the conversation assigns it to a person or role.
+  - When a later explicit assignment corrects an earlier summary, extract the
+    current assignment and omit the stale claim.
   - Prefer concrete facts over vague summaries.
   - If the conversation contains no extractable information, return
     {"extractions": []}.

@@ -71,7 +71,7 @@ _WRITE_OPTS = frozenset({
 # and inherited by later versions. Letting a caller edit it after the fact
 # would be a laundering path straight through the feature this field exists
 # to provide.
-_UPDATE_OPTS = frozenset({"weight", "metadata", "domains", "driver_id"})
+_UPDATE_OPTS = frozenset({"weight", "metadata", "domains", "driver_id", "relevant_until"})
 _SET_RULE_OPTS = frozenset({
     "name", "tier", "action_type", "config", "scope_filter",
     "enabled", "priority",

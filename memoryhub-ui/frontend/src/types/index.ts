@@ -840,6 +840,7 @@ export interface ReviewItem {
   history: { event_type: string; actor_id: string; timestamp: string; comment: string | null }[];
   reach_agents: number;
   approvers_required: number;
+  can_decide: boolean;
 }
 
 export interface AuditResponse {
@@ -916,6 +917,7 @@ export interface SettingsResponse {
     reranker: Partial<HealthItem> & { url: string | null };
   };
   mcp: Partial<HealthItem> & { public_url: string; internal_url: string };
+  services?: { valkey?: Partial<HealthItem> & { status?: string } };
   tenant: { tenant_id: string; auth_url: string; cluster_domain: string | null };
 }
 

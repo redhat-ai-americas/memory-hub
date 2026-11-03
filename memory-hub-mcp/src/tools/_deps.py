@@ -98,12 +98,13 @@ def get_caller_id() -> str | None:
 
 
 def resolve_driver_id(per_request: str | None, claims: dict) -> str:
-    """Resolve driver_id: per-request > session default > actor_id.
+    """Resolve driver_id: per-request > session default > trusted claim > actor_id.
 
-    The three-tier fallback captures who is ultimately driving a write:
+    The fallback captures who is ultimately driving a write:
       1. Explicit per-request driver_id (highest priority)
       2. Session-level default set at register_session time
-      3. The authenticated actor_id (autonomous agent acting for itself)
+      3. Trusted driver_id claim from the verified identity provider
+      4. The authenticated actor_id (autonomous agent acting for itself)
     """
     if per_request is not None:
         return per_request
@@ -111,4 +112,7 @@ def resolve_driver_id(per_request: str | None, claims: dict) -> str:
     session_default = get_default_driver_id()
     if session_default is not None:
         return session_default
+    claim_driver = claims.get("driver_id")
+    if isinstance(claim_driver, str) and claim_driver.strip():
+        return claim_driver.strip()
     return claims["sub"]

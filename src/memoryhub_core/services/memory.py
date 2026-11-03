@@ -576,8 +576,11 @@ async def update_memory(
         db_content = old_node.content
         storage_type = old_node.storage_type
 
-    # Recompute relevant_until when content changes; inherit from old node otherwise.
-    if content_changed:
+    # An explicit relevance deadline wins; otherwise recalculate only when the
+    # content changes and preserve the existing deadline for metadata-only edits.
+    if data.relevant_until is not None:
+        new_relevant_until = data.relevant_until
+    elif content_changed:
         from memoryhub_core.services.temporal import classify_temporal
 
         new_relevant_until = classify_temporal(new_content, now)

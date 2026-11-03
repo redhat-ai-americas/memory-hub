@@ -82,6 +82,16 @@ async def update_memory(
             ),
         ),
     ] = None,
+    relevant_until: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Explicit semantic expiry for the new version. Accepts an ISO "
+                "8601 timestamp or date; a date-only value remains valid through "
+                "the end of that UTC day. Omit to infer from changed content."
+            ),
+        ),
+    ] = None,
     project_id: Annotated[
         str | None,
         Field(
@@ -120,11 +130,24 @@ async def update_memory(
             f"Invalid memory_id format: '{memory_id}'. Expected a UUID string."
         ) from None
 
+    parsed_relevant_until = None
+    if relevant_until is not None:
+        try:
+            from src.tools._temporal import parse_relevant_until
+
+            parsed_relevant_until = parse_relevant_until(relevant_until)
+        except (ValueError, TypeError):
+            raise ToolError(
+                f"Invalid relevant_until format: '{relevant_until}'. "
+                "Use an ISO 8601 timestamp or date."
+            ) from None
+
     update_data = MemoryNodeUpdate(
         content=content,
         weight=weight,
         metadata=metadata,
         domains=domains,
+        relevant_until=parsed_relevant_until,
     )
 
     try:

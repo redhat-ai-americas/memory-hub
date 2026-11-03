@@ -332,7 +332,7 @@ const AuditLog: React.FC<{
                   const d = decisionOf(e);
                   const open = expanded.has(e.id);
                   const actorSub =
-                    (e.metadata as { via?: string }).via === 'dashboard'
+                    (e.metadata as { via?: string } | null)?.via === 'dashboard'
                       ? 'dashboard'
                       : e.driver_id && e.driver_id !== e.actor_id
                         ? `for ${e.driver_id}`

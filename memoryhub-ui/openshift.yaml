@@ -75,6 +75,10 @@ spec:
         # projects and members are added explicitly) or "self_service".
         - name: MEMORYHUB_PROJECT_PROVISIONING
           value: "central"
+        - name: MEMORYHUB_PROJECT_ISOLATION_ENABLED
+          value: "true"
+        - name: MEMORYHUB_ROLE_ISOLATION_ENABLED
+          value: "true"
         # Release 1 surface: features beyond R1 (knowledge pages, packs,
         # retrieval checks, entity merge…) stay hidden unless set to "true".
         - name: MEMORYHUB_UI_LABS

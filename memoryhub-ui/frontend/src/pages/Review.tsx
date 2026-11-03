@@ -346,13 +346,13 @@ const Detail: React.FC<{ summary: ReviewSummary; viewer: string; onDecided: () =
         </div>
       )}
 
-      <div>
+      {data.can_decide && <div>
         <label htmlFor="cm" className="sm" style={{ fontWeight: 600, display: 'block', marginBottom: 6 }}>
           Decision comment · recorded in the audit trail
         </label>
         <textarea id="cm" className="in" style={{ minHeight: 70 }} placeholder="Why are you approving or rejecting?" value={comment} onChange={(e) => setComment(e.target.value)} />
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      </div>}
+      {data.can_decide ? <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {data.kind === 'approval' || data.kind === 'promotion' ? (
           <>
             <button
@@ -402,7 +402,7 @@ const Detail: React.FC<{ summary: ReviewSummary; viewer: string; onDecided: () =
             </span>
           </>
         )}
-      </div>
+      </div> : <p className="sm muted" role="status">You can view this item, but your role does not allow review decisions.</p>}
     </>
   );
 };

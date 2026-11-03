@@ -76,6 +76,7 @@ echo ""
 echo "Populating public Route URLs for the welcome-email feature..."
 MCP_ROUTE_HOST=$(oc get route memory-hub-mcp --context "$CONTEXT" -n memory-hub-mcp -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 AUTH_ROUTE_HOST=$(oc get route auth-server --context "$CONTEXT" -n memoryhub-auth -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+UI_ROUTE_HOST=$(oc get route "$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 EMBEDDING_SVC_NAME=$(oc get svc --context "$CONTEXT" -n embedding-model -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 if [ -n "$EMBEDDING_SVC_NAME" ]; then
     EMBEDDING_SVC_HOST="${EMBEDDING_SVC_NAME}.embedding-model.svc.cluster.local"
@@ -91,6 +92,9 @@ if [ -n "$MCP_ROUTE_HOST" ] && [ -n "$AUTH_ROUTE_HOST" ]; then
         "MEMORYHUB_PUBLIC_MCP_URL=$MCP_PUBLIC_URL"
         "MEMORYHUB_PUBLIC_AUTH_URL=$AUTH_PUBLIC_URL"
     )
+    if [ -n "$UI_ROUTE_HOST" ]; then
+        ENV_ARGS+=("MEMORYHUB_UI_PUBLIC_BASE_URL=https://$UI_ROUTE_HOST")
+    fi
     if [ -n "$EMBEDDING_SVC_HOST" ]; then
         EMBEDDING_URL="http://$EMBEDDING_SVC_HOST:80"
         echo "  MEMORYHUB_EMBEDDING_URL=$EMBEDDING_URL"
@@ -110,6 +114,13 @@ else
     echo "  The welcome-email feature will render example.com placeholder URLs"
     echo "  until the routes exist. Re-run this script after mcp-server and"
     echo "  auth-server are deployed."
+fi
+if [ -n "$UI_ROUTE_HOST" ]; then
+    oc set env "deployment/$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" \
+        "MEMORYHUB_UI_PUBLIC_BASE_URL=https://$UI_ROUTE_HOST" --containers="$DEPLOYMENT" >/dev/null
+    echo "  MEMORYHUB_UI_PUBLIC_BASE_URL=https://$UI_ROUTE_HOST"
+else
+    echo "  WARNING: could not resolve the UI Route host; invite creation needs MEMORYHUB_UI_PUBLIC_BASE_URL."
 fi
 
 # Step 4: Force rollout restart so the selected image digest is picked up.

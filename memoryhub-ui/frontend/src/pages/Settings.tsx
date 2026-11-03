@@ -61,6 +61,8 @@ const Settings: React.FC = () => {
   const sec = (id: string) => (el: HTMLElement | null) => {
     refs.current[id] = el;
   };
+  const rerankerReady = data?.models.reranker.status === 'healthy';
+  const pushReady = data?.services?.valkey?.status === 'healthy';
 
   return (
     <>
@@ -146,14 +148,16 @@ const Settings: React.FC = () => {
                     </div>
                   </div>
                   <div style={{ marginTop: 14 }}>
-                    <Row title="Cross-encoder reranking" hint="Adds ~90 ms; improves precision on ambiguous queries.">
-                      <Switch on={values.retrieval.rerank} label="Cross-encoder reranking" onChange={(v) => set('retrieval', 'rerank', v)} />
+                    <Row title="Cross-encoder reranking" hint={rerankerReady ? 'Adds ~90 ms; improves precision on ambiguous queries.' : `Service unavailable; reranking is currently off${values.retrieval.rerank ? ' despite the saved preference being on' : ''}.`}>
+                      <Switch on={values.retrieval.rerank && !!rerankerReady} disabled={!rerankerReady} label="Cross-encoder reranking" onChange={(v) => set('retrieval', 'rerank', v)} />
+                      {!rerankerReady && <span className="lbl g">Unavailable</span>}
                     </Row>
                     <Row title="Cache-optimized ordering" hint="Deterministic, epoch-locked order so agents share KV-cache prefixes. Epoch rolls every 6 h.">
                       <Switch on={values.retrieval.cache_optimized_ordering} label="Cache-optimized ordering" onChange={(v) => set('retrieval', 'cache_optimized_ordering', v)} />
                     </Row>
-                    <Row title="Real-time push to sessions" hint="Broadcast new memories to sessions whose focus matches.">
-                      <Switch on={values.retrieval.realtime_push} label="Real-time push" onChange={(v) => set('retrieval', 'realtime_push', v)} />
+                    <Row title="Real-time push to sessions" hint={pushReady ? 'Broadcast new memories to sessions whose focus matches.' : `Valkey is unavailable; real-time push is currently off${values.retrieval.realtime_push ? ' despite the saved preference being on' : ''}.`}>
+                      <Switch on={values.retrieval.realtime_push && !!pushReady} disabled={!pushReady} label="Real-time push" onChange={(v) => set('retrieval', 'realtime_push', v)} />
+                      {!pushReady && <span className="lbl g">Unavailable</span>}
                     </Row>
                   </div>
                 </section>
@@ -193,11 +197,15 @@ const Settings: React.FC = () => {
 
                 <section className="card" id="set-governance" ref={sec('governance')}>
                   <h3>Isolation &amp; governance</h3>
-                  <Row title="Project isolation" hint="Project memories are readable only by project members.">
-                    <Switch on={values.governance.project_isolation} label="Project isolation" onChange={(v) => set('governance', 'project_isolation', v)} />
+                  <Row title="Project isolation" hint="Deployment-controlled by MEMORYHUB_PROJECT_ISOLATION_ENABLED; shared with MCP authorization.">
+                    <span className={values.governance.project_isolation ? 'lbl grn' : 'lbl g'}>
+                      {values.governance.project_isolation ? 'Enabled' : 'Disabled'}
+                    </span>
                   </Row>
-                  <Row title="Role isolation" hint="Role memories are readable only by holders of that OpenShift role.">
-                    <Switch on={values.governance.role_isolation} label="Role isolation" onChange={(v) => set('governance', 'role_isolation', v)} />
+                  <Row title="Role isolation" hint="Deployment-controlled by MEMORYHUB_ROLE_ISOLATION_ENABLED; shared with MCP authorization.">
+                    <span className={values.governance.role_isolation ? 'lbl grn' : 'lbl g'}>
+                      {values.governance.role_isolation ? 'Enabled' : 'Disabled'}
+                    </span>
                   </Row>
                   <Row title="Contradiction revision threshold" hint="Reports needed before the curator prompts a revision.">
                     <input className="in" type="number" min={1} value={values.governance.contradiction_threshold} style={{ width: 80 }} aria-label="Contradiction threshold" onChange={(e) => set('governance', 'contradiction_threshold', num(e.target.value, 5))} />

@@ -34,6 +34,11 @@ system_prompt: |
   relationships, habits, goals, likes/dislikes, stated intentions, and
   changes in preference over time.
 
+  When the document assigns responsibilities, preserve the named person or
+  role. Do not summarize an assignment as "no owner" or "not assigned" when
+  the document names an owner. If later statements refine an earlier summary,
+  prefer the explicit, more recent assignment and do not repeat the stale claim.
+
   Do NOT include: inferences not explicitly stated, generalizations,
   meta-commentary about the conversation format, or information that is
   purely ephemeral.

@@ -40,6 +40,14 @@ export const fmtRelative = (value: string | Date | null | undefined, now = new D
   if (!value) return 'Never';
   const d = toDate(value);
   const diff = (now.getTime() - d.getTime()) / 1000;
+  if (diff < 0) {
+    const future = -diff;
+    if (future < 45) return 'in less than a minute';
+    if (future < 3600) return `in ${Math.max(1, Math.round(future / 60))} min`;
+    if (future < 86400) return `in ${Math.round(future / 3600)} h`;
+    if (future < 86400 * 60) return `in ${Math.round(future / 86400)} days`;
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
   if (diff < 45) return 'Just now';
   if (diff < 3600) return `${Math.max(1, Math.round(diff / 60))} min ago`;
   if (diff < 86400) return `${Math.round(diff / 3600)} h ago`;

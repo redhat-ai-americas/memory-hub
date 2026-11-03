@@ -16,6 +16,7 @@ from typing import Annotated, Any, Literal
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
+from sqlalchemy import select
 from src.core.app import mcp
 from src.core.authz import (
     PROJECT_ISOLATION_ENABLED,
@@ -78,6 +79,85 @@ VALID_SCOPES = {s.value for s in MemoryScope}
 # over-estimates a bit (real ratios for English JSON are closer to 3.5)
 # so the actual response stays under the cap.
 _CHARS_PER_TOKEN = 4
+
+
+async def _audit_returned_search_results(
+    session,
+    response: dict[str, Any],
+    *,
+    actor_id: str,
+    driver_id: str,
+    tenant_id: str,
+    query: str,
+    max_results: int,
+    fallback_scope: str | None,
+    fallback_owner: str,
+) -> None:
+    """Persist one search audit row for each memory actually returned."""
+    ids: set[uuid_mod.UUID] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            raw_id = value.get("id")
+            if raw_id:
+                try:
+                    ids.add(uuid_mod.UUID(str(raw_id)))
+                except (TypeError, ValueError):
+                    pass
+            for key in ("results", "branches"):
+                collect(value.get(key))
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+
+    collect(response.get("results", []))
+    try:
+        rows = []
+        if ids:
+            rows = (
+                await session.execute(
+                    select(MemoryNode).where(
+                        MemoryNode.id.in_(ids),
+                        MemoryNode.tenant_id == tenant_id,
+                    )
+                )
+            ).scalars().all()
+
+        if not rows:
+            await record_audit_event(
+                event_type="memory.search",
+                actor_id=actor_id,
+                driver_id=driver_id,
+                scope=fallback_scope or "all",
+                owner_id=fallback_owner,
+                memory_id=None,
+                decision="allowed",
+                tenant_id=tenant_id,
+                metadata={"query": query[:200], "max_results": max_results, "result_count": len(ids)},
+                session=session,
+            )
+        else:
+            for node in rows:
+                await record_audit_event(
+                    event_type="memory.search",
+                    actor_id=actor_id,
+                    driver_id=driver_id,
+                    scope=node.scope,
+                    owner_id=node.owner_id,
+                    memory_id=node.id,
+                    decision="allowed",
+                    tenant_id=tenant_id,
+                    metadata={
+                        "query": query[:200],
+                        "max_results": max_results,
+                        "result_count": len(rows),
+                    },
+                    session=session,
+                )
+        await session.commit()
+    except Exception:
+        logger.warning("Could not persist search result audit events", exc_info=True)
+        await session.rollback()
 
 
 def _to_stub(read: MemoryNodeRead) -> MemoryNodeStub:
@@ -898,6 +978,9 @@ async def search_memory(
         unique nodes surfaced by graph traversal beyond the vector results.
       - graph_fallback_reason (str, only when graph_depth > 0 and traversal
         was skipped): human-readable reason graph traversal was not performed.
+
+    Search access events are audit logged for the returned memory IDs; the
+    search itself does not create or modify memory records.
       - pattern_signals (list, only when a within-user topic cluster is
         detected): each entry has pattern, matching_memories, time_window_days,
         representative_id, and summary_hint. Indicates 3+ recent memories
@@ -937,6 +1020,9 @@ async def search_memory(
     # is ALWAYS applied, independent of scopes.
     tenant = resolve_tenant(claims, tenant_id)
     caller_id = claims["sub"]
+    from src.tools._deps import resolve_driver_id
+
+    driver_id = resolve_driver_id(None, claims)
     project_ids: set[str] | None = None
 
     # Resolve campaign membership when project_id is provided. The
@@ -1032,23 +1118,6 @@ async def search_memory(
 
     session, gen = await get_db_session()
     try:
-        event_metadata: dict[str, Any] = {"query": query[:200], "max_results": max_results}
-        if current_step_id is not None:
-            event_metadata["current_step_id"] = current_step_id
-            event_metadata["query_ignored"] = True
-        await record_audit_event(
-            event_type="memory.search",
-            actor_id=claims["sub"],
-            driver_id=claims["sub"],
-            scope=scope or "all",
-            owner_id=owner_id or claims["sub"],
-            memory_id=None,
-            decision="allowed",
-            tenant_id=tenant,
-            metadata=event_metadata,
-            session=session,
-        )
-
         if current_step_id is not None:
             if ctx:
                 await ctx.info(f"Generating procedural guidance from step {current_step_id}")
@@ -1069,7 +1138,7 @@ async def search_memory(
                 max_hops=max_hops,
                 authorize=_can_read,
             )
-            return search_guidance_response(
+            response = search_guidance_response(
                 guidance,
                 graph_depth=graph_depth,
                 focus=focus,
@@ -1077,6 +1146,18 @@ async def search_memory(
                 entities=entities,
                 graph_relationship_types=graph_relationship_types,
             )
+            await _audit_returned_search_results(
+                session,
+                response,
+                actor_id=caller_id,
+                driver_id=driver_id,
+                tenant_id=tenant,
+                query=query,
+                max_results=max_results,
+                fallback_scope=scope,
+                fallback_owner=owner_id or caller_id,
+            )
+            return response
 
 
         if ctx:
@@ -1222,6 +1303,17 @@ async def search_memory(
             if focus_meta is not None:
                 response["pivot_suggested"] = focus_meta["pivot_suggested"]
                 response["pivot_reason"] = focus_meta["pivot_reason"]
+            await _audit_returned_search_results(
+                session,
+                response,
+                actor_id=caller_id,
+                driver_id=driver_id,
+                tenant_id=tenant,
+                query=query,
+                max_results=max_results,
+                fallback_scope=scope,
+                fallback_owner=owner_id or caller_id,
+            )
             return response
 
         # mode='index' degrades every full result to stub form. Done before
@@ -1500,6 +1592,17 @@ async def search_memory(
                 }
                 for sig in pattern_signals
             ]
+        await _audit_returned_search_results(
+            session,
+            response,
+            actor_id=caller_id,
+            driver_id=driver_id,
+            tenant_id=tenant,
+            query=query,
+            max_results=max_results,
+            fallback_scope=scope,
+            fallback_owner=owner_id or caller_id,
+        )
         return response
 
     except EmbeddingContentTooLargeError as exc:

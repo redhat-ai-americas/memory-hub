@@ -32,9 +32,6 @@ _IMPLICIT_TEMPORAL_PATTERNS = [
 
 _IMPLICIT_TEMPORAL_DAYS = 90
 
-# ISO date pattern: 2026-07-15
-_ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
-
 # Deadline phrases with ISO dates: "by 2026-07-15", "deadline 2026-07-15",
 # "due 2026-07-15", "before 2026-07-15", "until 2026-07-15"
 _DEADLINE_ISO_RE = re.compile(
@@ -96,12 +93,10 @@ def classify_temporal(
     Returns None for evergreen or version-bound content (no semantic expiry).
     The classifier checks patterns in priority order:
     1. Deadline phrases with explicit dates
-    2. Standalone ISO dates
-    3. Relative deadlines ("within N weeks")
-    4. "Next week/month"
-    5. Implicit temporal markers ("currently", "for now")
-    6. Version references -> None (version-bound, skip)
-    7. No signal -> None (evergreen)
+    2. Relative deadlines ("within N weeks")
+    3. "Next week/month"
+    4. Implicit temporal markers ("currently", "for now")
+    5. No signal -> None (evergreen)
     """
     now = created_at or datetime.now(UTC)
 
@@ -117,19 +112,17 @@ def classify_temporal(
         if parsed is not None:
             return parsed
 
-    # 3. Standalone ISO dates (e.g., "Deploy 2026-07-15")
-    m = _ISO_DATE_RE.search(content)
-    if m:
-        return _parse_iso_match(m.group(1), m.group(2), m.group(3))
+    # A date of an event or observation is not, by itself, an expiry.
+    # Only explicit deadline language above makes a date time-bounded.
 
-    # 4. Relative deadlines
+    # 3. Relative deadlines
     m = _RELATIVE_RE.search(content)
     if m:
         count = int(m.group(1))
         unit = m.group(2).lower().rstrip("s")
         return _apply_relative(now, count, unit)
 
-    # 5. "Next week/month"
+    # 4. "Next week/month"
     m = _NEXT_UNIT_RE.search(content)
     if m:
         unit = m.group(1).lower()
@@ -138,12 +131,12 @@ def classify_temporal(
         if unit == "month":
             return now + timedelta(days=30)
 
-    # 6. Implicit temporal markers
+    # 5. Implicit temporal markers
     for pattern in _IMPLICIT_TEMPORAL_PATTERNS:
         if pattern.search(content):
             return now + timedelta(days=_IMPLICIT_TEMPORAL_DAYS)
 
-    # 7. No temporal signal found -> evergreen
+    # No temporal signal found -> evergreen
     return None
 
 

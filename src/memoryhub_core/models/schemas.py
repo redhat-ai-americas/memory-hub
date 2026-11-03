@@ -126,6 +126,10 @@ class MemoryNodeUpdate(BaseModel):
     domains: list[str] | None = Field(default=None, description="Updated domain tags")
     content_type: ContentType | None = None
     source: str | None = None
+    relevant_until: datetime | None = Field(
+        default=None,
+        description="Explicit semantic expiry override for the new version.",
+    )
 
 
 # -- Output schemas --

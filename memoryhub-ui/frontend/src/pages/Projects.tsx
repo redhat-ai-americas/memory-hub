@@ -384,7 +384,8 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
   const [showAll, setShowAll] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const { me } = useApp();
-  const changeRole = async (userId: string, next: 'member' | 'admin') => {
+  const changeRole = async (userId: string, current: 'member' | 'admin', next: 'member' | 'admin') => {
+    if (current === 'admin' && next === 'member' && !window.confirm(`Make ${userId} a project member? They will lose permission to manage ${name}'s members and settings.`)) return;
     try {
       await api.setMemberRole(name, userId, next);
       toast(next === 'admin' ? `${userId} is now an admin of ${name}.` : `${userId} is now a member of ${name}.`);
@@ -459,7 +460,7 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
                   className="in auto sm"
                   aria-label={`Role of ${m.user_id}`}
                   value={m.role}
-                  onChange={(e) => changeRole(m.user_id, e.target.value as 'member' | 'admin')}
+                  onChange={(e) => changeRole(m.user_id, m.role, e.target.value as 'member' | 'admin')}
                   style={{ width: 'auto', padding: '2px 8px' }}
                 >
                   <option value="member">member</option>

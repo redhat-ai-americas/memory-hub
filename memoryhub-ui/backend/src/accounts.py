@@ -24,6 +24,7 @@ import secrets
 import uuid
 from datetime import timedelta
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -546,8 +547,18 @@ async def update_account(account_id: str, body: AccountUpdate, db: DbDep, settin
     losing_admin = (
         m["role"] == "admin" and m["status"] == "active" and (body.role == "user" or body.status == "disabled")
     )
-    if losing_admin and await admin_count(db, tenant_id) <= 1:
-        raise HTTPException(status_code=409, detail="The tenant needs at least one active platform admin")
+    if losing_admin:
+        active_admins = (
+            await db.execute(
+                text(
+                    f"SELECT id FROM {ACCOUNTS} WHERE tenant_id = :t AND role = 'admin' AND status = 'active' "
+                    "ORDER BY id FOR UPDATE"
+                ),
+                {"t": tenant_id},
+            )
+        ).all()
+        if len(active_admins) <= 1:
+            raise HTTPException(status_code=409, detail="The tenant needs at least one active platform admin")
     if m["username"] == viewer.username and losing_admin:
         raise HTTPException(status_code=409, detail="You cannot remove your own admin access")
     changes = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -587,6 +598,7 @@ class InviteRequest(BaseModel):
 @router.post("/api/invites", status_code=201)
 async def create_invite(body: InviteRequest, request: Request, db: DbDep, settings: SettingsDep, viewer: AdminDep):
     await ensure_tables(db)
+    base = _public_ui_base_url(request, settings)
     email = (body.email or "").strip().lower() or None
     if email and not EMAIL_RE.match(email):
         raise HTTPException(status_code=422, detail="Email is not valid")
@@ -618,7 +630,6 @@ async def create_invite(body: InviteRequest, request: Request, db: DbDep, settin
         metadata={"role": body.role, "expires_days": body.expires_days},
     )
     await db.commit()
-    base = str(request.base_url).rstrip("/")
     # The code is shown once, like a client secret.
     return {
         "code": code,
@@ -627,3 +638,47 @@ async def create_invite(body: InviteRequest, request: Request, db: DbDep, settin
         "expires_at": expires,
         "link": f"{base}/#/register?invite={code}",
     }
+
+
+def _public_ui_base_url(request: Request, settings: Settings) -> str:
+    """Return a trusted HTTPS origin for invite links."""
+    configured = settings.ui_public_base_url.strip()
+    if configured:
+        parsed = urlsplit(configured)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise HTTPException(status_code=500, detail="MEMORYHUB_UI_PUBLIC_BASE_URL must be an HTTPS origin")
+        return f"https://{parsed.netloc}"
+
+    if settings.ui_trust_proxy_headers:
+        proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+        host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+        parsed = urlsplit(f"//{host}") if host else None
+        if (
+            proto == "https"
+            and parsed
+            and parsed.hostname
+            and not parsed.username
+            and not parsed.password
+            and not parsed.path
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return f"https://{host}".rstrip("/")
+
+    parsed = urlsplit(str(request.base_url))
+    if parsed.scheme == "https" and parsed.hostname and not parsed.username and not parsed.password:
+        return f"https://{parsed.netloc}".rstrip("/")
+    if parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
+        return f"http://{parsed.netloc}".rstrip("/")
+    raise HTTPException(
+        status_code=503,
+        detail="Invite links require MEMORYHUB_UI_PUBLIC_BASE_URL to be configured with the public HTTPS origin.",
+    )

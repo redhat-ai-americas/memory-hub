@@ -57,7 +57,7 @@ _QUICK_START = [
     "in full/minimal, to load context relevant to your task.",
     "Pass project_id='<name>' to search/write operations to scope memories "
     "to a project.",
-    "Writing to a project you haven't joined? Auto-enrollment handles it.",
+    "Project writes require an existing project membership; ask a project admin to add this agent.",
 ]
 
 
@@ -256,7 +256,8 @@ async def register_session(
             description=(
                 "Identity of the upstream human or system on whose behalf the "
                 "agent is acting. When set, every write in this session records "
-                "this as the driver_id unless overridden per-call. Omit when "
+                "this as the driver_id unless overridden per-call. If omitted, "
+                "a trusted driver_id token claim is used when available. Omit when "
                 "the agent is acting autonomously (driver_id defaults to the "
                 "authenticated actor_id)."
             ),
@@ -293,6 +294,7 @@ async def register_session(
     if token is not None:
         jwt_claims = token.claims
         user_id = jwt_claims.get("sub", token.client_id)
+        effective_driver_id = default_driver_id or jwt_claims.get("driver_id")
         session_id = str(uuid.uuid4())
         session_ttl_seconds = AppSettings().session_ttl_seconds
         set_session_id(
@@ -300,7 +302,7 @@ async def register_session(
             ctx=ctx,
             ttl_seconds=session_ttl_seconds,
         )
-        set_default_driver_id(default_driver_id, ctx=ctx)
+        set_default_driver_id(effective_driver_id, ctx=ctx)
         tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
         projects = await _fetch_user_projects(user_id, tenant)
@@ -316,7 +318,7 @@ async def register_session(
         record_event(
             event_type="session.registered",
             actor_id=user_id,
-            driver_id=default_driver_id or user_id,
+            driver_id=effective_driver_id or user_id,
             scope="session",
             owner_id=user_id,
             memory_id=None,
@@ -330,7 +332,7 @@ async def register_session(
             "scopes": list(token.scopes),
             "project_memberships": project_memberships,
             "auth_method": "jwt",
-            "default_driver_id": default_driver_id,
+            "default_driver_id": effective_driver_id,
             "projects": projects,
             "persona_synopsis_id": persona_synopsis_id,
             "quick_start": _QUICK_START,
@@ -382,6 +384,7 @@ async def register_session(
     # This must happen before set_session() so the session user dict
     # carries project_memberships for get_claims_from_context() to extract.
     user["project_memberships"] = await _resolve_project_memberships(user)
+    effective_driver_id = default_driver_id or user.get("driver_id")
 
     app_settings = AppSettings()
     ttl = app_settings.session_ttl_seconds
@@ -392,7 +395,7 @@ async def register_session(
             ttl_seconds=ttl,
             ctx=ctx,
             session_id=session_id,
-            default_driver_id=default_driver_id,
+            default_driver_id=effective_driver_id,
         )
     except RuntimeError as exc:
         raise ToolError(
@@ -413,7 +416,7 @@ async def register_session(
     record_event(
         event_type="session.registered",
         actor_id=user["user_id"],
-        driver_id=default_driver_id or user["user_id"],
+        driver_id=effective_driver_id or user["user_id"],
         scope="session",
         owner_id=user["user_id"],
         memory_id=None,
@@ -429,7 +432,7 @@ async def register_session(
         "project_memberships": user["project_memberships"],
         "expires_at": expires_at.isoformat(),
         "session_ttl_seconds": ttl,
-        "default_driver_id": default_driver_id,
+        "default_driver_id": effective_driver_id,
         "projects": projects,
         "persona_synopsis_id": persona_synopsis_id,
         "quick_start": _QUICK_START,

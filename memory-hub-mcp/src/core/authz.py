@@ -90,6 +90,7 @@ def get_claims_from_context() -> dict:
         refresh_session_metadata()
         claims = {
             "sub": token.claims.get("sub", token.client_id),
+            "driver_id": token.claims.get("driver_id"),
             "identity_type": token.claims.get("identity_type", "user"),
             "tenant_id": token.claims.get("tenant_id", DEFAULT_TENANT_ID),
             "scopes": list(token.scopes),
@@ -110,6 +111,7 @@ def get_claims_from_context() -> dict:
             scopes = scopes.split()
         claims = {
             "sub": jwt_claims.get("sub", "unknown"),
+            "driver_id": jwt_claims.get("driver_id"),
             "identity_type": jwt_claims.get("identity_type", "user"),
             "tenant_id": jwt_claims.get("tenant_id", DEFAULT_TENANT_ID),
             "scopes": scopes,
@@ -130,6 +132,7 @@ def get_claims_from_context() -> dict:
             scopes = _normalize_session_scopes(raw_scopes)
         claims = {
             "sub": user["user_id"],
+            "driver_id": user.get("driver_id"),
             "identity_type": user.get("identity_type", "user"),
             "tenant_id": user.get("tenant_id", DEFAULT_TENANT_ID),
             "scopes": scopes,

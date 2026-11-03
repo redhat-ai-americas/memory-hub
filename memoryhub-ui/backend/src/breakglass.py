@@ -48,7 +48,13 @@ _request: ContextVar[dict | None] = ContextVar("memoryhub_break_glass", default=
 
 
 def start_request() -> dict:
-    state: dict = {"viewer": None, "grant": None, "tenant": None, "reveals": {}}
+    state: dict = {
+        "viewer": None,
+        "grant": None,
+        "tenant": None,
+        "reveals": {},
+        "audited_reveals": set(),
+    }
     _request.set(state)
     return state
 
@@ -69,6 +75,13 @@ async def flush(state: dict) -> int:
     """Write one HIGH-severity audit event per revealed user memory."""
     if not state or not state.get("grant") or not state["reveals"]:
         return 0
+    pending = {
+        memory_id: owner
+        for memory_id, owner in state["reveals"].items()
+        if memory_id not in state["audited_reveals"]
+    }
+    if not pending:
+        return 0
     from memoryhub_core.models.audit import AuditLog
 
     from src.config import get_settings as _settings
@@ -76,7 +89,7 @@ async def flush(state: dict) -> int:
 
     grant, viewer = state["grant"], state["viewer"]
     async with _get_session_factory(_settings())() as db:
-        for raw_id, owner in state["reveals"].items():
+        for raw_id, owner in pending.items():
             try:
                 memory_id = uuid.UUID(raw_id)
             except ValueError:
@@ -103,11 +116,12 @@ async def flush(state: dict) -> int:
                 )
             )
         await db.commit()
-    return len(state["reveals"])
+    state["audited_reveals"].update(pending)
+    return len(pending)
 
 
 class BreakGlassAuditMiddleware:
-    """Pure ASGI middleware: one collection per request, flushed after the response."""
+    """Persist break-glass reads before the response can reveal their content."""
 
     def __init__(self, app):
         self.app = app
@@ -116,15 +130,78 @@ class BreakGlassAuditMiddleware:
         if scope["type"] != "http" or not scope.get("path", "").startswith("/api/"):
             return await self.app(scope, receive, send)
         state = start_request()
+        response_blocked = False
+        response_start = None
+        response_started = False
+
+        async def unavailable_response() -> None:
+            body = b"Incident access could not be audited. The response was withheld."
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 503,
+                    "headers": [
+                        (b"content-type", b"text/plain; charset=utf-8"),
+                        (b"content-length", str(len(body)).encode()),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body, "more_body": False})
+
+        async def audited_send(message):
+            nonlocal response_blocked, response_start, response_started
+            if response_blocked:
+                return
+            if message["type"] == "http.response.start":
+                response_start = message
+                return
+            if message["type"] == "http.response.body":
+                try:
+                    await flush(state)
+                except Exception:
+                    response_blocked = True
+                    logger.exception(
+                        "Could not audit break-glass reads for incident %s",
+                        (state.get("grant") or {}).get("incident_ref"),
+                    )
+                    if response_started:
+                        await send({"type": "http.response.body", "body": b"", "more_body": False})
+                    else:
+                        await unavailable_response()
+                    return
+                if response_start is not None and not response_started:
+                    await send(response_start)
+                    response_started = True
+            await send(message)
+
+        app_error = None
         try:
-            await self.app(scope, receive, send)
-        finally:
+            await self.app(scope, receive, audited_send)
+        except Exception as exc:
+            app_error = exc
+
+        if not response_blocked:
+            # If the endpoint fails before sending headers, still record any
+            # content it inspected before the exception propagates.
             try:
                 await flush(state)
-            except Exception:  # pragma: no cover - needs a database failure
+            except Exception:
+                response_blocked = True
                 logger.exception(
-                    "Could not audit break-glass reads for incident %s", (state.get("grant") or {}).get("incident_ref")
+                    "Could not audit break-glass reads for incident %s",
+                    (state.get("grant") or {}).get("incident_ref"),
                 )
+                if not response_started:
+                    await unavailable_response()
+                else:
+                    await send({"type": "http.response.body", "body": b"", "more_body": False})
+            else:
+                if response_start is not None and not response_started:
+                    await send(response_start)
+                    await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+        if app_error is not None and not response_blocked:
+            raise app_error
 
 
 # ---------------------------------------------------------------------------
