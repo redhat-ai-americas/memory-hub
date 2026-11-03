@@ -1,7 +1,7 @@
 """The search pipeline the playground, retrieval checks and context packs share.
 
-Same stages as the agent-facing ``search_memory``: candidates (pgvector top
-50, or full text), RBAC for the run-as identity, session focus, reciprocal
+Same stages as the agent-facing ``search_memory``: RBAC for the run-as identity,
+candidates (pgvector top 50, or full text), session focus, reciprocal
 rank fusion, cross-encoder rerank, weight threshold, ``max_results`` and the
 token budget. On top of the results it explains itself:
 
@@ -26,7 +26,7 @@ import uuid
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from memoryhub_core.models.memory import MemoryNode
 from sqlalchemy import func, literal_column, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,10 +99,19 @@ async def run_search(
 ) -> dict:
     from src.routes_dashboard import _visible_predicate
 
-    if viewer.restricted:
-        body.identity = viewer.username  # users can only search as themselves
     tenant_id = settings.ui_tenant_id
     acc = await access_for(db, settings, viewer)
+    identity = (body.identity or "").strip() or (viewer.username if viewer.restricted else None)
+    if viewer.restricted and (acc.grants is None or identity not in acc.grants.identities):
+        raise HTTPException(status_code=403, detail="You can search as yourself or an agent you own")
+    t0 = time.perf_counter()
+    visible, run_as, identity_clause = await _visible_predicate(
+        db, tenant_id, identity, body.project, self_service=settings.project_provisioning == "self_service"
+    )
+    rbac_ms = round((time.perf_counter() - t0) * 1000, 1)
+    read_filters = [*acc.filters(), MemoryNode.scope.not_in(acc.hidden_scopes)]
+    if identity_clause is not None:
+        read_filters.append(identity_clause)
     tenant_settings = await load_tenant_settings(db, tenant_id)
     full_threshold = float(tenant_settings["retrieval"]["full_content_threshold"])
     stages: list[dict] = []
@@ -110,7 +119,9 @@ async def run_search(
     def stage(name: str, started: float, **extra):
         stages.append({"name": name, "ms": round((time.perf_counter() - started) * 1000, 1), **extra})
 
-    base = [MemoryNode.tenant_id == tenant_id, MemoryNode.deleted_at.is_(None), MemoryNode.scope != "entity"]
+    base = [
+        MemoryNode.tenant_id == tenant_id, MemoryNode.deleted_at.is_(None), MemoryNode.scope != "entity", *read_filters,
+    ]
     strict = [MemoryNode.status == "active"]
     if body.current_only:
         strict.append(MemoryNode.is_current.is_(True))
@@ -160,7 +171,7 @@ async def run_search(
     hidden: dict[str, int] = {}
 
     def drop(n: MemoryNode, stage_key: str, reason: str, detail: str, **extra):
-        if acc.can_read_row(n):
+        if acc.can_read_row(n) and not acc.hides(n.scope):
             dropped.append(_brief(n, stage=stage_key, reason=reason, detail=detail, **extra))
         else:
             hidden[stage_key] = hidden.get(stage_key, 0) + 1
@@ -176,16 +187,11 @@ async def run_search(
             relaxed_dropped += 1
             drop(n, "filters", why[0], why[1], score=round(float(score), 4))
 
-    t0 = time.perf_counter()
-    visible, run_as = await _visible_predicate(db, tenant_id, body.identity, body.project)
-    allowed = []
-    for n, s in candidates:
-        if visible(n):
-            allowed.append((n, s))
-        else:
-            drop(n, "rbac", "no_access", f"Outside what {run_as} can read.", score=round(s, 4))
-    rbac_dropped = len(candidates) - len(allowed)
-    stage("rbac", t0)
+    # Access is part of every candidate query, before TOP_K. Inaccessible rows
+    # cannot displace readable matches or reach reranking and context assembly.
+    allowed = candidates
+    rbac_dropped = 0
+    stages.append({"name": "rbac", "ms": rbac_ms, "detail": "Applied before candidate ranking"})
 
     focus_scores: dict[uuid.UUID, float] = {}
     if body.focus and body.session_focus_weight > 0 and allowed:
@@ -359,6 +365,7 @@ async def run_search(
                 run_as,
                 ranked,
                 strict,
+                read_filters,
             )
         )
 
@@ -387,7 +394,8 @@ async def run_search(
 
 
 async def _explain(
-    db, settings, acc, body, raw, qvec, retrieval, returned_ids, dropped_by_id, visible, run_as, ranked, strict
+    db, settings, acc, body, raw, qvec, retrieval, returned_ids, dropped_by_id, visible, run_as, ranked, strict,
+    read_filters,
 ):
     """Where one memory fell out of the pipeline."""
     try:
@@ -397,7 +405,7 @@ async def _explain(
     n = (
         await db.execute(select(MemoryNode).where(MemoryNode.id == mid, MemoryNode.tenant_id == settings.ui_tenant_id))
     ).scalar_one_or_none()
-    if n is None or not acc.can_read_row(n):
+    if n is None or not acc.can_read_row(n) or acc.hides(n.scope):
         return {"id": raw, "found": False, "stage": "missing", "detail": "No memory with this ID that you can read."}
     out = _brief(n, found=True)
     if str(n.id) in returned_ids:
@@ -426,6 +434,7 @@ async def _explain(
                     MemoryNode.deleted_at.is_(None),
                     MemoryNode.scope != "entity",
                     *strict,
+                    *read_filters,
                     MemoryNode.embedding.is_not(None),
                     MemoryNode.embedding.cosine_distance(qvec) < 1 - sim,
                 )

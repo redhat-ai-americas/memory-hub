@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     # https://oauth-openshift.apps.<cluster>/logout from the route host.
     ui_oauth_logout_url: str = ""
     # TEST DEPLOYMENTS ONLY. Adds an account switcher to the user menu that lets
-    # whoever is signed in view the dashboard as another identity and role
+    # a platform administrator view the dashboard as another identity and role
     # (admin / user), without logging out. Never enable in production.
     ui_test_mode: bool = False
     # Background scheduler inside the BFF: runs due dreams (nightly / weekly)

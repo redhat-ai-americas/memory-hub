@@ -29,7 +29,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request
 from memoryhub_core.models.campaign import CampaignMembership
 from memoryhub_core.models.memory import MemoryNode
-from memoryhub_core.models.project import ProjectMembership
+from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.role import RoleAssignment
 from sqlalchemy import false, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,13 +118,19 @@ class Grants:
         return {self.identity} | self.agents
 
 
-async def load_grants(db: AsyncSession, tenant_id: str, identity: str) -> Grants:
+async def load_grants(db: AsyncSession, tenant_id: str, identity: str, *, include_agents: bool = True) -> Grants:
     from src.ownership import owned_agents
 
-    agents = await owned_agents(db, tenant_id, identity)
+    agents = await owned_agents(db, tenant_id, identity) if include_agents else set()
     who = list({identity} | agents)
     projects = set(
-        (await db.execute(select(ProjectMembership.project_id).where(ProjectMembership.user_id.in_(who))))
+        (
+            await db.execute(
+                select(ProjectMembership.project_id)
+                .join(Project, Project.name == ProjectMembership.project_id)
+                .where(ProjectMembership.user_id.in_(who), Project.tenant_id == tenant_id)
+            )
+        )
         .scalars()
         .all()
     )

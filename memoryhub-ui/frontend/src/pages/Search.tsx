@@ -406,7 +406,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
             </div>
             <div className="f">
               <label htmlFor="as">Run as identity</label>
-              <input id="as" className="in" list="identity-list" value={form.identity} onChange={(e) => set('identity', e.target.value)} placeholder={`Dashboard (${me?.username ?? 'admin'}) — no RBAC filter`} />
+              <input id="as" className="in" list="identity-list" value={form.identity} onChange={(e) => set('identity', e.target.value)} placeholder={`Dashboard (${me?.username ?? 'admin'})`} />
               <datalist id="identity-list">
                 {identities.map((i) => (
                   <option key={i.id} value={i.id}>
@@ -414,7 +414,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
                   </option>
                 ))}
               </datalist>
-              <span className="hint">Results are filtered by this identity’s scopes and memberships.</span>
+              <span className="hint">Search runs as the selected identity and stays within your access permissions.</span>
             </div>
             <div className="f">
               <label htmlFor="pj">Project context</label>

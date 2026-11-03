@@ -21,8 +21,6 @@ from memoryhub_core.models.audit import AuditLog
 from memoryhub_core.models.campaign import CampaignMembership
 from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
-from memoryhub_core.models.project import ProjectMembership
-from memoryhub_core.models.role import RoleAssignment
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Float, String, and_, case, cast, exists, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +44,7 @@ from src.ui_common import (
     parse_uuid,
     preview,
     probe_components,
+    real_viewer,
     viewer_from_request,
 )
 
@@ -127,7 +126,7 @@ async def me(request: Request, db: DbDep, settings: SettingsDep):
         "role": viewer.role,
         "real_username": viewer.real_username,
         "real_role": viewer.real_role,
-        "test_mode": settings.ui_test_mode,
+        "test_mode": settings.ui_test_mode and real_viewer(request, settings).can_admin,
         "labs": settings.ui_labs,
         "tenant_id": settings.ui_tenant_id,
     }
@@ -2262,68 +2261,32 @@ class SearchRequest(BaseModel):
     explain: list[str] = Field(default_factory=list, max_length=10)
 
 
-async def _visible_predicate(db: AsyncSession, tenant_id: str, identity: str | None, project: str | None):
-    """Python predicate reproducing the MCP read RBAC for one identity.
+async def _visible_predicate(
+    db: AsyncSession, tenant_id: str, identity: str | None, project: str | None, *, self_service: bool = False
+):
+    """Matching Python and SQL read predicates for the selected search identity."""
+    from src.access import load_grants, readable_clause, readable_python
 
-    Returns (predicate, description). Organizational and enterprise memories
-    are tenant-wide; user memories need ownership; project, role and campaign
-    memories need a membership.
-    """
     if not identity:
-        return (lambda n: True), "dashboard (admin)"
-    projects = set(
-        (await db.execute(select(ProjectMembership.project_id).where(ProjectMembership.user_id == identity)))
-        .scalars()
-        .all()
-    )
-    if project and project not in projects:
-        # Open projects enroll an agent on first use, so the declared project
-        # context is readable; invite-only projects still need a membership.
+        return (lambda n: True), "dashboard (admin)", None
+    grants = await load_grants(db, tenant_id, identity, include_agents=False)
+    if self_service and project and project not in grants.projects:
+        # Only the explicit self-service mode permits simulated enrollment.
         from memoryhub_core.models.project import Project
 
         invite_only = (
             await db.execute(select(Project.invite_only).where(Project.name == project, Project.tenant_id == tenant_id))
         ).scalar_one_or_none()
         if invite_only is False:
-            projects.add(project)
-    roles = set(
-        (
-            await db.execute(
-                select(RoleAssignment.role_name).where(
-                    RoleAssignment.user_id == identity, RoleAssignment.tenant_id == tenant_id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    campaigns = set()
-    if projects:
-        campaigns = {
-            str(c)
-            for c in (
-                await db.execute(
-                    select(CampaignMembership.campaign_id).where(CampaignMembership.project_id.in_(list(projects)))
-                )
-            )
-            .scalars()
-            .all()
-        }
-
-    def visible(n: MemoryNode) -> bool:
-        if n.scope in ("organizational", "enterprise"):
-            return True
-        if n.scope == "user":
-            return n.owner_id == identity
-        if n.scope == "project":
-            return (n.scope_id or n.owner_id) in projects
-        if n.scope == "role":
-            return (n.scope_id or n.owner_id) in roles
-        if n.scope == "campaign":
-            return (n.scope_id or n.owner_id) in campaigns
-        return False
-
-    return visible, identity
+            grants.projects.add(project)
+            grants.campaigns |= {
+                str(c) for c in (
+                    await db.execute(
+                        select(CampaignMembership.campaign_id).where(CampaignMembership.project_id == project)
+                    )
+                ).scalars()
+            }
+    return readable_python(grants), identity, readable_clause(grants)
 
 
 @router.post("/api/search")

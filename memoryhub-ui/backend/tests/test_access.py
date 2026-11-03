@@ -182,7 +182,7 @@ async def test_oauth_proxy_logout_is_a_post_form(monkeypatch):
 def test_test_mode_switcher_overrides_viewer_only_in_test_mode():
     from src.ui_common import VIEW_AS_COOKIE, make_view_as_cookie, viewer_from_request
 
-    on = Settings(ui_trust_proxy_headers=True, ui_test_mode=True, ui_session_secret="k")
+    on = Settings(ui_trust_proxy_headers=True, ui_test_mode=True, ui_session_secret="k", ui_admin_users="kr")
     cookie = make_view_as_cookie("alice", "admin", on)
     req = _request(headers={"x-forwarded-user": "kr"})
     req.cookies = {VIEW_AS_COOKIE: cookie}

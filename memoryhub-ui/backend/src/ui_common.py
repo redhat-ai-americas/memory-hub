@@ -153,6 +153,8 @@ def viewer_from_request(request: Request, settings: Settings) -> Viewer:
     """The effective viewer: the signed-in person, or whoever they switched to
     with the test-mode account switcher (MEMORYHUB_UI_TEST_MODE=true)."""
     real = real_viewer(request, settings)
+    if not real.can_admin:
+        return real
     view_as = read_view_as(request, settings)
     if not view_as or (view_as[0] == real.username and view_as[1] == real.role):
         return real

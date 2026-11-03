@@ -24,7 +24,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from memoryhub_core.models.project import Project, ProjectMembership
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -344,8 +344,14 @@ async def update_team(team_id: str, body: TeamUpdate, request: Request, db: DbDe
         if "name" in changes:
             # Keep team-derived memberships labelled with the current name.
             await db.execute(
-                text("UPDATE project_memberships SET joined_by = :new WHERE joined_by = :old"),
-                {"new": f"{TEAM_PREFIX}{changes['name']}", "old": f"{TEAM_PREFIX}{team['name']}"},
+                update(ProjectMembership)
+                .where(
+                    ProjectMembership.joined_by == f"{TEAM_PREFIX}{team['name']}",
+                    ProjectMembership.project_id.in_(
+                        select(Project.name).where(Project.tenant_id == settings.ui_tenant_id)
+                    ),
+                )
+                .values(joined_by=f"{TEAM_PREFIX}{changes['name']}"),
             )
         await audit(
             db,

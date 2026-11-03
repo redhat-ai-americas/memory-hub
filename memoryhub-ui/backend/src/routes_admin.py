@@ -93,7 +93,7 @@ async def auth_status(request: Request, db: DbDep, settings: SettingsDep):
         "role": viewer.role,
         "cluster_domain": settings.cluster_domain or None,
         "setup_required": False,
-        "test_mode": settings.ui_test_mode,
+        "test_mode": settings.ui_test_mode and real_viewer(request, settings).can_admin,
     }
     if settings.ui_local_accounts and viewer.source != "oauth-proxy":
         from src.accounts import accounts_status
@@ -183,6 +183,8 @@ def _switch_allowed(request: Request, settings: Settings):
     real = real_viewer(request, settings)
     if real.source == "anonymous" and auth_enabled(settings):
         raise HTTPException(status_code=401, detail="Log in to the dashboard first")
+    if not real.can_admin:
+        raise HTTPException(status_code=403, detail="Only platform admins can use the test account switcher")
     return real
 
 
@@ -1578,13 +1580,19 @@ class _BriefRow:
 
 
 async def _review_item(
-    db: AsyncSession, tenant_id: str, node: MemoryNode, kind: str, threshold: int, full_threshold: float
+    db: AsyncSession, tenant_id: str, node: MemoryNode, kind: str, threshold: int, full_threshold: float, acc
 ) -> dict:
+    content_filters = [*acc.filters(), MemoryNode.scope.not_in(acc.hidden_scopes)]
     branches = (
         (
             await db.execute(
                 select(MemoryNode)
-                .where(MemoryNode.parent_id == node.id, MemoryNode.deleted_at.is_(None))
+                .where(
+                    MemoryNode.parent_id == node.id,
+                    MemoryNode.tenant_id == tenant_id,
+                    MemoryNode.deleted_at.is_(None),
+                    *content_filters,
+                )
                 .order_by(MemoryNode.created_at)
             )
         )
@@ -1600,6 +1608,7 @@ async def _review_item(
                     MemoryRelationship.source_id == node.id,
                     MemoryRelationship.relationship_type == "derived_from",
                     MemoryNode.tenant_id == tenant_id,
+                    *content_filters,
                 )
             )
         )
@@ -1614,6 +1623,7 @@ async def _review_item(
                 select(MemoryNode, (1 - distance))
                 .where(
                     *live_filters(tenant_id),
+                    *content_filters,
                     MemoryNode.id != node.id,
                     MemoryNode.parent_id.is_(None),
                     MemoryNode.status == "active",
@@ -1625,7 +1635,10 @@ async def _review_item(
             )
         ).first()
         if row and row[1] >= 0.75:
-            similar = {"id": str(row[0].id), "stub": clean_stub(row[0].stub), "score": round(float(row[1]), 3)}
+            similar = {
+                "id": str(row[0].id), "stub": clean_stub(row[0].stub), "score": round(float(row[1]), 3),
+                "scope": row[0].scope, "scope_id": row[0].scope_id, "owner_id": row[0].owner_id,
+            }
     from memoryhub_core.services.curation.scanner import scan_content
 
     scan = scan_content(node.content, pattern_set="all")
@@ -1741,6 +1754,7 @@ async def review_queue(
     counts = await _review_counts(db, tenant_id, threshold)
     approvers_needed = int(tenant_settings["governance"]["enterprise_approvers"])
     viewer = viewer_from_request(request, settings)
+    acc = await access_for(db, settings, viewer)
     items: list[dict] = []
 
     def summary(node: MemoryNode, kind: str, **extra) -> dict:
@@ -1824,17 +1838,17 @@ async def review_queue(
         events = (
             await db.execute(
                 select(AuditLog, MemoryNode)
-                .outerjoin(MemoryNode, MemoryNode.id == AuditLog.memory_id)
-                .where(AuditLog.tenant_id == tenant_id, AuditLog.event_type.like("review.%"))
+                .outerjoin(MemoryNode, and_(MemoryNode.id == AuditLog.memory_id, MemoryNode.tenant_id == tenant_id))
+                .where(AuditLog.tenant_id == tenant_id, AuditLog.event_type.like("review.%"), *acc.filters())
                 .order_by(AuditLog.timestamp.desc())
                 .limit(100)
             )
         ).all()
         items = [{"kind": "history", **_event_row(e, m, {})} for e, m in events]
 
-    acc = await access_for(db, settings, viewer)
-    if acc.grants is not None:
-        items = [i for i in items if i.get("kind") == "history" or acc.can_read_row(_BriefRow(i))]
+    # History rows have already been authorized in SQL before applying the limit.
+    if acc.grants is not None and tab != "history":
+        items = [i for i in items if acc.can_read_row(_BriefRow(i))]
     items = acc.redact_tree(items)
 
     # "Also waiting": the first item of every other queue.
@@ -1870,6 +1884,7 @@ async def review_item(
         kind,
         int(tenant_settings["governance"]["contradiction_threshold"]),
         float(tenant_settings["retrieval"]["full_content_threshold"]),
+        acc,
     )
     agents = (
         await db.execute(

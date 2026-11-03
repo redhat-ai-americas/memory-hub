@@ -6,6 +6,14 @@ An OAuth-proxy deployment must explicitly set `MEMORYHUB_UI_TRUST_PROXY_HEADERS=
 
 With all three authentication settings disabled, the dashboard retains its existing open development mode.
 
+## Test account switching
+
+The OpenShift manifest disables `MEMORYHUB_UI_TEST_MODE`. Enable it explicitly
+only on an isolated development deployment. The switcher requires a real
+platform administrator or the open development operator; regular users cannot
+use it or reuse a previously issued view-as cookie. Keep the flag disabled in
+production, since this development feature intentionally simulates other roles.
+
 ## Upgrading local sessions
 
 Migration `0004_account_sessions` adds `memoryhub_ui_accounts.session_version`. The standard startup migration applies it automatically. Deployments that manage migrations separately should run `alembic upgrade head` from this directory before serving the updated backend.

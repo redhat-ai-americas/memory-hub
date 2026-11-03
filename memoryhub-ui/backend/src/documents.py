@@ -434,28 +434,25 @@ async def memory_source(memory_id: str, db: DbDep, settings: SettingsDep, viewer
             {"m": node.id},
         )
     ).first()
-    meta = (node.metadata_ or {}).get("source_document")
     if link is None:
-        return {"linked": False, "title": meta.get("title") if meta else None}
+        return {"linked": False}
     if viewer.redacts_content:
         return {"linked": True, "redacted": True, "status": link[3]}
-    doc = (
-        await db.execute(text(f"SELECT title, body, version, owner, project FROM {DOCS} WHERE id = :d"), {"d": link[0]})
-    ).first()
-    if doc is None:
-        return {"linked": True, "document_deleted": True, "snippet": link[4], "status": link[3]}
-    body = doc[1]
+    try:
+        doc = await _doc(db, settings, viewer, str(link[0]))
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        # Reading a derived memory does not grant access to its source document.
+        return {"linked": True, "redacted": True, "status": link[3]}
+    body = doc[4]
     s, e = link[1], link[2]
-    can_open = doc[3] == viewer.username
-    if not can_open and doc[4]:
-        acc = await access_for(db, settings, viewer)
-        can_open = acc.grants is None or doc[4] in acc.grants.projects
     return {
         "linked": True,
-        "document_id": str(link[0]) if can_open else None,
-        "title": doc[0],
+        "document_id": str(doc[0]),
+        "title": doc[2],
         "status": link[3],
-        "version": doc[2],
+        "version": doc[5],
         "linked_version": link[5],
         "before": body[max(0, s - 240) : s],
         "passage": body[s:e] if link[3] != "changed" else link[4],
