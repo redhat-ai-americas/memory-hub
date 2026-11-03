@@ -250,7 +250,13 @@ CLAIMS_A_USER_OTHER = {
 
 
 def _mock_session():
-    return MagicMock(), AsyncMock()
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=result)
+    return session, AsyncMock()
 
 
 def _mock_create_memory_factory(store: FakeMemoryStore):
@@ -640,7 +646,6 @@ async def test_update_as_b_fails_on_tenant_a_memory():
     (the tenant filter short-circuits before the write path is even
     reached)."""
     from fastmcp.exceptions import ToolError
-
     from src.tools.update_memory import update_memory
     from src.tools.write_memory import write_memory
 
@@ -815,7 +820,6 @@ async def test_delete_as_b_fails_on_tenant_a_memory():
     delete fails at the auth pre-check and never reaches the service
     delete path."""
     from fastmcp.exceptions import ToolError
-
     from src.tools.delete_memory import delete_memory
     from src.tools.write_memory import write_memory
 
@@ -907,7 +911,6 @@ async def test_get_memory_history_as_b_fails_on_tenant_a_memory():
     include_versions=True.
     """
     from fastmcp.exceptions import ToolError
-
     from src.tools.read_memory import read_memory
     from src.tools.write_memory import write_memory
 
@@ -1477,7 +1480,6 @@ async def test_report_contradiction_cross_tenant_fails():
     tenant-filters, so the call fails at "not found" before ever
     inserting a contradiction report."""
     from fastmcp.exceptions import ToolError
-
     from src.tools.manage_curation import manage_curation
     from src.tools.write_memory import write_memory
 

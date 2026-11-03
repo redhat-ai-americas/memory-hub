@@ -2,12 +2,21 @@
 
 import inspect
 from datetime import UTC
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 import src.tools.auth as auth_mod
 from src.tools.search_memory import search_memory
+
+
+def _mock_async_session():
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=result)
+    return session
 
 
 def test_search_memory_is_importable():
@@ -1056,9 +1065,7 @@ async def test_search_memory_forwards_tenant_id_to_service():
     """The tool must forward the caller's tenant_id (from JWT claims)
     into search_memories AND count_search_matches so the SQL-level
     filter runs in the correct tenant."""
-    from unittest.mock import MagicMock
-
-    mock_session = MagicMock()
+    mock_session = _mock_async_session()
     mock_gen = AsyncMock()
     fake_embedding_service = AsyncMock()
     fake_claims = {
@@ -1113,11 +1120,9 @@ async def test_search_memory_forwards_tenant_id_to_service():
 async def test_search_memory_focused_path_forwards_tenant_id():
     """When focus is set, the tool routes to search_memories_with_focus;
     tenant_id must be forwarded there too."""
-    from unittest.mock import MagicMock
-
     from memoryhub_core.services.memory import FocusedSearchResult
 
-    mock_session = MagicMock()
+    mock_session = _mock_async_session()
     mock_gen = AsyncMock()
     fake_embedding_service = AsyncMock()
     fake_reranker = AsyncMock()
@@ -1544,11 +1549,9 @@ async def test_graph_fallback_reason_surfaces_when_traversal_finds_nothing():
 @pytest.mark.asyncio
 async def test_graph_relationship_types_forwarded_to_service():
     """graph_relationship_types is forwarded as-is to search_memories_with_focus."""
-    from unittest.mock import MagicMock
-
     from memoryhub_core.services.memory import FocusedSearchResult
 
-    mock_session = MagicMock()
+    mock_session = _mock_async_session()
     mock_gen = AsyncMock()
     fake_embedding_service = AsyncMock()
     fake_reranker = AsyncMock()
@@ -1612,11 +1615,9 @@ async def test_graph_relationship_types_forwarded_to_service():
 @pytest.mark.asyncio
 async def test_graph_boost_weight_forwarded_to_service():
     """graph_boost_weight is forwarded to search_memories_with_focus."""
-    from unittest.mock import MagicMock
-
     from memoryhub_core.services.memory import FocusedSearchResult
 
-    mock_session = MagicMock()
+    mock_session = _mock_async_session()
     mock_gen = AsyncMock()
     fake_embedding_service = AsyncMock()
     fake_reranker = AsyncMock()
@@ -1849,9 +1850,7 @@ def test_search_memory_has_entities_param():
 async def test_search_memory_forwards_entities_to_service():
     """When entities is passed, the tool must forward entity_names to the
     underlying service layer."""
-    from unittest.mock import MagicMock
-
-    mock_session = MagicMock()
+    mock_session = _mock_async_session()
     mock_gen = AsyncMock()
     fake_embedding_service = AsyncMock()
     fake_claims = {
@@ -1924,6 +1923,7 @@ class TestCompactEntryHonestyFlags:
         from datetime import datetime
 
         from src.tools.search_memory import _compact_entry
+
         from memoryhub_core.models.schemas import MemoryNodeRead, MemoryScope, StorageType
 
         node = MemoryNodeRead(
@@ -1990,9 +1990,7 @@ async def test_search_memory_forwards_content_type_to_count():
     (not introduced by #552's schema work) surfaced by adding a fourth
     content_type value; affects any content_type- or source-filtered
     search, not just content_type="procedural"."""
-    from unittest.mock import MagicMock
-
-    mock_session = MagicMock()
+    mock_session = _mock_async_session()
     mock_gen = AsyncMock()
     fake_embedding_service = AsyncMock()
     fake_claims = {

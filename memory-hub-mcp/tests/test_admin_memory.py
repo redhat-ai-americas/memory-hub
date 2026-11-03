@@ -4,17 +4,15 @@ Tests action dispatch routing, parameter validation, and authorization
 checks. Underlying service functions are patched to isolate the tool layer.
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastmcp.exceptions import ToolError
-
 from src.tools.admin_memory import (
     _VALID_ACTIONS,
     _check_admin_scope,
     admin_memory,
 )
-
 
 # ── Authorization tests ──────────────────────────────────────────────────
 
@@ -224,6 +222,16 @@ class TestScopeEnforcement:
 
 
 class TestDispatchRouting:
+    @staticmethod
+    def _session():
+        session = MagicMock()
+        session.commit = AsyncMock()
+        session.rollback = AsyncMock()
+        result = MagicMock()
+        result.first.return_value = None
+        session.execute = AsyncMock(return_value=result)
+        return session
+
     def _admin_claims(self, extra_scopes=None):
         scopes = ["memory:admin"]
         if extra_scopes:
@@ -250,7 +258,7 @@ class TestDispatchRouting:
             patch(
                 "src.tools._deps.get_db_session",
                 new_callable=AsyncMock,
-                return_value=("mock_session", "mock_gen"),
+                return_value=(self._session(), "mock_gen"),
             ),
             patch(
                 "src.tools._deps.get_embedding_service",
@@ -290,7 +298,7 @@ class TestDispatchRouting:
             patch(
                 "src.tools._deps.get_db_session",
                 new_callable=AsyncMock,
-                return_value=("mock_session", "mock_gen"),
+                return_value=(self._session(), "mock_gen"),
             ),
             patch(
                 "src.tools._deps.release_db_session",
