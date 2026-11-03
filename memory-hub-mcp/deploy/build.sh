@@ -27,7 +27,15 @@ import sys
 main_py = os.environ["MAIN_PY"]
 tools_dir = os.environ["TOOLS_DIR"]
 
-non_tool_files = {"auth.py", "backfill_entities.py"}
+# Persona implementations are invoked by the registered persona dispatcher;
+# they are intentionally not registered as standalone MCP tools.
+non_tool_files = {
+    "auth.py",
+    "backfill_entities.py",
+    "compile_persona.py",
+    "edit_persona.py",
+    "get_persona.py",
+}
 files = {
     f[:-3]
     for f in os.listdir(tools_dir)
