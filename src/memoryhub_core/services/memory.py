@@ -668,8 +668,14 @@ async def update_memory(
             content=child.content,
             stub=child.stub,
             scope=child.scope,
+            # A deep copy is the same branch: it keeps the project it lives in
+            # and who wrote it, or it silently leaves the project and the
+            # authorship checks stop recognising its author.
+            scope_id=child.scope_id,
             weight=child.weight,
             owner_id=child.owner_id,
+            actor_id=child.actor_id,
+            driver_id=child.driver_id,
             tenant_id=child.tenant_id,
             parent_id=new_node.id,
             branch_type=child.branch_type,

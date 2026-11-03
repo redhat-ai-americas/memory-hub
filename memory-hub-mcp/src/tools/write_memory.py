@@ -37,12 +37,21 @@ from memoryhub_core.services.exceptions import (
     EmbeddingContentTooLargeError,
     EmbeddingServiceError,
     EmbeddingServiceUnavailableError,
+    InvalidProjectPolicyError,
     MemoryAccessDeniedError,
     MemoryNotFoundError,
+    ProjectArchivedError,
     ProjectInviteOnlyError,
+    ProjectMembershipRequiredError,
+    ProjectNotProvisionedError,
+    ProjectQuotaExceededError,
 )
 from memoryhub_core.services.memory import create_fact_children, create_memory
-from memoryhub_core.services.project import ensure_project_membership
+from memoryhub_core.services.project import (
+    ensure_project_membership,
+    project_write_policies,
+    relevant_until_from_policies,
+)
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
 
@@ -191,14 +200,15 @@ async def write_memory(
         ),
     ] = None,
     weight: Annotated[
-        float,
+        float | None,
         Field(
             description=(
                 "Injection priority from 0.0 to 1.0. High-weight (0.8-1.0) "
-                "memories get full content injected. Default 0.7."
+                "memories get full content injected. Default 0.7, or the "
+                "project's default weight for project-scoped writes."
             ),
         ),
-    ] = 0.7,
+    ] = None,
     parent_id: Annotated[
         str | None,
         Field(
@@ -409,10 +419,12 @@ async def write_memory(
             await release_db_session(gen_for_campaign)
 
     # Resolve project membership when writing to project scope.
-    # Auto-enrolls the user if the project is open (or creates it).
+    # Central provisioning (default): members only. Self-service: auto-enrolls
+    # the user if the project is open (or creates it).
     project_ids: set[str] | None = None
     scope_id_value: str | None = None
     was_auto_enrolled = False
+    project_policies: dict = {}
     if scope == "project":
         if not project_id:
             raise ToolError(
@@ -453,6 +465,13 @@ async def write_memory(
                     session_for_project, project_id, claims["sub"], write_tenant_id,
                     description=project_description,
                 )
+                # #671: archived projects are read-only; max_memories caps new
+                # memories (branches are not new memories); ttl_days and
+                # default_weight shape what is written below.
+                project_policies = await project_write_policies(
+                    session_for_project, project_id, write_tenant_id,
+                    new_memory=parent_id is None,
+                )
                 await session_for_project.commit()
                 if was_auto_enrolled:
                     user = get_current_user()
@@ -460,7 +479,14 @@ async def write_memory(
                         existing = set(user.get("project_memberships", []))
                         existing.add(project_id)
                         user["project_memberships"] = sorted(existing)
-            except ProjectInviteOnlyError as exc:
+            except (
+                ProjectInviteOnlyError,
+                ProjectNotProvisionedError,
+                ProjectMembershipRequiredError,
+                ProjectArchivedError,
+                ProjectQuotaExceededError,
+                InvalidProjectPolicyError,
+            ) as exc:
                 raise ToolError(str(exc)) from exc
             finally:
                 await release_db_session(gen_for_project)
@@ -556,6 +582,11 @@ async def write_memory(
                     f"Invalid relevant_until format: '{relevant_until}'. "
                     "Use an ISO 8601 timestamp or date (for example, '2026-12-31T23:59:59Z' or '2026-12-31')."
                 ) from None
+        if parsed_relevant_until is None and parent_id is None:
+            # Project ttl_days: new project memories go stale after N days.
+            parsed_relevant_until = relevant_until_from_policies(project_policies)
+        if weight is None:
+            weight = project_policies.get("default_weight", 0.7)
 
         # Build the create schema with validation
         # Only pass content_type if explicitly provided; let Pydantic default apply

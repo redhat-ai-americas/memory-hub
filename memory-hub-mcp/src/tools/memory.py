@@ -26,6 +26,8 @@ _VALID_ACTIONS = frozenset({
     "write", "update", "delete", "set_focus", "relate",
     "report", "resolve", "set_rule",
     "create_project", "add_member", "remove_member", "promote",
+    "update_project", "archive_project", "unarchive_project",
+    "delete_project", "set_member_role",
     "graduate", "checkpoint",
     # Admin actions
     "backfill_entities",
@@ -233,6 +235,15 @@ async def memory(
         Add user to project.
       remove_member(project_id, options: {user_id})
         Remove user from project.
+      update_project(project_id, options: {description, invite_only, policies})
+        Project admins: change description, enrollment or policies
+        ({ttl_days, max_memories, default_weight}; null removes one).
+      archive_project(project_id) / unarchive_project(project_id)
+        Project admins: make the project read-only, or writable again.
+      delete_project(project_id)
+        memory:admin / project:admin only: soft-delete the project and all its memories.
+      set_member_role(project_id, options: {user_id, role})
+        Project admins: role is member or admin; the last admin stays.
       promote(memory_id, options: {target_scope}, [options: target_scope_id])
         Promote memory to broader scope. Creates new memory linked via derived_from.
       graduate(memory_id, [options: evidence, reviewer_note])
@@ -317,6 +328,8 @@ async def memory(
         return await _dispatch_add_member(project_id, opts, ctx)
     if action == "remove_member":
         return await _dispatch_remove_member(project_id, opts, ctx)
+    if action in _PROJECT_LIFECYCLE:
+        return await _dispatch_project_lifecycle(action, project_id, opts, ctx)
     if action == "promote":
         return await _dispatch_promote(memory_id, project_id, opts, ctx)
     if action == "graduate":
@@ -566,6 +579,32 @@ async def _dispatch_create_project(project_id, opts, ctx):
     return await manage_project(
         action="create", project_name=project_name, ctx=ctx,
         **kwargs,
+    )
+
+
+_PROJECT_LIFECYCLE = {
+    "update_project": "update",
+    "archive_project": "archive",
+    "unarchive_project": "unarchive",
+    "delete_project": "delete",
+    "set_member_role": "set_role",
+}
+
+
+async def _dispatch_project_lifecycle(action, project_id, opts, ctx):
+    from src.tools.manage_project import manage_project
+    _require(action, "project_id", project_id)
+    kwargs = {}
+    if action == "update_project":
+        for key in ("description", "invite_only", "policies"):
+            if key in opts:
+                kwargs[key] = opts[key]
+    if action == "set_member_role":
+        _opt_require(action, "user_id", opts)
+        _opt_require(action, "role", opts)
+        kwargs["user_id"], kwargs["role"] = opts["user_id"], opts["role"]
+    return await manage_project(
+        action=_PROJECT_LIFECYCLE[action], project_name=project_id, ctx=ctx, **kwargs,
     )
 
 

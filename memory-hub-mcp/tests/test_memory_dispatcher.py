@@ -71,7 +71,7 @@ class TestActionValidation:
 
     def test_valid_actions_count(self):
         assert "guidance" in _VALID_ACTIONS
-        assert len(_VALID_ACTIONS) == 29
+        assert len(_VALID_ACTIONS) == 34  # +5 project lifecycle actions (#671)
 
 
 # ── Required param validation ──────────────────────────────────────────────

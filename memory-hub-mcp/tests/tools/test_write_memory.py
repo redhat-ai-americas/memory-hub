@@ -42,7 +42,8 @@ def test_write_memory_default_values():
     sig = inspect.signature(write_memory)
     params = sig.parameters
 
-    assert params["weight"].default == 0.7
+    # None: 0.7, or the project's default_weight for project writes (#671).
+    assert params["weight"].default is None
     assert params["parent_id"].default is None
     assert params["branch_type"].default is None
     assert params["metadata"].default is None

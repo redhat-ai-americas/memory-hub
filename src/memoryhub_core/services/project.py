@@ -4,30 +4,57 @@ Provides helpers that resolve which projects a user has access to,
 based on project_memberships rows. Used by the authz layer and search
 filters to include project-scoped memories in results.
 
-Also provides auto-enrollment: when a user writes to a project they
-are not yet a member of, ``ensure_project_membership`` creates the
-project (if needed) and the membership row automatically — unless the
-project is invite-only.
+Project provisioning has two modes (``MEMORYHUB_PROJECT_PROVISIONING``):
+
+* ``central`` (default): projects are created by administrators, with their
+  members, through the dashboard, the CLI or ``manage_project(create)`` with
+  admin rights. Writing to a project never creates or joins it; callers
+  must already be members. This stops look-alike projects from piling up and
+  stops anyone who knows a project's name from joining it and reading its
+  memories.
+* ``self_service``: the earlier behaviour for sandboxes and personal use —
+  when a user writes to a project they are not yet a member of,
+  ``ensure_project_membership`` creates the project (if needed) and the
+  membership row automatically, unless the project is invite-only.
 """
 
 import logging
+import os
 import uuid
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.services.exceptions import (
+    InvalidProjectPolicyError,
     LastAdminError,
     MembershipNotFoundError,
     ProjectAlreadyExistsError,
+    ProjectArchivedError,
     ProjectInviteOnlyError,
+    ProjectMembershipRequiredError,
     ProjectNotFoundError,
+    ProjectNotProvisionedError,
+    ProjectQuotaExceededError,
 )
 
 logger = logging.getLogger(__name__)
+
+PROVISIONING_MODES = ("central", "self_service")
+
+
+def provisioning_mode() -> str:
+    """``central`` (default) or ``self_service``; read on every call so tests and
+    restarts pick up the environment."""
+    mode = os.environ.get("MEMORYHUB_PROJECT_PROVISIONING", "central").strip().lower()
+    if mode not in PROVISIONING_MODES:
+        logger.warning("Unknown MEMORYHUB_PROJECT_PROVISIONING=%r; using 'central'", mode)
+        return "central"
+    return mode
 
 
 async def get_projects_for_user(
@@ -41,7 +68,8 @@ async def get_projects_for_user(
     """
     stmt = (
         select(ProjectMembership.project_id)
-        .where(ProjectMembership.user_id == user_id)
+        .join(Project, ProjectMembership.project_id == Project.name)
+        .where(ProjectMembership.user_id == user_id, Project.deleted_at.is_(None))
     )
     result = await session.execute(stmt)
     return {row[0] for row in result.all()}
@@ -59,6 +87,7 @@ async def get_projects_for_user_in_tenant(
         .where(
             ProjectMembership.user_id == user_id,
             Project.tenant_id == tenant_id,
+            Project.deleted_at.is_(None),
         )
     )
     result = await session.execute(stmt)
@@ -89,9 +118,12 @@ async def assert_project_membership(
 async def get_project(
     session: AsyncSession,
     project_name: str,
+    include_deleted: bool = False,
 ) -> Project | None:
-    """Fetch a project by name, or None if it doesn't exist."""
+    """Fetch a project by name, or None if it doesn't exist (or was deleted)."""
     stmt = select(Project).where(Project.name == project_name)
+    if not include_deleted:
+        stmt = stmt.where(Project.deleted_at.is_(None))
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -102,8 +134,12 @@ async def ensure_project_membership(
     user_id: str,
     tenant_id: str,
     description: str | None = None,
+    mode: str | None = None,
 ) -> tuple[set[str], bool]:
     """Ensure the user is a member of the project, auto-enrolling if allowed.
+
+    In ``central`` provisioning mode (the default, see ``provisioning_mode``)
+    nothing is created or joined: members pass, everyone else is refused.
 
     Returns:
         A tuple of (project_ids, was_auto_enrolled) where project_ids is
@@ -111,14 +147,25 @@ async def ensure_project_membership(
 
     Raises:
         ProjectInviteOnlyError: If the project exists and is invite-only.
+        ProjectNotProvisionedError: Central mode, the project does not exist.
+        ProjectMembershipRequiredError: Central mode, the caller is not a member.
     """
     # Fast path: user is already a member.
     project_ids = await get_projects_for_user(session, user_id)
     if project_id in project_ids:
+        await assert_project_writable(session, project_id)
         return project_ids, False
 
-    # Fetch or create the project.
+    # Fetch or create the project. A deleted project's name stays reserved.
     project = await get_project(session, project_id)
+    if project is None and await get_project(session, project_id, include_deleted=True) is not None:
+        raise ProjectNotProvisionedError(project_id)
+    if project is not None and project.archived_at is not None:
+        raise ProjectArchivedError(project_id)
+    if (mode or provisioning_mode()) == "central":
+        if project is None or project.tenant_id != tenant_id:
+            raise ProjectNotProvisionedError(project_id)
+        raise ProjectMembershipRequiredError(project_id)
     if project is not None and project.invite_only:
         raise ProjectInviteOnlyError(project_id)
 
@@ -173,9 +220,10 @@ async def create_project(
     """Create a new project.
 
     Raises:
-        ProjectAlreadyExistsError: If a project with this name already exists.
+        ProjectAlreadyExistsError: If a project with this name already exists
+            (including a deleted one: names are never reused).
     """
-    existing = await get_project(session, name)
+    existing = await get_project(session, name, include_deleted=True)
     if existing is not None:
         raise ProjectAlreadyExistsError(name)
 
@@ -220,6 +268,7 @@ async def get_project_members(
     project = await get_project(session, project_name)
     if project is None:
         raise ProjectNotFoundError(project_name)
+    await lock_project(session, project_name)
 
     stmt = (
         select(ProjectMembership)
@@ -278,6 +327,18 @@ async def add_project_member(
         user_id, project_name, role, added_by,
     )
     return True
+
+
+async def lock_project(session: AsyncSession, name: str) -> Project | None:
+    """Lock the project row until the transaction ends.
+
+    Serialises the check-then-write guards on one project (the last admin,
+    the memory quota) so two concurrent requests cannot both pass them.
+    PostgreSQL ``SELECT ... FOR UPDATE``; a no-op on SQLite.
+    """
+    return (
+        await session.execute(select(Project).where(Project.name == name).with_for_update())
+    ).scalar_one_or_none()
 
 
 async def remove_project_member(
@@ -350,7 +411,7 @@ async def list_projects_for_tenant(
     """
     if include_all_open:
         # All open projects + user's invite-only projects.
-        stmt = select(Project).where(Project.tenant_id == tenant_id)
+        stmt = select(Project).where(Project.tenant_id == tenant_id, Project.deleted_at.is_(None))
         result = await session.execute(stmt)
         projects = result.scalars().all()
 
@@ -375,6 +436,7 @@ async def list_projects_for_tenant(
                 "created_by": p.created_by,
                 "is_member": is_member,
                 "memory_count": counts.get(p.name, 0),
+                **_lifecycle(p),
             })
         return out
 
@@ -405,9 +467,18 @@ async def list_projects_for_tenant(
             "created_by": p.created_by,
             "is_member": True,
             "memory_count": counts.get(p.name, 0),
+            **_lifecycle(p),
         }
         for p in projects
     ]
+
+
+def _lifecycle(p: Project) -> dict:
+    return {
+        "archived": p.archived_at is not None,
+        "archived_at": p.archived_at.isoformat() if p.archived_at else None,
+        "policies": dict(p.policies or {}),
+    }
 
 
 async def memory_counts(
@@ -428,3 +499,206 @@ async def memory_counts(
     )
     result = await session.execute(stmt)
     return dict(result.all())
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle and policies (#671)
+# ---------------------------------------------------------------------------
+
+POLICY_KEYS = ("ttl_days", "max_memories", "default_weight")
+
+
+def validate_policies(policies: dict | None) -> dict:
+    """Normalise a policies dict; unknown keys and out-of-range values are rejected."""
+    out: dict = {}
+    for key, value in (policies or {}).items():
+        if key not in POLICY_KEYS:
+            raise InvalidProjectPolicyError(f"Unknown project policy '{key}'. Known: {', '.join(POLICY_KEYS)}")
+        if value is None:
+            continue
+        if key == "ttl_days":
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3650:
+                raise InvalidProjectPolicyError("ttl_days must be a whole number of days from 1 to 3650")
+        elif key == "max_memories":
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10_000_000:
+                raise InvalidProjectPolicyError("max_memories must be a whole number from 1 to 10,000,000")
+        elif key == "default_weight":
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
+                raise InvalidProjectPolicyError("default_weight must be between 0.0 and 1.0")
+            value = float(value)
+        out[key] = value
+    return out
+
+
+async def assert_project_writable(session: AsyncSession, project_id: str) -> Project:
+    """Raise if the project is deleted or archived; return it otherwise."""
+    project = await get_project(session, project_id)
+    if project is None:
+        raise ProjectNotProvisionedError(project_id)
+    if project.archived_at is not None:
+        raise ProjectArchivedError(project_id)
+    return project
+
+
+async def project_write_policies(
+    session: AsyncSession,
+    project_id: str,
+    tenant_id: str,
+    *,
+    new_memory: bool = True,
+) -> dict:
+    """Policies that apply to a write into a project, after writability checks.
+
+    Enforces ``max_memories`` for new memories (current, non-deleted root
+    memories are counted) and returns the policies so the caller can apply
+    ``ttl_days`` (as the memory's ``relevant_until``) and ``default_weight``.
+    """
+    project = await assert_project_writable(session, project_id)
+    policies = dict(project.policies or {})
+    limit = policies.get("max_memories")
+    if new_memory and limit:
+        # Concurrent writers to a project with a quota take turns (#671).
+        await lock_project(session, project_id)
+        count = (
+            await session.execute(
+                select(func.count()).select_from(MemoryNode).where(
+                    MemoryNode.tenant_id == tenant_id,
+                    MemoryNode.scope == "project",
+                    MemoryNode.scope_id == project_id,
+                    MemoryNode.is_current.is_(True),
+                    MemoryNode.deleted_at.is_(None),
+                    MemoryNode.parent_id.is_(None),
+                )
+            )
+        ).scalar_one()
+        if count >= limit:
+            raise ProjectQuotaExceededError(project_id, limit)
+    return policies
+
+
+def relevant_until_from_policies(policies: dict, now: datetime | None = None) -> datetime | None:
+    """``ttl_days`` becomes a semantic expiry (``relevant_until``) on new memories."""
+    days = (policies or {}).get("ttl_days")
+    if not days:
+        return None
+    return (now or datetime.now(UTC)) + timedelta(days=int(days))
+
+
+async def update_project(
+    session: AsyncSession,
+    name: str,
+    *,
+    description: str | None = None,
+    invite_only: bool | None = None,
+    policies: dict | None = None,
+) -> Project:
+    """Change description, enrollment policy or policies. The name never changes."""
+    project = await get_project(session, name)
+    if project is None:
+        raise ProjectNotFoundError(name)
+    if description is not None:
+        project.description = description or None
+    if invite_only is not None:
+        project.invite_only = invite_only
+    if policies is not None:
+        merged = {**(project.policies or {}), **policies}
+        project.policies = validate_policies({k: v for k, v in merged.items() if v is not None})
+    await session.flush()
+    return project
+
+
+async def archive_project(session: AsyncSession, name: str, by: str) -> Project:
+    """Make the project read-only. Existing memories stay readable to members."""
+    project = await get_project(session, name)
+    if project is None:
+        raise ProjectNotFoundError(name)
+    if project.archived_at is None:
+        project.archived_at = datetime.now(UTC)
+        project.archived_by = by
+        await session.flush()
+    return project
+
+
+async def unarchive_project(session: AsyncSession, name: str) -> Project:
+    project = await get_project(session, name)
+    if project is None:
+        raise ProjectNotFoundError(name)
+    project.archived_at = None
+    project.archived_by = None
+    await session.flush()
+    return project
+
+
+async def project_memory_count(session: AsyncSession, name: str, tenant_id: str) -> int:
+    """Live project memories, every version and branch included (what delete removes)."""
+    return (
+        await session.execute(
+            select(func.count()).select_from(MemoryNode).where(
+                MemoryNode.tenant_id == tenant_id,
+                MemoryNode.scope == "project",
+                MemoryNode.scope_id == name,
+                MemoryNode.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one()
+
+
+async def delete_project(session: AsyncSession, name: str, tenant_id: str, by: str) -> dict:
+    """Soft-delete the project and every memory in it.
+
+    Members lose access at once (deleted projects are excluded from every
+    membership lookup). The project row and memberships are kept for audit and
+    the name stays reserved. Returns how many memory rows were soft-deleted.
+    """
+    project = await get_project(session, name)
+    if project is None or project.tenant_id != tenant_id:
+        raise ProjectNotFoundError(name)
+    now = datetime.now(UTC)
+    result = await session.execute(
+        update(MemoryNode)
+        .where(
+            MemoryNode.tenant_id == tenant_id,
+            MemoryNode.scope == "project",
+            MemoryNode.scope_id == name,
+            MemoryNode.deleted_at.is_(None),
+        )
+        .values(deleted_at=now)
+    )
+    project.deleted_at = now
+    project.deleted_by = by
+    await session.flush()
+    logger.info("Deleted project %r by %r (%d memories)", name, by, result.rowcount or 0)
+    return {"project": name, "memories_deleted": result.rowcount or 0, "deleted_at": now.isoformat()}
+
+
+async def update_member_role(session: AsyncSession, name: str, user_id: str, role: str) -> bool:
+    """Set a member's role; returns False when it was already that role."""
+    if role not in ("member", "admin"):
+        raise ValueError("role must be 'member' or 'admin'")
+    if await get_project(session, name) is None:
+        raise ProjectNotFoundError(name)
+    await lock_project(session, name)
+    membership = (
+        await session.execute(
+            select(ProjectMembership).where(
+                ProjectMembership.project_id == name, ProjectMembership.user_id == user_id
+            )
+        )
+    ).scalar_one_or_none()
+    if membership is None:
+        raise MembershipNotFoundError(name, user_id)
+    if membership.role == role:
+        return False
+    if membership.role == "admin" and role == "member":
+        admins = (
+            await session.execute(
+                select(func.count()).select_from(ProjectMembership).where(
+                    ProjectMembership.project_id == name, ProjectMembership.role == "admin"
+                )
+            )
+        ).scalar_one()
+        if admins <= 1:
+            raise LastAdminError(name)
+    membership.role = role
+    await session.flush()
+    return True
