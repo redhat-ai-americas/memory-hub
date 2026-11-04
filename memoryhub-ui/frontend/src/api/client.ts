@@ -185,7 +185,8 @@ export const api = {
   writeMemory: (body: {
     content: string;
     scope: string;
-    weight: number;
+    /** Omit to use the default (a project's default weight for project writes). */
+    weight?: number;
     owner_id?: string;
     scope_id?: string;
     domains?: string[];
@@ -327,14 +328,18 @@ export const api = {
 
   // Projects & campaigns
   projects: (mine: boolean) =>
-    get<{ items: ProjectRow[]; total: number; campaign_total: number; viewer: string; provisioning?: ProjectProvisioning; can_create?: boolean }>(
+    get<{ items: ProjectRow[]; total: number; campaign_total: number; viewer: string; provisioning?: ProjectProvisioning; can_create?: boolean; can_delete?: boolean }>(
       `/projects${qs({ mine })}`,
     ),
   project: (name: string) => get<ProjectDetail>(`/projects/${enc(name)}`),
   createProject: (body: { name: string; description?: string; invite_only: boolean; members?: { user_id: string; role: 'member' | 'admin' }[] }) =>
     post<{ name: string }>('/projects', body),
-  updateProject: (name: string, body: { description?: string | null; invite_only?: boolean }) =>
+  updateProject: (name: string, body: { description?: string | null; invite_only?: boolean; policies?: Record<string, number | null> }) =>
     patch<{ name: string }>(`/projects/${enc(name)}`, body),
+  archiveProject: (name: string) => post<{ name: string; archived: boolean }>(`/projects/${enc(name)}/archive`),
+  unarchiveProject: (name: string) => post<{ name: string; archived: boolean }>(`/projects/${enc(name)}/unarchive`),
+  deleteProject: (name: string, confirm: string) =>
+    request<{ name: string; memories_deleted: number }>('DELETE', `/projects/${enc(name)}`, { confirm }),
   addMember: (name: string, body: { user_id: string; role: string }) =>
     post<{ ok: boolean }>(`/projects/${enc(name)}/members`, body),
   removeMember: (name: string, userId: string) => del<void>(`/projects/${enc(name)}/members/${enc(userId)}`),

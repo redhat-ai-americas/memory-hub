@@ -288,6 +288,12 @@ class ProjectRequest(BaseModel):
 class ProjectUpdate(BaseModel):
     description: str | None = None
     invite_only: bool | None = None
+    # #671: ttl_days, max_memories, default_weight; a key set to null is removed.
+    policies: dict[str, int | float | None] | None = None
+
+
+class ProjectDeleteRequest(BaseModel):
+    confirm: str = Field(min_length=1, max_length=255)
 
 
 class MemberRequest(BaseModel):
@@ -374,7 +380,11 @@ async def _project_role(db: AsyncSession, project: str, user: str) -> str | None
 
 async def _load_project(db: AsyncSession, settings: Settings, name: str) -> Project:
     project = (
-        await db.execute(select(Project).where(Project.name == name, Project.tenant_id == settings.ui_tenant_id))
+        await db.execute(
+            select(Project).where(
+                Project.name == name, Project.tenant_id == settings.ui_tenant_id, Project.deleted_at.is_(None)
+            )
+        )
     ).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project {name!r} not found")
@@ -385,6 +395,27 @@ async def _require_project_admin(db: AsyncSession, viewer, project: Project) -> 
     if viewer.can_admin or await _project_role(db, project.name, viewer.username) == "admin":
         return
     raise HTTPException(status_code=403, detail=f"Only an admin of {project.name} or a platform admin can change it")
+
+
+def _require_writable(project: Project) -> None:
+    if project.archived_at is not None:
+        raise HTTPException(status_code=409, detail=f"{project.name} is archived and read-only. Unarchive it first.")
+
+
+def _lifecycle(project: Project) -> dict:
+    return {
+        "archived": project.archived_at is not None,
+        "archived_at": project.archived_at,
+        "archived_by": project.archived_by,
+        "policies": dict(project.policies or {}),
+    }
+
+
+async def _lock(db: AsyncSession, name: str) -> None:
+    """Serialise last-admin checks on one project (two admins demoting each other)."""
+    from memoryhub_core.services.project import lock_project
+
+    await lock_project(db, name)
 
 
 async def _ensure_not_last_admin(db: AsyncSession, project: str, user: str) -> None:
@@ -414,7 +445,7 @@ async def _visible_to(db: AsyncSession, viewer, settings: Settings, project: Pro
 async def list_projects(request: Request, db: DbDep, settings: SettingsDep, mine: bool = Query(default=False)):
     tenant_id = settings.ui_tenant_id
     viewer = viewer_from_request(request, settings)
-    stmt = select(Project).where(Project.tenant_id == tenant_id).order_by(Project.name)
+    stmt = select(Project).where(Project.tenant_id == tenant_id, Project.deleted_at.is_(None)).order_by(Project.name)
     if mine:
         stmt = stmt.where(
             Project.name.in_(select(ProjectMembership.project_id).where(ProjectMembership.user_id == viewer.username))
@@ -433,7 +464,11 @@ async def list_projects(request: Request, db: DbDep, settings: SettingsDep, mine
         projects = [p for p in projects if p.name in roles or (not _central(settings) and not p.invite_only)]
     stats = await _project_stats(db, tenant_id, [p.name for p in projects])
     total = (
-        await db.execute(select(func.count()).select_from(Project).where(Project.tenant_id == tenant_id))
+        await db.execute(
+            select(func.count())
+            .select_from(Project)
+            .where(Project.tenant_id == tenant_id, Project.deleted_at.is_(None))
+        )
     ).scalar_one()
     campaigns = (
         await db.execute(select(func.count()).select_from(Campaign).where(Campaign.tenant_id == tenant_id))
@@ -446,6 +481,7 @@ async def list_projects(request: Request, db: DbDep, settings: SettingsDep, mine
             "created_at": p.created_at,
             "created_by": p.created_by,
             "my_role": roles.get(p.name),
+            **_lifecycle(p),
             **stats[p.name],
         }
         for p in projects
@@ -460,6 +496,7 @@ async def list_projects(request: Request, db: DbDep, settings: SettingsDep, mine
         "viewer": viewer.username,
         "provisioning": "central" if _central(settings) else "self_service",
         "can_create": _can_create_projects(viewer, settings),
+        "can_delete": viewer.can_admin,
     }
 
 
@@ -555,6 +592,9 @@ async def project_detail(name: str, request: Request, db: DbDep, settings: Setti
         "loading_policy": policy,
         "my_role": my_role,
         "can_manage": viewer.can_admin or my_role == "admin",
+        # #671: deleting removes every memory in the project, so only platform admins do it.
+        "can_delete": viewer.can_admin,
+        **_lifecycle(project),
         "provisioning": "central" if _central(settings) else "self_service",
     }
 
@@ -570,11 +610,12 @@ async def create_project(body: ProjectRequest, request: Request, db: DbDep, sett
     # Project names are unique across tenants (primary key); never say which tenant holds one.
     exists_ = (await db.execute(select(Project).where(Project.name == body.name))).scalar_one_or_none()
     if exists_ is not None:
-        detail = (
-            f"Project {body.name!r} already exists"
-            if exists_.tenant_id == settings.ui_tenant_id
-            else f"The name {body.name!r} is taken; choose another"
-        )
+        if exists_.tenant_id != settings.ui_tenant_id:
+            detail = f"The name {body.name!r} is taken; choose another"
+        elif exists_.deleted_at is not None:
+            detail = f"A deleted project was called {body.name!r}; project names are not reused, choose another"
+        else:
+            detail = f"Project {body.name!r} already exists"
         raise HTTPException(status_code=409, detail=detail)
     db.add(
         Project(
@@ -616,8 +657,19 @@ async def update_project(name: str, body: ProjectUpdate, request: Request, db: D
     project = await _load_project(db, settings, name)
     await _require_project_admin(db, viewer, project)
     changes = body.model_dump(exclude_unset=True)
+    policies = changes.pop("policies", None)
     for key, value in changes.items():
         setattr(project, key, value)
+    if policies is not None:
+        from memoryhub_core.services.exceptions import InvalidProjectPolicyError
+        from memoryhub_core.services.project import validate_policies
+
+        merged = {**(project.policies or {}), **policies}
+        try:
+            project.policies = validate_policies({k: v for k, v in merged.items() if v is not None})
+        except InvalidProjectPolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        changes["policies"] = project.policies
     await audit(
         db,
         tenant_id=settings.ui_tenant_id,
@@ -632,10 +684,85 @@ async def update_project(name: str, body: ProjectUpdate, request: Request, db: D
     return {"name": name}
 
 
+@router.post("/api/projects/{name}/archive")
+async def archive_project(name: str, request: Request, db: DbDep, settings: SettingsDep):
+    """Read-only: members keep reading, nobody writes until it is unarchived (#671)."""
+    from memoryhub_core.services.project import archive_project as svc_archive
+
+    viewer = viewer_from_request(request, settings)
+    project = await _load_project(db, settings, name)
+    await _require_project_admin(db, viewer, project)
+    if project.archived_at is None:
+        await svc_archive(db, name, viewer.username)
+        await audit(
+            db,
+            tenant_id=settings.ui_tenant_id,
+            viewer=viewer,
+            event_type="project.archive",
+            scope="project",
+            owner_id=name,
+            memory_id=None,
+        )
+        await db.commit()
+    return {"name": name, "archived": True}
+
+
+@router.post("/api/projects/{name}/unarchive")
+async def unarchive_project(name: str, request: Request, db: DbDep, settings: SettingsDep):
+    from memoryhub_core.services.project import unarchive_project as svc_unarchive
+
+    viewer = viewer_from_request(request, settings)
+    project = await _load_project(db, settings, name)
+    await _require_project_admin(db, viewer, project)
+    if project.archived_at is not None:
+        await svc_unarchive(db, name)
+        await audit(
+            db,
+            tenant_id=settings.ui_tenant_id,
+            viewer=viewer,
+            event_type="project.unarchive",
+            scope="project",
+            owner_id=name,
+            memory_id=None,
+        )
+        await db.commit()
+    return {"name": name, "archived": False}
+
+
+@router.delete("/api/projects/{name}")
+async def delete_project(name: str, body: ProjectDeleteRequest, request: Request, db: DbDep, settings: SettingsDep):
+    """Soft-delete the project and every memory in it. Platform admins only; the name is not reused."""
+    from memoryhub_core.services.project import delete_project as svc_delete
+
+    viewer = viewer_from_request(request, settings)
+    project = await _load_project(db, settings, name)
+    if not viewer.can_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only platform admins delete projects. Archive it to make it read-only instead.",
+        )
+    if body.confirm != project.name:
+        raise HTTPException(status_code=422, detail=f"Type the project name ({project.name}) to confirm")
+    result = await svc_delete(db, name, settings.ui_tenant_id, viewer.username)
+    await audit(
+        db,
+        tenant_id=settings.ui_tenant_id,
+        viewer=viewer,
+        event_type="project.delete",
+        scope="project",
+        owner_id=name,
+        memory_id=None,
+        metadata={"memories_deleted": result["memories_deleted"]},
+    )
+    await db.commit()
+    return {"name": name, "memories_deleted": result["memories_deleted"]}
+
+
 @router.post("/api/projects/{name}/members", status_code=201)
 async def add_member(name: str, body: MemberRequest, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
     project = await _load_project(db, settings, name)
+    _require_writable(project)
     if _central(settings) or project.invite_only:
         await _require_project_admin(db, viewer, project)
     elif not viewer.can_admin and await _project_role(db, name, viewer.username) is None:
@@ -668,6 +795,7 @@ async def remove_member(name: str, user_id: str, request: Request, db: DbDep, se
     project = await _load_project(db, settings, name)
     if user_id != viewer.username:
         await _require_project_admin(db, viewer, project)
+    await _lock(db, name)
     await _ensure_not_last_admin(db, name, user_id)
     membership = (
         await db.execute(
@@ -703,6 +831,7 @@ async def set_member_role(
     viewer = viewer_from_request(request, settings)
     project = await _load_project(db, settings, name)
     await _require_project_admin(db, viewer, project)
+    await _lock(db, name)
     membership = (
         await db.execute(
             select(ProjectMembership)

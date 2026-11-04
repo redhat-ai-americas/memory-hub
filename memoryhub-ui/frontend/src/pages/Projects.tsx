@@ -5,7 +5,7 @@ import { Dropdown, Empty, ErrorState, Modal, SkLines, SkTable, useToast } from '
 import { useApi } from '@/hooks/useApi';
 import { PeoplePicker } from '@/components/PeoplePicker';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { CampaignRow, ProjectDetail, ProjectRow } from '@/types';
+import type { CampaignRow, ProjectDetail, ProjectPolicies, ProjectRow } from '@/types';
 import { avatarColor, errorMessage, fmtInt, fmtRelative, initials } from '@/utils/format';
 import { ConfirmModal } from './common';
 import { ProjectTeams, TeamForm, TeamPanel, TeamsTable } from './Teams';
@@ -20,13 +20,25 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
   const selectedCampaign = route.params.get('campaign');
   const [mine, setMine] = useState(false);
   const [filter, setFilter] = useState('');
+  // #671: archived projects are hidden by default; sort by recent activity, name, creation or size.
+  const status = (route.params.get('status') as 'active' | 'archived' | 'all' | null) ?? 'active';
+  const sort = (route.params.get('sort') as ProjectSort | null) ?? 'activity';
   const [modal, setModal] = useState<null | 'project' | 'campaign' | 'team' | 'edit' | 'member' | 'enroll'>(null);
+  const [lifecycle, setLifecycle] = useState<null | { action: 'archive' | 'unarchive' | 'delete'; project: ProjectRow }>(null);
 
   const projects = useApi(() => api.projects(mine), [mine]);
   const campaigns = useApi(() => api.campaigns(), []);
   const teams = useApi(() => api.teams(), []);
   const activeTeam = (teams.data?.items ?? []).find((t) => t.id === selectedTeam) ?? teams.data?.items?.[0] ?? null;
-  const rows = (projects.data?.items ?? []).filter((p) => p.name.toLowerCase().includes(filter.toLowerCase()) || (p.description ?? '').toLowerCase().includes(filter.toLowerCase()));
+  const allRows = projects.data?.items ?? [];
+  const archivedCount = allRows.filter((p) => p.archived).length;
+  const rows = sortProjects(
+    allRows
+      .filter((p) => (status === 'all' ? true : status === 'archived' ? p.archived : !p.archived))
+      .filter((p) => p.name.toLowerCase().includes(filter.toLowerCase()) || (p.description ?? '').toLowerCase().includes(filter.toLowerCase())),
+    sort,
+  );
+  const canDelete = projects.data?.can_delete ?? role !== 'user';
   const camps = (campaigns.data?.items ?? []).filter((c) => c.name.toLowerCase().includes(filter.toLowerCase()));
   const activeProject = selectedName ?? rows[0]?.name ?? null;
   // #676: with central provisioning only platform admins create projects.
@@ -90,16 +102,40 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
               <label htmlFor="pf" className="vh">
                 Filter {kind}
               </label>
-              <input id="pf" className="in" placeholder="Filter by name" style={{ flex: '1 1 240px' }} value={filter} onChange={(e) => setFilter(e.target.value)} />
+              <input id="pf" className="in" placeholder="Filter by name" style={{ flex: '1 1 160px' }} value={filter} onChange={(e) => setFilter(e.target.value)} />
               {kind === 'projects' && (
-                <div className="seg" role="group" aria-label="Which projects">
-                  <button type="button" className={mine ? 'on' : ''} aria-pressed={mine} onClick={() => setMine(true)}>
-                    Mine
-                  </button>
-                  <button type="button" className={!mine ? 'on' : ''} aria-pressed={!mine} onClick={() => setMine(false)}>
-                    All in tenant
-                  </button>
-                </div>
+                <>
+                  <div className="seg" role="group" aria-label="Which projects">
+                    <button type="button" className={mine ? 'on' : ''} aria-pressed={mine} onClick={() => setMine(true)}>
+                      Mine
+                    </button>
+                    <button type="button" className={!mine ? 'on' : ''} aria-pressed={!mine} onClick={() => setMine(false)}>
+                      All in tenant
+                    </button>
+                  </div>
+                  <div className="seg" role="group" aria-label="Project status">
+                    {(['active', 'archived', 'all'] as const).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={status === s ? 'on' : ''}
+                        aria-pressed={status === s}
+                        onClick={() => setParam({ status: s === 'active' ? undefined : s, project: undefined })}
+                      >
+                        {s === 'active' ? 'Active' : s === 'archived' ? `Archived${archivedCount ? ` (${archivedCount})` : ''}` : 'All'}
+                      </button>
+                    ))}
+                  </div>
+                  <label htmlFor="psort" className="vh">
+                    Sort projects
+                  </label>
+                  <select id="psort" className="in auto" value={sort} onChange={(e) => setParam({ sort: e.target.value === 'activity' ? undefined : e.target.value })}>
+                    <option value="activity">Recent activity</option>
+                    <option value="name">Name</option>
+                    <option value="created">Newest</option>
+                    <option value="memories">Most memories</option>
+                  </select>
+                </>
               )}
             </div>
             {kind === 'teams' ? (
@@ -118,9 +154,10 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                 <SkTable rows={6} cols={6} />
               ) : rows.length === 0 ? (
                 <Empty
-                  title={filter ? 'No projects match' : mine ? 'You are not in any project yet' : 'No projects yet'}
+                  title={filter ? 'No projects match' : status === 'archived' ? 'No archived projects' : mine ? 'You are not in any project yet' : 'No projects yet'}
                   action={
                     !filter &&
+                    status !== 'archived' &&
                     canCreate && (
                       <button type="button" className="btn bp" onClick={() => setModal('project')}>
                         Create project
@@ -130,7 +167,9 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                 >
                   {filter
                     ? 'Try another name.'
-                    : central
+                    : status === 'archived'
+                      ? 'Archived projects are read-only: their members still read the memories, nobody writes to them.'
+                      : central
                       ? canCreate
                         ? 'Create a project for each shared context and add its members; agents cannot create projects on this deployment.'
                         : 'Projects are created by platform admins, who add their members. Ask an admin to add you to your team’s project.'
@@ -164,6 +203,11 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                             >
                               {p.name}
                             </a>
+                            {p.archived && (
+                              <span className="lbl g" style={{ marginLeft: 8 }} title={p.archived_at ? `Archived ${fmtRelative(p.archived_at).toLowerCase()}${p.archived_by ? ` by ${p.archived_by}` : ''}` : undefined}>
+                                Archived
+                              </span>
+                            )}
                             <div className="sm muted">{p.description || '—'}</div>
                           </td>
                           <td>{central ? <span className="lbl blue">Members only</span> : p.invite_only ? <span className="lbl blue">Invite-only</span> : <span className="lbl g">Open</span>}</td>
@@ -199,12 +243,24 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                                       <button type="button" onClick={() => { close(); setParam({ project: p.name }); setModal('edit'); }}>
                                         Edit
                                       </button>
-                                      <button type="button" onClick={() => { close(); setParam({ project: p.name }); setModal('member'); }}>
-                                        Add member
-                                      </button>
+                                      {!p.archived && (
+                                        <button type="button" onClick={() => { close(); setParam({ project: p.name }); setModal('member'); }}>
+                                          Add member
+                                        </button>
+                                      )}
                                     </>
                                   )}
                                   <a href={buildHash('/memories', { project: p.name })}>Browse memories</a>
+                                  {manages(p) && (
+                                    <button type="button" onClick={() => { close(); setLifecycle({ action: p.archived ? 'unarchive' : 'archive', project: p }); }}>
+                                      {p.archived ? 'Unarchive' : 'Archive'}
+                                    </button>
+                                  )}
+                                  {canDelete && (
+                                    <button type="button" className="danger" onClick={() => { close(); setLifecycle({ action: 'delete', project: p }); }}>
+                                      Delete…
+                                    </button>
+                                  )}
                                 </>
                               )}
                             </Dropdown>
@@ -285,7 +341,13 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
               )
             ) : kind === 'projects' ? (
               activeProject ? (
-                <ProjectPanel name={activeProject} onEdit={() => setModal('edit')} onAddMember={() => setModal('member')} key={activeProject} />
+                <ProjectPanel
+                  name={activeProject}
+                  onEdit={() => setModal('edit')}
+                  onAddMember={() => setModal('member')}
+                  onLifecycle={(action, project) => setLifecycle({ action, project })}
+                  key={activeProject}
+                />
               ) : (
                 <div className="card">
                   <Empty compact title="No project selected">
@@ -326,6 +388,19 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
             toast('Project updated.');
             reloadAll();
             setParam({ project: activeProject, _r: String(Date.now()) });
+          }}
+        />
+      )}
+      {lifecycle && (
+        <LifecycleModal
+          action={lifecycle.action}
+          project={lifecycle.project}
+          onClose={() => setLifecycle(null)}
+          onDone={(message) => {
+            toast(message);
+            reloadAll();
+            if (lifecycle.action === 'delete') setParam({ project: undefined });
+            else setParam({ project: lifecycle.project.name, status: lifecycle.action === 'archive' && status === 'active' ? 'all' : status === 'active' ? undefined : status, _r: String(Date.now()) });
           }}
         />
       )}
@@ -377,7 +452,12 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
   );
 };
 
-const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: () => void }> = ({ name, onEdit, onAddMember }) => {
+const ProjectPanel: React.FC<{
+  name: string;
+  onEdit: () => void;
+  onAddMember: () => void;
+  onLifecycle: (action: 'archive' | 'unarchive' | 'delete', project: ProjectRow) => void;
+}> = ({ name, onEdit, onAddMember, onLifecycle }) => {
   const toast = useToast();
   const { route } = useRouteToken();
   const { data, error, loading, reload } = useApi<ProjectDetail>(() => api.project(name), [name, route]);
@@ -407,12 +487,58 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
             <span className="lbl s-project">Project</span>
             <h3 style={{ fontSize: 20, marginTop: 8 }}>{data.name}</h3>
           </div>
-          {data.can_manage !== false && (
-            <button type="button" className="btn bg" onClick={onEdit}>
-              Edit
-            </button>
+          {(data.can_manage !== false || data.can_delete) && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              {data.can_manage !== false && (
+                <button type="button" className="btn bg" onClick={onEdit}>
+                  Edit
+                </button>
+              )}
+              <Dropdown
+                align="right"
+                toggle={(tp) => (
+                  <button type="button" className="btn bg" aria-label={`More actions for ${data.name}`} style={{ padding: '6px 10px' }} {...tp}>
+                    ⋮
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    {data.can_manage !== false && (
+                      <button type="button" onClick={() => { close(); onLifecycle(data.archived ? 'unarchive' : 'archive', data); }}>
+                        {data.archived ? 'Unarchive' : 'Archive'}
+                      </button>
+                    )}
+                    {data.can_delete && (
+                      <button type="button" className="danger" onClick={() => { close(); onLifecycle('delete', data); }}>
+                        Delete…
+                      </button>
+                    )}
+                  </>
+                )}
+              </Dropdown>
+            </div>
           )}
         </div>
+        {data.can_manage !== false && !data.members_list.some((m) => m.role === 'admin') && (
+          <div className="alert warn-a" role="status" style={{ marginBottom: 14 }}>
+            <div>
+              <b>No project admin.</b> Only platform admins can manage its members. Make a member an admin below.
+            </div>
+          </div>
+        )}
+        {data.archived && (
+          <div className="alert warn-a" role="status" style={{ marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <b>Archived{data.archived_at ? ` ${fmtRelative(data.archived_at).toLowerCase()}` : ''}{data.archived_by ? ` by ${data.archived_by}` : ''}.</b> Read-only: members still read its memories; agents and people cannot write, edit or join. Authors can still delete their own memories.
+            </div>
+            {data.can_manage !== false && (
+              <button type="button" className="btn bs sm" onClick={() => onLifecycle('unarchive', data)}>
+                Unarchive
+              </button>
+            )}
+          </div>
+        )}
         <p className="sm muted" style={{ margin: '0 0 14px' }}>
           {data.description ? `${data.description}. ` : ''}
           {data.provisioning !== 'self_service'
@@ -435,9 +561,10 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
             <div className="num-lg">{fmtInt(data.agents_today)}</div>
           </div>
         </div>
+        <PolicySummary policies={data.policies} memories={data.memories} />
         <div className="ch" style={{ marginBottom: 10 }}>
           <b className="sm">Members</b>
-          {data.can_manage !== false && (
+          {data.can_manage !== false && !data.archived && (
             <button type="button" className="btn bl sm" onClick={onAddMember}>
               + Add member
             </button>
@@ -450,10 +577,13 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
               <span className="mav" style={{ background: avatarColor(m.user_id) }}>
                 {initials(m.user_id)}
               </span>
-              <span style={{ flex: 1 }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
                 {m.user_id}
-                {m.joined_by === m.user_id && <span className="sm muted"> · auto-enrolled</span>}
                 {m.via_team && <span className="sm muted"> · via team {m.via_team}</span>}
+                <span className="hint" style={{ display: 'block' }}>
+                  {m.joined_by === m.user_id ? 'Auto-enrolled' : m.joined_by && !m.via_team ? `Added by ${m.joined_by}` : 'Joined'}
+                  {m.joined_at ? ` ${fmtRelative(m.joined_at).toLowerCase()}` : ''}
+                </span>
               </span>
               {data.can_manage !== false ? (
                 <select
@@ -488,7 +618,7 @@ const ProjectPanel: React.FC<{ name: string; onEdit: () => void; onAddMember: ()
             </button>
           )}
         </div>
-        <ProjectTeams project={data.name} teams={data.teams ?? []} onChanged={reload} />
+        <ProjectTeams project={data.name} teams={data.teams ?? []} onChanged={reload} readOnly={data.archived} />
       </div>
 
       <div className="card">
@@ -637,6 +767,9 @@ const ProjectForm: React.FC<{ existing?: ProjectRow; central?: boolean; onClose:
   const [name, setName] = useState(existing?.name ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
   const [inviteOnly, setInviteOnly] = useState(existing?.invite_only ?? central);
+  const [ttl, setTtl] = useState(existing?.policies?.ttl_days?.toString() ?? '');
+  const [quota, setQuota] = useState(existing?.policies?.max_memories?.toString() ?? '');
+  const [weight, setWeight] = useState(existing?.policies?.default_weight?.toString() ?? '');
   const [admins, setAdmins] = useState<string[]>([]);
   const [members, setMembers] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -648,7 +781,12 @@ const ProjectForm: React.FC<{ existing?: ProjectRow; central?: boolean; onClose:
     setBusy(true);
     setErr(null);
     try {
-      if (existing) await api.updateProject(existing.name, { description: description || null, invite_only: inviteOnly });
+      if (existing)
+        await api.updateProject(existing.name, {
+          description: description || null,
+          invite_only: inviteOnly,
+          policies: { ttl_days: ttl ? Number(ttl) : null, max_memories: quota ? Number(quota) : null, default_weight: weight ? Number(weight) : null },
+        });
       else
         await api.createProject({
           name: name.trim(),
@@ -692,6 +830,41 @@ const ProjectForm: React.FC<{ existing?: ProjectRow; central?: boolean; onClose:
             </div>
           </>
         )}
+        {existing && (
+          <fieldset className="f" style={{ border: 0, padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <legend style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Memory policies</legend>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+              <div className="f">
+                <label htmlFor="pttl">Keep relevant for (days)</label>
+                <input id="pttl" className="in" type="number" min={1} max={3650} step={1} inputMode="numeric" value={ttl} onChange={(e) => setTtl(e.target.value)} placeholder="No limit" />
+              </div>
+              <div className="f">
+                <label htmlFor="pquota">Memory limit</label>
+                <input id="pquota" className="in" type="number" min={1} step={1} inputMode="numeric" value={quota} onChange={(e) => setQuota(e.target.value)} placeholder="No limit" />
+              </div>
+              <div className="f">
+                <label htmlFor="pweight">Default weight</label>
+                <input id="pweight" className="in" type="number" min={0} max={1} step={0.05} inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0.7" />
+              </div>
+            </div>
+            <ul className="hint" style={{ margin: 0, paddingLeft: 18, listStyle: 'disc' }}>
+              <li>
+                <b>Keep relevant</b>: new memories are marked no longer relevant after that many days (they are not deleted). Existing memories are not changed.
+              </li>
+              <li>
+                <b>Memory limit</b>: new memories are refused once the project holds that many current memories. New versions and branches don’t count.
+              </li>
+              <li>
+                <b>Default weight</b>: used only when the agent or person writing doesn’t set a weight. Existing memories keep theirs.
+              </li>
+            </ul>
+            {quota && existing.memories > Number(quota) && (
+              <div className="alert warn-a" role="status">
+                {existing.name} already holds {fmtInt(existing.memories)} memories. Nothing is removed, but new memories are refused until fewer than {fmtInt(Number(quota))} remain.
+              </div>
+            )}
+          </fieldset>
+        )}
         {central ? (
           <p className="hint" style={{ margin: 0 }}>
             Central provisioning: members are always added explicitly, by a project admin or a platform admin. Writing to the project never joins it.
@@ -700,7 +873,10 @@ const ProjectForm: React.FC<{ existing?: ProjectRow; central?: boolean; onClose:
           <label className="swrow">
             <span>
               <b>Invite-only</b>
-              <div className="hint">Agents must be added by a project admin before they can read or write.</div>
+              <div className="hint">
+                Agents must be added by a project admin before they can read or write.
+                {existing && !existing.invite_only && inviteOnly ? ' Current members keep their access.' : ''}
+              </div>
             </span>
             <input type="checkbox" checked={inviteOnly} onChange={(e) => setInviteOnly(e.target.checked)} />
           </label>
@@ -887,6 +1063,103 @@ const EnrollForm: React.FC<{ campaign: CampaignRow; projects: ProjectRow[]; onCl
       )}
       {err && <div className="alert err-a">{err}</div>}
     </Modal>
+  );
+};
+
+type ProjectSort = 'activity' | 'name' | 'created' | 'memories';
+
+const sortProjects = (rows: ProjectRow[], sort: ProjectSort): ProjectRow[] => {
+  const by: Record<ProjectSort, (a: ProjectRow, b: ProjectRow) => number> = {
+    activity: (a, b) => (b.last_write ?? b.created_at).localeCompare(a.last_write ?? a.created_at),
+    name: (a, b) => a.name.localeCompare(b.name),
+    created: (a, b) => b.created_at.localeCompare(a.created_at),
+    memories: (a, b) => b.memories - a.memories || a.name.localeCompare(b.name),
+  };
+  return [...rows].sort(by[sort]);
+};
+
+const PolicySummary: React.FC<{ policies?: ProjectPolicies; memories: number }> = ({ policies, memories }) => {
+  const items: string[] = [];
+  if (policies?.ttl_days) items.push(`New memories stay relevant ${policies.ttl_days} ${policies.ttl_days === 1 ? 'day' : 'days'}`);
+  if (policies?.max_memories) items.push(`Limit ${fmtInt(policies.max_memories)} memories (${fmtInt(memories)} used)`);
+  if (policies?.default_weight !== undefined) items.push(`Default weight ${policies.default_weight}`);
+  if (!items.length) return null;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <b className="sm">Memory policies</b>
+      <ul className="sm" style={{ margin: '6px 0 0', paddingLeft: 18, listStyle: 'disc' }}>
+        {items.map((t) => (
+          <li key={t}>{t}</li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+const LifecycleModal: React.FC<{
+  action: 'archive' | 'unarchive' | 'delete';
+  project: ProjectRow;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}> = ({ action, project, onClose, onDone }) => {
+  const [typed, setTyped] = useState('');
+  const confirmed = typed.trim() === project.name;
+  if (action !== 'delete')
+    return (
+      <ConfirmModal
+        title={action === 'archive' ? `Archive ${project.name}?` : `Unarchive ${project.name}?`}
+        confirmLabel={action === 'archive' ? 'Archive' : 'Unarchive'}
+        onClose={onClose}
+        onConfirm={async () => {
+          if (action === 'archive') await api.archiveProject(project.name);
+          else await api.unarchiveProject(project.name);
+          onDone(action === 'archive' ? `${project.name} archived — read-only.` : `${project.name} is writable again.`);
+        }}
+      >
+        {action === 'archive' ? (
+          <>
+            <b>{project.name}</b> becomes read-only. Its {fmtInt(project.members)} {project.members === 1 ? 'member keeps' : 'members keep'} reading its {fmtInt(project.memories)} memories; agents and people can no longer write, edit or join. You can unarchive it later.
+          </>
+        ) : (
+          <>
+            Members of <b>{project.name}</b> can write to it again.
+          </>
+        )}
+      </ConfirmModal>
+    );
+  return (
+    <ConfirmModal
+      title={`Delete ${project.name}?`}
+      confirmLabel="Delete project and memories"
+      danger
+      confirmDisabled={!confirmed}
+      onClose={onClose}
+      onConfirm={async () => {
+        const res = await api.deleteProject(project.name, typed.trim());
+        onDone(`${project.name} deleted with ${fmtInt(res.memories_deleted)} ${res.memories_deleted === 1 ? 'memory' : 'memories'}.`);
+      }}
+    >
+      <p style={{ margin: '0 0 8px' }}>Deleting removes more than the project:</p>
+      <ul style={{ margin: '0 0 12px', paddingLeft: 20, listStyle: 'disc' }}>
+        <li>
+          all <b>{fmtInt(project.memories)}</b> project {project.memories === 1 ? 'memory' : 'memories'}, with their versions and branches, for every member and agent;
+        </li>
+        <li>
+          access for its <b>{fmtInt(project.members)}</b> {project.members === 1 ? 'member' : 'members'} and any linked teams;
+        </li>
+        <li>the name: a new project can never be called {project.name}.</li>
+      </ul>
+      <p style={{ margin: '0 0 12px' }}>
+        The dashboard cannot undo it.{' '}
+        {project.archived ? 'The project is archived already: members can still read it until you delete it.' : <b>To keep the memories readable, archive the project instead.</b>}
+      </p>
+      <div className="f">
+        <label htmlFor="pdel">
+          Type <span className="mono">{project.name}</span> to confirm
+        </label>
+        <input id="pdel" className="in" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+      </div>
+    </ConfirmModal>
   );
 };
 

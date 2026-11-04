@@ -10,9 +10,9 @@ function expectFilters(url: string) {
 }
 
 for (const scenario of [
-  { name: 'read-only shared memory', role: 'user', write: false, moderate: false },
-  { name: 'moderator', role: 'admin', write: false, moderate: true },
-  { name: 'writer', role: 'user', write: true, moderate: true },
+  { name: 'read-only shared memory', role: 'user', write: false, moderate: false, canDelete: false },
+  { name: 'moderator', role: 'admin', write: false, moderate: true, canDelete: true },
+  { name: 'writer', role: 'user', write: true, moderate: true, canDelete: true },
 ] as const) {
   test(`memory detail actions follow server permissions for ${scenario.name}`, async ({ page }) => {
     await mockDashboardApi(page, { role: scenario.role });
@@ -23,6 +23,8 @@ for (const scenario of [
       tenant_id: 'demo-tenant', source: 'agent', metadata: null, expires_at: null, embedding_dims: null,
       injection: 'full', full_content_threshold: 0.8,
       capabilities: { write: scenario.write, moderate: scenario.moderate },
+      // #671: deleting a shared memory needs authorship or project admin, not moderation alone.
+      can_delete: scenario.canDelete,
     };
     await page.route('**/api/memory/*/context', (route) => route.fulfill({ json: {
       memory, versions: [memory], branches: [], relationships: [], relationships_omitted: 0,
@@ -33,7 +35,7 @@ for (const scenario of [
     await expect(page.getByRole('button', { name: 'Edit · new version', exact: true })).toHaveCount(scenario.write ? 1 : 0);
     await expect(page.getByRole('button', { name: 'Report contradiction', exact: true })).toHaveCount(scenario.write ? 1 : 0);
     await expect(page.getByRole('button', { name: 'Add branch', exact: true })).toHaveCount(scenario.write ? 1 : 0);
-    await expect(page.getByRole('button', { name: 'Delete memory', exact: true })).toHaveCount(scenario.moderate ? 1 : 0);
+    await expect(page.getByRole('button', { name: 'Delete memory', exact: true })).toHaveCount(scenario.canDelete ? 1 : 0);
     expect(errors).toEqual([]);
   });
 }
@@ -41,7 +43,7 @@ for (const scenario of [
 test('read-only selections cannot start bulk mutations', async ({ page }) => {
   await mockDashboardApi(page, { role: 'user' });
   await page.route('**/api/memories/browse?**', (route) => route.fulfill({ json: {
-    items: [{ ...commonMemory, capabilities: { write: false, moderate: false } }],
+    items: [{ ...commonMemory, capabilities: { write: false, moderate: false }, can_delete: false }],
     total: 1, page: 1, per_page: 20, search_mode: 'none',
     tab_counts: { current: 1, all: 1, quarantined: 0, deleted: 0 },
     facets: { scopes: [], writers: [], projects: [], domains: [], flags: {} },

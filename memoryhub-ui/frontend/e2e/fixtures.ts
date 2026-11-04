@@ -63,6 +63,7 @@ const settings = {
 
 const commonMemory = {
   capabilities: { write: true, moderate: true },
+  can_delete: true,
   id: memoryId,
   stub: 'Run the MemoryHub UI locally with npm run dev',
   content_preview: 'Run the MemoryHub UI locally with npm run dev.',
@@ -198,10 +199,12 @@ export interface MockOptions {
   labs?: boolean;
   role?: 'operator' | 'user' | 'admin' | 'superuser';
   grant?: boolean;
+  /** #671: whether the viewer may delete the row (can_delete). */
+  canDelete?: boolean | null;
 }
 
 export async function mockDashboardApi(page: Page, opts: MockOptions = {}) {
-  const { labs = true, role, grant = false } = opts;
+  const { labs = true, role, grant = false, canDelete } = opts;
   const activeGrant = { id: 'g1', username: 'admin', incident_ref: 'INC-1234', justification: 'Spill of a customer contract into a user memory', created_at: now, expires_at: '2026-12-31T12:00:00.000Z', ended_at: null, active: true, reads: 3, owners: 1 };
   const access = role === 'admin' || role === 'superuser' ? { hidden_scopes: grant ? [] : ['user'], break_glass: grant ? activeGrant : null } : null;
   await page.route('**/*', async (route) => {
@@ -246,7 +249,7 @@ export async function mockDashboardApi(page: Page, opts: MockOptions = {}) {
       });
     if (path === '/identities') return respond(route, { items: [identity], auth_available: true, roles: [{ name: 'admin', members: 1 }], counts: { all: 1, users: 1, user_agents: 0, service_agents: 0, roles: 1 } });
     if (path.startsWith('/identities/')) return respond(route, { ...identity, grant: 'password', scope_matrix: [], activity_24h: { searches: 1, writes: 1, denied: 0, total: 2 }, hourly: [], agents: [] });
-    if (path === '/memories/browse') return respond(route, { items: [commonMemory], total: 1, page: 1, per_page: 20, search_mode: 'none', tab_counts: { current: 1, all: 1, quarantined: 0, deleted: 0 }, facets: { scopes: ['user', 'project', 'campaign', 'role', 'organizational', 'enterprise'].map((value) => ({ value, count: value === 'project' ? 1 : 0 })), writers: [{ value: 'admin', count: 1 }], projects: [{ value: 'memoryhub-ui', count: 1 }], domains: [{ value: 'tooling', count: 1 }], flags: { contradicted: 0, has_branches: 0, near_duplicate: null } } });
+    if (path === '/memories/browse') return respond(route, { items: [{ ...commonMemory, can_delete: canDelete ?? true }], total: 1, page: 1, per_page: 20, search_mode: 'none', tab_counts: { current: 1, all: 1, quarantined: 0, deleted: 0 }, facets: { scopes: ['user', 'project', 'campaign', 'role', 'organizational', 'enterprise'].map((value) => ({ value, count: value === 'project' ? 1 : 0 })), writers: [{ value: 'admin', count: 1 }], projects: [{ value: 'memoryhub-ui', count: 1 }], domains: [{ value: 'tooling', count: 1 }], flags: { contradicted: 0, has_branches: 0, near_duplicate: null } } });
     if (path === '/graph/all') return respond(route, { nodes: [{ ...node(memoryId, 'Run the MemoryHub UI locally with npm run dev', 0), degree: 1 }, { ...node(otherMemoryId, 'The UI is served on port 3000', 0), degree: 1 }], edges: [{ id: 'rel-1', source: memoryId, target: otherMemoryId, type: 'related_to' }], total: 2, truncated: false, orphan_count: 0, hidden_links: 0, metadata_only: false });
     if (path === '/memories/timeline')
       return respond(route, {
@@ -333,10 +336,27 @@ export async function mockDashboardApi(page: Page, opts: MockOptions = {}) {
     if (path === '/me/onboarding') return respond(route, { steps: [{ id: 'agent', title: 'Link an agent', body: 'Link agents.', href: '/identities', done: true }, { id: 'dream', title: 'Run your first dream', body: 'Dream.', href: '/dreaming', done: false }], done: 1, total: 2, dismissed: false });
     if (path === '/graph/neighbourhood') return respond(route, { focus: { ...node(memoryId, 'Run the MemoryHub UI locally with npm run dev', 0), content: commonMemory.content_preview, degree: 1, hidden_degree: 0 }, nodes: [node(memoryId, commonMemory.stub, 0), node(otherMemoryId, 'The UI is served on port 3000', 1)], edges: [{ id: 'rel-1', source: memoryId, target: otherMemoryId, type: 'related_to' }], hidden_count: 0, provenance: [], conflicts: [] });
     if (path === '/credentials') return respond(route, { auth_available: true, issuer: 'https://auth.test', clients: [client], api_keys: [], issuers: [{ name: 'OpenShift', kind: 'oauth-proxy', description: 'Cluster issuer', status: 'active' }] });
-    if (path === '/projects' && request.method() === 'GET') return respond(route, { items: [{ name: 'memoryhub-ui', description: 'UI project', invite_only: false, created_at: now, created_by: 'admin', memories: 1, last_write: now, members: 1, campaigns: [], my_role: role === 'user' ? 'member' : null }], total: 1, campaign_total: 0, viewer: 'admin', provisioning: 'central', can_create: role !== 'user' });
+    if (path === '/projects' && request.method() === 'GET')
+      return respond(route, {
+        items: [
+          { name: 'memoryhub-ui', description: 'UI project', invite_only: false, created_at: now, created_by: 'admin', memories: 1, last_write: now, members: 1, campaigns: [], my_role: role === 'user' ? 'member' : null, archived: false, policies: {} },
+          { name: 'old-pilot', description: 'Finished pilot', invite_only: true, created_at: '2026-01-01T00:00:00Z', created_by: 'admin', memories: 12, last_write: '2026-02-01T00:00:00Z', members: 3, campaigns: [], my_role: null, archived: true, archived_at: now, archived_by: 'carol', policies: {} },
+        ],
+        total: 2,
+        campaign_total: 0,
+        viewer: 'admin',
+        provisioning: 'central',
+        can_create: role !== 'user',
+        can_delete: role !== 'user',
+      });
+    if (/^\/projects\/[^/]+\/(archive|unarchive)$/.test(path)) return respond(route, { name: path.split('/')[2], archived: path.endsWith('/archive') });
+    if (/^\/projects\/[^/]+$/.test(path) && request.method() === 'DELETE') return respond(route, { name: path.split('/')[2], memories_deleted: 12 });
+    if (/^\/projects\/[^/]+$/.test(path) && request.method() === 'PATCH') return respond(route, { name: path.split('/')[2] });
+    if (path === '/projects/old-pilot')
+      return respond(route, { name: 'old-pilot', description: 'Finished pilot', invite_only: true, created_at: now, created_by: 'admin', memories: 12, last_write: now, members: 3, campaigns: [], agents_today: 0, members_list: [{ user_id: 'carol', role: 'admin', joined_at: now, joined_by: 'admin' }], focus_history: [], focus_available: true, loading_policy: 'default', provisioning: 'central', my_role: null, can_manage: role !== 'user', can_delete: role !== 'user', archived: true, archived_at: now, archived_by: 'carol', policies: { ttl_days: 90, max_memories: 500 } });
     if (path === '/projects' && request.method() === 'POST') return respond(route, { name: JSON.parse(request.postData() || '{}').name }, 201);
     if (path === '/campaigns') return respond(route, { items: [] });
-    if (path.startsWith('/projects/')) return respond(route, { name: 'memoryhub-ui', description: 'UI project', invite_only: false, created_at: now, created_by: 'admin', memories: 1, last_write: now, members: 1, campaigns: [], agents_today: 1, members_list: [{ user_id: 'admin', role: 'admin', joined_at: now, joined_by: 'admin' }], focus_history: [], focus_available: true, loading_policy: 'default', provisioning: 'central', my_role: role === 'user' ? 'member' : 'admin', can_manage: role !== 'user' });
+    if (path.startsWith('/projects/')) return respond(route, { name: 'memoryhub-ui', description: 'UI project', invite_only: false, created_at: now, created_by: 'admin', memories: 1, last_write: now, members: 1, campaigns: [], agents_today: 1, members_list: [{ user_id: 'admin', role: 'admin', joined_at: now, joined_by: 'admin' }], focus_history: [], focus_available: true, loading_policy: 'default', provisioning: 'central', my_role: role === 'user' ? 'member' : 'admin', can_manage: role !== 'user', can_delete: role !== 'user', archived: false, policies: { default_weight: 0.5 } });
     if (path === '/rules') return respond(route, []);
     if (path === '/rules/matches') return respond(route, { days: 7, available: true, counts: {} });
     if (path === '/review') return respond(route, { tab: 'approvals', counts: { approvals: 0, promotions: 0, contradictions: 0, quarantine: 0 }, items: [], also_waiting: [], approvers_required: 2, viewer: 'admin' });

@@ -108,7 +108,7 @@ export const TeamPanel: React.FC<{ team: TeamRow; projects: ProjectRow[]; onChan
       toast(errorMessage(e), 'err');
     }
   };
-  const freeProjects = projects.filter((p) => !team.projects.includes(p.name));
+  const freeProjects = (projects.filter((p) => !team.projects.includes(p.name))).filter((p) => !p.archived);
   return (
     <>
       <div className="card">
@@ -348,7 +348,7 @@ export const TeamForm: React.FC<{ existing?: TeamRow; projects: ProjectRow[]; on
             <span className="lbl-t">Works on projects</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {projects.length === 0 && <span className="sm muted">No projects yet.</span>}
-              {projects.map((p) => (
+              {projects.filter((p) => !p.archived || chosen.includes(p.name)).map((p) => (
                 <label key={p.name} className="tg" style={{ background: chosen.includes(p.name) ? '#e7f1fa' : '#fff' }}>
                   <input
                     type="checkbox"
@@ -398,7 +398,12 @@ const PersonModal: React.FC<{ title: string; exclude: string[]; onClose: () => v
 };
 
 /** On a project: which teams work on it, and add one. */
-export const ProjectTeams: React.FC<{ project: string; teams: { id: string; name: string; members: number }[]; onChanged: () => void }> = ({ project, teams, onChanged }) => {
+export const ProjectTeams: React.FC<{ project: string; teams: { id: string; name: string; members: number }[]; onChanged: () => void; readOnly?: boolean }> = ({
+  project,
+  teams,
+  onChanged,
+  readOnly = false,
+}) => {
   const toast = useToast();
   const all = useApi(() => api.teams(), []);
   const [open, setOpen] = useState(false);
@@ -407,9 +412,11 @@ export const ProjectTeams: React.FC<{ project: string; teams: { id: string; name
     <>
       <div className="ch" style={{ margin: '18px 0 10px' }}>
         <b className="sm">Teams</b>
-        <button type="button" className="btn bl sm" disabled={!free.length} onClick={() => setOpen(true)}>
-          + Add team
-        </button>
+        {!readOnly && (
+          <button type="button" className="btn bl sm" disabled={!free.length} onClick={() => setOpen(true)}>
+            + Add team
+          </button>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {teams.length === 0 && <span className="sm muted">No team works on this project yet.</span>}

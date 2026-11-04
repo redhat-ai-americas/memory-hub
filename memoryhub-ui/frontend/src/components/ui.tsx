@@ -123,25 +123,41 @@ export const Standby: React.FC<{ title?: string; children?: React.ReactNode; com
   </div>
 );
 
+/** A title that says why it failed: no access, gone, offline or a server error. */
+export const errorTitle = (error: Error | null, fallback = 'Could not load this data'): string => {
+  const status = (error as { status?: number } | null)?.status;
+  if (status === 403) return 'You don’t have access to this';
+  if (status === 404) return 'Not found, or not visible to you';
+  if (status === 409) return 'This changed in the meantime';
+  if (status === 0) return 'The dashboard backend is not reachable';
+  if (status !== undefined && status >= 500) return 'The server hit an error';
+  return fallback;
+};
+
 export const ErrorState: React.FC<{ error: Error | null; onRetry?: () => void; title?: string; compact?: boolean }> = ({
   error,
   onRetry,
-  title = 'Could not load this data',
+  title,
   compact,
-}) => (
-  <div className={`empty ${compact ? 'compact' : ''}`} role="alert">
-    <span className="err">
-      <Icon.Warn size={compact ? 28 : 40} width={1.6} />
-    </span>
-    <div className="et">{title}</div>
-    <p>{error?.message || 'The request failed.'}</p>
-    {onRetry && (
-      <button type="button" className="btn bs" onClick={onRetry}>
-        Try again
-      </button>
-    )}
-  </div>
-);
+}) => {
+  const status = (error as { status?: number } | null)?.status;
+  // Retrying a refusal does not help; offer it for outages and conflicts.
+  const retry = onRetry && status !== 403 && status !== 404;
+  return (
+    <div className={`empty ${compact ? 'compact' : ''}`} role="alert">
+      <span className="err">
+        <Icon.Warn size={compact ? 28 : 40} width={1.6} />
+      </span>
+      <div className="et">{title ?? errorTitle(error)}</div>
+      <p>{error?.message || 'The request failed.'}</p>
+      {retry && (
+        <button type="button" className="btn bs" onClick={onRetry}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /* Controls                                                            */

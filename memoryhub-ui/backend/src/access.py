@@ -123,12 +123,13 @@ async def load_grants(db: AsyncSession, tenant_id: str, identity: str, *, includ
 
     agents = await owned_agents(db, tenant_id, identity) if include_agents else set()
     who = list({identity} | agents)
+    # Deleted projects (#671) grant nothing, even though their membership rows remain.
     projects = set(
         (
             await db.execute(
                 select(ProjectMembership.project_id)
                 .join(Project, Project.name == ProjectMembership.project_id)
-                .where(ProjectMembership.user_id.in_(who), Project.tenant_id == tenant_id)
+                .where(ProjectMembership.user_id.in_(who), Project.tenant_id == tenant_id, Project.deleted_at.is_(None))
             )
         )
         .scalars()

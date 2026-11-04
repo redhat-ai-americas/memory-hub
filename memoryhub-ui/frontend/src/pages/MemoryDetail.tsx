@@ -105,6 +105,8 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   const deleted = Boolean(m?.deleted_at);
   const canWrite = Boolean(m?.capabilities?.write);
   const canModerate = Boolean(m?.capabilities?.moderate);
+  /** #671: authors (and project admins) delete; moderation alone is not enough for shared memories. */
+  const canDelete = Boolean(m?.can_delete);
 
   return (
     <>
@@ -181,7 +183,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                   </button>
                 </>
               )}
-              {canModerate && (
+              {canDelete && (
                 <button type="button" className="btn bd outline" aria-label="Delete memory" onClick={() => setModal('delete')}>
                   Delete
                 </button>

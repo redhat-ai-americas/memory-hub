@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api } from '@/api/client';
 import { useApp } from '@/components/Shell';
 import { Modal, useToast } from '@/components/ui';
 import { buildHash } from '@/hooks/useHashRoute';
-import type { AuditEvent } from '@/types';
+import type { AuditEvent, ProjectRow } from '@/types';
 import { errorMessage, SCOPE_ORDER, scopeMeta, truncate } from '@/utils/format';
 
 export const memoryHref = (id: string) => buildHash(`/memory/${id}`);
@@ -79,11 +79,33 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
   const restricted = role === 'user';
   const allowedScopes = me?.write?.scopes ?? (role === 'operator' ? [...SCOPE_ORDER] : []);
   const [content, setContent] = useState(initialContent ?? '');
-  const [scope, setScope] = useState('user');
+  const [scope, setScopeState] = useState('user');
+  // Saved defaults load asynchronously; they must not undo a choice the person already made.
+  const touched = useRef({ scope: false, weight: false });
+  const setScope = (next: string) => {
+    touched.current.scope = true;
+    setScopeState(next);
+  };
   const [owner, setOwner] = useState('');
   const [scopeId, setScopeId] = useState('');
   const [weight, setWeight] = useState(0.7);
+  // Unset weight lets a project's default weight apply (#671).
+  const [weightSet, setWeightSet] = useState(false);
   const [domains, setDomains] = useState('');
+  // #671: a project's policies decide the default weight when the writer does not set one.
+  const [projects, setProjects] = useState<ProjectRow[] | null>(null);
+  useEffect(() => {
+    if (scope !== 'project' || projects) return;
+    let alive = true;
+    api
+      .projects(restricted)
+      .then((r) => alive && setProjects(r.items))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [scope, projects, restricted]);
+  const project = projects?.find((p) => p.name === scopeId);
   // The user's saved defaults (Preferences & privacy), when available.
   useEffect(() => {
     let alive = true;
@@ -91,8 +113,10 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
       .myPrefs()
       .then((r) => {
         if (!alive) return;
-        setScope(allowedScopes.includes(r.prefs.write.default_scope) ? r.prefs.write.default_scope : (allowedScopes[0] ?? ''));
-        setWeight(r.prefs.write.default_weight);
+        if (!touched.current.scope) {
+          setScopeState(allowedScopes.includes(r.prefs.write.default_scope) ? r.prefs.write.default_scope : (allowedScopes[0] ?? ''));
+        }
+        if (!touched.current.weight) setWeight(r.prefs.write.default_weight);
       })
       .catch(() => undefined);
     return () => {
@@ -113,7 +137,7 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
       const res = await api.writeMemory({
         content: content.trim(),
         scope,
-        weight,
+        weight: scope === 'project' && !weightSet ? undefined : weight,
         owner_id: restricted ? (needsScopeId ? scopeId.trim() : me?.write?.owner_id ?? me?.username) : owner.trim() || (needsScopeId ? scopeId.trim() : undefined),
         scope_id: needsScopeId ? scopeId.trim() : undefined,
         domains: domains.split(',').map((d) => d.trim()).filter(Boolean),
@@ -140,7 +164,7 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="f">
             <label htmlFor="wm-scope">Scope</label>
-            <select id="wm-scope" className="in" value={scope} onChange={(e) => { setScope(e.target.value); setScopeId(''); }}>
+            <select id="wm-scope" className="in" value={scope} onChange={(e) => { setScope(e.target.value); setScopeId(''); }} aria-describedby="wm-who">
               {allowedScopes.map((s) => (
                 <option key={s} value={s}>
                   {scopeMeta(s).label}
@@ -165,9 +189,37 @@ export const WriteMemoryModal: React.FC<{ onClose: () => void; onSaved?: (id: st
             </div>
           )}
         </div>
+        <p id="wm-who" className="hint" style={{ margin: '-6px 0 0' }}>
+          {scope === 'user'
+            ? 'Only you and your agents see it.'
+            : scope === 'project'
+              ? scopeId
+                ? `Every member of ${scopeId} and their agents see it.`
+                : 'Every member of the project and their agents see it.'
+              : scope === 'campaign'
+                ? 'Every project enrolled in the campaign sees it.'
+                : scope === 'role'
+                  ? 'Everyone holding the role sees it.'
+                  : scope === 'organizational'
+                    ? 'Everyone in the tenant sees it.'
+                    : 'Everyone in the tenant sees it once two approvers accept it in the review queue.'}
+        </p>
         <div className="f">
-          <label htmlFor="wm-weight">Weight · {weight.toFixed(2)}</label>
-          <input id="wm-weight" type="range" min={0} max={100} value={Math.round(weight * 100)} onChange={(e) => setWeight(Number(e.target.value) / 100)} />
+          <label htmlFor="wm-weight">
+            Weight · {scope === 'project' && !weightSet ? (project?.policies?.default_weight !== undefined ? `project default (${project.policies.default_weight})` : 'default') : weight.toFixed(2)}
+          </label>
+          <input
+            id="wm-weight"
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round((scope === 'project' && !weightSet && project?.policies?.default_weight !== undefined ? project.policies.default_weight : weight) * 100)}
+            onChange={(e) => {
+              touched.current.weight = true;
+              setWeight(Number(e.target.value) / 100);
+              setWeightSet(true);
+            }}
+          />
         </div>
         <div className="f">
           <label htmlFor="wm-domains">Domain tags</label>
@@ -309,9 +361,11 @@ export const ConfirmModal: React.FC<{
   children: React.ReactNode;
   confirmLabel: string;
   danger?: boolean;
+  /** Keep the confirm button off until the dialog's own check passes (e.g. a typed name). */
+  confirmDisabled?: boolean;
   onConfirm: () => Promise<void> | void;
   onClose: () => void;
-}> = ({ title, children, confirmLabel, danger, onConfirm, onClose }) => {
+}> = ({ title, children, confirmLabel, danger, confirmDisabled, onConfirm, onClose }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -323,7 +377,7 @@ export const ConfirmModal: React.FC<{
           <button
             type="button"
             className={`btn ${danger ? 'bd' : 'bp'}`}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             onClick={async () => {
               setBusy(true);
               setError(null);

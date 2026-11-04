@@ -646,6 +646,75 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, viewer
     await forget_memory(memory_id, db, settings, viewer)
 
 
+async def first_version(db: AsyncSession, tenant_id: str, node: MemoryNode) -> MemoryNode:
+    """The oldest version of a memory: its author is who wrote the memory."""
+    seen = {node.id}
+    current = node
+    while current.previous_version_id and current.previous_version_id not in seen:
+        prev = (
+            await db.execute(
+                select(MemoryNode).where(
+                    MemoryNode.id == current.previous_version_id, MemoryNode.tenant_id == tenant_id
+                )
+            )
+        ).scalar_one_or_none()
+        if prev is None:
+            break
+        seen.add(prev.id)
+        current = prev
+    return current
+
+
+def wrote(identities: set[str], node: MemoryNode) -> bool:
+    """Written by this person or one of their agents."""
+    if node.scope == "user" and node.owner_id in identities:
+        return True
+    return bool({node.actor_id, node.driver_id} & identities) or (
+        node.scope != "project" and node.owner_id in identities
+    )
+
+
+async def admin_projects(db: AsyncSession, identities: set[str]) -> set[str]:
+    from memoryhub_core.models.project import ProjectMembership
+
+    if not identities:
+        return set()
+    return set(
+        (
+            await db.execute(
+                select(ProjectMembership.project_id).where(
+                    ProjectMembership.user_id.in_(list(identities)), ProjectMembership.role == "admin"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def may_forget(identities: set[str], admin_of: set[str], node: MemoryNode, author: MemoryNode | None = None) -> bool:
+    if wrote(identities, author or node):
+        return True
+    return node.scope == "project" and node.scope_id in admin_of
+
+
+async def ensure_forgettable(db: AsyncSession, tenant_id: str, grants, node: MemoryNode) -> None:
+    """People delete the memories they (or their agents) wrote; project admins any in their project.
+
+    Reading a shared memory is not enough to delete it for everyone (#671).
+    """
+    identities = grants.identities if grants else set()
+    author = await first_version(db, tenant_id, node)
+    if may_forget(identities, await admin_projects(db, identities), node, author):
+        return
+    if node.scope == "project" and node.scope_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only its author or an admin of {node.scope_id} can delete this memory",
+        )
+    raise HTTPException(status_code=403, detail="You can delete only the memories you or your agents wrote")
+
+
 async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, viewer: Viewer) -> dict:
     """Soft-delete a memory and its entire version chain.
 
@@ -676,6 +745,9 @@ async def forget_memory(memory_id: str, db: AsyncSession, settings: Settings, vi
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
     acc = await access_for(db, settings, viewer)
     acc.ensure_moderatable(node)
+    if viewer.restricted:
+        # #671: people delete what they or their agents wrote; project admins anything in their project.
+        await ensure_forgettable(db, tenant_id, acc.grants, node)
     affected = [node]
     if node.deleted_at is not None:
         raise HTTPException(status_code=409, detail=f"Memory {memory_id!r} is already deleted")

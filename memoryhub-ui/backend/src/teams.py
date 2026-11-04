@@ -210,13 +210,21 @@ async def _can_manage(db: AsyncSession, viewer: Viewer, team_id: uuid.UUID) -> N
     raise HTTPException(status_code=403, detail="Only the team lead or a platform admin can change this team")
 
 
-async def _can_grant_project(db: AsyncSession, viewer: Viewer, tenant_id: str, project: str) -> None:
+async def _can_grant_project(
+    db: AsyncSession, viewer: Viewer, tenant_id: str, project: str, *, linking: bool = False
+) -> None:
     """Linking a team gives project access: needs a project admin or platform admin."""
-    exists = (
-        await db.execute(select(Project.name).where(Project.name == project, Project.tenant_id == tenant_id))
-    ).scalar_one_or_none()
-    if exists is None:
+    row = (
+        await db.execute(
+            select(Project.name, Project.archived_at).where(
+                Project.name == project, Project.tenant_id == tenant_id, Project.deleted_at.is_(None)
+            )
+        )
+    ).first()
+    if row is None:
         raise HTTPException(status_code=404, detail=f"Project {project!r} not found")
+    if linking and row.archived_at is not None:
+        raise HTTPException(status_code=409, detail=f"{project} is archived and read-only. Unarchive it first.")
     if viewer.can_admin:
         return
     role = (
@@ -285,7 +293,7 @@ async def create_team(body: TeamRequest, request: Request, db: DbDep, settings: 
     tenant_id = settings.ui_tenant_id
     await ensure_tables(db)
     for project in body.projects:
-        await _can_grant_project(db, viewer, tenant_id, project)
+        await _can_grant_project(db, viewer, tenant_id, project, linking=True)
     team_id = uuid.uuid4()
     try:
         await db.execute(
@@ -444,7 +452,7 @@ async def remove_team_member(team_id: str, user_id: str, request: Request, db: D
 async def link_project(team_id: str, body: TeamProjectRequest, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
     team = await _team(db, settings.ui_tenant_id, team_id)
-    await _can_grant_project(db, viewer, settings.ui_tenant_id, body.project)
+    await _can_grant_project(db, viewer, settings.ui_tenant_id, body.project, linking=True)
     await db.execute(
         text(
             f"INSERT INTO {LINKS} (team_id, project_id, added_by) VALUES (:id, :p, :b) "

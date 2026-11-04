@@ -180,3 +180,117 @@ async def test_team_leads_cannot_hand_out_project_access(monkeypatch):
     await teams._can_grant_linked_projects(
         _Db(), _viewer("user"), Settings(project_provisioning="self_service"), uuid.uuid4()
     )
+
+
+# --- #671: project lifecycle and who deletes memories ------------------------
+
+
+def _node(**kw):
+    base = dict(scope="project", scope_id="team-x", owner_id="team-x", actor_id="bob-agent", driver_id="bob")
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_authors_and_project_admins_delete_memories():
+    me = {"alice", "alice-agent"}
+    # Written by alice's agent into the shared project: hers to delete.
+    assert routes.may_forget(me, set(), _node(actor_id="alice-agent", driver_id=None))
+    # Written by bob: alice may read it, not delete it for the whole team...
+    assert not routes.may_forget(me, set(), _node())
+    # ...unless she administers the project.
+    assert routes.may_forget(me, {"team-x"}, _node())
+    assert not routes.may_forget(me, {"other"}, _node())
+    # The author of the first version counts, not whoever edited last.
+    assert routes.may_forget(me, set(), _node(), author=_node(actor_id="alice", driver_id="alice"))
+    assert not routes.may_forget(me, set(), _node(actor_id="alice"), author=_node())
+    # Own user-scope memories, whoever wrote them on her behalf.
+    assert routes.may_forget(me, set(), _node(scope="user", scope_id=None, owner_id="alice", actor_id="svc"))
+    # A project memory owned by the project name is not "owned" by a member called like it.
+    assert not routes.may_forget({"team-x"}, set(), _node(actor_id="x", driver_id=None))
+
+
+@pytest.mark.asyncio
+async def test_forgetting_someone_elses_memory_is_refused(monkeypatch):
+    async def first(db, tenant_id, node):
+        return node
+
+    async def admin_of(db, identities):
+        return set()
+
+    monkeypatch.setattr(routes, "first_version", first)
+    monkeypatch.setattr(routes, "admin_projects", admin_of)
+    grants = SimpleNamespace(identities={"alice"})
+    with pytest.raises(HTTPException) as exc:
+        await routes.ensure_forgettable(None, "default", grants, _node())
+    assert exc.value.status_code == 403
+    assert "admin of team-x" in exc.value.detail
+    with pytest.raises(HTTPException):
+        await routes.ensure_forgettable(None, "default", grants, _node(scope="organizational", scope_id=None))
+    await routes.ensure_forgettable(None, "default", grants, _node(actor_id="alice"))
+
+
+def test_archived_projects_are_read_only():
+    from datetime import UTC, datetime
+
+    from src.routes_admin import _lifecycle, _require_writable
+
+    live = SimpleNamespace(name="a", archived_at=None, archived_by=None, policies=None)
+    _require_writable(live)
+    assert _lifecycle(live) == {"archived": False, "archived_at": None, "archived_by": None, "policies": {}}
+    archived = SimpleNamespace(name="a", archived_at=datetime.now(UTC), archived_by="carol", policies={"ttl_days": 30})
+    with pytest.raises(HTTPException) as exc:
+        _require_writable(archived)
+    assert exc.value.status_code == 409
+    assert _lifecycle(archived)["archived"] is True
+
+
+@pytest.mark.asyncio
+async def test_only_platform_admins_delete_projects(monkeypatch):
+    from src import routes_admin
+    from src.config import Settings
+
+    project = SimpleNamespace(name="team-x", tenant_id="default", archived_at=None)
+
+    async def load(db, settings, name):
+        return project
+
+    monkeypatch.setattr(routes_admin, "_load_project", load)
+    monkeypatch.setattr(routes_admin, "viewer_from_request", lambda request, settings: _viewer("user", "carol"))
+    body = routes_admin.ProjectDeleteRequest(confirm="team-x")
+    with pytest.raises(HTTPException) as exc:
+        await routes_admin.delete_project("team-x", body, None, None, Settings())
+    assert exc.value.status_code == 403
+    assert "Archive it" in exc.value.detail
+    monkeypatch.setattr(routes_admin, "viewer_from_request", lambda request, settings: _viewer("admin", "ray"))
+    with pytest.raises(HTTPException) as exc:
+        wrong = routes_admin.ProjectDeleteRequest(confirm="team")
+        await routes_admin.delete_project("team-x", wrong, None, None, Settings())
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_project_write_refusals_say_why(monkeypatch):
+    """No project vs not a member: different errors, each with the next step (#676)."""
+    from src import authz, routes_dashboard
+    from src.config import Settings
+
+    async def acc(db, settings, viewer):
+        return SimpleNamespace(grants=SimpleNamespace(identities={"alice"}, projects=set()))
+
+    monkeypatch.setattr(routes_dashboard, "access_for", acc)
+    monkeypatch.setattr(authz, "person_can_write", lambda *a, **k: False)
+
+    class _Db:
+        def __init__(self, found):
+            self.found = found
+
+        async def execute(self, *a, **k):
+            return SimpleNamespace(scalar_one_or_none=lambda: self.found)
+
+    alice = _viewer("user", "alice")
+    with pytest.raises(HTTPException) as exc:
+        await routes_dashboard._writable_scope(_Db(None), Settings(), alice, "project", "ghost")
+    assert exc.value.status_code == 404 and "does not exist" in exc.value.detail
+    with pytest.raises(HTTPException) as exc:
+        await routes_dashboard._writable_scope(_Db("team-x"), Settings(), alice, "project", "team-x")
+    assert exc.value.status_code == 403 and "not a member of team-x" in exc.value.detail

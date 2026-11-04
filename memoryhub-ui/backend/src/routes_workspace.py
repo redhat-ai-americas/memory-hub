@@ -128,7 +128,11 @@ async def restore_memory(db: AsyncSession, settings: Settings, viewer, memory_id
     acc.ensure_readable(node)
     if node.deleted_at is None:
         raise HTTPException(status_code=409, detail="This memory is not deleted")
-    acc.ensure_moderatable(node)
+    acc.ensure_moderatable(node)  # #667 moderation
+    if node.scope == "project" and node.scope_id:
+        from src.routes_dashboard import project_writable
+
+        await project_writable(db, node.scope_id)  # #671: not into archived or deleted projects
     rows = await _deleted_batch(db, tenant_id, node)
     for restored in rows:
         acc.ensure_moderatable(restored)
