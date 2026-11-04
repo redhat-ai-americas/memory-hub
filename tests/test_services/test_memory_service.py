@@ -12,7 +12,6 @@ import pytest
 from sqlalchemy import select
 
 from memoryhub_core.models.memory import MemoryRelationship
-
 from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryNodeRead,
@@ -2161,8 +2160,8 @@ def _make_mock_node(**overrides):
     Uses a SimpleNamespace instead of a real ORM instance to avoid needing
     a database session. node_to_read only reads attributes, never queries.
     """
-    from types import SimpleNamespace
     from datetime import UTC, datetime
+    from types import SimpleNamespace
 
     defaults = {
         "id": uuid.uuid4(),
@@ -2229,3 +2228,60 @@ def test_node_to_read_honesty_flags(
         f"storage_type={storage_type!r}, content_ref={content_ref!r}: "
         f"expected full_available={expected_available}, got {result.full_available}"
     )
+
+
+@pytest.mark.parametrize("actor,driver", [("assistant-1", "alice"), (None, None)])
+def test_node_to_read_preserves_persisted_provenance(actor, driver):
+    node = _make_mock_node(actor_id=actor, driver_id=driver)
+    result = node_to_read(node, has_children=False, has_rationale=False).model_dump()
+    assert result["actor_id"] == actor
+    assert result["driver_id"] == driver
+
+
+async def test_generated_chunks_inherit_provenance_and_relevance(async_session, embedding_service):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from memoryhub_core.models.memory import MemoryNode
+
+    deadline = datetime(2027, 2, 1, tzinfo=UTC)
+    data = _make_create_data(
+        content=_make_oversized_content(), actor_id="assistant-1", driver_id="alice",
+        relevant_until=deadline, content_type="knowledge",
+    )
+    parent, _ = await create_memory(data, async_session, embedding_service, s3_adapter=MockS3Adapter())
+    for current in [parent, await _svc_update_memory(
+        parent.id, MemoryNodeUpdate(relevant_until=datetime(2027, 3, 1, tzinfo=UTC)),
+        async_session, embedding_service, actor_id="assistant-2", driver_id="alice",
+    )]:
+        chunks = (await async_session.execute(select(MemoryNode).where(
+            MemoryNode.parent_id == current.id, MemoryNode.branch_type == "chunk",
+        ))).scalars().all()
+        assert len(chunks) >= 2
+        for chunk in chunks:
+            assert chunk.actor_id == current.actor_id
+            assert chunk.driver_id == current.driver_id
+            assert chunk.relevant_until.replace(tzinfo=UTC) == current.relevant_until.replace(tzinfo=UTC)
+            assert chunk.content_type == current.content_type
+
+
+async def test_metadata_only_update_does_not_reembed_oversized_inline_content(
+    async_session, embedding_service, monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    parent, _ = await create_memory(
+        _make_create_data(content=_make_oversized_content()), async_session, embedding_service,
+    )
+    from memoryhub_core.models.memory import MemoryNode
+
+    original_vector = list((await async_session.get(MemoryNode, parent.id)).embedding)
+    embed = AsyncMock(side_effect=AssertionError("Metadata-only updates must reuse the vector"))
+    monkeypatch.setattr(embedding_service, "embed", embed)
+    updated = await _svc_update_memory(
+        parent.id, MemoryNodeUpdate(metadata={"reviewed": True}), async_session, embedding_service,
+    )
+    assert updated.content == parent.content
+    assert list((await async_session.get(MemoryNode, updated.id)).embedding) == original_vector
+    embed.assert_not_called()

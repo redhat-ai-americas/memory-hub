@@ -414,6 +414,10 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                     <dd className="mono">{m.tenant_id}</dd>
                     <dt>Written by</dt>
                     <dd>{who(m.actor_id, m.driver_id, m.owner_id)}</dd>
+                    <dt>Upstream trust</dt>
+                    <dd>{m.upstream_trust_level ?? 'Not recorded'}</dd>
+                    <dt>Relevant until</dt>
+                    <dd>{m.relevant_until ? fmtDateTime(m.relevant_until) : 'No semantic expiry'}</dd>
                     <dt>Created</dt>
                     <dd>{fmtDateTime(byVersion[0]?.created_at ?? m.created_at)}</dd>
                     <dt>Domains</dt>
@@ -432,6 +436,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                         : `Stub only (weight < ${m.full_content_threshold.toFixed(1)})`}
                     </dd>
                   </dl>
+                  {m.taint_metadata != null && <><h4>Taint metadata</h4><pre>{JSON.stringify(m.taint_metadata, null, 2)}</pre></>}
                   {m.metadata && Object.keys(m.metadata).length > 0 && (
                     <>
                       <div className="sm" style={{ fontWeight: 600, margin: '16px 0 8px' }}>
@@ -507,6 +512,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           content={m.content}
           weight={m.weight}
           domains={m.domains}
+          metadata={m.metadata}
           onClose={() => setModal(null)}
           onDone={(newId) => {
             toast('New version created.');
@@ -705,16 +711,19 @@ const EditModal: React.FC<{
   content: string;
   weight: number;
   domains: string[];
+  metadata: Record<string, unknown> | null;
   onClose: () => void;
   onDone: (newId: string) => void;
-}> = ({ id, content: initial, weight: initialWeight, domains: initialDomains, onClose, onDone }) => {
+}> = ({ id, content: initial, weight: initialWeight, domains: initialDomains, metadata: initialMetadata, onClose, onDone }) => {
   const [content, setContent] = useState(initial);
   const [weight, setWeight] = useState(initialWeight);
   const [domains, setDomains] = useState(initialDomains.join(', '));
+  const initialMetadataText = JSON.stringify(initialMetadata ?? {}, null, 2);
+  const [metadataText, setMetadataText] = useState(initialMetadataText);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const domainList = domains.split(',').map((d) => d.trim()).filter(Boolean);
-  const changed = content !== initial || weight !== initialWeight || domainList.join(',') !== initialDomains.join(',');
+  const changed = content !== initial || weight !== initialWeight || domainList.join(',') !== initialDomains.join(',') || metadataText !== initialMetadataText;
   return (
     <Modal
       title="Edit · new version"
@@ -729,10 +738,13 @@ const EditModal: React.FC<{
             onClick={async () => {
               setBusy(true);
               try {
+                const metadata: unknown = JSON.parse(metadataText);
+                if (metadata === null || Array.isArray(metadata) || typeof metadata !== 'object') throw new Error('Metadata must be a JSON object.');
                 const res = await api.newVersion(id, {
                   content: content !== initial ? content.trim() : undefined,
                   weight: weight !== initialWeight ? weight : undefined,
                   domains: domainList.join(',') !== initialDomains.join(',') ? domainList : undefined,
+                  metadata: metadataText !== initialMetadataText ? metadata as Record<string, unknown> : undefined,
                 });
                 onDone(res.id);
                 onClose();
@@ -762,6 +774,10 @@ const EditModal: React.FC<{
       <div className="f">
         <label htmlFor="ed">Domain tags</label>
         <input id="ed" className="in" value={domains} onChange={(e) => setDomains(e.target.value)} />
+      </div>
+      <div className="f">
+        <label htmlFor="edit-metadata">Metadata (JSON object)</label>
+        <textarea id="edit-metadata" className="in mono" value={metadataText} onChange={(e) => setMetadataText(e.target.value)} />
       </div>
       <span className="hint">The current version is kept for forensics; agents receive the new version from now on.</span>
       {err && <div className="alert err-a">{err}</div>}

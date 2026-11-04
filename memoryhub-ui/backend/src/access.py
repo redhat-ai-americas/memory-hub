@@ -331,6 +331,8 @@ class Access:
             out["entities"] = []
         if "metadata" in out:
             out["metadata"] = None
+        if "taint_metadata" in out:
+            out["taint_metadata"] = None
         out["redacted"] = True
         return out
 

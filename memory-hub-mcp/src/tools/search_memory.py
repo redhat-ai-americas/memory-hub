@@ -111,6 +111,7 @@ async def _audit_returned_search_results(
                 collect(item)
 
     collect(response.get("results", []))
+    search_request_id = str(uuid_mod.uuid4())
     try:
         rows = []
         if ids:
@@ -133,7 +134,10 @@ async def _audit_returned_search_results(
                 memory_id=None,
                 decision="allowed",
                 tenant_id=tenant_id,
-                metadata={"query": query[:200], "max_results": max_results, "result_count": len(ids)},
+                metadata={
+                    "query": query[:200], "max_results": max_results, "result_count": len(ids),
+                    "search_request_id": search_request_id,
+                },
                 session=session,
             )
         else:
@@ -151,6 +155,7 @@ async def _audit_returned_search_results(
                         "query": query[:200],
                         "max_results": max_results,
                         "result_count": len(rows),
+                        "search_request_id": search_request_id,
                     },
                     session=session,
                 )

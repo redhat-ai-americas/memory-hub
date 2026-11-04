@@ -2680,3 +2680,30 @@ async def test_s3_hydration_then_budget_degrades_to_stub():
     # The stub must not leak the hydrated (huge) content -- _to_stub()
     # discards it, falling back to the original truncated prefix.
     assert entry["content"] == "big item"
+
+
+@pytest.mark.asyncio
+async def test_search_audit_groups_hits_without_collapsing_separate_requests():
+    import uuid
+    from types import SimpleNamespace
+
+    from src.tools.search_memory import _audit_returned_search_results
+
+    nodes = [SimpleNamespace(id=uuid.uuid4(), scope="project", owner_id="p") for _ in range(3)]
+    session = _mock_async_session()
+    session.execute.return_value.scalars.return_value.all.return_value = nodes
+    response = {"results": [{"id": str(node.id)} for node in nodes]}
+    with patch("src.tools.search_memory.record_audit_event", new_callable=AsyncMock) as record:
+        for _ in range(2):
+            await _audit_returned_search_results(
+                session=session, response=response, actor_id="agent", driver_id="human",
+                tenant_id="tenant", query="dispatch", max_results=3,
+                fallback_scope="project", fallback_owner="p",
+            )
+        calls = [call.kwargs for call in record.await_args_list]
+        assert len(calls) == 6
+        first = {call["metadata"]["search_request_id"] for call in calls[:3]}
+        second = {call["metadata"]["search_request_id"] for call in calls[3:]}
+        assert len(first) == len(second) == 1
+        assert first.isdisjoint(second)
+        assert {call["memory_id"] for call in calls[:3]} == {node.id for node in nodes}

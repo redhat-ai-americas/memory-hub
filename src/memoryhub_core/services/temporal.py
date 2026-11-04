@@ -35,7 +35,7 @@ _IMPLICIT_TEMPORAL_DAYS = 90
 # Deadline phrases with ISO dates: "by 2026-07-15", "deadline 2026-07-15",
 # "due 2026-07-15", "before 2026-07-15", "until 2026-07-15"
 _DEADLINE_ISO_RE = re.compile(
-    r"\b(?:by|deadline|due|before|until)\s+(\d{4})-(\d{2})-(\d{2})\b",
+    r"\b(?:by|before|until|(?:deadline|due)(?:\s+(?:is|on))?)\s+(\d{4})-(\d{2})-(\d{2})\b",
     re.IGNORECASE,
 )
 
@@ -58,7 +58,7 @@ _MONTH_PATTERN = "|".join(
     re.escape(m) for m in sorted(_ALL_MONTHS.keys(), key=len, reverse=True)
 )
 _DEADLINE_NATURAL_RE = re.compile(
-    rf"\b(?:by|deadline|due|before|until)\s+"
+    rf"\b(?:by|before|until|(?:deadline|due)(?:\s+(?:is|on))?)\s+"
     rf"({_MONTH_PATTERN})\s+(\d{{1,2}})(?:st|nd|rd|th)?"
     rf"(?:,?\s+(\d{{4}}))?",
     re.IGNORECASE,

@@ -6,7 +6,6 @@ import pytest
 
 from memoryhub_core.services.temporal import classify_temporal, compute_temporal_status
 
-
 # -- classify_temporal tests --
 
 
@@ -26,6 +25,11 @@ class TestExplicitDates:
         assert result.year == 2027
         assert result.month == 3
         assert result.day == 15
+
+    @pytest.mark.parametrize("phrase", ["The deadline is", "The report is due on", "Complete by"])
+    @pytest.mark.parametrize("date_text", ["2027-03-15", "March 15, 2027"])
+    def test_explicit_deadline_connectors(self, phrase, date_text):
+        assert classify_temporal(f"{phrase} {date_text}") == datetime(2027, 3, 15, 23, 59, 59, tzinfo=UTC)
 
     def test_due_iso_date(self):
         result = classify_temporal("Report due 2026-08-01")
@@ -135,6 +139,17 @@ class TestEvergreenContent:
     def test_no_temporal_signal(self, content):
         result = classify_temporal(content)
         assert result is None
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "As of 2026-11-03, the pilot requires offline capture and sync within one hour of reconnecting.",
+            "Confirmed on 2026-11-03: Aoife owns route planning; Patrick owns recovery testing.",
+            "The 2026-11-03 discussion left commercial pricing open; no annual commitment was made.",
+        ],
+    )
+    def test_observation_date_does_not_expire_ongoing_facts(self, content):
+        assert classify_temporal(content, datetime(2026, 11, 3, tzinfo=UTC)) is None
 
 
 class TestEdgeCases:

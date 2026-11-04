@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { commonMemory, memoryId, mockDashboardApi } from './fixtures';
 
-const filterQuery = 'tab=deleted&q=needle&mode=text&scope=project&actor=alice&project=p1&domain=security&minw=0.75&flag=contradicted&entity=33333333-3333-4333-8333-333333333333';
+const filterQuery = 'tab=deleted&q=needle&mode=text&scope=project&actor=alice&project=p1&domain=security&minw=0.75&maxw=0.95&from=2026-11-01&to=2026-11-04&branch=evidence&flag=contradicted&entity=33333333-3333-4333-8333-333333333333';
 function expectFilters(url: string) {
   const params = new URL(url, 'http://test').searchParams;
   for (const [key, value] of new URLSearchParams(filterQuery)) {
-    expect(params.get(key === 'minw' ? 'min_weight' : key)).toBe(value);
+    expect(params.get(({ minw: 'min_weight', maxw: 'max_weight', from: 'created_from', to: 'created_to', branch: 'branch_type' } as Record<string, string>)[key] || key)).toBe(value);
   }
 }
 

@@ -2186,3 +2186,45 @@ async def test_project_lifecycle_actions(client, method, args, kwargs, action, e
     assert payload["project_id"] == "team-x"
     for key, value in expected.items():
         assert payload[key] == value
+
+
+async def test_write_defers_weight_to_project_and_forwards_provenance(client):
+    c, transport = client
+    transport.call_tool.return_value = FakeCallToolResult(
+        structured_content={"memory": MINIMAL_MEMORY, "curation": MINIMAL_CURATION}
+    )
+    await c.write(
+        "Ongoing project policy",
+        scope="project",
+        project_id="relay",
+        relevant_until="2026-12-01",
+        driver_id="alice",
+    )
+    forwarded = _payload(transport)
+    assert "weight" not in forwarded
+    assert forwarded["relevant_until"] == "2026-12-01"
+    assert forwarded["driver_id"] == "alice"
+
+
+async def test_expiry_only_update_is_not_rejected(client):
+    c, transport = client
+    transport.call_tool.return_value = FakeCallToolResult(structured_content=MINIMAL_MEMORY)
+    await c.update("mem-001", relevant_until="2026-12-01", driver_id="alice")
+    assert _payload(transport)["relevant_until"] == "2026-12-01"
+    assert _payload(transport)["driver_id"] == "alice"
+
+
+@pytest.mark.parametrize("oauth", [False, True])
+async def test_session_driver_is_registered_for_both_auth_modes(oauth):
+    c = _make_client() if oauth else _make_api_key_client()
+    c._default_driver_id = "alice"
+    transport = AsyncMock()
+    transport.call_tool.return_value = FakeCallToolResult(structured_content={"session_id": "s1"})
+    with patch("memoryhub.client.Client", return_value=transport):
+        async with c:
+            assert c.session_id == "s1"
+    transport.call_tool.assert_awaited_once_with(
+        "register_session",
+        {"api_key": "" if oauth else "mh-dev-test", "default_driver_id": "alice"},
+        raise_on_error=False,
+    )

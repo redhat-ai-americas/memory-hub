@@ -191,7 +191,7 @@ export const api = {
     scope_id?: string;
     domains?: string[];
   }) => post<{ id: string }>('/memories', body),
-  newVersion: (id: string, body: { content?: string; weight?: number; domains?: string[] }) =>
+  newVersion: (id: string, body: { content?: string; weight?: number; domains?: string[]; metadata?: Record<string, unknown> }) =>
     post<{ id: string; version: number }>(`/memory/${enc(id)}/versions`, body),
   addBranch: (id: string, body: { branch_type: string; content: string }) =>
     post<{ id: string }>(`/memory/${enc(id)}/branches`, body),

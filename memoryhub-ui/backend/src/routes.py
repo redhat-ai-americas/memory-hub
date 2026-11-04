@@ -863,7 +863,12 @@ SELF_SERVICE_SCOPES = frozenset(
 )
 
 
+ELEVATED_CLIENT_SCOPES = {"memory:admin:super", "memory:admin:cross_tenant"}
+
+
 def _validate_client_scopes(viewer: Viewer, scopes: list[str] | None) -> None:
+    if viewer.role not in ("superuser", "operator") and ELEVATED_CLIENT_SCOPES.intersection(scopes or []):
+        raise HTTPException(status_code=403, detail="Only super-users can manage elevated admin client scopes")
     if viewer.restricted and scopes is not None and set(scopes) - SELF_SERVICE_SCOPES:
         raise HTTPException(status_code=403, detail="Only platform admins can assign privileged client scopes")
 
@@ -877,6 +882,11 @@ async def _client_viewer(
         acc = await access_for(db, settings, viewer)
         if client_id not in (acc.grants.identities if acc.grants else set()):
             raise HTTPException(status_code=404, detail=f"Client {client_id!r} not found")
+    if client_id is not None and viewer.role not in ("superuser", "operator"):
+        response = await _admin_request(
+            settings, "GET", f"/admin/clients/{client_id}", tenant_id=settings.ui_tenant_id,
+        )
+        _validate_client_scopes(viewer, response.json().get("default_scopes", []))
     return viewer
 
 
@@ -928,10 +938,11 @@ async def create_client(body: CreateClientRequest, request: Request, db: DbDep, 
 
 @router.patch("/api/clients/{client_id}", response_model=ClientResponse)
 async def update_client(client_id: str, body: UpdateClientRequest, request: Request, db: DbDep, settings: SettingsDep):
-    viewer = await _client_viewer(request, db, settings, client_id)
+    viewer = viewer_from_request(request, settings)
     _validate_client_scopes(viewer, body.default_scopes)
     if viewer.restricted and body.active is True:
         raise HTTPException(status_code=403, detail="Only platform admins can reactivate a revoked client")
+    await _client_viewer(request, db, settings, client_id)
     payload = body.model_dump(exclude_none=True)
     resp = await _admin_request(
         settings,

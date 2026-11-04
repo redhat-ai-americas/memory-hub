@@ -642,3 +642,50 @@ class TestProjectLifecycle:
         )
         assert result.exit_code == 2
         client.set_project_member_role.assert_not_called()
+
+
+class TestWritePolicyDefaults:
+    def test_omitted_weight_and_explicit_attribution(self):
+        from memoryhub.models import WriteResult
+
+        result = WriteResult.model_validate(
+            {"memory": SAMPLE_MEMORY.model_dump(), "curation": {"blocked": False}}
+        )
+        client = _mock_client(write=AsyncMock(return_value=result))
+        with patch("memoryhub_cli.main._get_client", return_value=client):
+            response = runner.invoke(
+                app,
+                [
+                    "write",
+                    "Project policy",
+                    "--scope",
+                    "project",
+                    "--project-id",
+                    "relay",
+                    "--driver-id",
+                    "alice",
+                    "--relevant-until",
+                    "2026-12-01",
+                    "-o",
+                    "json",
+                ],
+            )
+        assert response.exit_code == 0, response.output
+        args = client.write.call_args.kwargs
+        assert args["weight"] is None
+        assert args["driver_id"] == "alice"
+        assert args["relevant_until"] == "2026-12-01"
+
+
+def test_update_relevance_without_rewriting_content():
+    client = _mock_client(update=AsyncMock(return_value=SAMPLE_MEMORY))
+    with patch("memoryhub_cli.main._get_client", return_value=client):
+        response = runner.invoke(app, [
+            "update", str(SAMPLE_MEMORY.id), "--relevant-until", "2027-02-01",
+            "--driver-id", "alice", "-o", "json",
+        ])
+    assert response.exit_code == 0, response.output
+    args = client.update.call_args.kwargs
+    assert args["content"] is None
+    assert args["relevant_until"] == "2027-02-01"
+    assert args["driver_id"] == "alice"

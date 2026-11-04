@@ -98,17 +98,23 @@ async def test_existing_cookie_loses_access_on_account_change(secured_app, chang
 async def test_disabling_and_reenabling_does_not_revive_cookie(secured_app, monkeypatch):
     s = secured_app
     monkeypatch.setattr(accounts, "audit", AsyncMock())
-    monkeypatch.setattr(accounts, "admin_count", AsyncMock(return_value=2))
     monkeypatch.setattr(accounts, "_account_row", lambda row: dict(row._mapping))
+    second_admin_id = uuid.uuid4().hex
     # SQLite's text driver uses string UUIDs, unlike the PostgreSQL driver.
     monkeypatch.setattr(accounts.uuid, "UUID", lambda value: s.account_id.hex)
     admin = Viewer("bob", "Bob", None, "account", "admin")
     async with s.factory() as db:
+        await db.execute(
+            text("INSERT INTO memoryhub_ui_accounts VALUES (:id, 'tenant-a', 'bob', 'admin', 'active', 0)"),
+            {"id": second_admin_id},
+        )
         await accounts.update_account(
             str(s.account_id), accounts.AccountUpdate(status="disabled"), db, s.settings, admin
         )
         await accounts.update_account(str(s.account_id), accounts.AccountUpdate(status="active"), db, s.settings, admin)
-        row = (await db.execute(text("SELECT session_version FROM memoryhub_ui_accounts"))).scalar_one()
+        row = (await db.execute(text(
+            "SELECT session_version FROM memoryhub_ui_accounts WHERE username = 'alice'"
+        ))).scalar_one()
         assert row == 2
     cookie = make_session_cookie("alice", s.settings, source="account")
     async with AsyncClient(

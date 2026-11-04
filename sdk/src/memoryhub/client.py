@@ -128,6 +128,7 @@ class MemoryHubClient:
         api_key: str | None = None,
         server_url: str | None = None,
         project_config: ProjectConfig | None = None,
+        default_driver_id: str | None = None,
     ) -> None:
         """Construct a MemoryHubClient.
 
@@ -151,6 +152,8 @@ class MemoryHubClient:
             server_url: Alias for ``url`` (backward-compatible).
                 If both ``url`` and ``server_url`` are provided they
                 must match.
+            default_driver_id: Upstream human or system recorded as provenance.
+                This does not grant permissions or change the authenticated actor.
             project_config: Optional project-level config. When omitted,
                 all-defaults :class:`ProjectConfig` is used; the
                 ``retrieval_defaults`` section is applied to outbound
@@ -219,6 +222,7 @@ class MemoryHubClient:
         self._mcp: Client | None = None
         self._session_id: str | None = None
         self._project_config = project_config or ProjectConfig()
+        self._default_driver_id = default_driver_id
         # #62 push pipeline state. The handler is constructed lazily in
         # __aenter__ when live_subscription is enabled, so the SDK adds zero
         # overhead for projects that haven't opted into push. Callbacks
@@ -248,6 +252,8 @@ class MemoryHubClient:
         Reads (API key mode): MEMORYHUB_API_KEY, plus MEMORYHUB_URL or
         MEMORYHUB_SERVER_URL.
 
+        Both modes accept MEMORYHUB_DRIVER_ID for session provenance.
+
         Reads (OAuth mode): MEMORYHUB_URL, MEMORYHUB_AUTH_URL,
         MEMORYHUB_CLIENT_ID, MEMORYHUB_CLIENT_SECRET.
         """
@@ -255,6 +261,7 @@ class MemoryHubClient:
         server_url = os.environ.get("MEMORYHUB_SERVER_URL", "")
         url = os.environ.get("MEMORYHUB_URL", "")
         effective_url = url or server_url
+        default_driver_id = os.environ.get("MEMORYHUB_DRIVER_ID") or None
 
         project_config: ProjectConfig | None = None
         if config_path is not None:
@@ -272,6 +279,7 @@ class MemoryHubClient:
                 url=effective_url,
                 api_key=api_key,
                 project_config=project_config,
+                default_driver_id=default_driver_id,
             )
 
         # OAuth mode
@@ -298,6 +306,7 @@ class MemoryHubClient:
             client_id=client_id,
             client_secret=client_secret,
             project_config=project_config,
+            default_driver_id=default_driver_id,
         )
 
     async def __aenter__(self) -> MemoryHubClient:
@@ -322,8 +331,11 @@ class MemoryHubClient:
         await self._mcp.__aenter__()
 
         # API key mode: authenticate via register_session after connecting
-        if self._api_key is not None:
-            result = await self._call("register_session", {"api_key": self._api_key})
+        if self._api_key is not None or self._default_driver_id is not None:
+            registration = {"api_key": self._api_key or ""}
+            if self._default_driver_id is not None:
+                registration["default_driver_id"] = self._default_driver_id
+            result = await self._call("register_session", registration)
             if isinstance(result, dict):
                 self._session_id = result.get("session_id")
 
@@ -844,7 +856,7 @@ class MemoryHubClient:
         *,
         scope: str = "user",
         owner_id: str | None = None,
-        weight: float = 0.7,
+        weight: float | None = None,
         parent_id: str | None = None,
         branch_type: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -857,6 +869,8 @@ class MemoryHubClient:
         chunk_overlap_tokens: int | None = None,
         extract_facts: str | None = None,
         upstream_trust_level: str | None = None,
+        relevant_until: str | None = None,
+        driver_id: str | None = None,
     ) -> WriteResult:
         """Write a new memory.
 
@@ -864,7 +878,11 @@ class MemoryHubClient:
             content: The memory content to store.
             scope: Memory scope (default "user").
             owner_id: Owner override; defaults to the authenticated user.
-            weight: Memory weight (0.0-1.0, default 0.7).
+            weight: Explicit weight (0.0-1.0). Omit to use the project default,
+                or 0.7 outside projects.
+            relevant_until: Explicit ISO-8601 semantic expiry. Date-only values
+                cover the whole UTC day.
+            driver_id: Attribution of the human driving this write; does not grant access.
             parent_id: Parent memory ID for branching.
             branch_type: Branch type label (e.g., "rationale").
             metadata: Arbitrary metadata dict.
@@ -891,7 +909,13 @@ class MemoryHubClient:
             cache_impact fields populated. Check curation.gated before accessing
             memory.
         """
-        opts: dict[str, Any] = {"weight": weight}
+        opts: dict[str, Any] = {}
+        if weight is not None:
+            opts["weight"] = weight
+        if relevant_until is not None:
+            opts["relevant_until"] = relevant_until
+        if driver_id is not None:
+            opts["driver_id"] = driver_id
         if owner_id is not None:
             opts["owner_id"] = owner_id
         if parent_id is not None:
@@ -935,6 +959,8 @@ class MemoryHubClient:
         project_id: str | None = None,
         domains: list[str] | None = None,
         tenant_id: str | None = None,
+        relevant_until: str | None = None,
+        driver_id: str | None = None,
     ) -> Memory:
         """Update an existing memory (creates a new version with a new UUID).
 
@@ -942,7 +968,7 @@ class MemoryHubClient:
         automatically re-pointed to the new version. The stable logical_id
         is inherited across all versions.
 
-        At least one of content, weight, or metadata must be provided.
+        Provide content, weight, metadata, domains, or relevant_until.
 
         Args:
             memory_id: ID of the memory to update.
@@ -953,9 +979,16 @@ class MemoryHubClient:
             domains: Domain tags for the memory, e.g. ['React', 'Spring Boot'].
             tenant_id: Optional tenant identifier.
         """
-        if content is None and weight is None and metadata is None:
-            raise ValueError("update() requires at least one of: content, weight, metadata")
+        if all(value is None for value in (content, weight, metadata, domains, relevant_until)):
+            raise ValueError(
+                "update() requires at least one of: content, weight, metadata, "
+                "domains, relevant_until"
+            )
         opts: dict[str, Any] = {}
+        if relevant_until is not None:
+            opts["relevant_until"] = relevant_until
+        if driver_id is not None:
+            opts["driver_id"] = driver_id
         if weight is not None:
             opts["weight"] = weight
         if metadata is not None:

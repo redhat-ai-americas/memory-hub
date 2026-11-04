@@ -175,7 +175,8 @@ async def logout(request: Request, response: Response, settings: SettingsDep):
 
 class SwitchRequest(BaseModel):
     username: str | None = Field(default=None, max_length=255)
-    role: str | None = Field(default=None, pattern="^(admin|superuser|user|operator)$")
+    # The three product tiers; see VIEW_AS_ROLES for why "operator" is not one.
+    role: str | None = Field(default=None, pattern="^(admin|superuser|user)$")
 
 
 def _switch_allowed(request: Request, settings: Settings):

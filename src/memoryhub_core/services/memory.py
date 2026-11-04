@@ -227,6 +227,8 @@ async def create_memory(
                 tenant_id=tenant_id,
                 domains=data.domains,
                 upstream_trust_level=node.upstream_trust_level,
+                actor_id=node.actor_id, driver_id=node.driver_id,
+                relevant_until=node.relevant_until, content_type=node.content_type,
                 embedding_service=embedding_service,
                 session=session,
                 now=now,
@@ -273,6 +275,10 @@ async def _create_chunk_children(
     session: AsyncSession,
     now: datetime,
     upstream_trust_level: str = "trusted",
+    actor_id: str | None = None,
+    driver_id: str | None = None,
+    relevant_until: datetime | None = None,
+    content_type: str = "experiential",
     chunk_target_tokens: int | None = None,
     chunk_overlap_tokens: int | None = None,
 ) -> bool:
@@ -311,6 +317,10 @@ async def _create_chunk_children(
             scope_id=scope_id,
             weight=0.0,
             owner_id=owner_id,
+            actor_id=actor_id,
+            driver_id=driver_id,
+            relevant_until=relevant_until,
+            content_type=content_type,
             tenant_id=tenant_id,
             parent_id=parent_id,
             branch_type="chunk",
@@ -544,9 +554,15 @@ async def update_memory(
     else:
         needs_chunking = False
         use_s3 = old_node.storage_type == "s3" and s3_adapter is not None
-        embed_text = new_content
+        embed_text = new_content[:embedding_service.max_tokens * 4]
 
-    embedding = await embedding_service.embed(embed_text)
+    # Metadata-only versions preserve the vector and avoid sending oversized
+    # inline content back to an embedding endpoint with a smaller input limit.
+    embedding = (
+        old_node.embedding
+        if not content_changed and old_node.embedding is not None
+        else await embedding_service.embed(embed_text)
+    )
     stub = generate_stub(
         content=new_content,
         scope=old_node.scope,
@@ -674,8 +690,10 @@ async def update_memory(
             scope_id=child.scope_id,
             weight=child.weight,
             owner_id=child.owner_id,
-            actor_id=child.actor_id,
-            driver_id=child.driver_id,
+            actor_id=new_node.actor_id if child.branch_type == "chunk" else child.actor_id,
+            driver_id=new_node.driver_id if child.branch_type == "chunk" else child.driver_id,
+            relevant_until=new_node.relevant_until if child.branch_type == "chunk" else child.relevant_until,
+            content_type=child.content_type,
             tenant_id=child.tenant_id,
             parent_id=new_node.id,
             branch_type=child.branch_type,
@@ -715,6 +733,8 @@ async def update_memory(
                 tenant_id=old_node.tenant_id,
                 domains=new_domains,
                 upstream_trust_level=new_node.upstream_trust_level,
+                actor_id=new_node.actor_id, driver_id=new_node.driver_id,
+                relevant_until=new_node.relevant_until, content_type=new_node.content_type,
                 embedding_service=embedding_service,
                 session=session,
                 now=now,
@@ -2290,6 +2310,8 @@ def node_to_read(
         scope_id=node.scope_id,
         branch_type=node.branch_type,
         owner_id=node.owner_id,
+        actor_id=getattr(node, "actor_id", None),
+        driver_id=getattr(node, "driver_id", None),
         tenant_id=node.tenant_id,
         domains=node.domains,
         content_type=node.content_type,

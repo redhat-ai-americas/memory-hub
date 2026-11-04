@@ -11,6 +11,16 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
+from src.core.app import mcp
+from src.core.authz import (
+    AuthenticationError,
+    authorize_write,
+    get_claims_from_context,
+    get_tenant_filter,
+)
+from src.tools._audit_helpers import record_audit_event
+from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session, resolve_driver_id
+from src.tools._push_helpers import broadcast_after_write
 
 from memoryhub_core.models.schemas import MemoryNodeUpdate
 from memoryhub_core.services.campaign import get_campaigns_for_project
@@ -29,16 +39,6 @@ from memoryhub_core.services.memory import update_memory as svc_update_memory
 from memoryhub_core.services.project import assert_project_writable, get_projects_for_user
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
-from src.core.app import mcp
-from src.core.authz import (
-    AuthenticationError,
-    authorize_write,
-    get_claims_from_context,
-    get_tenant_filter,
-)
-from src.tools._audit_helpers import record_audit_event
-from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session, resolve_driver_id
-from src.tools._push_helpers import broadcast_after_write
 
 
 @mcp.tool(
@@ -118,11 +118,11 @@ async def update_memory(
 
     Use this when a preference changes, information is corrected, or a memory
     needs refinement. The old version stays accessible via read_memory with include_versions=true.
-    At least one of content, weight, or metadata must be provided.
+    At least one of content, weight, metadata, domains, or relevant_until must be provided.
     """
-    if content is None and weight is None and metadata is None and domains is None:
+    if all(value is None for value in (content, weight, metadata, domains, relevant_until)):
         raise ToolError(
-            "No changes provided. Include at least one of: content, weight, metadata, domains."
+            "No changes provided. Include at least one of: content, weight, metadata, domains, relevant_until."
         )
 
     try:

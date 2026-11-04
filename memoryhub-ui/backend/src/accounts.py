@@ -28,7 +28,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import column, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.access import AdminDep
@@ -548,13 +548,17 @@ async def update_account(account_id: str, body: AccountUpdate, db: DbDep, settin
         m["role"] == "admin" and m["status"] == "active" and (body.role == "user" or body.status == "disabled")
     )
     if losing_admin:
+        account_table = table(ACCOUNTS, column("id"), column("tenant_id"), column("role"), column("status"))
         active_admins = (
             await db.execute(
-                text(
-                    f"SELECT id FROM {ACCOUNTS} WHERE tenant_id = :t AND role = 'admin' AND status = 'active' "
-                    "ORDER BY id FOR UPDATE"
-                ),
-                {"t": tenant_id},
+                select(account_table.c.id)
+                .where(
+                    account_table.c.tenant_id == tenant_id,
+                    account_table.c.role == "admin",
+                    account_table.c.status == "active",
+                )
+                .order_by(account_table.c.id)
+                .with_for_update()
             )
         ).all()
         if len(active_admins) <= 1:

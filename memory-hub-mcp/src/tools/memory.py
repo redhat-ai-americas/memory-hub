@@ -12,7 +12,6 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
 from src.core.app import mcp
 
 logger = logging.getLogger(__name__)
@@ -208,7 +207,7 @@ async def memory(
     Write actions:
       write(content, [scope, project_id, options: weight, parent_id, branch_type, ...])
         Create memory node or branch. scope defaults to "user" if omitted.
-      update(memory_id, [content, options: weight, metadata, domains])
+      update(memory_id, [content, options: weight, metadata, domains, relevant_until, driver_id])
         New version with a **new UUID**; old version preserved with is_current=false.
         Graph edges are automatically re-pointed to the new version.
         The stable logical_id is inherited across all versions.
@@ -633,9 +632,10 @@ async def _dispatch_remove_member(project_id, opts, ctx):
 
 async def _dispatch_checkpoint(opts, ctx):
     """Dispatch checkpoint action (read or upsert)."""
-    from memoryhub_core.services.checkpoint import read_checkpoint, upsert_checkpoint
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.checkpoint import read_checkpoint, upsert_checkpoint
 
     _opt_require("checkpoint", "workflow_name", opts)
     workflow_name = opts["workflow_name"]
@@ -687,9 +687,10 @@ async def _dispatch_promote(memory_id, project_id, opts, ctx):
     """Dispatch promote action to service layer."""
     import uuid as uuid_module
 
-    from memoryhub_core.services.promotion import promote_memory
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.promotion import promote_memory
 
     _require("promote", "memory_id", memory_id)
     _opt_require("promote", "target_scope", opts)
@@ -735,9 +736,10 @@ async def _dispatch_graduate(memory_id, project_id, opts, ctx):
     """Dispatch graduate action to service layer."""
     import uuid as uuid_module
 
-    from memoryhub_core.services.graduation import graduate_memory
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.graduation import graduate_memory
 
     _require("graduate", "memory_id", memory_id)
 
@@ -790,9 +792,10 @@ async def _dispatch_backfill_entities(opts, ctx):
 
 async def _dispatch_list_entities(opts, ctx):
     """Dispatch list_entities action."""
-    from memoryhub_core.services.entity import list_entities
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, release_db_session
+
+    from memoryhub_core.services.entity import list_entities
 
     claims = get_claims_from_context()
     tenant_id = get_tenant_filter(claims)
@@ -822,9 +825,10 @@ async def _dispatch_merge_entities(opts, ctx):
     """Dispatch merge_entities action."""
     import uuid as uuid_module
 
-    from memoryhub_core.services.entity import merge_entities
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.entity import merge_entities
 
     _opt_require("merge_entities", "source_id", opts)
     _opt_require("merge_entities", "target_id", opts)
@@ -852,9 +856,10 @@ async def _dispatch_rename_entity(memory_id, opts, ctx):
     """Dispatch rename_entity action."""
     import uuid as uuid_module
 
-    from memoryhub_core.services.entity import rename_entity
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.entity import rename_entity
 
     _require("rename_entity", "memory_id", memory_id)
     _opt_require("rename_entity", "new_name", opts)

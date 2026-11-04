@@ -11,9 +11,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastmcp.exceptions import ToolError
-
 import src.tools.auth as auth_mod
+from fastmcp.exceptions import ToolError
 from src.tools.manage_graph import manage_graph
 
 # ── tool-level structural tests ──────────────────────────────────────────────
@@ -673,3 +672,42 @@ async def test_get_relationships_rejects_invalid_as_of():
             )
     finally:
         auth_mod._current_session = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "member,writer,archived",
+    [(True, True, False), (False, True, False), (True, False, False), (True, True, True)],
+)
+async def test_project_relationship_uses_membership_and_write_policy(member, writer, archived):
+    from src.core import authz
+
+    from memoryhub_core.services.exceptions import ProjectArchivedError
+
+    node = SimpleNamespace(scope="project", scope_id="relay", owner_id="relay", tenant_id="default")
+    claims = {"sub": "test-user", "tenant_id": "default", "identity_type": "user",
+              "scopes": ["memory:read"] + (["memory:write:project"] if writer else [])}
+    created = MagicMock()
+    created.model_dump.return_value = {"relationship_type": "related_to"}
+    with (
+        patch.object(authz, "PROJECT_ISOLATION_ENABLED", True),
+        patch("src.tools.manage_graph.get_claims_from_context", return_value=claims),
+        patch("src.tools.manage_graph.get_db_session", return_value=(AsyncMock(), AsyncMock())),
+        patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock),
+        patch("src.tools.manage_graph.read_memory_service", AsyncMock(return_value=node)),
+        patch("src.tools.manage_graph.get_projects_for_user", AsyncMock(return_value={"relay"} if member else set())),
+        patch(
+            "src.tools.manage_graph.assert_project_writable",
+            AsyncMock(side_effect=ProjectArchivedError("relay") if archived else None),
+        ),
+        patch("src.tools.manage_graph.create_relationship_service", AsyncMock(return_value=created)) as create,
+    ):
+        args = {"action": "create_relationship", "source_id": str(uuid.uuid4()),
+                "target_id": str(uuid.uuid4()), "relationship_type": "related_to"}
+        if member and writer and not archived:
+            assert (await manage_graph(**args))["relationship_type"] == "related_to"
+            create.assert_awaited_once()
+        else:
+            with pytest.raises(ToolError):
+                await manage_graph(**args)
+            create.assert_not_awaited()

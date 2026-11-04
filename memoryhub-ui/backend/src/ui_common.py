@@ -126,7 +126,10 @@ def _groups(header_value: str | None) -> list[str]:
 
 
 VIEW_AS_COOKIE = "memoryhub_ui_view_as"
-VIEW_AS_ROLES = ("admin", "superuser", "user", "operator")
+# The three product tiers only. "operator" is the no-auth development role: it
+# reads every scope unredacted, so offering it here would let a platform admin
+# read user memories without a break-glass grant and without a HIGH audit (#667).
+VIEW_AS_ROLES = ("admin", "superuser", "user")
 
 
 def make_view_as_cookie(username: str, role: str, settings: Settings) -> str:

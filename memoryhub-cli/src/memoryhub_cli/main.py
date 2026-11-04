@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import warnings
 from importlib.metadata import version as pkg_version
@@ -152,18 +153,20 @@ def _get_client(output: OutputFormat = OutputFormat.table):
     """
     from memoryhub import MemoryHubClient
 
+    provenance = {}
+    if driver_id := os.environ.get("MEMORYHUB_DRIVER_ID"):
+        provenance["default_driver_id"] = driver_id
     api_key = get_api_key()
     if api_key:
         url = get_server_url()
         if not url:
             handle_error(
                 "missing_config",
-                "API key found but no server URL. "
-                "Set MEMORYHUB_URL or run 'memoryhub login'.",
+                "API key found but no server URL. Set MEMORYHUB_URL or run 'memoryhub login'.",
                 output,
                 EXIT_CLIENT_ERROR,
             )
-        return MemoryHubClient(url=url, api_key=api_key)
+        return MemoryHubClient(url=url, api_key=api_key, **provenance)
 
     params = get_connection_params()
     missing = [k for k, v in params.items() if not v]
@@ -181,6 +184,7 @@ def _get_client(output: OutputFormat = OutputFormat.table):
         auth_url=params["auth_url"],
         client_id=params["client_id"],
         client_secret=params["client_secret"],
+        **provenance,
     )
 
 
@@ -549,8 +553,7 @@ def read(
 
     if memory.branch_count:
         console.print(  # noqa: T201
-            f"\n[dim]{memory.branch_count} branch(es). "
-            f"Search or read by ID to inspect them.[/dim]"
+            f"\n[dim]{memory.branch_count} branch(es). Search or read by ID to inspect them.[/dim]"
         )
 
 
@@ -558,7 +561,18 @@ def read(
 def write(
     content: str = typer.Argument(None, help="Memory content (reads from stdin if omitted)"),
     scope: str = typer.Option("user", "--scope", "-s", help="Memory scope"),
-    weight: float = typer.Option(0.7, "--weight", "-w", help="Priority weight 0.0-1.0"),
+    weight: float | None = typer.Option(
+        None, "--weight", "-w",
+        help="Priority weight 0.0-1.0; omitted uses the project or server default",
+    ),
+    relevant_until: str | None = typer.Option(
+        None, "--relevant-until", help="Explicit relevance deadline in ISO 8601 format"
+    ),
+    driver_id: str | None = typer.Option(
+        None,
+        "--driver-id",
+        help="Upstream human or system for provenance; does not change permissions",
+    ),
     parent_id: str | None = typer.Option(None, "--parent", help="Parent memory ID"),
     branch_type: str | None = typer.Option(None, "--branch-type", help="Branch type"),
     project_id: str | None = typer.Option(
@@ -599,6 +613,8 @@ def write(
         async with client:
             return await client.write(
                 content, scope=scope, weight=weight,
+                relevant_until=relevant_until,
+                driver_id=driver_id,
                 parent_id=parent_id, branch_type=branch_type,
                 project_id=_project_id, domains=domains or None,
                 content_type=content_type,
@@ -688,6 +704,12 @@ def update(
     weight: float | None = typer.Option(
         None, "--weight", "-w", help="New priority weight 0.0-1.0",
     ),
+    relevant_until: str | None = typer.Option(
+        None, "--relevant-until", help="New relevance deadline in ISO 8601 format",
+    ),
+    driver_id: str | None = typer.Option(
+        None, "--driver-id", help="Upstream human or system for provenance",
+    ),
     project_id: str | None = typer.Option(
         None, "--project-id", "-p", help="Project ID for campaign access",
     ),
@@ -698,19 +720,19 @@ def update(
         OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
     ),
 ):
-    """Update an existing memory's content, weight, or domains.
+    """Update an existing memory's content, weight, domains, or relevance.
 
     Content can be passed as an argument or piped via stdin.
-    At least one of content or --weight must be provided.
+    Provide content, --weight, --domain, or --relevant-until.
     """
     # Resolve content from stdin if not provided as an argument
     if content is None and not sys.stdin.isatty():
         content = sys.stdin.read().strip() or None
 
-    if content is None and weight is None and not domains:
+    if content is None and weight is None and not domains and relevant_until is None:
         handle_error(
             "missing_input",
-            "Provide at least one of: content, --weight, or --domain.",
+            "Provide at least one of: content, --weight, --domain, or --relevant-until.",
             output, EXIT_CLIENT_ERROR,
         )
 
@@ -728,6 +750,8 @@ def update(
                 weight=weight,
                 project_id=_project_id,
                 domains=domains or None,
+                relevant_until=relevant_until,
+                driver_id=driver_id,
             )
 
     memory = _run_command(_do(), output)
@@ -740,8 +764,7 @@ def update(
 
     console.print(f"[green]Memory updated:[/green] {memory.id}")  # noqa: T201
     console.print(  # noqa: T201
-        f"  Scope: {memory.scope} | Weight: {memory.weight:.2f} | "
-        f"Version: {memory.version}"
+        f"  Scope: {memory.scope} | Weight: {memory.weight:.2f} | Version: {memory.version}"
     )
 
 
@@ -1220,7 +1243,7 @@ def config_init(
         else:
             console.print(  # noqa: T201
                 "[yellow]Warning:[/yellow] No server URL configured.\n"
-                "  Set MEMORYHUB_URL or add \"url\" to"
+                '  Set MEMORYHUB_URL or add "url" to'
                 " ~/.config/memoryhub/config.json."
             )
     else:
@@ -1265,8 +1288,7 @@ def config_regenerate(
     if not yaml_path.is_file():
         handle_error(
             "missing_config",
-            f"No {CONFIG_FILENAME} in {project_dir}. "
-            "Run 'memoryhub config init' first.",
+            f"No {CONFIG_FILENAME} in {project_dir}. Run 'memoryhub config init' first.",
             output,
             EXIT_CLIENT_ERROR,
         )
@@ -3006,8 +3028,7 @@ def extract(
     filtered = len(result.filtered)
     if written or filtered:
         console.print(  # noqa: T201
-            f"[green]Extracted:[/green] {written} written, "
-            f"{filtered} duplicates filtered"
+            f"[green]Extracted:[/green] {written} written, {filtered} duplicates filtered"
         )
 
 

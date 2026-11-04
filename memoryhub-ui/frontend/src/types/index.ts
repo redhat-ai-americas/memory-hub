@@ -279,6 +279,10 @@ export interface BrowseParams {
   project?: string;
   domain?: string[];
   min_weight?: number;
+  max_weight?: number;
+  created_from?: string;
+  created_to?: string;
+  branch_type?: string;
   flag?: string[];
   sort?: string;
   order?: string;
@@ -318,6 +322,9 @@ export interface MemoryContext {
     content_type: string;
     source: string | null;
     metadata: Record<string, unknown> | null;
+    upstream_trust_level?: string;
+    taint_metadata?: unknown;
+    relevant_until?: string | null;
     created_at: string;
     updated_at: string;
     deleted_at: string | null;

@@ -52,6 +52,10 @@ async def test_table_graph_timeline_and_export_share_filters(monkeypatch, tab, m
         "domain": "security",
         "flag": ["contradicted", "has_branches", "near_duplicate"],
         "min_weight": 0.75,
+        "max_weight": 0.95,
+        "created_from": "2026-11-01",
+        "created_to": "2026-11-04",
+        "branch_type": "evidence",
         "entity": entity,
     }
     predicates = []
@@ -72,6 +76,11 @@ async def test_table_graph_timeline_and_export_share_filters(monkeypatch, tab, m
         assert "memory_nodes.actor_id IN" in sql
         assert "memory_nodes.domains &&" in sql
         assert "memory_nodes.weight >=" in sql
+        assert "memory_nodes.weight <=" in sql
+        assert "memory_nodes.created_at >=" in sql
+        assert "memory_nodes.created_at <" in sql
+        assert "branch_type =" in sql
+        assert "scope_id IS NOT DISTINCT FROM" in sql
         assert "memory_relationships.target_id =" in sql
         assert "contradiction_reports" in sql
         assert "%needle%" in values.values() if mode == "text" else [match_id] in values.values()
@@ -82,3 +91,15 @@ async def test_table_graph_timeline_and_export_share_filters(monkeypatch, tab, m
         )
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("params", [
+    {"min_weight": 0.9, "max_weight": 0.1},
+    {"created_from": "2026-11-04", "created_to": "2026-11-01"},
+    {"max_weight": 2},
+    {"created_from": "not-a-date"},
+])
+async def test_invalid_filter_ranges_are_rejected(params):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/memories/browse", params=params)
+    assert response.status_code == 422

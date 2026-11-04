@@ -51,6 +51,10 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
     project: p.get('project') || '',
     domain: list(p.get('domain')),
     minWeight: p.get('minw') ? Number(p.get('minw')) : 0,
+    maxWeight: p.get('maxw') || '',
+    createdFrom: p.get('from') || '',
+    createdTo: p.get('to') || '',
+    branchType: p.get('branch') || '',
     flag: list(p.get('flag')),
     sort: p.get('sort') || '',
     page: Number(p.get('page') || 1),
@@ -123,6 +127,10 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
     if (state.domain.length) out.push({ label: `Domain: ${state.domain.join(', ')}`, clear: () => setParams({ domain: [] }) });
     if (state.entity) out.push({ label: `Entity: ${state.entityName || state.entity.slice(0, 8)}`, clear: () => setParams({ entity: '', entityName: '' }) });
     if (state.minWeight) out.push({ label: `Weight ≥ ${state.minWeight.toFixed(2)}`, clear: () => setParams({ minw: '' }) });
+    if (state.maxWeight) out.push({ label: `Weight ≤ ${Number(state.maxWeight).toFixed(2)}`, clear: () => setParams({ maxw: '' }) });
+    if (state.createdFrom) out.push({ label: `Created from ${state.createdFrom}`, clear: () => setParams({ from: '' }) });
+    if (state.createdTo) out.push({ label: `Created through ${state.createdTo}`, clear: () => setParams({ to: '' }) });
+    if (state.branchType) out.push({ label: `Branch: ${state.branchType}`, clear: () => setParams({ branch: '' }) });
     state.flag.forEach((f) =>
       out.push({ label: FLAG_LABEL[f] ?? f, clear: () => setParams({ flag: state.flag.filter((x) => x !== f) }) }),
     );
@@ -390,6 +398,29 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 </div>
                 )}
                 <WeightFilter value={state.minWeight} disabled={filtersDisabled} onCommit={(v) => setParams({ minw: v ? v.toFixed(2) : '' })} />
+                <div className="f">
+                  <label htmlFor="maximum-weight">Maximum weight</label>
+                  <input id="maximum-weight" className="in" type="number" min={0} max={1} step={0.05}
+                    value={state.maxWeight} disabled={filtersDisabled} placeholder="No upper bound"
+                    onChange={(e) => setParams({ maxw: e.target.value })} />
+                </div>
+                <div className="f">
+                  <label htmlFor="created-from">Created from (UTC)</label>
+                  <input id="created-from" className="in" type="date" value={state.createdFrom}
+                    disabled={filtersDisabled} onChange={(e) => setParams({ from: e.target.value })} />
+                </div>
+                <div className="f">
+                  <label htmlFor="created-to">Created through (UTC)</label>
+                  <input id="created-to" className="in" type="date" value={state.createdTo}
+                    disabled={filtersDisabled} onChange={(e) => setParams({ to: e.target.value })} />
+                </div>
+                <div className="f">
+                  <label htmlFor="branch-type">Has branch type</label>
+                  <input id="branch-type" className="in" list="branch-types" value={state.branchType}
+                    disabled={filtersDisabled} placeholder="Any branch type"
+                    onChange={(e) => setParams({ branch: e.target.value })} />
+                  <datalist id="branch-types"><option value="rationale" /><option value="provenance" /><option value="evidence" /></datalist>
+                </div>
                 <div>
                   <p className="fh">Flags</p>
                   <div className="fx">

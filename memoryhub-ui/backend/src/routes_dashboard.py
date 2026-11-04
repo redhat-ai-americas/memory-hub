@@ -323,7 +323,10 @@ async def overview(
         AuditLog.timestamp >= day_ago,
         *audit_scope,
     ]
-    searches_24h = (await db.execute(select(func.count()).select_from(AuditLog).where(*search_scope))).scalar_one()
+    # MCP records one audit row per served memory. Count a request once while
+    # preserving individual rows for per-memory usage and privacy accounting.
+    search_key = func.coalesce(AuditLog.event_metadata["search_request_id"].astext, cast(AuditLog.id, String))
+    searches_24h = (await db.execute(select(func.count(func.distinct(search_key))).where(*search_scope))).scalar_one()
     p95 = None
     try:
         latency = cast(AuditLog.event_metadata["latency_ms"].astext, Float)
@@ -388,7 +391,7 @@ async def overview(
         await db.execute(
             select(
                 audit_bucket,
-                func.count().filter(AuditLog.event_type.in_(SEARCH_EVENTS)),
+                func.count(func.distinct(search_key)).filter(AuditLog.event_type.in_(SEARCH_EVENTS)),
                 func.count().filter(AuditLog.event_type.in_(WRITE_EVENTS)),
             )
             .where(AuditLog.tenant_id == tenant_id, AuditLog.timestamp >= activity_start, *audit_scope)
@@ -886,6 +889,27 @@ async def build_browse_filters(db, settings, viewer, acc, params: BrowseQuery):
         )
     if min_weight is not None:
         filters.append(MemoryNode.weight >= min_weight)
+    if params.max_weight is not None:
+        filters.append(MemoryNode.weight <= params.max_weight)
+    if params.created_from is not None:
+        filters.append(MemoryNode.created_at >= datetime.combine(params.created_from, datetime.min.time(), tzinfo=UTC))
+    if params.created_to is not None:
+        end = datetime.combine(params.created_to, datetime.min.time(), tzinfo=UTC) + timedelta(days=1)
+        filters.append(MemoryNode.created_at < end)
+    if params.branch_type:
+        child = aliased(MemoryNode)
+        filters.extend(readable_only)
+        filters.append(exists().where(
+            child.parent_id == MemoryNode.id,
+            child.tenant_id == tenant_id,
+            child.scope == MemoryNode.scope,
+            child.scope_id.is_not_distinct_from(MemoryNode.scope_id),
+            child.owner_id == MemoryNode.owner_id,
+            child.branch_type == params.branch_type,
+            child.deleted_at.is_(None),
+            child.is_current.is_(True),
+            child.status != "quarantined",
+        ))
     flags = set(flag or [])
     if "contradicted" in flags:
         filters.append(_contradicted_clause(tenant_id))
@@ -1398,6 +1422,9 @@ async def memory_context(memory_id: str, db: DbDep, settings: SettingsDep, viewe
             "content_type": node.content_type,
             "source": node.source,
             "metadata": node.metadata_,
+            "upstream_trust_level": node.upstream_trust_level,
+            "taint_metadata": (node.metadata_ or {}).get("taint_metadata"),
+            "relevant_until": node.relevant_until,
             "created_at": node.created_at,
             "updated_at": node.updated_at,
             "deleted_at": node.deleted_at,
@@ -1509,6 +1536,7 @@ class NewVersionRequest(BaseModel):
     content: str | None = Field(default=None, min_length=1)
     weight: float | None = Field(default=None, ge=0, le=1)
     domains: list[str] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class BranchRequest(BaseModel):
@@ -1762,14 +1790,14 @@ async def new_version(memory_id: str, body: NewVersionRequest, request: Request,
             status_code=409,
             detail="Someone saved a newer version of this memory. Reload to see it, then edit that version.",
         )
-    if body.content is None and body.weight is None and body.domains is None:
+    if all(value is None for value in (body.content, body.weight, body.domains, body.metadata)):
         raise HTTPException(status_code=422, detail="Nothing to change")
     from memoryhub_core.services.exceptions import MemoryNotCurrentError
 
     try:
         updated = await update_memory(
             node.id,
-            MemoryNodeUpdate(content=body.content, weight=body.weight, domains=body.domains),
+            MemoryNodeUpdate(content=body.content, weight=body.weight, domains=body.domains, metadata=body.metadata),
             db,
             _embedding_service(settings),
             s3_adapter=get_memory_storage(),

@@ -13,6 +13,7 @@ from fastapi import HTTPException, Request, Response
 from memoryhub_core.models.audit import AuditLog
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.project import Project, ProjectMembership
+from pydantic import ValidationError
 from sqlalchemy import event, func, select, text
 
 from src import documents, retrieval, routes_admin, routes_dashboard, teams, ui_common
@@ -112,7 +113,7 @@ async def test_switcher_cannot_elevate_regular_users(enabled, admin, status):
     settings = Settings(ui_trust_proxy_headers=True, ui_test_mode=enabled)
     with pytest.raises(HTTPException) as error:
         await routes_admin.switch_account(
-            routes_admin.SwitchRequest(username="someone-else", role="operator"),
+            routes_admin.SwitchRequest(username="someone-else", role="user"),
             proxy_request(admin=admin),
             Response(),
             settings,
@@ -342,3 +343,22 @@ async def test_team_rename_is_tenant_scoped(privacy_context):
     await teams.update_team(str(team_ids[0]), teams.TeamUpdate(name="platform"), c.request, c.db, c.settings)
     memberships = {row.project_id: row.joined_by for row in (await c.db.execute(select(ProjectMembership))).scalars()}
     assert memberships == {"project-a": "team:platform", "project-b": "team:engineers"}
+
+
+async def test_switcher_cannot_assume_the_unredacted_open_mode_role():
+    """#667: test mode previews the product tiers, it does not lift redaction.
+
+    ``operator`` is the no-auth development role and is the only one that reads
+    every scope unredacted, so a platform admin must not be able to become it:
+    that would open user memories with no break-glass grant and no HIGH audit.
+    """
+    from src.ui_common import VIEW_AS_ROLES, make_view_as_cookie
+
+    assert "operator" not in VIEW_AS_ROLES
+    settings = Settings(ui_trust_proxy_headers=True, ui_test_mode=True, ui_session_secret="test")
+    with pytest.raises(ValidationError):
+        routes_admin.SwitchRequest(username="someone-else", role="operator")
+    # A cookie minted elsewhere for that role is ignored too.
+    cookie = make_view_as_cookie("someone-else", "operator", settings)
+    viewer = viewer_from_request(proxy_request(admin=True, cookie=cookie), settings)
+    assert viewer.role == "admin" and viewer.redacts_content
