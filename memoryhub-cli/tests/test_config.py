@@ -305,6 +305,18 @@ class TestCredentialsInResolutionChain:
         monkeypatch.setenv("MEMORYHUB_CONTEXT", "ctx-b")
         assert get_api_key() == "key-b"
 
+    def test_explicit_context_overrides_environment_context(
+        self, _no_files, tmp_path, monkeypatch,
+    ):
+        (tmp_path / "credentials").write_text(
+            "[ctx-a]\napi_key = key-a\nurl = https://a.example.com\n\n"
+            "[ctx-b]\napi_key = key-b\nurl = https://b.example.com\n"
+        )
+        monkeypatch.setenv("MEMORYHUB_CONTEXT", "ctx-a")
+
+        assert get_api_key("ctx-b") == "key-b"
+        assert get_server_url("ctx-b") == "https://b.example.com"
+
     def test_flat_file_fallback_when_no_creds(self, _no_files, tmp_path):
         (tmp_path / "api-key").write_text("from-flat\n")
         assert get_api_key() == "from-flat"

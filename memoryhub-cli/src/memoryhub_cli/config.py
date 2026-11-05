@@ -107,13 +107,17 @@ def migrate_flat_to_credentials() -> bool:
     return True
 
 
-def get_api_key() -> str | None:
-    """Resolve API key: env var > credentials file > flat file > config.json."""
+def get_api_key(context: str | None = None) -> str | None:
+    """Resolve API key: env var > selected credentials section > flat file > config.json.
+
+    An explicit context selects that credentials section; otherwise
+    ``MEMORYHUB_CONTEXT`` or the default section is used.
+    """
     key = os.environ.get("MEMORYHUB_API_KEY", "").strip()
     if key:
         return key
 
-    creds = read_credentials_section()
+    creds = read_credentials_section(context)
     if creds and creds.get("api_key"):
         return creds["api_key"]
 
@@ -137,13 +141,17 @@ def get_user_id() -> str | None:
     return None
 
 
-def get_server_url() -> str | None:
-    """Resolve server URL: env var > credentials file > config.json."""
+def get_server_url(context: str | None = None) -> str | None:
+    """Resolve server URL: env var > selected credentials section > config.json.
+
+    An explicit context selects that credentials section; otherwise
+    ``MEMORYHUB_CONTEXT`` or the default section is used.
+    """
     url = os.environ.get("MEMORYHUB_URL", "").strip()
     if url:
         return url
 
-    creds = read_credentials_section()
+    creds = read_credentials_section(context)
     if creds and creds.get("url"):
         return creds["url"]
 

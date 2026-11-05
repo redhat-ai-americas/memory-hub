@@ -2,6 +2,16 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [Unreleased]
+
+- **`memoryhub doctor`**: When `memoryhub-local` is not installed, check the
+  configured cluster endpoint, authentication, and a write/search/read/delete
+  smoke test. Report per-stage results, authenticated session identity/scopes/
+  expiry/project memberships, selected context and sanitized endpoint,
+  actionable failures, and health-based exit codes; keep personal-edition checks
+  unchanged. Add `--edition local`, `--edition cluster`, and `--context` options
+  (#654).
+
 ## [0.12.1] -- 2026-07-29
 
 - Defer topic search until user provides actionable signal (#471)
