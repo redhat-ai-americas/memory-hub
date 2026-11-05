@@ -1,8 +1,10 @@
 import { Type } from "@sinclair/typebox";
 import {
   buildMemoryOperation,
+  DEFAULT_MEMORY_TOOL_NAMES,
   MEMORY_TOOL_DESCRIPTIONS,
 } from "../../common/src/memory-operations.js";
+import type { DefaultMemoryToolName } from "../../common/src/memory-operations.js";
 import type { MemoryHubMcpClient } from "./mcp-client.js";
 import type { MemoryHubConfig } from "./config.js";
 import type { AnyAgentTool, AgentToolResult } from "./openclaw-plugin-sdk.js";
@@ -49,6 +51,7 @@ export function createTools(
   config: MemoryHubConfig,
   withSession: <T>(operation: () => Promise<T>) => Promise<T> = (operation) =>
     operation(),
+  enabledTools: readonly DefaultMemoryToolName[] = DEFAULT_MEMORY_TOOL_NAMES,
 ): AnyAgentTool[] {
   async function execute(
     name: keyof typeof MEMORY_TOOL_DESCRIPTIONS,
@@ -246,7 +249,7 @@ export function createTools(
     },
   };
 
-  return [
+  const tools = [
     memoryhubSearch,
     memoryhubRead,
     memoryhubList,
@@ -254,4 +257,7 @@ export function createTools(
     memoryhubUpdate,
     memoryhubDelete,
   ];
+
+  const enabled = new Set(enabledTools);
+  return tools.filter((tool) => enabled.has(tool.name as DefaultMemoryToolName));
 }

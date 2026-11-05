@@ -24,6 +24,14 @@ describe("tools", () => {
     return tool;
   }
 
+  it("allows the host to select a subset of the shared tool profile", () => {
+    const tools = createTools(mcpClient, config, undefined, ["memoryhub_search", "memoryhub_read"]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "memoryhub_search",
+      "memoryhub_read",
+    ]);
+  });
+
   describe("memoryhub_search", () => {
     it("calls memory(action=search) with query", async () => {
       (mcpClient.callMemory as ReturnType<typeof vi.fn>).mockResolvedValue({
