@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import warnings
+from datetime import datetime, timezone
+from enum import Enum
 from importlib.metadata import version as pkg_version
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import typer
 from memoryhub import CONFIG_FILENAME, ConfigError, load_project_config
@@ -30,6 +34,7 @@ from memoryhub_cli.config import (
     get_connection_params,
     get_server_url,
     load_config,
+    read_credentials_section,
     save_config,
 )
 from memoryhub_cli.export import export_app
@@ -57,6 +62,13 @@ from memoryhub_cli.project_config import (
 )
 
 _MAX_TESTED_PYTHON = (3, 13)
+_DOCTOR_SESSION_EXPIRY_WARNING_SECONDS = 5 * 60
+
+
+class DoctorEdition(str, Enum):
+    auto = "auto"
+    local = "local"
+    cluster = "cluster"
 
 
 def _version_callback(value: bool) -> None:
@@ -144,17 +156,42 @@ thread_app = typer.Typer(
 app.add_typer(thread_app, name="thread")
 
 
-def _get_client(output: OutputFormat = OutputFormat.table):
+def _get_client(
+    output: OutputFormat = OutputFormat.table,
+    *,
+    context: str | None = None,
+):
     """Create a MemoryHubClient from config/env.
 
     Tries API key auth first (env var, key file, or config). Falls back to
-    OAuth if no API key is available.
+    OAuth if no API key is available. When context is provided, resolve the
+    named credentials section for the endpoint and API key.
     """
     from memoryhub import MemoryHubClient
 
-    api_key = get_api_key()
+    context_credentials = None
+    if context is not None:
+        context_credentials = read_credentials_section(context)
+        if context_credentials is None:
+            message = (
+                f"MemoryHub context '{context}' was not found in "
+                "~/.config/memoryhub/credentials. Add a matching section and retry."
+            )
+            if output == OutputFormat.json:
+                payload = {
+                    "status": "error",
+                    "error": {"code": "missing_config", "message": message},
+                }
+                print(json.dumps(payload), file=sys.stderr)  # noqa: T201
+                raise typer.Exit(EXIT_CLIENT_ERROR)
+            err_console.print(
+                f"Error (missing_config): {message}", markup=False
+            )
+            raise typer.Exit(EXIT_CLIENT_ERROR)
+
+    api_key = get_api_key(context) if context is not None else get_api_key()
     if api_key:
-        url = get_server_url()
+        url = get_server_url(context) if context is not None else get_server_url()
         if not url:
             handle_error(
                 "missing_config",
@@ -166,6 +203,14 @@ def _get_client(output: OutputFormat = OutputFormat.table):
         return MemoryHubClient(url=url, api_key=api_key)
 
     params = get_connection_params()
+    if context is not None and context_credentials:
+        # The context chooses its configured server URL unless MEMORYHUB_URL
+        # explicitly overrides it. OAuth credentials remain in normal config.
+        params["url"] = (
+            os.environ.get("MEMORYHUB_URL", "").strip()
+            or context_credentials.get("url")
+            or params["url"]
+        )
     missing = [k for k, v in params.items() if not v]
     if missing:
         handle_error(
@@ -2407,24 +2452,77 @@ def doctor(
     output: OutputFormat = typer.Option(
         OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
     ),
+    edition: DoctorEdition = typer.Option(
+        DoctorEdition.auto,
+        "--edition",
+        help="Edition to check: auto, local, or cluster.",
+    ),
+    context: str | None = typer.Option(
+        None,
+        "--context",
+        help="Named credentials context for a cluster check.",
+    ),
 ):
-    """Check MemoryHub personal edition health: DB, model, migrations."""
-    import sqlite3
+    """Check MemoryHub health for an explicit or detected edition."""
 
     checks: dict[str, str | int | bool | None] = {}
 
-    # Edition detection
+    if context is not None and edition == DoctorEdition.local:
+        message = (
+            "--context applies only to cluster checks. Use --edition cluster with "
+            "--context, or omit --context to use auto-detection."
+        )
+        if output == OutputFormat.json:
+            payload = {
+                "status": "error",
+                "error": {"code": "invalid_context", "message": message},
+            }
+            print(json.dumps(payload), file=sys.stderr)  # noqa: T201
+        else:
+            err_console.print(
+                f"Error (invalid_context): {message}", markup=False
+            )
+        raise typer.Exit(EXIT_CLIENT_ERROR)
+
+    # An explicit context identifies a cluster target, even when the edition
+    # option is omitted. Without either option, keep historical auto-detection.
+    if edition == DoctorEdition.cluster or context is not None:
+        _doctor_cluster(output, context=context)
+        return
+
+    # Auto mode retains the historical package-presence detection. Local mode
+    # forces these checks and reports an actionable error when the extra is absent.
     try:
         import memoryhub_local  # noqa: F401
-        checks["edition"] = "personal"
+        local_installed = True
     except ImportError:
-        checks["edition"] = "cluster"
+        local_installed = False
+
+    if edition == DoctorEdition.local and not local_installed:
+        message = (
+            "Personal-edition diagnostics require memoryhub-local. "
+            "Install it with: pip install 'memoryhub[local]'."
+        )
         if output == OutputFormat.json:
-            json_success(checks)
-        else:
-            console.print("Edition: [cyan]cluster[/cyan] (memoryhub-local not installed)")  # noqa: T201
-            console.print("[dim]Doctor diagnostics are for the personal edition.[/dim]")  # noqa: T201
+            err_console.print_json(
+                json.dumps({
+                    "status": "error",
+                    "error": {"code": "local_edition_unavailable", "message": message},
+                })
+            )
+            raise typer.Exit(EXIT_CLIENT_ERROR)
+        err_console.print(
+            f"Error (local_edition_unavailable): {message}", markup=False
+        )
+        raise typer.Exit(EXIT_CLIENT_ERROR)
+
+    if not local_installed:
+        _doctor_cluster(output)
         return
+
+    import sqlite3
+
+    checks["edition"] = "personal"
 
     from memoryhub_local.database import get_default_db_path
     from memoryhub_local.embeddings.base import EMBEDDING_DIM
@@ -2508,6 +2606,471 @@ def doctor(
 
     if checks.get("db_error"):
         console.print(f"\n  [red]DB error: {checks['db_error']}[/red]")  # noqa: T201
+
+
+def _doctor_session_details(
+    session: object,
+) -> tuple[dict[str, object], list[str]]:
+    """Extract safe, useful diagnostics from the MCP session status response."""
+    if not isinstance(session, dict):
+        return {}, []
+
+    details: dict[str, object] = {}
+    for field in ("user_id", "name"):
+        value = session.get(field)
+        if isinstance(value, str) and value.strip():
+            details[field] = value.strip()
+
+    raw_scopes = session.get("scopes")
+    scopes_reported = isinstance(raw_scopes, (list, tuple, set))
+    scopes = sorted({
+        scope.strip()
+        for scope in raw_scopes
+        if isinstance(scope, str) and scope.strip()
+    }) if scopes_reported else []
+    if scopes_reported:
+        details["scopes"] = scopes
+        can_read_user = "memory:read" in scopes or "memory:read:user" in scopes
+        can_write_user = "memory:write" in scopes or "memory:write:user" in scopes
+        details["user_scope_permissions"] = {
+            "read": "granted" if can_read_user else "missing",
+            "write": "granted" if can_write_user else "missing",
+        }
+    else:
+        can_read_user = can_write_user = True
+        details["scopes"] = None
+        details["user_scope_permissions"] = {
+            "read": "unreported",
+            "write": "unreported",
+        }
+
+    missing_permissions = []
+    if scopes_reported and not can_read_user:
+        missing_permissions.append("user-scope read")
+    if scopes_reported and not can_write_user:
+        missing_permissions.append("user-scope write")
+
+    expires_at = session.get("expires_at")
+    if isinstance(expires_at, str) and expires_at.strip():
+        details["expires_at"] = expires_at.strip()
+
+    remaining = session.get("remaining_seconds")
+    if not isinstance(remaining, (int, float)) or isinstance(remaining, bool):
+        remaining = None
+        if isinstance(expires_at, str):
+            try:
+                parsed_expiry = datetime.fromisoformat(
+                    expires_at.strip().replace("Z", "+00:00")
+                )
+                if parsed_expiry.tzinfo is not None:
+                    remaining = int(
+                        (parsed_expiry - datetime.now(timezone.utc)).total_seconds()
+                    )
+            except ValueError:
+                pass
+    if remaining is not None:
+        remaining = int(remaining)
+    details["remaining_seconds"] = remaining
+    details["near_expiry"] = (
+        remaining is not None
+        and 0 < remaining <= _DOCTOR_SESSION_EXPIRY_WARNING_SECONDS
+    )
+
+    projects = session.get("projects")
+    if isinstance(projects, (list, tuple)):
+        details["projects"] = sorted({
+            project["project_id"].strip()
+            for project in projects
+            if isinstance(project, dict)
+            and isinstance(project.get("project_id"), str)
+            and project["project_id"].strip()
+        })
+    else:
+        details["projects"] = None
+
+    return details, missing_permissions
+
+
+def _sanitize_doctor_endpoint(endpoint: object) -> str | None:
+    """Return the endpoint's scheme, host, port, and path without URL secrets."""
+    if not isinstance(endpoint, str) or not endpoint:
+        return None
+    try:
+        parsed = urlsplit(endpoint)
+        if not parsed.scheme or not parsed.hostname:
+            return None
+        hostname = parsed.hostname
+        if ":" in hostname:
+            hostname = f"[{hostname}]"
+        if parsed.port is not None:
+            hostname = f"{hostname}:{parsed.port}"
+        return urlunsplit((parsed.scheme, hostname, parsed.path, "", ""))
+    except ValueError:
+        return None
+
+
+def _doctor_cluster(
+    output: OutputFormat,
+    *,
+    context: str | None = None,
+) -> None:
+    """Check a cluster connection using the configured CLI credentials."""
+    from uuid import uuid4
+
+    client = _get_client(output, context=context) if context is not None else _get_client(output)
+    endpoint = _sanitize_doctor_endpoint(getattr(client, "_url", None))
+    check_names = (
+        "endpoint_reachable", "authenticated", "write", "search", "read", "delete",
+    )
+    checks: dict[str, dict[str, str]] = {
+        name: {"status": "pending", "detail": "Not run."}
+        for name in check_names
+    }
+    failure: dict[str, str | int] | None = None
+    memory_id: str | None = None
+    session_details: dict[str, object] | None = None
+    content = f"[test] MemoryHub doctor smoke check {uuid4().hex}"
+
+    def _set_check(name: str, status: str, detail: str) -> None:
+        checks[name] = {"status": status, "detail": detail}
+
+    def _skip_after(name: str, detail: str) -> None:
+        start = check_names.index(name) + 1
+        for skipped_name in check_names[start:]:
+            if checks[skipped_name]["status"] == "pending":
+                _set_check(skipped_name, "skipped", detail)
+
+    def _record_failure(
+        name: str,
+        message: str,
+        next_action: str,
+        *,
+        exc: Exception | None = None,
+        code: str = "doctor_check_failed",
+        exit_code: int = EXIT_SERVER_ERROR,
+    ) -> None:
+        nonlocal failure
+        _set_check(name, "failed", message)
+        if failure is not None:
+            return
+        if isinstance(exc, AuthenticationError):
+            code, exit_code = "auth_failed", EXIT_AUTH_ERROR
+        elif isinstance(
+            exc,
+            (PermissionDeniedError, ValidationError, ConflictError, CurationVetoError,
+             NotFoundError),
+        ):
+            code, exit_code = "permission_or_request_failed", EXIT_CLIENT_ERROR
+        failure = {
+            "code": code,
+            "message": message,
+            "next_action": next_action,
+            "exit_code": exit_code,
+        }
+
+    def _record_cleanup_failure(message: str, next_action: str) -> None:
+        nonlocal failure
+        _set_check("delete", "failed", message)
+        if failure is None:
+            _record_failure(
+                "delete", message, next_action, code="cleanup_failed",
+                exit_code=EXIT_SERVER_ERROR,
+            )
+            return
+        failure["message"] = f"{failure['message']} Cleanup also failed."
+        failure["next_action"] = f"{failure['next_action']} {next_action}"
+
+    def _report() -> dict[str, object]:
+        healthy = all(checks[name]["status"] == "passed" for name in check_names)
+        report: dict[str, object] = {
+            "edition": "cluster", "healthy": healthy, "checks": checks,
+        }
+        if context is not None:
+            report["context"] = context
+        if endpoint is not None:
+            report["endpoint"] = endpoint
+        if session_details is not None:
+            report["session"] = session_details
+        return report
+
+    async def _do_checks() -> None:
+        nonlocal memory_id, session_details
+        try:
+            try:
+                await client.__aenter__()
+                _set_check(
+                    "endpoint_reachable", "passed", "MCP client connection established."
+                )
+            except AuthenticationError as exc:
+                # API-key registration happens in __aenter__, after the endpoint responds.
+                _set_check(
+                    "endpoint_reachable", "passed", "MCP endpoint responded."
+                )
+                _record_failure(
+                    "authenticated",
+                    "The server rejected the configured credentials.",
+                    "Run 'memoryhub login' or check the API key and OAuth configuration.",
+                    exc=exc,
+                )
+                _skip_after("authenticated", "Authentication failed.")
+            except Exception as exc:
+                _record_failure(
+                    "endpoint_reachable",
+                    "Could not establish an MCP connection.",
+                    "Check MEMORYHUB_URL and confirm the MCP endpoint is reachable.",
+                    exc=exc,
+                )
+                _skip_after("endpoint_reachable", "The endpoint could not be reached.")
+
+            if failure is None:
+                try:
+                    session, missing_permissions = _doctor_session_details(
+                        await client.get_session()
+                    )
+                    session_details = session
+                    remaining = session.get("remaining_seconds")
+                    if isinstance(remaining, int) and remaining <= 0:
+                        _record_failure(
+                            "authenticated",
+                            "The authenticated session has expired.",
+                            "Run 'memoryhub login' to refresh the session, then retry.",
+                            code="session_expired",
+                            exit_code=EXIT_AUTH_ERROR,
+                        )
+                        _skip_after("authenticated", "The session has expired.")
+                    elif missing_permissions:
+                        missing = " and ".join(missing_permissions)
+                        _record_failure(
+                            "authenticated",
+                            f"The session is missing {missing} permission.",
+                            "Ask an administrator to grant memory:read:user and "
+                            "memory:write:user (or equivalent broader scopes), then retry.",
+                            code="insufficient_session_scopes",
+                            exit_code=EXIT_CLIENT_ERROR,
+                        )
+                        _skip_after("authenticated", "Required session permissions are missing.")
+                    else:
+                        _set_check(
+                            "authenticated", "passed", "Authenticated session verified."
+                        )
+                except Exception as exc:
+                    _record_failure(
+                        "authenticated",
+                        "Could not verify an authenticated session.",
+                        "Check the API key or OAuth credentials with 'memoryhub login', "
+                        "and confirm the account is enabled.",
+                        exc=exc,
+                    )
+                    _skip_after("authenticated", "Authentication could not be verified.")
+
+            if failure is None:
+                try:
+                    write_result = await client.write(content, scope="user")
+                    if write_result.memory is None:
+                        _record_failure(
+                            "write",
+                            "The smoke-test write was gated and created no memory.",
+                            "Check the account's write permission and review applicable "
+                            "curation rules.",
+                            code="write_rejected",
+                            exit_code=EXIT_CLIENT_ERROR,
+                        )
+                        _skip_after("write", "No smoke-test memory was created.")
+                    else:
+                        memory_id = str(write_result.memory.id)
+                        _set_check("write", "passed", "Smoke-test memory created.")
+                except Exception as exc:
+                    _record_failure(
+                        "write",
+                        "The smoke-test write failed.",
+                        "Check the account's user-scope write permission and the server's "
+                        "write path.",
+                        exc=exc,
+                    )
+                    _skip_after("write", "The smoke-test write failed.")
+
+            if failure is None:
+                try:
+                    search_result = await client.search(
+                        content,
+                        scope="user",
+                        max_results=10,
+                        mode="full_only",
+                        raw_results=True,
+                    )
+                    if not any(
+                        str(memory.id) == memory_id for memory in search_result.results
+                    ):
+                        _record_failure(
+                            "search",
+                            "Search did not return the smoke-test memory.",
+                            "Check search availability, embedding services, and access to "
+                            "user-scope memories.",
+                        )
+                        _skip_after("search", "Search did not find the smoke-test memory.")
+                    else:
+                        _set_check("search", "passed", "Smoke-test memory found by ID.")
+                except Exception as exc:
+                    _record_failure(
+                        "search",
+                        "The smoke-test search failed.",
+                        "Check search availability, embedding services, and access to "
+                        "user-scope memories.",
+                        exc=exc,
+                    )
+                    _skip_after("search", "The smoke-test search failed.")
+
+            if failure is None:
+                try:
+                    read_result = await client.read(memory_id)
+                    if str(read_result.id) != memory_id or read_result.content != content:
+                        _record_failure(
+                            "read",
+                            "Read returned unexpected smoke-test memory data.",
+                            "Check user-scope read permission and the server's read path.",
+                        )
+                        _skip_after("read", "The smoke-test read did not match the write.")
+                    else:
+                        _set_check("read", "passed", "Smoke-test content verified.")
+                except Exception as exc:
+                    _record_failure(
+                        "read",
+                        "The smoke-test read failed.",
+                        "Check user-scope read permission and the server's read path.",
+                        exc=exc,
+                    )
+                    _skip_after("read", "The smoke-test read failed.")
+        finally:
+            if memory_id is not None:
+                try:
+                    delete_result = await client.delete(memory_id)
+                    if delete_result.deleted_id == memory_id:
+                        _set_check("delete", "passed", "Smoke-test memory deleted.")
+                    else:
+                        _record_cleanup_failure(
+                            "Delete did not confirm the smoke-test memory ID.",
+                            f"The test memory {memory_id} may remain; delete it manually.",
+                        )
+                except Exception:
+                    _record_cleanup_failure(
+                        "Could not delete the smoke-test memory.",
+                        f"The test memory {memory_id} may remain; delete it manually.",
+                    )
+            elif checks["delete"]["status"] == "pending":
+                _set_check("delete", "skipped", "No smoke-test memory was created.")
+
+            try:
+                await client.__aexit__(None, None, None)
+            except Exception:
+                # Closing the client must not replace the check or cleanup result.
+                pass
+
+    _run(_do_checks())
+    report = _report()
+
+    if failure is None:
+        if output == OutputFormat.json:
+            json_success(report)
+        elif output != OutputFormat.quiet:
+            _print_doctor_cluster_table(report, None)
+        return
+
+    error_payload = {
+        key: value for key, value in failure.items() if key != "exit_code"
+    }
+    if output == OutputFormat.json:
+        err_console.print_json(
+            json.dumps(
+                {"status": "error", "data": report, "error": error_payload},
+                default=str,
+            )
+        )
+    elif output != OutputFormat.quiet:
+        _print_doctor_cluster_table(report, error_payload)
+    raise typer.Exit(int(failure["exit_code"]))
+
+
+def _print_doctor_cluster_table(
+    report: dict[str, object], error: dict[str, str | int] | None,
+) -> None:
+    """Render cluster diagnostic results without exposing exception details."""
+    console.print("[bold]MemoryHub Doctor[/bold]\n")  # noqa: T201
+    console.print("  Edition:    [cyan]cluster[/cyan]")  # noqa: T201
+    if report.get("context"):
+        console.print(f"  Context:    {report['context']}", markup=False)  # noqa: T201
+    if report.get("endpoint"):
+        console.print(f"  Server URL: {report['endpoint']}", markup=False)  # noqa: T201
+    checks = report["checks"]
+    assert isinstance(checks, dict)
+    labels = {
+        "endpoint_reachable": "Endpoint",
+        "authenticated": "Authentication",
+        "write": "Write",
+        "search": "Search",
+        "read": "Read",
+        "delete": "Delete",
+    }
+    for name, label in labels.items():
+        check = checks[name]
+        status = check["status"]
+        color = {"passed": "green", "failed": "red", "skipped": "yellow"}[status]
+        console.print(
+            f"  {label + ':':<16} [{color}]{status}[/{color}]  {check['detail']}"
+        )  # noqa: T201
+
+    session = report.get("session")
+    if isinstance(session, dict):
+        identity = session.get("name") or session.get("user_id")
+        if identity:
+            user_id = session.get("user_id")
+            identity_text = str(identity)
+            if user_id and user_id != identity:
+                identity_text += f" ({user_id})"
+            console.print(f"  Identity:        {identity_text}", markup=False)  # noqa: T201
+
+        permissions = session.get("user_scope_permissions")
+        if isinstance(permissions, dict):
+            permission_text = (
+                f"read {permissions.get('read', 'unreported')}, "
+                f"write {permissions.get('write', 'unreported')}"
+            )
+            console.print(f"  User permissions: {permission_text}", markup=False)  # noqa: T201
+
+        scopes = session.get("scopes")
+        if isinstance(scopes, list):
+            scope_text = ", ".join(str(scope) for scope in scopes) or "none reported"
+            console.print(f"  Scopes:           {scope_text}", markup=False)  # noqa: T201
+
+        expiry = session.get("expires_at")
+        remaining = session.get("remaining_seconds")
+        if expiry or remaining is not None:
+            if isinstance(remaining, int):
+                if remaining <= 0:
+                    expiry_text = "expired"
+                elif remaining < 60:
+                    expiry_text = f"in {remaining}s"
+                elif remaining < 3600:
+                    expiry_text = f"in {remaining // 60}m"
+                elif remaining < 86400:
+                    expiry_text = f"in {remaining // 3600}h"
+                else:
+                    expiry_text = f"in {remaining // 86400}d"
+            else:
+                expiry_text = "time remaining unavailable"
+            if expiry:
+                expiry_text = f"{expiry} ({expiry_text})"
+            if session.get("near_expiry"):
+                expiry_text += " (near expiry)"
+            console.print(f"  Session expires: {expiry_text}", markup=False)  # noqa: T201
+
+        projects = session.get("projects")
+        if isinstance(projects, list):
+            project_text = ", ".join(str(project) for project in projects) or "none"
+            console.print(f"  Projects:         {project_text}", markup=False)  # noqa: T201
+
+    if error is not None:
+        console.print(f"\n  Error: {error['message']}")  # noqa: T201
+        console.print(f"  Next action: {error['next_action']}")  # noqa: T201
 
 
 @app.command()
