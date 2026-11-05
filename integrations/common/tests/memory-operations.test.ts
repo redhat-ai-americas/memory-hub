@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMemoryOperation,
+  DEFAULT_MEMORY_TOOL_NAMES,
+  extendMemoryToolCatalog,
+  MEMORY_TOOL_CATALOG,
   MEMORY_TOOL_DESCRIPTIONS,
 } from "../src/memory-operations.js";
 
@@ -11,6 +14,42 @@ describe("buildMemoryOperation", () => {
     const expected = ["search", "read", "list", "write", "update", "delete"];
     const tools = Object.keys(MEMORY_TOOL_DESCRIPTIONS) as Array<keyof typeof MEMORY_TOOL_DESCRIPTIONS>;
     expect(tools.map((tool) => buildMemoryOperation(tool, {}, defaults).action)).toEqual(expected);
+  });
+
+  it("keeps the six tools as the default catalog profile", () => {
+    expect(DEFAULT_MEMORY_TOOL_NAMES).toEqual([
+      "memoryhub_search",
+      "memoryhub_read",
+      "memoryhub_list",
+      "memoryhub_write",
+      "memoryhub_update",
+      "memoryhub_delete",
+    ]);
+    expect(Object.keys(MEMORY_TOOL_CATALOG)).toEqual(DEFAULT_MEMORY_TOOL_NAMES);
+  });
+
+  it("allows adapters to extend the catalog without changing common mappings", () => {
+    const catalog = extendMemoryToolCatalog({
+      memoryhub_threads: {
+        description: "Manage conversation threads.",
+        buildOperation: (args) => ({
+          action: "thread",
+          params: { action: args.action },
+        }),
+      },
+    });
+
+    expect(buildMemoryOperation("memoryhub_threads", { action: "list" }, defaults, catalog)).toEqual({
+      action: "thread",
+      params: { action: "list" },
+    });
+    expect(Object.keys(MEMORY_TOOL_CATALOG)).toHaveLength(6);
+  });
+
+  it("rejects tools that are not in the selected catalog", () => {
+    expect(() => buildMemoryOperation("memoryhub_unknown", {}, defaults)).toThrow(
+      "Unknown MemoryHub tool: memoryhub_unknown",
+    );
   });
 
   it("applies search defaults while preserving explicit arguments", () => {
