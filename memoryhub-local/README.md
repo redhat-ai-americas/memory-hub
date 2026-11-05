@@ -52,6 +52,15 @@ The three scopes, in priority order:
 
 ## Verify it works
 
+By default, `memoryhub doctor` selects its checks based on whether
+`memoryhub-local` is installed in the CLI's Python environment. With this
+package installed, it reports personal-edition database, migration,
+embedding-model, and memory-count status. If `memoryhub-local` is not installed,
+the same command checks the configured cluster connection. Use
+`memoryhub doctor --edition local` or `memoryhub doctor --edition cluster` to
+force either path; see the
+[`memoryhub-cli` doctor guide](../memoryhub-cli/README.md#check-the-connection).
+
 ```bash
 memoryhub doctor
 ```
@@ -86,7 +95,7 @@ Cluster-only actions (projects, curation rules, promote/graduate, focus) return 
 | Command | Description |
 |---------|-------------|
 | `memoryhub mcp` | Start the local MCP server (stdio). This is what Claude Code calls. |
-| `memoryhub doctor` | Health check: database status, model, migrations, memory count |
+| `memoryhub doctor` | Auto-detect health check; use `--edition local` or `--edition cluster` to force a path; use `--context` to select a named cluster context |
 | `memoryhub dream -m <model>` | Extract facts from threads using a local LLM |
 
 ### Offline extraction with `dream`
