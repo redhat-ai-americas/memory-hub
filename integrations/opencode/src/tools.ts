@@ -2,9 +2,12 @@ import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import {
   buildMemoryOperation,
   DEFAULT_MEMORY_TOOL_NAMES,
+  MEMORY_TOOL_CATALOG,
   MEMORY_TOOL_DESCRIPTIONS,
 } from "../../common/src/memory-operations.js";
-import type { DefaultMemoryToolName } from "../../common/src/memory-operations.js";
+import type {
+  MemoryToolCatalog,
+} from "../../common/src/memory-operations.js";
 import { type MemoryHubMcpClient } from "./mcp-client.js";
 import type { MemoryHubConfig } from "./config.js";
 
@@ -41,16 +44,22 @@ export function createTools(
   mcpClient: MemoryHubMcpClient,
   config: MemoryHubConfig,
   withSession: <T>(fn: () => Promise<T>) => Promise<T>,
-  enabledTools: readonly DefaultMemoryToolName[] = DEFAULT_MEMORY_TOOL_NAMES,
+  profile: {
+    catalog?: MemoryToolCatalog;
+    enabledTools?: readonly string[];
+  } = {},
 ): Record<string, ToolDefinition> {
+  const catalog = profile.catalog ?? MEMORY_TOOL_CATALOG;
+  const enabledTools = profile.enabledTools ?? DEFAULT_MEMORY_TOOL_NAMES;
+
   async function execute(
-    name: keyof typeof MEMORY_TOOL_DESCRIPTIONS,
+    name: string,
     args: Record<string, unknown>,
     title: string,
     fallback: string,
   ) {
     try {
-      const operation = buildMemoryOperation(name, args, config.defaults);
+      const operation = buildMemoryOperation(name, args, config.defaults, catalog);
       const result = await withSession(() =>
         mcpClient.callMemory(operation.action, operation.params),
       );
@@ -60,7 +69,7 @@ export function createTools(
     }
   }
 
-  const tools: Record<DefaultMemoryToolName, ToolDefinition> = {
+  const tools: Record<string, ToolDefinition> = {
     memoryhub_search: tool({
       description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_search,
       args: {
@@ -204,9 +213,14 @@ export function createTools(
     }),
   };
 
+  const unavailable = enabledTools.filter((name) => !(name in tools));
+  if (unavailable.length > 0) {
+    throw new Error(
+      `Unsupported OpenCode MemoryHub tool profile entries: ${unavailable.join(", ")}`,
+    );
+  }
+
   return Object.fromEntries(
-    enabledTools
-      .filter((name) => name in tools)
-      .map((name) => [name, tools[name]]),
+    enabledTools.map((name) => [name, tools[name]]),
   );
 }

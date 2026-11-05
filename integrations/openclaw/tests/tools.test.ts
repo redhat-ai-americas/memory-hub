@@ -25,11 +25,21 @@ describe("tools", () => {
   }
 
   it("allows the host to select a subset of the shared tool profile", () => {
-    const tools = createTools(mcpClient, config, undefined, ["memoryhub_search", "memoryhub_read"]);
+    const tools = createTools(mcpClient, config, undefined, {
+      enabledTools: ["memoryhub_search", "memoryhub_read"],
+    });
     expect(tools.map((tool) => tool.name)).toEqual([
       "memoryhub_search",
       "memoryhub_read",
     ]);
+  });
+
+  it("rejects a tool profile entry without an adapter schema", () => {
+    expect(() =>
+      createTools(mcpClient, config, undefined, {
+        enabledTools: ["memoryhub_threads"],
+      }),
+    ).toThrow("Unsupported OpenClaw MemoryHub tool profile entries: memoryhub_threads");
   });
 
   describe("memoryhub_search", () => {

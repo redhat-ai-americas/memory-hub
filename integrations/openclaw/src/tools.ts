@@ -2,9 +2,12 @@ import { Type } from "@sinclair/typebox";
 import {
   buildMemoryOperation,
   DEFAULT_MEMORY_TOOL_NAMES,
+  MEMORY_TOOL_CATALOG,
   MEMORY_TOOL_DESCRIPTIONS,
 } from "../../common/src/memory-operations.js";
-import type { DefaultMemoryToolName } from "../../common/src/memory-operations.js";
+import type {
+  MemoryToolCatalog,
+} from "../../common/src/memory-operations.js";
 import type { MemoryHubMcpClient } from "./mcp-client.js";
 import type { MemoryHubConfig } from "./config.js";
 import type { AnyAgentTool, AgentToolResult } from "./openclaw-plugin-sdk.js";
@@ -51,15 +54,21 @@ export function createTools(
   config: MemoryHubConfig,
   withSession: <T>(operation: () => Promise<T>) => Promise<T> = (operation) =>
     operation(),
-  enabledTools: readonly DefaultMemoryToolName[] = DEFAULT_MEMORY_TOOL_NAMES,
+  profile: {
+    catalog?: MemoryToolCatalog;
+    enabledTools?: readonly string[];
+  } = {},
 ): AnyAgentTool[] {
+  const catalog = profile.catalog ?? MEMORY_TOOL_CATALOG;
+  const enabledTools = profile.enabledTools ?? DEFAULT_MEMORY_TOOL_NAMES;
+
   async function execute(
-    name: keyof typeof MEMORY_TOOL_DESCRIPTIONS,
+    name: string,
     params: Record<string, unknown>,
     fallback: string,
   ): Promise<AgentToolResult> {
     try {
-      const operation = buildMemoryOperation(name, params, config.defaults);
+      const operation = buildMemoryOperation(name, params, config.defaults, catalog);
       const result = await withSession(() =>
         mcpClient.callMemory(operation.action, operation.params),
       );
@@ -258,6 +267,14 @@ export function createTools(
     memoryhubDelete,
   ];
 
+  const available = new Set(tools.map((tool) => tool.name));
+  const unavailable = enabledTools.filter((name) => !available.has(name));
+  if (unavailable.length > 0) {
+    throw new Error(
+      `Unsupported OpenClaw MemoryHub tool profile entries: ${unavailable.join(", ")}`,
+    );
+  }
+
   const enabled = new Set(enabledTools);
-  return tools.filter((tool) => enabled.has(tool.name as DefaultMemoryToolName));
+  return tools.filter((tool) => enabled.has(tool.name));
 }

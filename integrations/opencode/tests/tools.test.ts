@@ -45,10 +45,21 @@ describe("createTools", () => {
       createMockMcpClient(),
       testConfig(),
       passthroughSession,
-      ["memoryhub_search", "memoryhub_read"],
+      { enabledTools: ["memoryhub_search", "memoryhub_read"] },
     );
     expect(Object.keys(selected)).toEqual(["memoryhub_search", "memoryhub_read"]);
     expect(Object.keys(tools)).toHaveLength(6);
+  });
+
+  it("rejects a tool profile entry without an adapter schema", () => {
+    expect(() =>
+      createTools(
+        createMockMcpClient(),
+        testConfig(),
+        passthroughSession,
+        { enabledTools: ["memoryhub_threads"] },
+      ),
+    ).toThrow("Unsupported OpenCode MemoryHub tool profile entries: memoryhub_threads");
   });
 
   describe("memoryhub_search", () => {
