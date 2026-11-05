@@ -1,8 +1,10 @@
 import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import {
   buildMemoryOperation,
+  DEFAULT_MEMORY_TOOL_NAMES,
   MEMORY_TOOL_DESCRIPTIONS,
 } from "../../common/src/memory-operations.js";
+import type { DefaultMemoryToolName } from "../../common/src/memory-operations.js";
 import { type MemoryHubMcpClient } from "./mcp-client.js";
 import type { MemoryHubConfig } from "./config.js";
 
@@ -39,6 +41,7 @@ export function createTools(
   mcpClient: MemoryHubMcpClient,
   config: MemoryHubConfig,
   withSession: <T>(fn: () => Promise<T>) => Promise<T>,
+  enabledTools: readonly DefaultMemoryToolName[] = DEFAULT_MEMORY_TOOL_NAMES,
 ): Record<string, ToolDefinition> {
   async function execute(
     name: keyof typeof MEMORY_TOOL_DESCRIPTIONS,
@@ -57,7 +60,7 @@ export function createTools(
     }
   }
 
-  return {
+  const tools: Record<DefaultMemoryToolName, ToolDefinition> = {
     memoryhub_search: tool({
       description: MEMORY_TOOL_DESCRIPTIONS.memoryhub_search,
       args: {
@@ -200,4 +203,10 @@ export function createTools(
       },
     }),
   };
+
+  return Object.fromEntries(
+    enabledTools
+      .filter((name) => name in tools)
+      .map((name) => [name, tools[name]]),
+  );
 }

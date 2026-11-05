@@ -39,6 +39,18 @@ describe("createTools", () => {
     }
   });
 
+  it("allows the host to select a subset of the shared tool profile", () => {
+    const { tools } = makeTools();
+    const selected = createTools(
+      createMockMcpClient(),
+      testConfig(),
+      passthroughSession,
+      ["memoryhub_search", "memoryhub_read"],
+    );
+    expect(Object.keys(selected)).toEqual(["memoryhub_search", "memoryhub_read"]);
+    expect(Object.keys(tools)).toHaveLength(6);
+  });
+
   describe("memoryhub_search", () => {
     it("maps params onto memory(action=search)", async () => {
       const { client, tools } = makeTools(
