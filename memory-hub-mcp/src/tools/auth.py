@@ -20,7 +20,7 @@ import os
 import threading
 import time
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -37,6 +37,10 @@ class _SessionState:
     ttl_seconds: int
     session_id: str | None = None
     default_driver_id: str | None = None
+    # Auth-service API key this session registered with (memory only), so the
+    # session can be re-validated and revoked or narrowed clients lose access.
+    credential: str | None = field(default=None, repr=False)
+    validated_at: float = 0.0
 
 
 # FastMCP provides a stable session_id for each stateful MCP client session.
@@ -64,7 +68,9 @@ _users_loaded = False
 # Cache for remote (auth-service) API key validations, keyed by SHA-256
 # hash of the key.  Each entry is (user_dict, expiry_timestamp).
 _remote_key_cache: dict[str, tuple[dict[str, Any], float]] = {}
-_CACHE_TTL = 300  # 5 minutes
+# QA 2026-11-09 RT-CL-04/08: a 5-minute cache let rotated and revoked keys keep working.
+_CACHE_TTL = int(os.environ.get("MEMORYHUB_API_KEY_CACHE_SECONDS", "30"))
+SESSION_REVALIDATE_SECONDS = int(os.environ.get("MEMORYHUB_SESSION_REVALIDATE_SECONDS", "30"))
 
 
 def _load_users() -> None:
@@ -133,14 +139,14 @@ class AuthServiceUnavailableError(Exception):
     """Raised when the auth service cannot be reached for API key validation."""
 
 
-async def authenticate_remote(api_key: str) -> dict[str, Any] | None:
+async def authenticate_remote(api_key: str, *, use_cache: bool = True) -> dict[str, Any] | None:
     """Validate an API key via the auth service (fallback for keys not in ConfigMap).
 
     Returns the user dict on success, None if the key is definitively invalid,
     or raises AuthServiceUnavailableError on transient network failures.
     """
     key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-    cached = _remote_key_cache.get(key_hash)
+    cached = _remote_key_cache.get(key_hash) if use_cache else None
     if cached is not None:
         user_dict, expiry = cached
         if time.time() < expiry:
@@ -170,6 +176,7 @@ async def authenticate_remote(api_key: str) -> dict[str, Any] | None:
                 headers={"X-Service-Key": service_key},
             )
         if resp.status_code == 401:
+            _remote_key_cache.pop(key_hash, None)
             return None
         if resp.status_code != 200:
             raise AuthServiceUnavailableError(
@@ -583,3 +590,58 @@ def clear_session(ctx: Any | None = None) -> None:
             return
         else:
             _sessions_by_mcp_session.pop(mcp_session_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Session credential re-validation (QA 2026-11-09 RT-CL-08)
+# ---------------------------------------------------------------------------
+
+
+def bind_session_credential(api_key: str, ctx: Any | None = None) -> None:
+    """Remember the auth-service key behind this MCP session for re-validation."""
+    active_context = ctx if ctx is not None else _get_active_context()
+    mcp_session_id = _mcp_session_key(active_context)
+    if mcp_session_id is None:
+        return
+    with _sessions_lock:
+        state = _sessions_by_mcp_session.get(mcp_session_id)
+        if state is not None:
+            state.credential = api_key
+            state.validated_at = time.time()
+
+
+class SessionRevokedError(Exception):
+    """The credential behind an MCP session is no longer valid."""
+
+
+async def revalidate_session(ctx: Any | None = None) -> None:
+    """Re-check the session's API key with the auth service at most every SESSION_REVALIDATE_SECONDS.
+
+    A revoked or rotated key ends the session; changed scopes or tenant replace
+    the cached ones. If the auth service cannot be reached the call fails closed.
+    """
+    active_context = ctx if ctx is not None else _get_active_context()
+    mcp_session_id = _mcp_session_key(active_context)
+    if mcp_session_id is None:
+        return
+    with _sessions_lock:
+        state = _sessions_by_mcp_session.get(mcp_session_id)
+        credential = state.credential if state is not None else None
+        stale = state is not None and time.time() - state.validated_at >= SESSION_REVALIDATE_SECONDS
+    if not credential or not stale:
+        return
+    fresh = await authenticate_remote(credential, use_cache=False)
+    with _sessions_lock:
+        state = _sessions_by_mcp_session.get(mcp_session_id)
+        if state is None:
+            return
+        if fresh is None:
+            revoked_user = (state.user or {}).get("user_id", "unknown")
+            state.user = None
+            state.credential = None
+            logger.warning("MCP session for %s ended: API key no longer valid", revoked_user)
+            raise SessionRevokedError(revoked_user)
+        if state.user is not None:
+            for key in ("user_id", "name", "identity_type", "tenant_id", "scopes"):
+                state.user[key] = fresh[key]
+        state.validated_at = time.time()

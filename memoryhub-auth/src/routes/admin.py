@@ -1,7 +1,11 @@
 import hashlib
+import hmac
+import json
 import logging
 import os
+import re
 import secrets
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import bcrypt
@@ -25,13 +29,77 @@ log = logging.getLogger("memoryhub-auth.routes.admin")
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+# ---------------------------------------------------------------------------
+# Admin principals
+#
+# AUTH_ADMIN_KEY is the platform operator key: it may manage clients of any
+# tenant. AUTH_TENANT_ADMIN_KEYS (JSON object {"tenant-id": "key"}) holds one key
+# per tenant dashboard. A tenant key is bound to its tenant: every route forces
+# that tenant, a different tenant in the body or query string is refused (403),
+# and tenant keys can never grant cross-tenant scopes. The BFF is not trusted to
+# pick the tenant; the key it holds decides it.
+# ---------------------------------------------------------------------------
+
+_SCOPE_RE = re.compile(
+    r"^(memory:(read|write)(:(user|project|campaign|role|organizational|enterprise))?"
+    r"|memory:approve:(organizational|enterprise)"
+    r"|memory:admin(:(super|cross_tenant|sanitized_audit))?"
+    r"|project:admin)$"
+)
+PLATFORM_ONLY_SCOPES = frozenset({"memory:admin:cross_tenant"})
+
+
+@dataclass(frozen=True)
+class AdminPrincipal:
+    kind: str  # "platform" | "tenant"
+    tenant_id: str | None = None
+
+    def tenant_for(self, requested: str | None) -> str | None:
+        """Return the tenant this request may touch; refuse foreign tenants."""
+        if self.kind == "platform":
+            return requested
+        if requested is not None and requested != self.tenant_id:
+            log.warning("Refused tenant override: key for %s asked for %s", self.tenant_id, requested)
+            raise HTTPException(status_code=403, detail="This admin key cannot act on another tenant")
+        return self.tenant_id
+
+
+def _tenant_keys() -> dict[str, str]:
+    raw = os.environ.get("AUTH_TENANT_ADMIN_KEYS", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        log.error("AUTH_TENANT_ADMIN_KEYS is not valid JSON; tenant admin keys disabled")
+        return {}
+    return {str(t): str(k) for t, k in data.items() if t and k} if isinstance(data, dict) else {}
+
+
 async def require_admin_key(
     x_admin_key: str | None = Header(default=None),
-) -> None:
-    """Validate the admin API key from the X-Admin-Key header."""
-    admin_key = os.environ.get("AUTH_ADMIN_KEY", "")
-    if not admin_key or not x_admin_key or x_admin_key != admin_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing admin key")
+) -> AdminPrincipal:
+    """Resolve the X-Admin-Key header to a platform or tenant-bound principal."""
+    if x_admin_key:
+        platform = os.environ.get("AUTH_ADMIN_KEY", "")
+        if platform and hmac.compare_digest(x_admin_key.encode(), platform.encode()):
+            return AdminPrincipal(kind="platform")
+        for tenant, key in _tenant_keys().items():
+            if hmac.compare_digest(x_admin_key.encode(), key.encode()):
+                return AdminPrincipal(kind="tenant", tenant_id=tenant)
+    raise HTTPException(status_code=401, detail="Invalid or missing admin key")
+
+
+def _validate_scopes(principal: AdminPrincipal, scopes: list[str] | None) -> None:
+    if scopes is None:
+        return
+    unknown = sorted({s for s in scopes if not isinstance(s, str) or not _SCOPE_RE.match(s)})
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown scopes: {', '.join(map(str, unknown))}")
+    if principal.kind != "platform" and PLATFORM_ONLY_SCOPES.intersection(scopes):
+        raise HTTPException(
+            status_code=403, detail="Cross-tenant scopes can only be granted with the platform admin key"
+        )
 
 
 def _client_to_response(client: OAuthClient) -> ClientResponse:
@@ -49,11 +117,13 @@ def _client_to_response(client: OAuthClient) -> ClientResponse:
     )
 
 
-@router.get("/clients", dependencies=[Depends(require_admin_key)])
+@router.get("/clients")
 async def list_clients(
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
+    principal: AdminPrincipal = Depends(require_admin_key),
 ) -> list[ClientResponse]:
+    tenant_id = principal.tenant_for(tenant_id)
     stmt = select(OAuthClient)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
@@ -62,15 +132,17 @@ async def list_clients(
     return [_client_to_response(c) for c in clients]
 
 
-@router.post(
-    "/clients",
-    status_code=201,
-    dependencies=[Depends(require_admin_key)],
-)
+@router.post("/clients", status_code=201)
 async def create_client(
     body: CreateClientRequest,
+    tenant_id: str | None = Query(default=None, description="Must match body.tenant_id when given"),
     session: AsyncSession = Depends(get_session),
+    principal: AdminPrincipal = Depends(require_admin_key),
 ) -> ClientCreatedResponse:
+    if tenant_id is not None and tenant_id != body.tenant_id:
+        raise HTTPException(status_code=403, detail="Conflicting tenant in query string and body")
+    principal.tenant_for(body.tenant_id)
+    _validate_scopes(principal, body.default_scopes)
     # Check for duplicate client_id
     existing = await session.execute(
         select(OAuthClient).where(OAuthClient.client_id == body.client_id)
@@ -108,7 +180,7 @@ async def create_client(
     await session.commit()
     await session.refresh(client)
 
-    log.info("Created client %s (tenant=%s)", body.client_id, body.tenant_id)
+    log.info("Created client %s (tenant=%s, by=%s)", body.client_id, body.tenant_id, principal.kind)
 
     return ClientCreatedResponse(
         client_id=client.client_id,
@@ -126,12 +198,14 @@ async def create_client(
     )
 
 
-@router.get("/clients/{client_id}", dependencies=[Depends(require_admin_key)])
+@router.get("/clients/{client_id}")
 async def get_client(
     client_id: str,
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
+    principal: AdminPrincipal = Depends(require_admin_key),
 ) -> ClientResponse:
+    tenant_id = principal.tenant_for(tenant_id)
     stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
@@ -142,13 +216,15 @@ async def get_client(
     return _client_to_response(client)
 
 
-@router.patch("/clients/{client_id}", dependencies=[Depends(require_admin_key)])
+@router.patch("/clients/{client_id}")
 async def update_client(
     client_id: str,
     body: UpdateClientRequest,
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
+    principal: AdminPrincipal = Depends(require_admin_key),
 ) -> ClientResponse:
+    tenant_id = principal.tenant_for(tenant_id)
     stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
@@ -162,6 +238,7 @@ async def update_client(
     if body.active is not None:
         client.active = body.active
     if body.default_scopes is not None:
+        _validate_scopes(principal, body.default_scopes)
         client.default_scopes = body.default_scopes
     if body.redirect_uris is not None:
         client.redirect_uris = body.redirect_uris
@@ -178,13 +255,14 @@ async def update_client(
 
 @router.post(
     "/clients/{client_id}/rotate-secret",
-    dependencies=[Depends(require_admin_key)],
 )
 async def rotate_secret(
     client_id: str,
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
+    principal: AdminPrincipal = Depends(require_admin_key),
 ) -> SecretRotatedResponse:
+    tenant_id = principal.tenant_for(tenant_id)
     stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
@@ -212,13 +290,14 @@ async def rotate_secret(
 
 @router.post(
     "/clients/{client_id}/rotate-api-key",
-    dependencies=[Depends(require_admin_key)],
 )
 async def rotate_api_key(
     client_id: str,
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
     session: AsyncSession = Depends(get_session),
+    principal: AdminPrincipal = Depends(require_admin_key),
 ) -> ApiKeyRotatedResponse:
+    tenant_id = principal.tenant_for(tenant_id)
     stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)

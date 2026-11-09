@@ -1729,6 +1729,9 @@ async def create_dashboard_memory(
     owner = body.owner_id or (tenant_id if body.scope in ("organizational", "enterprise") else viewer.username)
     if viewer.restricted:
         owner = viewer.username if body.scope == "user" else (body.scope_id or owner)
+    elif body.scope == "user" and owner != viewer.username:
+        # Nobody plants content in another person's private memory from the dashboard.
+        raise HTTPException(status_code=403, detail="User memories can only be written by their owner")
     data = MemoryNodeCreate(
         content=body.content,
         scope=body.scope,

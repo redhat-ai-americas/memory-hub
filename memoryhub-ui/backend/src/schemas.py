@@ -104,7 +104,7 @@ class CreateClientRequest(BaseModel):
     client_id: str
     client_name: str
     identity_type: str = "user"
-    tenant_id: str
+    tenant_id: str | None = None  # ignored except to detect cross-tenant attempts; the dashboard's tenant is used
     default_scopes: list[str] = ["memory:read"]
 
 

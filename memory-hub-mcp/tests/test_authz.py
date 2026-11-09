@@ -276,30 +276,46 @@ def test_get_claims_jwt_path():
     assert "memory:write:user" in claims["scopes"]
 
 
-def test_get_claims_header_extraction():
-    """When get_access_token returns None, extract JWT from Authorization header."""
-    import jwt as pyjwt
+def test_unverified_header_token_is_not_an_identity():
+    """A bearer token nobody verified must not authenticate anyone.
 
-    test_token = pyjwt.encode(
-        {
-            "sub": "curator",
-            "identity_type": "service",
-            "tenant_id": "default",
-            "scopes": ["memory:read"],
-        },
+    Decoding the Authorization header without checking the signature let any
+    client claim any identity, tenant and scopes. Only claims verified by
+    BearerTokenMiddleware count; without them the call falls back to the
+    session, and with no session it is refused.
+    """
+    import jwt as pyjwt
+    from src.core.authz import AuthenticationError
+
+    forged = pyjwt.encode(
+        {"sub": "curator", "tenant_id": "other", "scopes": ["memory:admin"]},
         "test-key-not-a-real-secret",
         algorithm="HS256",
     )
     mock_request = MagicMock()
-    mock_request.headers = {"authorization": f"Bearer {test_token}"}
+    mock_request.headers = {"authorization": f"Bearer {forged}"}
 
     with (
         patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-        patch(
-            "fastmcp.server.dependencies.get_http_request", return_value=mock_request
-        ),
+        patch("fastmcp.server.dependencies.get_http_request", return_value=mock_request),
+        patch("src.core.authz.get_current_user", return_value=None),
+        pytest.raises(AuthenticationError),
     ):
-        claims = get_claims_from_context()
+        get_claims_from_context()
+
+
+def test_get_claims_from_a_verified_bearer_token():
+    """Claims verified by BearerTokenMiddleware are the caller's identity."""
+    from src.core import bearer
+
+    reset = bearer._verified_claims.set(
+        {"sub": "curator", "identity_type": "service", "tenant_id": "default", "scopes": ["memory:read"]}
+    )
+    try:
+        with patch("fastmcp.server.dependencies.get_access_token", return_value=None):
+            claims = get_claims_from_context()
+    finally:
+        bearer._verified_claims.reset(reset)
 
     assert claims["sub"] == "curator"
     assert claims["identity_type"] == "service"

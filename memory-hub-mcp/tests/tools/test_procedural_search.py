@@ -204,7 +204,7 @@ async def test_get_guidance_returns_the_service_payload():
         patch("src.tools.manage_graph.get_claims_from_context", return_value=_CLAIMS),
         patch("src.tools.manage_graph.get_db_session", return_value=(AsyncMock(), AsyncMock())),
         patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock),
-        patch("src.tools.manage_graph.get_projects_for_user", new_callable=AsyncMock, return_value=set()),
+        patch("src.tools.manage_graph.get_projects_for_user_in_tenant", new_callable=AsyncMock, return_value=set()),
         patch("src.tools.manage_graph.get_roles_for_user", new_callable=AsyncMock, return_value=set()),
         patch("src.tools._guidance.localized_guidance", fake_guidance),
     ):
@@ -305,7 +305,7 @@ async def test_get_guidance_neighborhood_stays_full():
     stack.enter_context(patch("src.tools.manage_graph.get_db_session", return_value=(AsyncMock(), AsyncMock())))
     stack.enter_context(patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock))
     stack.enter_context(
-        patch("src.tools.manage_graph.get_projects_for_user", new_callable=AsyncMock, return_value=set())
+        patch("src.tools.manage_graph.get_projects_for_user_in_tenant", new_callable=AsyncMock, return_value=set())
     )
     stack.enter_context(
         patch("src.tools.manage_graph.get_roles_for_user", new_callable=AsyncMock, return_value=set())

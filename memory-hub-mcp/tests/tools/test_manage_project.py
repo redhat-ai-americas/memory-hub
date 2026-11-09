@@ -196,7 +196,7 @@ class TestDescribeAction:
         async def fake_members(session, project_name):
             return [{"user_id": "wjackson", "role": "admin", "joined_at": "2026-04-01T00:00:00+00:00"}]
 
-        async def fake_get_project(session, name):
+        async def fake_get_project(session, name, **_kw):
             return FakeProject()
 
         async def fake_counts(session, tenant_id, names):
@@ -236,10 +236,10 @@ class TestAddMemberAction:
         class FakeMembership:
             role = "member"
 
-        async def fake_get(session, name):
+        async def fake_get(session, name, **_kw):
             return FakeProject()
 
-        async def fake_add(session, name, user_id, added_by, role):
+        async def fake_add(session, name, user_id, added_by, role, **_kw):
             return True
 
         monkeypatch.setattr("src.tools.manage_project.get_project", fake_get)
@@ -258,7 +258,7 @@ class TestAddMemberAction:
         class FakeProject:
             invite_only = False
 
-        async def fake_get(session, name):
+        async def fake_get(session, name, **_kw):
             return FakeProject()
 
         monkeypatch.setattr("src.tools.manage_project.get_project", fake_get)
@@ -278,7 +278,7 @@ class TestAddMemberAction:
         class FakeMembership:
             role = "member"
 
-        async def fake_get(session, name):
+        async def fake_get(session, name, **_kw):
             return FakeProject()
 
         monkeypatch.setattr("src.tools.manage_project.get_project", fake_get)
@@ -299,10 +299,10 @@ class TestAddMemberAction:
         class FakeMembership:
             role = "admin"
 
-        async def fake_get(session, name):
+        async def fake_get(session, name, **_kw):
             return FakeProject()
 
-        async def fake_add(session, name, user_id, added_by, role):
+        async def fake_add(session, name, user_id, added_by, role, **_kw):
             return True
 
         monkeypatch.setattr("src.tools.manage_project.get_project", fake_get)
@@ -324,10 +324,10 @@ class TestAddMemberAction:
         class FakeMembership:
             role = "member"
 
-        async def fake_get(session, name):
+        async def fake_get(session, name, **_kw):
             return FakeProject()
 
-        async def fake_add(session, name, user_id, added_by, role):
+        async def fake_add(session, name, user_id, added_by, role, **_kw):
             return False  # already a member
 
         monkeypatch.setattr("src.tools.manage_project.get_project", fake_get)
@@ -343,6 +343,10 @@ class TestAddMemberAction:
 
 
 class TestRemoveMemberAction:
+    @pytest.fixture(autouse=True)
+    def _project_in_tenant(self, monkeypatch):
+        monkeypatch.setattr("src.tools.manage_project.get_project", _fake_return(object()))
+
     async def test_remove_member_success(self, monkeypatch):
         """Admin can remove another member."""
         class FakeMembership:
@@ -498,7 +502,7 @@ class TestCentralProvisioning:
 
         added = {}
 
-        async def fake_add(session, name, user_id, added_by, role):
+        async def fake_add(session, name, user_id, added_by, role, **_kw):
             added.update(name=name, user_id=user_id, role=role)
             return True
 
@@ -535,6 +539,7 @@ class TestCentralProvisioning:
         )
         monkeypatch.setattr("src.tools.manage_project._get_membership", _fake_return(None))
         monkeypatch.setattr("src.tools.manage_project.remove_project_member", fake_remove)
+        monkeypatch.setattr("src.tools.manage_project.get_project", _fake_return(object()))
         self._db(monkeypatch)
         await manage_project(action="remove_member", project_name="proj", user_id="kate")
         assert removed == {"name": "proj", "user_id": "kate"}
@@ -644,3 +649,34 @@ class TestLifecycle:
         self._setup(monkeypatch, project_tenant="other")
         with pytest.raises(ToolError, match="not found"):
             await manage_project(action="archive", project_name="team-x")
+
+
+class TestCrossTenantProjectAdmin20261109:
+    """QA 2026-11-09 RT-XT-05: a provisioner of tenant B cannot touch tenant A's project."""
+
+    @pytest.fixture(autouse=True)
+    def _ctx(self, monkeypatch):
+        seen = {}
+
+        async def get_project_in(session, name, include_deleted=False, tenant_id=None):
+            seen["tenant_id"] = tenant_id
+            return None if tenant_id == "tenant-b" else object()
+
+        monkeypatch.setattr(
+            "src.tools.manage_project.get_claims_from_context",
+            lambda: {"sub": "b-admin", "tenant_id": "tenant-b", "scopes": ["memory:admin"]},
+        )
+        monkeypatch.setattr("src.tools.manage_project.get_project", get_project_in)
+        monkeypatch.setattr("src.tools.manage_project._get_membership", _fake_return(None))
+        monkeypatch.setattr("src.tools.manage_project.get_db_session", _fake_db_session)
+        monkeypatch.setattr("src.tools.manage_project.release_db_session", _fake_release)
+        self.seen = seen
+
+    @pytest.mark.parametrize("action", ["describe", "add_member", "remove_member"])
+    async def test_foreign_project_is_not_found(self, monkeypatch, action):
+        called = []
+        monkeypatch.setattr("src.tools.manage_project.add_project_member", lambda *a, **k: called.append("add"))
+        monkeypatch.setattr("src.tools.manage_project.remove_project_member", lambda *a, **k: called.append("rm"))
+        with pytest.raises(ToolError, match="not found"):
+            await manage_project(action=action, project_name="a-proj", user_id="intruder")
+        assert called == [] and self.seen["tenant_id"] == "tenant-b"

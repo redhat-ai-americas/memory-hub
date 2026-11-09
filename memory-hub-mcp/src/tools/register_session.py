@@ -21,17 +21,6 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
-from memoryhub_core.config import AppSettings
-from memoryhub_core.services.project import get_projects_for_user, list_projects_for_tenant
-from memoryhub_core.services.push_subscriber import (
-    ensure_memoryhub_subscriber_running,
-    stop_memoryhub_subscriber,
-)
-from memoryhub_core.services.valkey_client import (
-    ValkeyUnavailableError,
-    get_valkey_client,
-)
 from src.core.app import mcp
 from src.core.audit import record_event
 from src.core.authz import get_tenant_filter
@@ -41,10 +30,22 @@ from src.tools.auth import (
     AuthServiceUnavailableError,
     authenticate,
     authenticate_remote,
+    bind_session_credential,
     get_mcp_session_id,
     set_default_driver_id,
     set_session,
     set_session_id,
+)
+
+from memoryhub_core.config import AppSettings
+from memoryhub_core.services.project import get_projects_for_user_in_tenant, list_projects_for_tenant
+from memoryhub_core.services.push_subscriber import (
+    ensure_memoryhub_subscriber_running,
+    stop_memoryhub_subscriber,
+)
+from memoryhub_core.services.valkey_client import (
+    ValkeyUnavailableError,
+    get_valkey_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -218,7 +219,9 @@ async def _resolve_project_memberships(
     gen = None
     try:
         session, gen = await get_db_session()
-        db_projects = await get_projects_for_user(session, user["user_id"])
+        db_projects = await get_projects_for_user_in_tenant(
+            session, user["user_id"], user.get("tenant_id") or "default"
+        )
         merged = configmap_projects | db_projects
         return sorted(merged)
     except Exception as exc:
@@ -349,9 +352,10 @@ async def register_session(
         )
 
     user = authenticate(api_key)
+    remote_credential = user is None
     if user is None:
         try:
-            user = await authenticate_remote(api_key)
+            user = await authenticate_remote(api_key, use_cache=False)
         except AuthServiceUnavailableError as exc:
             raise ToolError(
                 "Could not reach authentication service to validate your API key. "
@@ -402,6 +406,8 @@ async def register_session(
             "API-key registration requires an established MCP client session. "
             "Reconnect and call register_session again."
         ) from exc
+    if remote_credential:
+        bind_session_credential(api_key, ctx)
     await _start_push_for_session(session_id, ctx)
 
     if ctx:

@@ -36,6 +36,12 @@ async def secured_app(monkeypatch):
             text("INSERT INTO memoryhub_ui_accounts VALUES (:id, 'tenant-a', 'alice', 'admin', 'active', 0)"),
             {"id": account_id.hex},
         )
+        await connection.execute(
+            text(
+                "CREATE TABLE memoryhub_ui_revoked_sessions "
+                "(token_hash TEXT PRIMARY KEY, tenant_id TEXT, username TEXT, revoked_at TEXT, expires_at TEXT)"
+            )
+        )
 
     async def db_provider():
         async with factory() as db:

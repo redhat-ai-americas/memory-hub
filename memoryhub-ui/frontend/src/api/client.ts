@@ -170,6 +170,7 @@ export const api = {
     patch<AccountRow>(`/accounts/${enc(id)}`, body),
   createInvite: (body: { role: 'admin' | 'user'; email?: string; note?: string; expires_days: number }) =>
     post<InviteCreated>('/invites', body),
+  revokeInvite: (id: string) => del<{ ok: boolean; id: string; state: 'revoked' }>(`/invites/${enc(id)}`),
   navCounts: () => get<NavCounts>('/nav-counts'),
   publicConfig: () => get<PublicConfig>('/public-config'),
 

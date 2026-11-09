@@ -142,6 +142,7 @@ async def _handle_client_credentials(
     scopes = _resolve_scopes(scope, client)
 
     access_token = create_access_token(
+        client_id=client.client_id,
         subject=client.client_id,
         identity_type=client.identity_type,
         tenant_id=client.tenant_id,
@@ -216,6 +217,7 @@ async def _handle_refresh_token(
 
     scopes = stored_rt.scopes
     access_token = create_access_token(
+        client_id=client.client_id,
         subject=stored_rt.subject,
         identity_type=client.identity_type,
         tenant_id=stored_rt.tenant_id,
@@ -307,6 +309,7 @@ async def _handle_authorization_code(
 
     scopes = auth_session.scopes or []
     access_token = create_access_token(
+        client_id=client.client_id,
         subject=auth_session.subject,
         identity_type=auth_session.identity_type,
         tenant_id=auth_session.tenant_id,
@@ -369,6 +372,7 @@ async def _handle_token_exchange(
 
     subject = token_info["username"]
     access_token = create_access_token(
+        client_id=client.client_id,
         subject=subject,
         identity_type=client.identity_type,
         tenant_id=tenant_id,

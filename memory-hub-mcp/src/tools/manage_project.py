@@ -249,7 +249,7 @@ async def manage_project(
             )
         elif action == "remove_member":
             return await _handle_remove_member(
-                session, caller, project_name, user_id,
+                session, tenant, caller, project_name, user_id,
                 provisioner=_can_provision(claims),
             )
         else:
@@ -413,7 +413,7 @@ async def _handle_lifecycle(
 async def _handle_describe(
     session: Any, tenant: str, name: str,
 ) -> dict[str, Any]:
-    project = await get_project(session, name)
+    project = await get_project(session, name, tenant_id=tenant)
     if project is None:
         raise ToolError(
             f"Project '{name}' not found. "
@@ -456,7 +456,9 @@ async def _handle_add_member(
     role: str,
     provisioner: bool = False,
 ) -> dict[str, Any]:
-    project = await get_project(session, project_name)
+    # QA 2026-11-09 RT-XT-05: a project of another tenant is "not found" here,
+    # even for provisioners (memory:admin / project:admin are tenant-bound).
+    project = await get_project(session, project_name, tenant_id=tenant)
     if project is None:
         raise ToolError(
             f"Project '{project_name}' not found. "
@@ -488,7 +490,7 @@ async def _handle_add_member(
 
     try:
         was_added = await add_project_member(
-            session, project_name, target_user, added_by=caller, role=role,
+            session, project_name, target_user, added_by=caller, role=role, tenant_id=tenant,
         )
     except ProjectNotFoundError:
         raise ToolError(
@@ -513,11 +515,18 @@ async def _handle_add_member(
 
 async def _handle_remove_member(
     session: Any,
+    tenant: str,
     caller: str,
     project_name: str,
     target_user: str,
     provisioner: bool = False,
 ) -> dict[str, Any]:
+    # QA 2026-11-09 RT-XT-05: never touch memberships of another tenant's project.
+    if await get_project(session, project_name, tenant_id=tenant) is None:
+        raise ToolError(
+            f"Project '{project_name}' not found. "
+            "Use action='list' with filter='all' to see available projects."
+        )
     # Authorization: self-removal is always allowed; otherwise require admin
     # (a deployment administrator counts as one under central provisioning).
     if caller != target_user and not (provisioner and provisioning_mode() == "central"):

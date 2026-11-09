@@ -119,6 +119,17 @@ def create_app() -> FastAPI:
                     or row._mapping["session_version"] != session.version
                 ):
                     session = None
+                else:
+                    from src.ui_common import SESSION_COOKIE, session_token_hash
+
+                    revoked = (
+                        await db.execute(
+                            text("SELECT 1 FROM memoryhub_ui_revoked_sessions WHERE token_hash = :h"),
+                            {"h": session_token_hash(request.cookies.get(SESSION_COOKIE, ""))},
+                        )
+                    ).first()
+                    if revoked is not None:
+                        session = None
             request.state.account_session = session
         proxy_identity = proxy_auth_enabled(current) and (
             request.headers.get("x-forwarded-preferred-username") or request.headers.get("x-forwarded-user")

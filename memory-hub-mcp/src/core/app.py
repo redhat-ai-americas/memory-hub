@@ -29,6 +29,11 @@ else:
 
 mcp = FastMCP(APP_NAME, auth=_auth) if _auth else FastMCP(APP_NAME)
 
+# The verifier for bearer tokens, shared with src.main: that entry point builds
+# its own FastMCP without transport auth (API-key clients connect without a
+# token), so tokens are verified per call by src.core.bearer instead.
+jwt_verifier = _auth
+
 # Import prompts module to trigger decorator registration
 # This must happen after mcp is created but before the server runs
 try:

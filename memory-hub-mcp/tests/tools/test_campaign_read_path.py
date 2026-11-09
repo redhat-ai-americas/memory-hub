@@ -528,7 +528,7 @@ async def test_get_relationships_campaign_nodes_filtered_without_project_id():
             return_value=[fake_rel],
         ),
         patch(
-            "src.tools.manage_graph.get_projects_for_user",
+            "src.tools.manage_graph.get_projects_for_user_in_tenant",
             new_callable=AsyncMock,
             return_value=set(),
         ),
@@ -589,7 +589,7 @@ async def test_get_relationships_campaign_nodes_accessible_with_project_id():
             return_value={CAMPAIGN_UUID},
         ),
         patch(
-            "src.tools.manage_graph.get_projects_for_user",
+            "src.tools.manage_graph.get_projects_for_user_in_tenant",
             new_callable=AsyncMock,
             return_value=set(),
         ),

@@ -85,12 +85,23 @@ async def test_user_cannot_reactivate_or_edit_another_client(client_user):
 async def test_safe_registration_and_admin_scope_assignment(client_user):
     viewer, upstream = client_user
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        result = await client.post(
+        # A foreign tenant is refused explicitly (QA 2026-11-06 X-008), not silently rewritten.
+        refused = await client.post(
             "/api/clients",
             json={
                 "client_id": "alice-agent",
                 "client_name": "Alice",
                 "tenant_id": "other-tenant",
+                "default_scopes": ["memory:read", "memory:write:user", "memory:write:project"],
+            },
+        )
+        assert refused.status_code == 403
+        upstream.assert_not_awaited()
+        result = await client.post(
+            "/api/clients",
+            json={
+                "client_id": "alice-agent",
+                "client_name": "Alice",
                 "default_scopes": ["memory:read", "memory:write:user", "memory:write:project"],
             },
         )
@@ -100,3 +111,42 @@ async def test_safe_registration_and_admin_scope_assignment(client_user):
         result = await client.patch("/api/clients/alice-agent", json={"default_scopes": ["memory:admin"]})
         assert result.status_code == 200
         assert upstream.call_args.kwargs["json_body"]["default_scopes"] == ["memory:admin"]
+
+
+@pytest.mark.parametrize("role", ["admin", "superuser", "user"])
+@pytest.mark.parametrize("scopes", [["memory:read"], ["memory:read", "memory:admin"]])
+async def test_no_role_can_create_a_client_in_another_tenant(client_user, role, scopes):
+    """QA 2026-11-06 X-008-client-admin: tenant A admin created a memory:admin client in tenant B."""
+    viewer, upstream = client_user
+    viewer.role = role
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            "/api/clients",
+            json={
+                "client_id": "x",
+                "client_name": "x",
+                "identity_type": "user",
+                "tenant_id": "harbor-xu",
+                "default_scopes": scopes,
+            },
+        )
+    assert r.status_code == 403
+    upstream.assert_not_awaited()
+
+
+async def test_own_tenant_is_forced_for_admin(client_user):
+    viewer, upstream = client_user
+    viewer.role = "admin"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            "/api/clients",
+            json={
+                "client_id": "svc",
+                "client_name": "svc",
+                "identity_type": "service",
+                "tenant_id": "default",
+                "default_scopes": ["memory:read", "memory:admin"],
+            },
+        )
+    assert r.status_code == 201
+    assert upstream.call_args.kwargs["json_body"]["tenant_id"] == "default"

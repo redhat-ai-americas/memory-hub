@@ -22,7 +22,7 @@ import logging
 import re
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
@@ -38,11 +38,13 @@ from src.ui_common import (
     DEFAULT_TENANT_SETTINGS,
     SESSION_COOKIE,
     Viewer,
+    _is_superuser,
     audit,
     load_tenant_settings,
     make_session_cookie,
     now_utc,
     save_tenant_settings,
+    session_cookie_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,13 @@ async def ensure_tables(db: AsyncSession) -> None:
     from src.schema import require
 
     await require(db)
+
+
+def _aware(value):
+    """Compare naive and aware timestamps safely (SQLite returns naive values)."""
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _account_row(row: Any) -> dict:
@@ -174,10 +183,7 @@ def _set_session(
     response.set_cookie(
         SESSION_COOKIE,
         make_session_cookie(username, settings, role=role, source="account", name=name, hours=hours, version=version),
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=hours * 3600,
+        **session_cookie_kwargs(settings, hours * 3600),
     )
 
 
@@ -372,7 +378,7 @@ async def register(body: RegisterRequest, response: Response, db: DbDep, setting
             await db.execute(
                 text(
                     f"SELECT * FROM {INVITES} WHERE code = :c AND tenant_id = :t AND used_at IS NULL "
-                    "AND expires_at > now()"
+                    "AND revoked_at IS NULL AND expires_at > now()"
                 ),
                 {"c": body.invite_code.strip(), "t": tenant_id},
             )
@@ -381,6 +387,18 @@ async def register(body: RegisterRequest, response: Response, db: DbDep, setting
             raise HTTPException(status_code=403, detail="That invite code is not valid or has expired")
         if invite._mapping["email"] and invite._mapping["email"].lower() != email:
             raise HTTPException(status_code=403, detail="That invite was issued for a different email address")
+        # Claim atomically so two concurrent sign-ups cannot both use one invite.
+        claimed = (
+            await db.execute(
+                text(
+                    f"UPDATE {INVITES} SET used_by = :u, used_at = now() WHERE code = :c AND tenant_id = :t "
+                    "AND used_at IS NULL AND revoked_at IS NULL RETURNING code"
+                ),
+                {"u": body.username, "c": invite._mapping["code"], "t": tenant_id},
+            )
+        ).first()
+        if claimed is None:
+            raise HTTPException(status_code=403, detail="That invite code is not valid or has expired")
     elif mode == "closed":
         raise HTTPException(status_code=403, detail="Sign-up is closed. Ask a platform admin for an account.")
     elif mode == "invite":
@@ -408,11 +426,6 @@ async def register(body: RegisterRequest, response: Response, db: DbDep, setting
         approved_by=invite._mapping["created_by"] if invite is not None else None,
         invited_by=invite._mapping["created_by"] if invite is not None else None,
     )
-    if invite is not None:
-        await db.execute(
-            text(f"UPDATE {INVITES} SET used_by = :u, used_at = now() WHERE code = :c"),
-            {"u": body.username, "c": invite._mapping["code"]},
-        )
     await audit(
         db,
         tenant_id=tenant_id,
@@ -516,7 +529,15 @@ async def list_accounts(db: DbDep, settings: SettingsDep, viewer: AdminDep):
                 "created_at": r._mapping["created_at"],
                 "expires_at": r._mapping["expires_at"],
                 "used_by": r._mapping["used_by"],
-                "state": "used" if r._mapping["used_at"] else ("expired" if r._mapping["expires_at"] < now else "open"),
+                "state": "used"
+                if r._mapping["used_at"]
+                else (
+                    "revoked"
+                    if r._mapping.get("revoked_at")
+                    else ("expired" if _aware(r._mapping["expires_at"]) < now else "open")
+                ),
+                "revoked_by": r._mapping.get("revoked_by"),
+                "revoke_reason": r._mapping.get("revoke_reason"),
             }
             for r in invites
         ],
@@ -547,11 +568,30 @@ async def update_account(account_id: str, body: AccountUpdate, db: DbDep, settin
     losing_admin = (
         m["role"] == "admin" and m["status"] == "active" and (body.role == "user" or body.status == "disabled")
     )
+    target_is_super = m["role"] == "admin" and _is_superuser(m["username"], [], settings)
+    requested = {k: v for k, v in body.model_dump().items() if v is not None}
+    if target_is_super and requested and not viewer.is_superuser:
+        # QA 2026-11-06 PA-004b: platform admins could demote or disable the super-user.
+        await audit(
+            db,
+            tenant_id=tenant_id,
+            viewer=viewer,
+            event_type="account.update",
+            scope="session",
+            owner_id=m["username"],
+            memory_id=None,
+            decision="denied",
+            metadata={"changes": requested, "reason": "target is a super-user"},
+        )
+        await db.commit()
+        raise HTTPException(status_code=403, detail="Only a super-user can change a super-user account")
     if losing_admin:
-        account_table = table(ACCOUNTS, column("id"), column("tenant_id"), column("role"), column("status"))
+        account_table = table(
+            ACCOUNTS, column("id"), column("tenant_id"), column("role"), column("status"), column("username")
+        )
         active_admins = (
             await db.execute(
-                select(account_table.c.id)
+                select(account_table.c.id, account_table.c.username)
                 .where(
                     account_table.c.tenant_id == tenant_id,
                     account_table.c.role == "admin",
@@ -563,6 +603,8 @@ async def update_account(account_id: str, body: AccountUpdate, db: DbDep, settin
         ).all()
         if len(active_admins) <= 1:
             raise HTTPException(status_code=409, detail="The tenant needs at least one active platform admin")
+        if target_is_super and sum(1 for a in active_admins if _is_superuser(a.username, [], settings)) <= 1:
+            raise HTTPException(status_code=409, detail="The tenant needs at least one active super-user")
     if m["username"] == viewer.username and losing_admin:
         raise HTTPException(status_code=409, detail="You cannot remove your own admin access")
     changes = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -608,6 +650,26 @@ async def create_invite(body: InviteRequest, request: Request, db: DbDep, settin
         raise HTTPException(status_code=422, detail="Email is not valid")
     code = secrets.token_urlsafe(18)
     expires = now_utc() + timedelta(days=body.expires_days)
+    superseded = []
+    if email:
+        # One active invite per address: a new invite supersedes (revokes) older unused ones.
+        if db.bind is not None and db.bind.dialect.name == "postgresql":
+            await db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"invite|{settings.ui_tenant_id}|{email}"}
+            )
+        superseded = [
+            r[0]
+            for r in (
+                await db.execute(
+                    text(
+                        f"UPDATE {INVITES} SET revoked_at = now(), revoked_by = :by, revoke_reason = 'superseded' "
+                        "WHERE tenant_id = :t AND lower(email) = :e AND used_at IS NULL AND revoked_at IS NULL "
+                        "RETURNING code"
+                    ),
+                    {"by": viewer.username, "t": settings.ui_tenant_id, "e": email},
+                )
+            ).all()
+        ]
     await db.execute(
         text(
             f"INSERT INTO {INVITES} (code, tenant_id, role, email, note, created_by, expires_at) "
@@ -631,17 +693,56 @@ async def create_invite(body: InviteRequest, request: Request, db: DbDep, settin
         scope="session",
         owner_id=email or "invite",
         memory_id=None,
-        metadata={"role": body.role, "expires_days": body.expires_days},
+        metadata={
+            "role": body.role,
+            "expires_days": body.expires_days,
+            "invite_id": code[:12],
+            "superseded": [c[:12] for c in superseded],
+        },
     )
     await db.commit()
     # The code is shown once, like a client secret.
     return {
         "code": code,
+        "id": code[:12],
         "role": body.role,
         "email": email,
         "expires_at": expires,
+        "superseded": [c[:12] for c in superseded],
         "link": f"{base}/#/register?invite={code}",
     }
+
+
+@router.delete("/api/invites/{invite_id}")
+async def revoke_invite(invite_id: str, db: DbDep, settings: SettingsDep, viewer: AdminDep):
+    """Revoke an unused invite. ``invite_id`` is the 12-character id shown in the invite list."""
+    await ensure_tables(db)
+    if len(invite_id) != 12:
+        raise HTTPException(status_code=422, detail="Invalid invite id")
+    rows = (
+        await db.execute(
+            text(
+                f"UPDATE {INVITES} SET revoked_at = now(), revoked_by = :by, revoke_reason = 'revoked' "
+                "WHERE tenant_id = :t AND substr(code, 1, 12) = :id AND used_at IS NULL AND revoked_at IS NULL "
+                "RETURNING code, email, role"
+            ),
+            {"by": viewer.username, "t": settings.ui_tenant_id, "id": invite_id},
+        )
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="No open invite with that id")
+    await audit(
+        db,
+        tenant_id=settings.ui_tenant_id,
+        viewer=viewer,
+        event_type="account.invite.revoke",
+        scope="session",
+        owner_id=rows[0][1] or "invite",
+        memory_id=None,
+        metadata={"invite_id": invite_id, "role": rows[0][2]},
+    )
+    await db.commit()
+    return {"ok": True, "id": invite_id, "state": "revoked"}
 
 
 def _public_ui_base_url(request: Request, settings: Settings) -> str:

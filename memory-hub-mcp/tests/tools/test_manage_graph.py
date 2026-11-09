@@ -294,7 +294,7 @@ async def test_get_relationships_success():
         patch("src.tools.manage_graph.get_db_session", return_value=(mock_session, mock_gen)),
         patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock),
         patch("src.tools.manage_graph.get_relationships_service", new_callable=AsyncMock, return_value=[mock_rel]),
-        patch("src.tools.manage_graph.get_projects_for_user", new_callable=AsyncMock, return_value=set()),
+        patch("src.tools.manage_graph.get_projects_for_user_in_tenant", new_callable=AsyncMock, return_value=set()),
         patch("src.tools.manage_graph.get_roles_for_user", new_callable=AsyncMock, return_value=set()),
     ):
         result = await manage_graph(action="get_relationships", node_id=str(uuid.uuid4()))
@@ -335,7 +335,7 @@ async def test_get_relationships_forwards_tenant_id_to_service():
             return_value=[],
         ) as mock_service,
         patch(
-            "src.tools.manage_graph.get_projects_for_user",
+            "src.tools.manage_graph.get_projects_for_user_in_tenant",
             new_callable=AsyncMock,
             return_value=set(),
         ),
@@ -628,7 +628,7 @@ async def test_get_relationships_forwards_as_of():
                 return_value=[],
             ) as mock_service,
             patch(
-                "src.tools.manage_graph.get_projects_for_user",
+                "src.tools.manage_graph.get_projects_for_user_in_tenant",
                 new_callable=AsyncMock,
                 return_value=set(),
             ),
@@ -695,7 +695,10 @@ async def test_project_relationship_uses_membership_and_write_policy(member, wri
         patch("src.tools.manage_graph.get_db_session", return_value=(AsyncMock(), AsyncMock())),
         patch("src.tools.manage_graph.release_db_session", new_callable=AsyncMock),
         patch("src.tools.manage_graph.read_memory_service", AsyncMock(return_value=node)),
-        patch("src.tools.manage_graph.get_projects_for_user", AsyncMock(return_value={"relay"} if member else set())),
+        patch(
+            "src.tools.manage_graph.get_projects_for_user_in_tenant",
+            AsyncMock(return_value={"relay"} if member else set()),
+        ),
         patch(
             "src.tools.manage_graph.assert_project_writable",
             AsyncMock(side_effect=ProjectArchivedError("relay") if archived else None),

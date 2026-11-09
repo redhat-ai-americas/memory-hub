@@ -111,7 +111,9 @@ export interface InviteRow {
   created_at: string;
   expires_at: string;
   used_by: string | null;
-  state: 'open' | 'used' | 'expired';
+  state: 'open' | 'used' | 'expired' | 'revoked';
+  revoked_by?: string | null;
+  revoke_reason?: string | null;
 }
 
 export interface AccountsResponse {

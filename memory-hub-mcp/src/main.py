@@ -26,7 +26,9 @@ import os
 from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
-
+from fastmcp.exceptions import ToolError
+from fastmcp.server.middleware import Middleware
+from src.core.bearer import BearerTokenMiddleware
 from src.tools.admin_memory import admin_memory
 from src.tools.delete_memory import delete_memory
 from src.tools.list_memory import list_memory
@@ -136,8 +138,35 @@ async def lifespan(server):
 
 mcp = FastMCP("MemoryHub", instructions=instructions, lifespan=lifespan)
 
+
+class SessionRevalidationMiddleware(Middleware):
+    """Re-check API-key sessions before tool calls (QA 2026-11-09 RT-CL-08)."""
+
+    async def on_call_tool(self, context, call_next):
+        if context.message.name != "register_session":
+            from src.tools.auth import AuthServiceUnavailableError, SessionRevokedError, revalidate_session
+
+            try:
+                await revalidate_session(context.fastmcp_context)
+            except SessionRevokedError as exc:
+                raise ToolError(
+                    "This session's API key has been revoked or rotated. Call register_session with a valid key."
+                ) from exc
+            except AuthServiceUnavailableError as exc:
+                raise ToolError(
+                    "Could not re-validate this session with the authentication service; retry shortly."
+                ) from exc
+        return await call_next(context)
+
+
+mcp.add_middleware(SessionRevalidationMiddleware())
+
 for tool_fn in tools:
     mcp.add_tool(tool_fn)
+
+# Bearer tokens are verified per call; see src/core/bearer.py. Keep this the
+# first middleware, so every later one sees the verified identity.
+mcp.add_middleware(BearerTokenMiddleware())
 
 logger.info(
     "MemoryHub tool profile: %s (%d tools registered)", TOOL_PROFILE, len(tools),

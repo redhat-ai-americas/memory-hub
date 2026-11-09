@@ -244,6 +244,25 @@ def session_secret(settings: Settings) -> str:
     return hashlib.sha256(seed.encode()).hexdigest()
 
 
+def cookie_secure(settings: Settings) -> bool:
+    """Secure flag for dashboard cookies; automatic when served over HTTPS."""
+    if settings.ui_cookie_secure is not None:
+        return settings.ui_cookie_secure
+    return (settings.ui_public_base_url or "").strip().lower().startswith("https://")
+
+
+def session_cookie_kwargs(settings: Settings, max_age: int | None = None) -> dict:
+    kw = {"httponly": True, "samesite": "lax", "secure": cookie_secure(settings), "path": "/"}
+    if max_age is not None:
+        kw["max_age"] = max_age
+    return kw
+
+
+def session_token_hash(raw: str) -> str:
+    """Identifier of one issued session cookie, used for server-side revocation."""
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def _sign(value: str, key: str) -> str:
     return hmac.new(key.encode(), value.encode(), hashlib.sha256).hexdigest()
 

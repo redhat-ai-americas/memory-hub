@@ -36,7 +36,7 @@ from memoryhub_core.services.exceptions import (
 )
 from memoryhub_core.services.memory import read_memory as _read_memory
 from memoryhub_core.services.memory import update_memory as svc_update_memory
-from memoryhub_core.services.project import assert_project_writable, get_projects_for_user
+from memoryhub_core.services.project import assert_project_writable, get_projects_for_user_in_tenant
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
 
@@ -181,7 +181,7 @@ async def update_memory(
         # Resolve project membership for project-scoped memories.
         project_ids: set[str] | None = None
         if existing.scope == "project":
-            project_ids = await get_projects_for_user(session, claims["sub"])
+            project_ids = await get_projects_for_user_in_tenant(session, claims["sub"], tenant)
 
         # Resolve role assignments for role-scoped memories.
         role_names: set[str] | None = None

@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     # the authenticated user. Default is "default" to match the Phase 1
     # server_default on memory_nodes.tenant_id.
     ui_tenant_id: str = "default"
+    # Session cookie Secure flag: None = automatic (on when the public base URL is https).
+    ui_cookie_secure: bool | None = None
 
     # --- Dashboard redesign (component health, search playground, login) ---
     # Optional cross-encoder reranker (TEI-compatible POST {"query","texts"}).

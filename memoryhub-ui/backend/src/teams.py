@@ -401,6 +401,9 @@ async def add_team_member(team_id: str, body: TeamMemberRequest, request: Reques
     team = await _team(db, settings.ui_tenant_id, team_id)
     await _can_manage(db, viewer, team["id"])
     await _can_grant_linked_projects(db, viewer, settings, team["id"])
+    from src.routes import require_identity_in_tenant
+
+    body.user_id = await require_identity_in_tenant(db, settings, body.user_id)
     await db.execute(
         text(
             f"""

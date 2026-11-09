@@ -47,8 +47,11 @@ from src.ui_common import (
     make_view_as_cookie,
     now_utc,
     parse_uuid,
+    read_session,
     real_viewer,
     save_tenant_settings,
+    session_cookie_kwargs,
+    session_token_hash,
     viewer_from_request,
 )
 
@@ -121,9 +124,7 @@ async def login(body: LoginRequest, response: Response, db: DbDep, settings: Set
     response.set_cookie(
         SESSION_COOKIE,
         make_session_cookie(username, settings, role=body.role, source="api-key"),
-        httponly=True,
-        samesite="lax",
-        max_age=12 * 3600,
+        **session_cookie_kwargs(settings, 12 * 3600),
     )
     return {"ok": True, "user": username, "role": body.role}
 
@@ -143,7 +144,7 @@ def _openshift_logout_url(request: Request, settings: Settings) -> str | None:
 
 
 @router.post("/api/auth/logout")
-async def logout(request: Request, response: Response, settings: SettingsDep):
+async def logout(request: Request, response: Response, settings: SettingsDep, db: DbDep):
     """End the dashboard session completely and say where the browser goes next.
 
     Clears the dashboard session cookie and the OAuth proxy cookie. Behind the
@@ -151,9 +152,40 @@ async def logout(request: Request, response: Response, settings: SettingsDep):
     server's logout, otherwise to the dashboard's sign-in page.
     """
     viewer = real_viewer(request, settings)
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    raw = request.cookies.get(SESSION_COOKIE)
+    session = read_session(request, settings)
+    if raw and session is not None:
+        # QA 2026-11-06 SA-010: revoke this cookie server-side, not only in the browser.
+        from datetime import UTC, datetime
+
+        from sqlalchemy import text as sql_text
+
+        expires = datetime.fromtimestamp(int(raw.split("|")[4]), tz=UTC)
+        await db.execute(
+            sql_text(
+                "INSERT INTO memoryhub_ui_revoked_sessions (token_hash, tenant_id, username, expires_at) "
+                "VALUES (:h, :t, :u, :x) ON CONFLICT (token_hash) DO NOTHING"
+            ),
+            {"h": session_token_hash(raw), "t": settings.ui_tenant_id, "u": session.username, "x": expires},
+        )
+        await db.execute(
+            sql_text("DELETE FROM memoryhub_ui_revoked_sessions WHERE expires_at < :now"), {"now": datetime.now(UTC)}
+        )
+        await audit(
+            db,
+            tenant_id=settings.ui_tenant_id,
+            viewer=viewer,
+            event_type="account.logout",
+            scope="session",
+            owner_id=session.username,
+            memory_id=None,
+            metadata={"revoked": True},
+        )
+        await db.commit()
+    kw = session_cookie_kwargs(settings)
+    response.delete_cookie(SESSION_COOKIE, **kw)
     response.delete_cookie(OAUTH_PROXY_COOKIE, path="/")
-    response.delete_cookie(VIEW_AS_COOKIE, path="/")
+    response.delete_cookie(VIEW_AS_COOKIE, **kw)
     body: dict = {"ok": True, "redirect": "/#/login?signed_out=1", "method": "GET", "fields": {}}
     if viewer.source == "oauth-proxy":
         host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
@@ -264,10 +296,7 @@ async def switch_account(body: SwitchRequest, request: Request, response: Respon
     response.set_cookie(
         VIEW_AS_COOKIE,
         make_view_as_cookie(body.username.strip(), body.role, settings),
-        httponly=True,
-        samesite="lax",
-        max_age=12 * 3600,
-        path="/",
+        **session_cookie_kwargs(settings, 12 * 3600),
     )
     logger.info("Test mode: %s now views the dashboard as %s (%s)", real.username, body.username, body.role)
     return {"ok": True, "username": body.username.strip(), "role": body.role}
@@ -629,8 +658,12 @@ async def create_project(body: ProjectRequest, request: Request, db: DbDep, sett
     )
     await db.flush()
     people: dict[str, str] = {}
+    from src.routes import require_identity_in_tenant
+
     for m in body.members:
         uid = m.user_id.strip()
+        if uid:
+            await require_identity_in_tenant(db, settings, uid)
         if uid and (people.get(uid) != "admin"):
             people[uid] = m.role
     # The creator administers the project unless a platform admin named other admins.
@@ -770,6 +803,9 @@ async def add_member(name: str, body: MemberRequest, request: Request, db: DbDep
         raise HTTPException(status_code=403, detail=f"Join {name} before adding others to it")
     if body.role == "admin":
         await _require_project_admin(db, viewer, project)
+    from src.routes import require_identity_in_tenant
+
+    body.user_id = await require_identity_in_tenant(db, settings, body.user_id)
     db.add(ProjectMembership(project_id=name, user_id=body.user_id, role=body.role, joined_by=viewer.username))
     try:
         await db.flush()
@@ -1378,6 +1414,11 @@ async def link_agent(body: LinkAgentRequest, request: Request, db: DbDep, settin
         raise HTTPException(status_code=409, detail="That agent already belongs to someone else. Ask a platform admin.")
     if not await verify_client_secret(settings, body.client_id, body.client_secret):
         raise HTTPException(status_code=403, detail="The auth service did not accept that client ID and secret")
+    from src.routes import client_in_tenant
+
+    if not await client_in_tenant(settings, body.client_id):
+        # A valid secret for another tenant's agent must not attach it here.
+        raise HTTPException(status_code=403, detail="The auth service did not accept that client ID and secret")
     await set_owner(db, settings.ui_tenant_id, body.client_id, viewer.username, viewer.username, "secret")
     await audit(
         db,
@@ -1401,9 +1442,14 @@ class OwnerRequest(BaseModel):
 async def assign_owner(identity_id: str, body: OwnerRequest, request: Request, db: DbDep, settings: SettingsDep):
     """Admin assigns (or clears) the person an agent belongs to."""
     from src.ownership import set_owner
+    from src.routes import client_in_tenant, require_identity_in_tenant
 
     viewer = viewer_from_request(request, settings)
     owner = (body.owner or "").strip() or None
+    if not await client_in_tenant(settings, identity_id):
+        raise HTTPException(status_code=404, detail=f"Agent {identity_id!r} not found in this tenant")
+    if owner is not None:
+        owner = await require_identity_in_tenant(db, settings, owner)
     await set_owner(db, settings.ui_tenant_id, identity_id, owner, viewer.username, "admin")
     await audit(
         db,
@@ -1426,7 +1472,10 @@ class RoleRequest(BaseModel):
 
 @router.post("/api/roles", status_code=201, dependencies=[Depends(admin_viewer)])
 async def assign_role(body: RoleRequest, request: Request, db: DbDep, settings: SettingsDep):
+    from src.routes import require_identity_in_tenant
+
     viewer = viewer_from_request(request, settings)
+    body.user_id = await require_identity_in_tenant(db, settings, body.user_id)
     db.add(
         RoleAssignment(
             user_id=body.user_id, role_name=body.role_name, tenant_id=settings.ui_tenant_id, assigned_by=viewer.username

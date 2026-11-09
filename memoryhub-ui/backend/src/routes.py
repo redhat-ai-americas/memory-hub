@@ -866,6 +866,59 @@ SELF_SERVICE_SCOPES = frozenset(
 ELEVATED_CLIENT_SCOPES = {"memory:admin:super", "memory:admin:cross_tenant"}
 
 
+async def require_identity_in_tenant(db: AsyncSession, settings: Settings, identity: str | None) -> str:
+    """Refuse identities that do not belong to this dashboard's tenant (QA 2026-11-09 RT-XT-01..04).
+
+    An identity is a local account of this tenant or an agent the auth service knows in this
+    tenant. Deployments without local accounts (OpenShift SSO) cannot enumerate people, so there
+    only foreign agents are caught here; MCP/core enforce the tenant on every membership use.
+    """
+    ident = (identity or "").strip()
+    if not ident:
+        raise HTTPException(status_code=422, detail="An identity is required")
+    if settings.ui_local_accounts:
+        found = (
+            await db.execute(
+                text("SELECT 1 FROM memoryhub_ui_accounts WHERE tenant_id = :t AND username = :u"),
+                {"t": settings.ui_tenant_id, "u": ident},
+            )
+        ).first()
+        if found is not None:
+            return ident
+    if await client_in_tenant(settings, ident):
+        return ident
+    if not settings.ui_local_accounts:
+        return ident
+    raise HTTPException(status_code=422, detail=f"{ident!r} is not a user or agent of this tenant")
+
+
+async def client_in_tenant(settings: Settings, client_id: str) -> bool:
+    """True when the auth service knows ``client_id`` in this dashboard's tenant."""
+    try:
+        resp = await _admin_request(settings, "GET", f"/admin/clients/{client_id}", tenant_id=settings.ui_tenant_id)
+    except HTTPException:
+        return False
+    return resp.status_code == 200
+
+
+async def _audit_client(
+    db: AsyncSession, settings: Settings, viewer: Viewer, event: str, client_id: str, decision: str, **meta
+) -> None:
+    """Every client-credential operation is audited, allowed or denied (QA 2026-11-06 SA-040)."""
+    await audit(
+        db,
+        tenant_id=settings.ui_tenant_id,
+        viewer=viewer,
+        event_type=event,
+        scope="session",
+        owner_id=viewer.username,
+        memory_id=None,
+        decision=decision,
+        metadata={"client_id": client_id, **meta},
+    )
+    await db.commit()
+
+
 def _validate_client_scopes(viewer: Viewer, scopes: list[str] | None) -> None:
     if viewer.role not in ("superuser", "operator") and ELEVATED_CLIENT_SCOPES.intersection(scopes or []):
         raise HTTPException(status_code=403, detail="Only super-users can manage elevated admin client scopes")
@@ -905,11 +958,24 @@ async def list_clients(request: Request, db: DbDep, settings: SettingsDep):
 @router.post("/api/clients", response_model=ClientCreatedResponse, status_code=201)
 async def create_client(body: CreateClientRequest, request: Request, db: DbDep, settings: SettingsDep):
     viewer = await _client_viewer(request, db, settings)
+    meta = {"requested_tenant": body.tenant_id, "scopes": body.default_scopes, "identity_type": body.identity_type}
+    # QA 2026-11-06 X-008: the dashboard is bound to one tenant; a caller-supplied tenant is never trusted.
+    if body.tenant_id not in (None, "", settings.ui_tenant_id):
+        await _audit_client(
+            db, settings, viewer, "client.create", body.client_id, "denied", reason="tenant override", **meta
+        )
+        raise HTTPException(status_code=403, detail="Clients can only be created in this dashboard's own tenant")
+    body.tenant_id = settings.ui_tenant_id
     if viewer.restricted and body.identity_type != "user":
+        await _audit_client(
+            db, settings, viewer, "client.create", body.client_id, "denied", reason="identity type", **meta
+        )
         raise HTTPException(status_code=403, detail="Users can register their own agents; admins create service agents")
-    if viewer.restricted:
-        body.tenant_id = settings.ui_tenant_id
-    _validate_client_scopes(viewer, body.default_scopes)
+    try:
+        _validate_client_scopes(viewer, body.default_scopes)
+    except HTTPException:
+        await _audit_client(db, settings, viewer, "client.create", body.client_id, "denied", reason="scopes", **meta)
+        raise
     resp = await _admin_request(
         settings,
         "POST",
@@ -918,6 +984,7 @@ async def create_client(body: CreateClientRequest, request: Request, db: DbDep, 
         tenant_id=settings.ui_tenant_id,
     )
     created = resp.json()
+    await _audit_client(db, settings, viewer, "client.create", body.client_id, "allowed", **meta)
     if viewer.restricted:
         from src.ownership import set_owner
 
@@ -939,11 +1006,21 @@ async def create_client(body: CreateClientRequest, request: Request, db: DbDep, 
 @router.patch("/api/clients/{client_id}", response_model=ClientResponse)
 async def update_client(client_id: str, body: UpdateClientRequest, request: Request, db: DbDep, settings: SettingsDep):
     viewer = viewer_from_request(request, settings)
-    _validate_client_scopes(viewer, body.default_scopes)
-    if viewer.restricted and body.active is True:
-        raise HTTPException(status_code=403, detail="Only platform admins can reactivate a revoked client")
-    await _client_viewer(request, db, settings, client_id)
     payload = body.model_dump(exclude_none=True)
+    if body.active is False:
+        event = "client.revoke"
+    elif body.active is True:
+        event = "client.reactivate"
+    else:
+        event = "client.update"
+    try:
+        _validate_client_scopes(viewer, body.default_scopes)
+        if viewer.restricted and body.active is True:
+            raise HTTPException(status_code=403, detail="Only platform admins can reactivate a revoked client")
+        await _client_viewer(request, db, settings, client_id)
+    except HTTPException as exc:
+        await _audit_client(db, settings, viewer, event, client_id, "denied", changes=payload, status=exc.status_code)
+        raise
     resp = await _admin_request(
         settings,
         "PATCH",
@@ -951,30 +1028,43 @@ async def update_client(client_id: str, body: UpdateClientRequest, request: Requ
         json_body=payload,
         tenant_id=settings.ui_tenant_id,
     )
+    await _audit_client(db, settings, viewer, event, client_id, "allowed", changes=payload)
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-secret", response_model=SecretRotatedResponse)
 async def rotate_client_secret(client_id: str, request: Request, db: DbDep, settings: SettingsDep):
-    await _client_viewer(request, db, settings, client_id)
+    viewer = viewer_from_request(request, settings)
+    try:
+        await _client_viewer(request, db, settings, client_id)
+    except HTTPException as exc:
+        await _audit_client(db, settings, viewer, "client.rotate_secret", client_id, "denied", status=exc.status_code)
+        raise
     resp = await _admin_request(
         settings,
         "POST",
         f"/admin/clients/{client_id}/rotate-secret",
         tenant_id=settings.ui_tenant_id,
     )
+    await _audit_client(db, settings, viewer, "client.rotate_secret", client_id, "allowed")
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-api-key", response_model=ApiKeyRotatedResponse)
 async def rotate_api_key(client_id: str, request: Request, db: DbDep, settings: SettingsDep):
-    await _client_viewer(request, db, settings, client_id)
+    viewer = viewer_from_request(request, settings)
+    try:
+        await _client_viewer(request, db, settings, client_id)
+    except HTTPException as exc:
+        await _audit_client(db, settings, viewer, "client.rotate_api_key", client_id, "denied", status=exc.status_code)
+        raise
     resp = await _admin_request(
         settings,
         "POST",
         f"/admin/clients/{client_id}/rotate-api-key",
         tenant_id=settings.ui_tenant_id,
     )
+    await _audit_client(db, settings, viewer, "client.rotate_api_key", client_id, "allowed")
     return resp.json()
 
 

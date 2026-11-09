@@ -1241,7 +1241,7 @@ async def test_get_relationships_same_tenant_returns_edges():
             new=AsyncMock(side_effect=_fake_get_rels),
         ),
         patch(
-            "src.tools.manage_graph.get_projects_for_user",
+            "src.tools.manage_graph.get_projects_for_user_in_tenant",
             new_callable=AsyncMock,
             return_value=set(),
         ),

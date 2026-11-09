@@ -40,7 +40,7 @@ from memoryhub_core.services.graph import (
     trace_provenance,
 )
 from memoryhub_core.services.memory import read_memory as read_memory_service
-from memoryhub_core.services.project import assert_project_writable, get_projects_for_user
+from memoryhub_core.services.project import assert_project_writable, get_projects_for_user_in_tenant
 from memoryhub_core.services.role import get_roles_for_user
 
 logger = logging.getLogger(__name__)
@@ -404,7 +404,7 @@ async def _handle_create_relationship(
                 )
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
         if node.scope == "project" and project_ids is None:
-            project_ids = await get_projects_for_user(session, claims["sub"])
+            project_ids = await get_projects_for_user_in_tenant(session, claims["sub"], tenant)
         if node.scope == "role" and role_names is None:
             role_names = await get_roles_for_user(session, claims["sub"], tenant, claims=claims)
         if not authorize_read(
@@ -529,7 +529,7 @@ async def _handle_get_relationships(
     if project_id:
         campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
 
-    project_ids: set[str] = await get_projects_for_user(session, claims["sub"])
+    project_ids: set[str] = await get_projects_for_user_in_tenant(session, claims["sub"], tenant)
     role_names: set[str] = await get_roles_for_user(
         session, claims["sub"], tenant, claims=claims,
     )
@@ -606,7 +606,7 @@ async def _handle_get_guidance(
     campaign_ids: set[str] | None = None
     if project_id:
         campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
-    project_ids: set[str] = await get_projects_for_user(session, claims["sub"])
+    project_ids: set[str] = await get_projects_for_user_in_tenant(session, claims["sub"], tenant)
     role_names: set[str] = await get_roles_for_user(
         session, claims["sub"], tenant, claims=claims,
     )
@@ -674,7 +674,7 @@ async def _handle_get_similar(
 
     project_ids: set[str] | None = None
     if source.scope == "project":
-        project_ids = await get_projects_for_user(session, claims["sub"])
+        project_ids = await get_projects_for_user_in_tenant(session, claims["sub"], tenant)
 
     role_names: set[str] | None = None
     if source.scope == "role":

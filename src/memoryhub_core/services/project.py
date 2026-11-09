@@ -119,9 +119,15 @@ async def get_project(
     session: AsyncSession,
     project_name: str,
     include_deleted: bool = False,
+    tenant_id: str | None = None,
 ) -> Project | None:
-    """Fetch a project by name, or None if it doesn't exist (or was deleted)."""
+    """Fetch a project by name, or None if it doesn't exist (or was deleted).
+
+    Pass ``tenant_id`` to treat a project of another tenant as non-existent.
+    """
     stmt = select(Project).where(Project.name == project_name)
+    if tenant_id is not None:
+        stmt = stmt.where(Project.tenant_id == tenant_id)
     if not include_deleted:
         stmt = stmt.where(Project.deleted_at.is_(None))
     result = await session.execute(stmt)
@@ -150,8 +156,10 @@ async def ensure_project_membership(
         ProjectNotProvisionedError: Central mode, the project does not exist.
         ProjectMembershipRequiredError: Central mode, the caller is not a member.
     """
-    # Fast path: user is already a member.
-    project_ids = await get_projects_for_user(session, user_id)
+    # Fast path: user is already a member of this project *in this tenant*
+    # (QA 2026-11-09 RT-XT-01: tenant-agnostic memberships let a foreign-tenant
+    # member write into another tenant's project namespace).
+    project_ids = await get_projects_for_user_in_tenant(session, user_id, tenant_id)
     if project_id in project_ids:
         await assert_project_writable(session, project_id)
         return project_ids, False
@@ -205,7 +213,7 @@ async def ensure_project_membership(
     )
 
     # Re-query to get the authoritative membership set.
-    project_ids = await get_projects_for_user(session, user_id)
+    project_ids = await get_projects_for_user_in_tenant(session, user_id, tenant_id)
     return project_ids, True
 
 
@@ -294,15 +302,16 @@ async def add_project_member(
     user_id: str,
     added_by: str,
     role: str = "member",
+    tenant_id: str | None = None,
 ) -> bool:
     """Add a user to a project.
 
     Returns True if the user was newly added, False if already a member.
 
     Raises:
-        ProjectNotFoundError: If the project does not exist.
+        ProjectNotFoundError: If the project does not exist (in ``tenant_id`` when given).
     """
-    project = await get_project(session, project_name)
+    project = await get_project(session, project_name, tenant_id=tenant_id)
     if project is None:
         raise ProjectNotFoundError(project_name)
 
@@ -417,7 +426,7 @@ async def list_projects_for_tenant(
 
         user_project_ids: set[str] = set()
         if user_id:
-            user_project_ids = await get_projects_for_user(session, user_id)
+            user_project_ids = await get_projects_for_user_in_tenant(session, user_id, tenant_id)
 
         project_names = [p.name for p in projects]
         counts = await memory_counts(session, tenant_id, project_names)
@@ -444,7 +453,7 @@ async def list_projects_for_tenant(
     if not user_id:
         return []
 
-    user_project_ids = await get_projects_for_user(session, user_id)
+    user_project_ids = await get_projects_for_user_in_tenant(session, user_id, tenant_id)
     if not user_project_ids:
         return []
 

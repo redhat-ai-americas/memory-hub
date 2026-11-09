@@ -16,8 +16,13 @@ def create_access_token(
     identity_type: str,
     tenant_id: str,
     scopes: list[str],
+    client_id: str | None = None,
 ) -> str:
-    """Create a signed JWT access token."""
+    """Create a signed JWT access token.
+
+    ``azp`` names the OAuth client the token was issued to, so resource servers can
+    refuse tokens of a client that was revoked after issuance (QA 2026-11-09 RT2-CL-05).
+    """
     now = int(time.time())
     payload = {
         "sub": subject,
@@ -29,6 +34,8 @@ def create_access_token(
         "iss": settings.issuer,
         "aud": settings.audience,
     }
+    if client_id:
+        payload["azp"] = client_id
     return jwt.encode(
         payload,
         get_private_key(),

@@ -51,25 +51,15 @@ def _normalize_session_scopes(access_tiers: list[str]) -> list[str]:
 
 
 def _extract_jwt_from_headers() -> dict | None:
-    """Extract and decode JWT from the HTTP Authorization header.
+    """Claims of the request's bearer token, once its signature is verified.
 
-    Returns decoded claims dict, or None if no JWT is available.
-    Decodes without signature verification — the transport layer
-    (JWTVerifier) already validated the token.
+    Only claims verified by ``src.core.bearer.BearerTokenMiddleware`` are
+    returned. The token itself is never decoded here: decoding without
+    verification let any client claim any identity, tenant and scopes.
     """
-    try:
-        from fastmcp.server.dependencies import get_http_request
+    from src.core.bearer import verified_bearer_claims
 
-        request = get_http_request()
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.lower().startswith("bearer "):
-            return None
-        token = auth_header.split(" ", 1)[1].strip()
-        import jwt as pyjwt
-
-        return pyjwt.decode(token, options={"verify_signature": False})
-    except Exception:
-        return None
+    return verified_bearer_claims()
 
 
 def get_claims_from_context() -> dict:
@@ -99,10 +89,8 @@ def get_claims_from_context() -> dict:
         log.debug("Resolved JWT identity via get_access_token: sub=%s", claims["sub"])
         return claims
 
-    # 2. Try extracting JWT directly from HTTP Authorization header.
-    #    JWTVerifier validates tokens at transport level but may not populate
-    #    get_access_token() in all transport modes. Decode without verification
-    #    since the transport already validated the signature.
+    # 2. A bearer token from the Authorization header, verified per call by
+    #    BearerTokenMiddleware (the production server has no transport auth).
     jwt_claims = _extract_jwt_from_headers()
     if jwt_claims is not None:
         refresh_session_metadata()

@@ -86,6 +86,7 @@ const Accounts: React.FC = () => {
                       <th>State</th>
                       <th>Created</th>
                       <th>Expires</th>
+                      <th />
                     </tr>
                   </thead>
                   <tbody>
@@ -99,11 +100,38 @@ const Accounts: React.FC = () => {
                         <td>
                           <span className={`lbl ${i.role === 'admin' ? 'red' : 'g'}`}>{i.role === 'admin' ? 'Platform admin' : 'User'}</span>
                         </td>
-                        <td className="sm">{i.state === 'used' ? `Used by ${i.used_by}` : i.state === 'expired' ? 'Expired' : 'Open'}</td>
+                        <td className="sm">
+                          {i.state === 'used'
+                            ? `Used by ${i.used_by}`
+                            : i.state === 'expired'
+                              ? 'Expired'
+                              : i.state === 'revoked'
+                                ? `${i.revoke_reason === 'superseded' ? 'Superseded' : 'Revoked'}${i.revoked_by ? ` by ${i.revoked_by}` : ''}`
+                                : 'Open'}
+                        </td>
                         <td className="sm muted">
                           {fmtRelative(i.created_at)} · {i.created_by}
                         </td>
                         <td className="sm muted">{fmtRelative(i.expires_at)}</td>
+                        <td>
+                          {i.state === 'open' && (
+                            <button
+                              type="button"
+                              className="btn bs"
+                              onClick={async () => {
+                                try {
+                                  await api.revokeInvite(i.id);
+                                  toast('Invite revoked');
+                                  reload();
+                                } catch (e) {
+                                  toast(errorMessage(e), 'err');
+                                }
+                              }}
+                            >
+                              Revoke
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

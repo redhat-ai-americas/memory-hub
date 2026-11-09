@@ -40,7 +40,7 @@ from memoryhub_core.services.memory import (
 from memoryhub_core.services.memory import (
     resolve_contradiction as _resolve_contradiction,
 )
-from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.project import get_projects_for_user_in_tenant
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
 from src.core.authz import (
@@ -337,7 +337,7 @@ async def _handle_report_contradiction(
 
         project_ids: set[str] | None = None
         if target_memory.scope == "project":
-            project_ids = await get_projects_for_user(session, claims["sub"])
+            project_ids = await get_projects_for_user_in_tenant(session, claims["sub"], tenant)
 
         role_names: set[str] | None = None
         if target_memory.scope == "role":

@@ -48,3 +48,23 @@ async def validate_api_key(
         tenant_id=client.tenant_id,
         scopes=client.default_scopes,
     )
+
+
+@router.get(
+    "/clients/{client_id}/status",
+    dependencies=[Depends(require_service_key)],
+)
+async def client_status(
+    client_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Current state of an OAuth client, for resource servers re-checking bearer tokens.
+
+    Unknown and revoked clients are both 404, so the answer reveals nothing beyond
+    "this client may not be used now" (QA 2026-11-09 RT2-CL-05).
+    """
+    result = await session.execute(select(OAuthClient).where(OAuthClient.client_id == client_id, OAuthClient.active))
+    client = result.scalar_one_or_none()
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not active")
+    return {"client_id": client.client_id, "tenant_id": client.tenant_id, "scopes": list(client.default_scopes or [])}

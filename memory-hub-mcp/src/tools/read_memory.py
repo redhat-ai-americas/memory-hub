@@ -12,7 +12,7 @@ from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import get_memory_history
 from memoryhub_core.services.memory import read_memory as _read_memory
-from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.project import get_projects_for_user_in_tenant
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
 from src.core.authz import (
@@ -183,8 +183,8 @@ async def read_memory(
         if node.scope == "project":
             session_for_project, gen_for_project = await get_db_session()
             try:
-                project_ids = await get_projects_for_user(
-                    session_for_project, claims["sub"],
+                project_ids = await get_projects_for_user_in_tenant(
+                    session_for_project, claims["sub"], tenant,
                 )
             finally:
                 await release_db_session(gen_for_project)

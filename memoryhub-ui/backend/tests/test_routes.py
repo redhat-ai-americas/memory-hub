@@ -149,6 +149,15 @@ def _make_settings(tenant_id: str = "default") -> Settings:
     )
 
 
+@pytest.fixture(autouse=True)
+def _client_audit_without_database(request, monkeypatch):
+    """Client endpoints now audit every operation; these HTTP-shape tests have no database."""
+    if request.cls is not None and request.cls.__name__ in ("TestClientEndpoints", "TestClientTenantForwarding"):
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        monkeypatch.setattr("src.routes._audit_client", _AsyncMock())
+
+
 @pytest.fixture
 def test_settings():
     return _make_settings(tenant_id="default")
@@ -817,7 +826,7 @@ class TestClientEndpoints:
                             "client_id": "test-client",
                             "client_name": "Test Client",
                             "identity_type": "user",
-                            "tenant_id": "test-tenant",
+                            "tenant_id": test_settings.ui_tenant_id,
                             "default_scopes": ["memory:read"],
                         },
                     )
@@ -908,12 +917,12 @@ class TestClientTenantForwarding:
                         json={
                             "client_id": "x",
                             "client_name": "X",
-                            "tenant_id": "t",
                         },
                     )
 
                 params = mock_http.request.call_args.kwargs.get("params", {})
                 assert params.get("tenant_id") == test_settings.ui_tenant_id
+                assert mock_http.request.call_args.kwargs["json"]["tenant_id"] == test_settings.ui_tenant_id
             finally:
                 app.dependency_overrides.clear()
 
