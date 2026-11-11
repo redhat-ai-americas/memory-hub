@@ -39,6 +39,29 @@ describe("createTools", () => {
     }
   });
 
+  it("allows the host to select a subset of the shared tool profile", () => {
+    const { tools } = makeTools();
+    const selected = createTools(
+      createMockMcpClient(),
+      testConfig(),
+      passthroughSession,
+      { enabledTools: ["memoryhub_search", "memoryhub_read"] },
+    );
+    expect(Object.keys(selected)).toEqual(["memoryhub_search", "memoryhub_read"]);
+    expect(Object.keys(tools)).toHaveLength(6);
+  });
+
+  it("rejects a tool profile entry without an adapter schema", () => {
+    expect(() =>
+      createTools(
+        createMockMcpClient(),
+        testConfig(),
+        passthroughSession,
+        { enabledTools: ["memoryhub_threads"] },
+      ),
+    ).toThrow("Unsupported OpenCode MemoryHub tool profile entries: memoryhub_threads");
+  });
+
   describe("memoryhub_search", () => {
     it("maps params onto memory(action=search)", async () => {
       const { client, tools } = makeTools(
@@ -50,7 +73,7 @@ describe("createTools", () => {
           query: "deployment patterns",
           limit: 5,
           scope: "project",
-          content_type: "factual",
+          content_type: "knowledge",
         },
         ctx,
       );
@@ -58,7 +81,7 @@ describe("createTools", () => {
         query: "deployment patterns",
         scope: "project",
         project_id: "proj-1",
-        options: { max_results: 5, content_type: "factual" },
+        options: { max_results: 5, content_type: "knowledge" },
       });
     });
 

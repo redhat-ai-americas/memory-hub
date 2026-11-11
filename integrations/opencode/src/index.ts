@@ -1,23 +1,12 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
 import type { Plugin, Hooks } from "@opencode-ai/plugin";
+import { PROTOCOL_CONTENT } from "../../common/src/protocol.js";
 import { resolveConfig } from "./config.js";
 import { createMcpClient } from "./mcp-client.js";
 import { createTools } from "./tools.js";
 import { createRecallEngine, createSystemTransform } from "./hooks.js";
 import { createSessionManager } from "./session.js";
 import { createLogger } from "./logger.js";
-
-function loadProtocolContent(): string | undefined {
-  try {
-    const selfDir = dirname(fileURLToPath(import.meta.url));
-    const protocolPath = resolve(selfDir, "..", "memoryhub-rules.md");
-    return readFileSync(protocolPath, "utf-8");
-  } catch {
-    return undefined;
-  }
-}
+import { V2MemoryHubPlugin } from "./v2.js";
 
 /**
  * MemoryHub plugin for opencode.
@@ -43,12 +32,7 @@ export const MemoryHubPlugin: Plugin = async (_input, options) => {
   }
 
   const mcpClient = createMcpClient(config.server.url);
-  const protocolContent = loadProtocolContent();
-  if (!protocolContent) {
-    logger.warn(
-      "memoryhub-rules.md not found, skipping system context injection",
-    );
-  }
+  const protocolContent = PROTOCOL_CONTENT;
 
   const { withSession } = createSessionManager(
     mcpClient,
@@ -76,14 +60,20 @@ export const MemoryHubPlugin: Plugin = async (_input, options) => {
     },
   };
 
-  if (protocolContent) {
-    const systemTransform = createSystemTransform(protocolContent);
-    hooks["experimental.chat.system.transform"] = async (_input, output) => {
-      systemTransform(output);
-    };
-  }
+  const systemTransform = createSystemTransform(protocolContent);
+  hooks["experimental.chat.system.transform"] = async (_input, output) => {
+    systemTransform(output);
+  };
 
   return hooks;
+};
+
+/** Supports the V2 server loader while retaining the V1 factory for the CLI. */
+export default {
+  ...V2MemoryHubPlugin,
+  async server() {
+    return MemoryHubPlugin;
+  },
 };
 
 // opencode invokes EVERY runtime export of a plugin package's entry module

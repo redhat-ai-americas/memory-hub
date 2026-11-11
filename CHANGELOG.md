@@ -150,3 +150,20 @@ Dashboard UI (React frontend + FastAPI backend). Lives in
 ### [Unreleased]
 
 - BFF walker, dashboard views, memory inspector.
+
+## MemoryHub agent-host plugins
+
+OpenClaw and OpenCode integrations live in [`integrations/openclaw/`](integrations/openclaw/)
+and [`integrations/opencode/`](integrations/opencode/). Published as
+`@memory-hub/openclaw-mh-plugin` and `@memory-hub/opencode-mh-plugin`.
+
+### [Unreleased]
+
+- **Shared plugin core (#622)**: Common configuration, MCP client and session
+  lifecycle, tool mapping, and recall logic are bundled with the plugin while
+  host-specific registration and tool result shapes remain in each adapter.
+- **OpenClaw recall project context (#622)**: Auto-recall now sends the configured
+  `project_id`, so project defaults affect which memories are returned.
+- **Shared session recovery (#622)**: Both adapters retry once for authentication,
+  expired-session, and lost MCP-session errors. The `session not found` match is
+  retained for the lost sessions after pod restarts documented in #104.

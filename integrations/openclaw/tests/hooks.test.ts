@@ -64,6 +64,61 @@ describe("before_prompt_build hook", () => {
     expect(result!.prependContext).toContain("</relevant-memories>");
   });
 
+  it("uses the OpenClaw prompt when messages contain no user text", async () => {
+    const hook = createBeforePromptBuildHook(mcpClient, config, logger);
+
+    await hook(
+      {
+        prompt: "What is Ben working on and what does he like?",
+        messages: [],
+      },
+      {},
+    );
+
+    expect(mcpClient.callMemory).toHaveBeenCalledWith("search", {
+      query: "What is Ben working on and what does he like?",
+      options: { max_results: 10, max_response_tokens: 4000 },
+    });
+  });
+
+  it("logs when auto-recall has no query text to search", async () => {
+    const hook = createBeforePromptBuildHook(mcpClient, config, logger);
+
+    await hook({ prompt: "", messages: [] }, {});
+
+    expect(mcpClient.callMemory).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalledWith(
+      "memoryhub: auto-recall skipped because the prompt event had no query text",
+    );
+  });
+
+  it("uses the configured project and shared session wrapper for auto-recall", async () => {
+    config.defaults.projectId = "project-1";
+    (mcpClient.callMemory as ReturnType<typeof vi.fn>).mockResolvedValue({
+      results: [{ content: "project memory", scope: "project", weight: 0.7 }],
+    });
+    const withSession = vi.fn(async (operation: () => Promise<unknown>) => operation());
+    const hook = createBeforePromptBuildHook(
+      mcpClient,
+      config,
+      logger,
+      undefined,
+      withSession,
+    );
+
+    await hook({
+      prompt: "",
+      messages: [{ role: "user", content: "What did we decide about deployments?" }],
+    }, {});
+
+    expect(mcpClient.callMemory).toHaveBeenCalledWith("search", {
+      query: "What did we decide about deployments?",
+      project_id: "project-1",
+      options: { max_results: 10, max_response_tokens: 4000 },
+    });
+    expect(withSession).toHaveBeenCalledOnce();
+  });
+
   it("includes prependSystemContext when protocol content is provided", async () => {
     (mcpClient.callMemory as ReturnType<typeof vi.fn>).mockResolvedValue({
       results: [

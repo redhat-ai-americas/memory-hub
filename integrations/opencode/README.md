@@ -11,8 +11,9 @@ What it does:
 - **Auto-recall**: on every user message, semantically relevant memories are
   retrieved and injected into the request as a `<relevant-memories>` block
   (with an untrusted-data guard). Failures never break the turn.
-- **Memory protocol**: `memoryhub-rules.md` is appended to the system prompt so
-  the agent knows when to read, write, and update memories.
+- **Memory protocol**: the shared protocol instructions are bundled with the
+  plugin and appended to the system prompt so the agent knows when to read,
+  write, and update memories.
 - **Host-side auth**: the plugin calls MemoryHub's `register_session` itself —
   your API key never enters the model's context. Expired sessions are
   re-registered transparently.
@@ -110,7 +111,7 @@ Set `MEMORYHUB_DEBUG=1` for verbose logging in the opencode server log.
 | `tool` | Registers the six `memoryhub_*` tools |
 | `chat.message` | Runs the auto-recall search for the new user message (15s cap) |
 | `experimental.chat.messages.transform` | Injects the recalled `<relevant-memories>` block into the latest user message (idempotent, marker-guarded) |
-| `experimental.chat.system.transform` | Appends `memoryhub-rules.md` to the system prompt |
+| `experimental.chat.system.transform` | Appends the bundled MemoryHub protocol to the system prompt |
 | `dispose` | Closes the MCP connection |
 
 All MemoryHub traffic flows through the server's MCP interface

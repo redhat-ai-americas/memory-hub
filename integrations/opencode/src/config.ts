@@ -1,26 +1,10 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { normalizeSharedConfig } from "../../common/src/config.js";
+import type { SharedPluginConfig } from "../../common/src/types.js";
 
-export interface MemoryHubConfig {
-  server: {
-    url: string;
-  };
-  auth: {
-    apiKey?: string;
-  };
-  autoRecall: {
-    enabled: boolean;
-    maxResults: number;
-    maxResponseTokens: number;
-  };
-  defaults: {
-    scope: string;
-    projectId?: string;
-    domains: string[];
-  };
-  needsSetup: boolean;
-}
+export type MemoryHubConfig = SharedPluginConfig;
 
 function getString(
   obj: Record<string, unknown> | undefined,
@@ -28,35 +12,6 @@ function getString(
 ): string | undefined {
   const val = obj?.[key];
   return typeof val === "string" ? val : undefined;
-}
-
-function getBool(
-  obj: Record<string, unknown> | undefined,
-  key: string,
-  fallback: boolean,
-): boolean {
-  const val = obj?.[key];
-  return typeof val === "boolean" ? val : fallback;
-}
-
-function getNumber(
-  obj: Record<string, unknown> | undefined,
-  key: string,
-  fallback: number,
-): number {
-  const val = obj?.[key];
-  return typeof val === "number" ? val : fallback;
-}
-
-function getStringArray(
-  obj: Record<string, unknown> | undefined,
-  key: string,
-): string[] {
-  const val = obj?.[key];
-  if (Array.isArray(val)) {
-    return val.filter((v): v is string => typeof v === "string");
-  }
-  return [];
 }
 
 function getObj(
@@ -133,8 +88,6 @@ export function resolveConfig(
   const raw = options ?? {};
   const server = getObj(raw, "server");
   const auth = getObj(raw, "auth");
-  const autoRecall = getObj(raw, "autoRecall");
-  const defaults = getObj(raw, "defaults");
 
   const credsPath = join(home, ".config", "memoryhub", "credentials");
   const section = env.MEMORYHUB_CONTEXT || "default";
@@ -165,19 +118,5 @@ export function resolveConfig(
     }
   }
 
-  return {
-    server: { url },
-    auth: { apiKey },
-    autoRecall: {
-      enabled: getBool(autoRecall, "enabled", true),
-      maxResults: getNumber(autoRecall, "maxResults", 10),
-      maxResponseTokens: getNumber(autoRecall, "maxResponseTokens", 4000),
-    },
-    defaults: {
-      scope: getString(defaults, "scope") ?? "user",
-      projectId: getString(defaults, "projectId"),
-      domains: getStringArray(defaults, "domains"),
-    },
-    needsSetup: !url || !apiKey,
-  };
+  return normalizeSharedConfig(raw, { url, apiKey });
 }

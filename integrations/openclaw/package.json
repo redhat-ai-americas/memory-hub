@@ -1,6 +1,6 @@
 {
   "name": "@memory-hub/openclaw-mh-plugin",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "MemoryHub memory backend for OpenClaw — governed, versioned, graph-aware agent memory.",
   "type": "module",
   "main": "dist/index.js",
@@ -11,8 +11,7 @@
   },
   "files": [
     "dist",
-    "openclaw.plugin.json",
-    "memoryhub-rules.md"
+    "openclaw.plugin.json"
   ],
   "scripts": {
     "build": "tsup",
@@ -34,12 +33,15 @@
     }
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "tsup": "^8.4.0",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
   },
   "openclaw": {
-    "extensions": ["./dist/index.js"]
+    "extensions": [
+      "./dist/index.js"
+    ]
   },
   "license": "Apache-2.0"
 }

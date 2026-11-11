@@ -26,7 +26,7 @@ things that configuration cannot do motivate the plugins:
    inject relevant memories into the request — requires host hooks.
    This is the difference between "the agent can look things up" and
    "the agent remembers."
-3. **Protocol injection.** The memory protocol (`memoryhub-rules.md`:
+3. **Protocol injection.** The shared memory protocol (`integrations/common/memoryhub-rules.md`:
    when to search, the four-gate write test, weight/scope guidance,
    contradiction handling) is appended to the system prompt by the
    plugin, so every project gets it without hand-editing agent rule
@@ -38,18 +38,30 @@ compact profile's single `memory` tool with 28 actions behind one schema.
 
 ## Shared architecture
 
-Both plugins are thin host-specific shells around a portable core. The
-opencode plugin's module layout (the OpenClaw plugin is equivalent
-modulo its host API):
+Both plugins are host-specific adapters around the same portable core in
+`integrations/common/`. Each plugin build bundles that core into its own
+package; consumers do not install a separate shared package. The adapters
+provide host SDK bindings and translate host-specific inputs and outputs.
+
+| Location | Responsibility |
+|---|---|
+| `integrations/common/src/mcp-client.ts` | Host-neutral MCP connection lifecycle, tool calls, result handling, and transport cleanup. Each adapter supplies the MCP SDK runtime. |
+| `integrations/common/src/session.ts` | Lazy session registration and bounded retry after recognized session errors. |
+| `integrations/common/src/memory-operations.ts` | Shared descriptions and mapping for the six `memoryhub_*` tools to `memory(action=...)`. |
+| `integrations/common/src/recall.ts` | Shared recall request construction, memory formatting, untrusted-data framing, timeout, and timer cleanup. |
+| `integrations/common/src/config.ts` | Shared configuration types, defaults, and normalization for fields used by both hosts. Credential lookup and host-only options remain in each adapter. |
+| `integrations/common/src/protocol.ts`, `integrations/common/memoryhub-rules.md` | One canonical set of protocol instructions, embedded in each plugin build. |
+| `integrations/common/src/types.ts`, `integrations/common/src/index.ts` | Shared contracts and module exports used by the adapters. |
+
+The host adapters retain these responsibilities:
 
 | Module | Responsibility |
 |---|---|
-| `src/mcp-client.ts` | MCP client over streamable HTTP (`@modelcontextprotocol/sdk`). Two server tools: `register_session`, `memory(action=...)`. Forwards only allow-listed keys (`memory_id`, `query`, `content`, `scope`, `project_id`, `options`). Unwraps single-text-part JSON results; `isError` results raise `McpClientError`. |
-| `src/config.ts` | Config resolution (precedence below) including the INI credentials reader shared with the CLI and Claude Code hook. |
-| `src/session.ts` | Session lifecycle: lazy single-flight connect + register, generation-guarded recovery on expiry. |
-| `src/tools.ts` | The six `memoryhub_*` tool definitions and their parameter mapping onto `memory(action=...)`. |
-| `src/hooks.ts` | The recall engine (search + injection) and system-prompt transform. |
-| `src/index.ts` | Plugin entry: wires the above into the host's hook surface. |
+| `integrations/openclaw/src/mcp-client.ts`, `integrations/opencode/src/mcp-client.ts` | Bind the shared client to `@modelcontextprotocol/sdk` transports and clients. |
+| `integrations/openclaw/src/config.ts`, `integrations/opencode/src/config.ts` | Read each host's config sources and host-only settings, then normalize common fields through the shared config module. |
+| `integrations/openclaw/src/tools.ts`, `integrations/opencode/src/tools.ts` | Define host schemas (TypeBox or Zod), call the shared tool mapping, and translate results into each host's result shape. |
+| `integrations/openclaw/src/hooks.ts`, `integrations/opencode/src/hooks.ts` | Read host events, invoke shared recall behavior, and inject recalled context through each host's hook API. |
+| `integrations/openclaw/src/index.ts`, `integrations/opencode/src/index.ts` | Register each plugin with its host SDK and wire its tools, hooks, logging, and cleanup. OpenCode's `src/session.ts` re-exports the shared session manager for its adapter. |
 
 ### Tool mapping
 
@@ -69,10 +81,11 @@ tests: `scope` and `project_id` are top-level; tuning knobs travel in
 
 Config defaults fill gaps: `defaults.scope` when a write omits scope,
 `defaults.projectId` on search/list/write, `defaults.domains` on search
-when the caller passes none. Tool failures return a structured
-`{ title: "Error", output: <message> }` result rather than throwing, so a
-memory outage degrades to an error string the model can react to instead
-of a broken turn.
+when the caller passes none. Tool failures are returned in each host's
+expected tool-result shape rather than thrown: OpenCode uses
+`{ title: "Error", output: <message> }`, while OpenClaw returns a text
+content block prefixed with `Error:`. This lets the model react to a memory
+outage without breaking the turn.
 
 ## opencode integration specifics
 
@@ -87,7 +100,7 @@ opencode has no memory-provider concept: the plugin is purely additive
 | `tool` | Registers the six tools (zod schemas via the `tool()` helper). |
 | `chat.message` | Runs the auto-recall search for each new user message. |
 | `experimental.chat.messages.transform` | Injects the pending recall block into the latest user message. |
-| `experimental.chat.system.transform` | Appends `memoryhub-rules.md` to the system prompt (idempotent). |
+| `experimental.chat.system.transform` | Appends the bundled MemoryHub protocol to the system prompt (idempotent). |
 | `dispose` | Closes the MCP transport. |
 
 ### Auto-recall flow

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMcpClient, McpClientError } from "../src/mcp-client.js";
 
+const { mockTransportClose } = vi.hoisted(() => ({
+  mockTransportClose: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => {
   return {
     Client: vi.fn().mockImplementation(() => ({
@@ -16,7 +20,7 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => {
 vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => {
   return {
     StreamableHTTPClientTransport: vi.fn().mockImplementation(() => ({
-      close: vi.fn().mockResolvedValue(undefined),
+      close: mockTransportClose,
     })),
   };
 });
@@ -178,12 +182,26 @@ describe("McpClient", () => {
     await expect(client.callMemory("list", {})).rejects.toThrow("Authentication required");
   });
 
-  it("close resets connection state", async () => {
+  it("close shuts down the SDK transport and resets connection state", async () => {
     const client = createMcpClient("https://hub.example.com/mcp/");
     await client.connect();
     expect(client.isConnected()).toBe(true);
 
     await client.close();
     expect(client.isConnected()).toBe(false);
+    expect(mockTransportClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("resetSession closes the SDK transport before reconnecting", async () => {
+    const client = createMcpClient("https://hub.example.com/mcp/");
+    await client.connect();
+
+    client.resetSession();
+
+    expect(client.isConnected()).toBe(false);
+    expect(mockTransportClose).toHaveBeenCalledTimes(1);
+
+    await client.connect();
+    expect(client.isConnected()).toBe(true);
   });
 });
