@@ -1,6 +1,6 @@
 {
   "name": "@memory-hub/opencode-mh-plugin",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "MemoryHub memory plugin for opencode — governed, versioned, graph-aware agent memory with semantic search and multi-scope hierarchy.",
   "type": "module",
   "main": "dist/index.js",
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@opencode/plugin": "^2.2.7",
     "@opencode-ai/plugin": "^1.18.25"
   },
   "devDependencies": {
