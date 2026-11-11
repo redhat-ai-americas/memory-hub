@@ -146,7 +146,7 @@ def test_rule_file_eager_required_phrases():
     assert "Eager" in out
     # Loads index of everything at startup.
     assert 'mode="index"' in out
-    assert "max_results=50" in out
+    assert "max_results" in out and "50" in out
     # Honest about not getting push notifications.
     assert "NOT pushed automatically" in out
     # Shared blocks present.
@@ -212,7 +212,8 @@ def test_rule_file_contradiction_enabled_keeps_simple_call():
     )
     out = render_rule_file(cfg)
     assert "tradeoff" not in out.lower()
-    assert "report_contradiction" in out
+    assert 'memory(action="report"' in out
+    assert "observed_behavior" in out
 
 
 def test_rule_file_warns_against_hand_editing():

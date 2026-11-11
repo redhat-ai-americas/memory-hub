@@ -2,6 +2,17 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [Unreleased]
+
+- **Fix**: `memoryhub config regenerate` now emits compact-profile-consistent
+  instructions. All tool references in generated `.claude/rules/memoryhub-loading.md`
+  use the `memory(action=...)` dispatcher (#672):
+  - `search_memory` → `memory(action="search", ...)`
+  - `update_memory` / `write_memory` → `memory(action="update", ...)` / `memory(action="write", ...)`
+  - `report_contradiction` → `memory(action="report", ..., options={"observed_behavior": "..."})` (compact profile; correct parameter name)
+  - Contradiction handling no longer emits `manage_curation(...)` (a `full`-profile-only tool) for the default compact profile
+  - Added S3 content-delivery section (`content_truncated`, `hydrate`) to the generated rule
+
 ## [0.12.1] -- 2026-07-29
 
 - Defer topic search until user provides actionable signal (#471)

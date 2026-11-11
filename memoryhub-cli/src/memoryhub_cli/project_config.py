@@ -151,7 +151,7 @@ _PATTERN_BLOCKS: dict[LoadingPattern, str] = {
 A `<memoryhub-context>` block should appear in your conversation context,
 injected by the SessionStart hook before you see the first prompt. Use
 its contents as your working set. Do NOT call `register_session` or
-`search_memory` -- the hook already did this.
+`memory(action="search")` -- the hook already did this.
 
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow:
@@ -160,18 +160,19 @@ misconfigured), fall back to the manual flow:
    (INI file, section matching `MEMORYHUB_CONTEXT` or `[default]`;
    falls back to `~/.config/memoryhub/api-key`).
 2. Call `register_session(api_key="<key>")` to authenticate.
-3. Immediately call `search_memory(query="", mode="index", max_results=50)`
+3. Immediately call
+   `memory(action="search", query="", options={"mode": "index", "max_results": 50})`
    to load the full working set as lightweight stubs. The empty query plus
    `mode="index"` returns headers for everything visible to your user.
 4. Hold the returned working set in context for the entire session.
 
 ## During the session
 
-- When a stub looks load-bearing for the current task, call `read_memory`
-  to expand it into full content.
+- When a stub looks load-bearing for the current task, call
+  `memory(action="read", memory_id="...")` to expand it into full content.
 - New writes (your own or another agent's) are NOT pushed automatically.
-  If a decision depends on the latest state, call `search_memory` again
-  rather than trusting the working set you loaded at session start.
+  If a decision depends on the latest state, call `memory(action="search")`
+  again rather than trusting the working set you loaded at session start.
 """,
     "lazy": """\
 ## At session start
@@ -179,14 +180,16 @@ misconfigured), fall back to the manual flow:
 A `<memoryhub-context>` block should appear in your conversation context,
 injected by the SessionStart hook before you see the first prompt. Use
 its contents as your working set. Do NOT call `register_session` or
-`search_memory` -- the hook already did this.
+`memory(action="search")` -- the hook already did this.
 
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow: read your API key from
-`~/.config/memoryhub/api-key` (trim whitespace), call
-`register_session(api_key="<key>")`, then wait until the user states a
-task or question with enough detail to form a meaningful search query.
-Derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
+`~/.config/memoryhub/credentials` (INI file, section matching
+`MEMORYHUB_CONTEXT` or `[default]`, falling back to
+`~/.config/memoryhub/api-key`), call `register_session(api_key="<key>")`,
+then wait until the user states a task or question with enough detail to
+form a meaningful search query. Derive a 1-2 sentence summary and call
+`memory(action="search", query=<summary>)`.
 If the opening turn is low-signal ("hi", "can you help me?"), do not
 search yet -- wait for a follow-up that reveals the topic.
 
@@ -201,14 +204,16 @@ search yet -- wait for a follow-up that reveals the topic.
 A `<memoryhub-context>` block should appear in your conversation context,
 injected by the SessionStart hook before you see the first prompt. Use
 its contents as your working set. Do NOT call `register_session` or
-`search_memory` -- the hook already did this.
+`memory(action="search")` -- the hook already did this.
 
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow: read your API key from
-`~/.config/memoryhub/api-key` (trim whitespace), call
-`register_session(api_key="<key>")`, then wait until the user states a
-task or question with enough detail to form a meaningful search query.
-Derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
+`~/.config/memoryhub/credentials` (INI file, section matching
+`MEMORYHUB_CONTEXT` or `[default]`, falling back to
+`~/.config/memoryhub/api-key`), call `register_session(api_key="<key>")`,
+then wait until the user states a task or question with enough detail to
+form a meaningful search query. Derive a 1-2 sentence summary and call
+`memory(action="search", query=<summary>)`.
 If the opening turn is low-signal ("hi", "can you help me?"), do not
 search yet -- wait for a follow-up that reveals the topic.
 
@@ -224,10 +229,10 @@ A pivot is any of:
 3. **Explicit switch** -- the user says "let's switch to...", "now let's
    talk about...", or similar phrasing.
 
-When you detect a pivot, call `search_memory` with a query for the new
-topic. **ADD the results to your working set; do not replace it.** The
-prior topic may come back later in the same session, and the agent should
-not have to re-search for memories it already saw.
+When you detect a pivot, call `memory(action="search", ...)` with a query
+for the new topic. **ADD the results to your working set; do not replace it.**
+The prior topic may come back later in the same session, and the agent
+should not have to re-search for memories it already saw.
 """,
     "jit": """\
 ## At session start
@@ -235,18 +240,20 @@ not have to re-search for memories it already saw.
 A `<memoryhub-context>` block should appear in your conversation context,
 injected by the SessionStart hook before you see the first prompt. Use
 its contents as initial context. Do NOT call `register_session` or
-`search_memory` -- the hook already did this.
+`memory(action="search")` -- the hook already did this.
 
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow: read your API key from
-`~/.config/memoryhub/api-key` (trim whitespace) and call
-`register_session(api_key="<key>")`. Do NOT call `search_memory` --
+`~/.config/memoryhub/credentials` (INI file, section matching
+`MEMORYHUB_CONTEXT` or `[default]`, falling back to
+`~/.config/memoryhub/api-key`) and call
+`register_session(api_key="<key>")`. Do NOT call `memory(action="search")` --
 there is no working set in this pattern.
 
 ## During the session
 
-- Call `search_memory` only when you encounter a question whose answer
-  might be in memory. Each search is one-shot.
+- Call `memory(action="search", query="...")` only when you encounter a
+  question whose answer might be in memory. Each search is one-shot.
 - Triggers that warrant a search: the user asks "what did we decide
   about X?", references a project-specific term you don't recognize, or
   asks for a recommendation that should reflect prior decisions.
@@ -353,6 +360,24 @@ implicit context. Use it for narrow one-shot tooling sessions.
 }
 
 
+_CONTENT_DELIVERY_BLOCK = """\
+## Content delivery
+
+- Search results may include **truncated content** for large memories
+  backed by S3 storage. Check `content_truncated` and `full_available`
+  flags on each result.
+- When `content_truncated` is true, call
+  `memory(action="read", memory_id="...", options={"hydrate": true})`
+  to retrieve the full content on demand.
+- For eval harnesses or batch pipelines that need complete content
+  inline, pass `options: {"content_mode": "full"}` to search. This
+  hydrates S3-backed content in the response at the cost of larger
+  payloads.
+- For interactive agent sessions, prefer the default (truncated) mode
+  and hydrate individual memories only when needed.
+"""
+
+
 _HYGIENE_BLOCK = """\
 ## Memory hygiene
 
@@ -361,8 +386,8 @@ _HYGIENE_BLOCK = """\
 - DO write preferences, decisions, architectural choices, tool
   configuration, and workflow patterns. Skip ephemeral things like "user
   asked me to read a file."
-- Use `update_memory` (not `write_memory`) to revise an existing entry —
-  this preserves version history. Use `write_memory` only for new facts.
+- Use `memory(action="update", ...)` (not `memory(action="write", ...)`) to revise an existing
+  entry — this preserves version history. Use `memory(action="write", ...)` only for new facts.
 - Set weights deliberately: `1.0` for critical policies, `0.8-0.9` for
   strong preferences, `0.5-0.7` for nice-to-know context.
 - Add rationale branches via `parent_id` + `branch_type="rationale"` when
@@ -377,9 +402,8 @@ _CONTRADICTION_ENABLED = """\
 ## Contradiction handling
 
 When you notice the user's behavior contradicting a memory you have
-loaded, call `report_contradiction` with the memory_id and a one-sentence
-description of the observed behavior. The server tracks contradiction
-counts and surfaces stale memories for review.
+loaded, call `memory(action="report", memory_id="...", options={"observed_behavior": "..."})`.
+The server tracks contradiction counts and surfaces stale memories for review.
 """
 
 
@@ -392,7 +416,7 @@ inside your current working set. Memories from other domains will not be
 checked — that's a deliberate tradeoff for token efficiency over coverage.
 
 When you DO notice a contradiction with a loaded memory, call
-`report_contradiction` with the memory_id and a one-sentence description.
+`memory(action="report", memory_id="...", options={"observed_behavior": "..."})`.
 """
 
 
@@ -431,6 +455,7 @@ def render_rule_file(config: ProjectConfig) -> str:
     blocks = [
         _RULE_HEADER.format(pattern_title=_PATTERN_TITLES[pattern]),
         pattern_block,
+        _CONTENT_DELIVERY_BLOCK,
         _HYGIENE_BLOCK,
         contradiction_block,
     ]
