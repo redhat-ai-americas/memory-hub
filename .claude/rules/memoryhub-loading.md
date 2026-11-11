@@ -12,14 +12,14 @@ file. Do not hand-edit this file directly — your changes will be overwritten.
 A `<memoryhub-context>` block should appear in your conversation context,
 injected by the SessionStart hook before you see the first prompt. Use
 its contents as initial context. Do NOT call `register_session` or
-`search_memory` -- the hook already did this.
+`memory(action="search")` -- the hook already did this.
 
 If no `<memoryhub-context>` block is present (CLI not installed or hook
 misconfigured), fall back to the manual flow: read your API key from
 `~/.config/memoryhub/credentials` (INI file, section matching
 `MEMORYHUB_CONTEXT` or `[default]`, falling back to
 `~/.config/memoryhub/api-key`) and call
-`register_session(api_key="<key>")`. Do NOT call `search_memory` --
+`register_session(api_key="<key>")`. Do NOT call `memory(action="search")` --
 there is no working set in this pattern.
 
 ## During the session
@@ -70,6 +70,5 @@ implicit context. Use it for narrow one-shot tooling sessions.
 ## Contradiction handling
 
 When you notice the user's behavior contradicting a memory you have
-loaded, call `manage_curation(action="report_contradiction", memory_id="...", description="...")` with a one-sentence
-description of the observed behavior. The server tracks contradiction
-counts and surfaces stale memories for review.
+loaded, call `memory(action="report", memory_id="...", options={"observed_behavior": "..."})`.
+The server tracks contradiction counts and surfaces stale memories for review.
