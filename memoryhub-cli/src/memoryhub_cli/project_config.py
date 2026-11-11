@@ -160,7 +160,8 @@ misconfigured), fall back to the manual flow:
    (INI file, section matching `MEMORYHUB_CONTEXT` or `[default]`;
    falls back to `~/.config/memoryhub/api-key`).
 2. Call `register_session(api_key="<key>")` to authenticate.
-3. Immediately call `memory(action="search", query="", options={"mode": "index", "max_results": 50})`
+3. Immediately call
+   `memory(action="search", query="", options={"mode": "index", "max_results": 50})`
    to load the full working set as lightweight stubs. The empty query plus
    `mode="index"` returns headers for everything visible to your user.
 4. Hold the returned working set in context for the entire session.
@@ -385,8 +386,8 @@ _HYGIENE_BLOCK = """\
 - DO write preferences, decisions, architectural choices, tool
   configuration, and workflow patterns. Skip ephemeral things like "user
   asked me to read a file."
-- Use `memory(action="update", ...)` (not `memory(action="write", ...)`) to revise an existing entry —
-  this preserves version history. Use `memory(action="write", ...)` only for new facts.
+- Use `memory(action="update", ...)` (not `memory(action="write", ...)`) to revise an existing
+  entry — this preserves version history. Use `memory(action="write", ...)` only for new facts.
 - Set weights deliberately: `1.0` for critical policies, `0.8-0.9` for
   strong preferences, `0.5-0.7` for nice-to-know context.
 - Add rationale branches via `parent_id` + `branch_type="rationale"` when

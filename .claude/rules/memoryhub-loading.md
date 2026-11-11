@@ -57,8 +57,8 @@ implicit context. Use it for narrow one-shot tooling sessions.
 - DO write preferences, decisions, architectural choices, tool
   configuration, and workflow patterns. Skip ephemeral things like "user
   asked me to read a file."
-- Use `memory(action="update", ...)` (not `memory(action="write", ...)`) to revise an existing entry —
-  this preserves version history. Use `memory(action="write", ...)` only for new facts.
+- Use `memory(action="update", ...)` (not `memory(action="write", ...)`) to revise an existing
+  entry — this preserves version history. Use `memory(action="write", ...)` only for new facts.
 - Set weights deliberately: `1.0` for critical policies, `0.8-0.9` for
   strong preferences, `0.5-0.7` for nice-to-know context.
 - Add rationale branches via `parent_id` + `branch_type="rationale"` when
