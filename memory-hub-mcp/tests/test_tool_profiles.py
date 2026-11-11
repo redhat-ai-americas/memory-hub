@@ -39,6 +39,42 @@ class TestProfileDefinitions:
                 f"Profile '{profile_name}' missing register_session"
             )
 
+    def test_compact_registers_exact_tool_set(self):
+        assert {tool.__name__ for tool in _TOOLS_COMPACT} == {
+            "register_session",
+            "memory",
+            "admin_memory",
+            "thread",
+            "persona",
+        }
+
+    def test_full_registers_exact_tool_set(self):
+        assert {tool.__name__ for tool in _TOOLS_FULL} == {
+            "register_session",
+            "write_memory",
+            "read_memory",
+            "update_memory",
+            "delete_memory",
+            "search_memory",
+            "list_memory",
+            "manage_session",
+            "manage_graph",
+            "manage_curation",
+            "manage_project",
+            "admin_memory",
+            "thread",
+            "persona",
+        }
+
+    def test_minimal_registers_exact_tool_set(self):
+        assert {tool.__name__ for tool in _TOOLS_MINIMAL} == {
+            "register_session",
+            "search_memory",
+            "write_memory",
+            "read_memory",
+            "thread",
+        }
+
     def test_compact_includes_memory_and_thread_dispatchers(self):
         from src.tools.memory import memory
         from src.tools.persona import persona
