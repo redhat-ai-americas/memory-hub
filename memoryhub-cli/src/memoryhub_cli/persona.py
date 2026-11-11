@@ -228,8 +228,8 @@ def status_cmd(
         async with client:
             try:
                 return await client._call(
-                    "get_persona",
-                    {"user_id": user_id, "project_id": project_id},
+                    "persona",
+                    {"action": "get", "user_id": user_id, "project_id": project_id},
                 )
             except Exception as exc:
                 handle_error("fetch_failed", str(exc), output, EXIT_SERVER_ERROR)
@@ -304,7 +304,7 @@ def edit_cmd(
         async with client:
             try:
                 return await client._call(
-                    "edit_persona",
+                    "persona",
                     {"action": "add_pin", "user_id": user_id, "content": fact},
                 )
             except Exception as exc:
