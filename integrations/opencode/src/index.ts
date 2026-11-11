@@ -6,6 +6,7 @@ import { createTools } from "./tools.js";
 import { createRecallEngine, createSystemTransform } from "./hooks.js";
 import { createSessionManager } from "./session.js";
 import { createLogger } from "./logger.js";
+import { V2MemoryHubPlugin } from "./v2.js";
 
 /**
  * MemoryHub plugin for opencode.
@@ -65,6 +66,14 @@ export const MemoryHubPlugin: Plugin = async (_input, options) => {
   };
 
   return hooks;
+};
+
+/** Supports the V2 server loader while retaining the V1 factory for the CLI. */
+export default {
+  ...V2MemoryHubPlugin,
+  async server() {
+    return MemoryHubPlugin;
+  },
 };
 
 // opencode invokes EVERY runtime export of a plugin package's entry module
