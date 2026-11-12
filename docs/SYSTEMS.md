@@ -88,20 +88,34 @@ The agent-memory-ergonomics subsystem is cross-cutting rather than load-bearing 
 
 ## Deployment topology
 
-The deployed system spans five OpenShift namespaces:
+The standard installation in `scripts/deploy-full.sh` spans seven OpenShift
+namespaces. The Helm chart uses the same layout: `memory-hub-mcp` is the Helm
+release namespace, and chart templates create or reuse the other six component
+namespaces. The UI was moved out of the MCP namespace; older diagrams and
+descriptions that put it beside the MCP server are stale.
 
 | Namespace | Pods | Purpose |
 |---|---|---|
-| `memory-hub-mcp` | `memory-hub-mcp` (FastMCP server), `memoryhub-ui` (BFF + oauth-proxy sidecar), `memoryhub-valkey` (Valkey 8.0), `fact-checker` (CronJob, daily) | Agent-facing MCP server, the dashboard, and job queues/push. Co-located so the BFF and agents can call MCP over the cluster network with low latency. |
-| `memoryhub-storage` | `memoryhub-minio` (MinIO) | S3-compatible object storage for oversized memory content. Isolated in its own namespace so data survives MCP server reinstalls (#395). |
-| `memoryhub-agents` | `trace-reviewer` (Deployment) | Background curation agents with a different scaling profile (HPA-eligible, continuous); reaches Valkey cross-namespace via `memoryhub-valkey.memory-hub-mcp.svc:6379`. |
-| `memoryhub-auth` | `auth-server` | Standalone OAuth 2.1 authorization server. Issues JWTs consumed by the MCP server's `JWTVerifier` and by the BFF's admin proxy. |
-| `memoryhub-db` | `memoryhub-pg-0` | PostgreSQL with the pgvector extension. Backs all relational, vector, and graph queries. |
+| `memory-hub-mcp` | `memory-hub-mcp` (FastMCP server), `memoryhub-valkey` (Valkey 8.0), retention sweep CronJob | Main API and in-process queue/cache. Valkey shares the namespace with MCP. |
+| `memoryhub-db` | `memoryhub-pg-0` | PostgreSQL with pgvector. Backs relational, vector, and graph queries. |
+| `memoryhub-storage` | `memoryhub-minio` (MinIO) | S3-compatible storage for oversized memory content. Isolated so object data survives MCP reinstalls (#395). |
+| `memoryhub-auth` | `auth-server` | OAuth 2.1 authorization server. Issues JWTs consumed by the MCP server and UI backend. |
+| `memoryhub-ui` | `memoryhub-ui` (BFF + oauth-proxy sidecar) | Dashboard. Kept separate from MCP; its internal URLs use cross-namespace Service DNS. |
+| `embedding-model` | CPU or GPU Text Embeddings Inference deployment | Embedding endpoint and model cache. |
+| `reranker-model` | CPU or GPU Text Embeddings Inference deployment | Optional reranker endpoint and model cache. |
 
-External RHOAI services that MemoryHub depends on but does not own:
+`memoryhub-agents` is a separate namespace for curation-agent manifests such as
+the Trace Reviewer and Fact Checker. Those resources are deployed separately;
+they are not included in `scripts/deploy-full.sh` or the Helm chart. The
+optional RHOAI dashboard proxy also creates resources in the platform-owned
+`redhat-ods-applications` namespace; that integration is outside the standard
+seven-namespace install.
 
-- **Embedding model** — `all-MiniLM-L6-v2` deployed via vLLM, 384-dimensional embeddings. URL configured via `MEMORYHUB_EMBEDDING_URL`.
-- **Cross-encoder reranker** — `ms-marco-MiniLM-L12-v2` deployed via vLLM. Optional; the focus-path retrieval (#58) gracefully falls back to plain pgvector cosine when `MEMORYHUB_RERANKER_URL` is unset or unreachable.
+The standard install deploys these model-serving components as HuggingFace
+Text Embeddings Inference (TEI) workloads:
+
+- **Embedding model** — `all-MiniLM-L6-v2` runs as a HuggingFace Text Embeddings Inference (TEI) workload in `embedding-model` (384-dimensional embeddings).
+- **Cross-encoder reranker** — `ms-marco-MiniLM-L12-v2` runs as a TEI workload in `reranker-model`. Optional; the focus-path retrieval (#58) gracefully falls back to plain pgvector cosine when the endpoint is unset or unreachable.
 
 ## Downstream consumers
 

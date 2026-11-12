@@ -8,5 +8,6 @@ spec:
     app: granite-embedding
   ports:
     - port: 80
+      name: http
       targetPort: 8080
       protocol: TCP

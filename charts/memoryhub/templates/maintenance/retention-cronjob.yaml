@@ -1,0 +1,58 @@
+{{- if .Values.maintenance.retention.enabled }}
+{{- $image := mergeOverwrite (deepCopy .Values.mcp.image) .Values.maintenance.retention.image -}}
+{{- $imageRef := include "memoryhub.imageRef" $image -}}
+{{- if and (eq $image.repository "memory-hub-mcp") (not $image.digest) -}}
+{{- $imageRef = printf "image-registry.openshift-image-registry.svc:5000/%s/memory-hub-mcp:%s" .Release.Namespace $image.tag -}}
+{{- end -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: memoryhub-retention-sweep
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-retention-sweep") | nindent 4 }}
+spec:
+  schedule: {{ .Values.maintenance.retention.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-retention-sweep") | nindent 12 }}
+          annotations:
+            alpha.image.policy.openshift.io/resolve-names: '*'
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- include "memoryhub.imagePullSecrets" . | nindent 10 }}
+          containers:
+            - name: retention-sweep
+              image: {{ $imageRef | quote }}
+              imagePullPolicy: {{ $image.pullPolicy }}
+              command: [python, -m, memoryhub_core.cli.retention_sweep]
+              env:
+                - name: MEMORYHUB_DB_HOST
+                  value: {{ include "memoryhub.serviceDNS" (dict "name" "memoryhub-pg" "namespace" .Values.namespaces.database "domain" .Values.clusterDomain) | quote }}
+                - name: MEMORYHUB_DB_PORT
+                  valueFrom: { secretKeyRef: { name: {{ .Values.mcp.secrets.database }}, key: MEMORYHUB_DB_PORT } }
+                - name: MEMORYHUB_DB_NAME
+                  valueFrom: { secretKeyRef: { name: {{ .Values.mcp.secrets.database }}, key: MEMORYHUB_DB_NAME } }
+                - name: MEMORYHUB_DB_USER
+                  valueFrom: { secretKeyRef: { name: {{ .Values.mcp.secrets.database }}, key: MEMORYHUB_DB_USER } }
+                - name: MEMORYHUB_DB_PASSWORD
+                  valueFrom: { secretKeyRef: { name: {{ .Values.mcp.secrets.database }}, key: MEMORYHUB_DB_PASSWORD } }
+                - { name: MEMORYHUB_S3_ENDPOINT, value: {{ printf "%s:9000" (include "memoryhub.serviceDNS" (dict "name" "memoryhub-minio" "namespace" .Values.namespaces.storage "domain" .Values.clusterDomain)) | quote }} }
+                - name: MEMORYHUB_S3_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: {{ .Values.mcp.secrets.minio }}, key: MINIO_ROOT_USER } }
+                - name: MEMORYHUB_S3_SECRET_KEY
+                  valueFrom: { secretKeyRef: { name: {{ .Values.mcp.secrets.minio }}, key: MINIO_ROOT_PASSWORD } }
+                - { name: MEMORYHUB_S3_BUCKET, value: {{ .Values.mcp.env.MEMORYHUB_S3_BUCKET | quote }} }
+                - { name: MEMORYHUB_S3_SECURE, value: {{ .Values.mcp.env.MEMORYHUB_S3_SECURE | quote }} }
+              resources:
+                {{- toYaml .Values.maintenance.retention.resources | nindent 16 }}
+{{- end }}

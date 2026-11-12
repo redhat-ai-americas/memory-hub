@@ -8,6 +8,6 @@ spec:
     kind: Service
     name: ms-marco-minilm-l12-v2
   port:
-    targetPort: 8080
+    targetPort: http
   tls:
     termination: edge

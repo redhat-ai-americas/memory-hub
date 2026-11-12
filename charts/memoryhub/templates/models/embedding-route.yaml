@@ -1,0 +1,25 @@
+{{- if and .Values.models.enabled .Values.models.embedding.route.enabled .Values.openshift.routes (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+{{- $name := ternary "all-minilm-l6-v2" "granite-embedding" (eq .Values.models.variant "cpu") -}}
+{{- $timeout := .Values.models.embedding.route.timeout -}}
+{{- if and (eq .Values.models.variant "gpu") (not $timeout) -}}
+{{- $timeout = "120s" -}}
+{{- end -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespaces.embeddingModel }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" $name) | nindent 4 }}
+  {{- with $timeout }}
+  annotations:
+    haproxy.router.openshift.io/timeout: {{ . | quote }}
+  {{- end }}
+spec:
+  {{- with .Values.models.embedding.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  to: { kind: Service, name: {{ $name }} }
+  port: { targetPort: http }
+  tls: { termination: edge }
+{{- end }}

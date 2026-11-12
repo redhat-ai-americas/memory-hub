@@ -1,0 +1,21 @@
+# Copy this file to values-openshift.yaml and replace the example hosts.
+# Keep credentials in Kubernetes Secrets; do not add them to this file.
+openshift:
+  enabled: true
+  routes: true
+
+mcp:
+  route:
+    host: mcp.example.com
+
+auth:
+  issuer: https://auth.example.com
+  oauthAuthorizeUrl: https://oauth-openshift.apps.cluster.example.com/oauth/authorize
+  route:
+    host: auth.example.com
+
+ui:
+  route:
+    host: ui.example.com
+  publicMcpUrl: https://mcp.example.com/mcp/
+  publicAuthUrl: https://auth.example.com

@@ -8,5 +8,6 @@ spec:
     app: all-minilm-l6-v2
   ports:
     - port: 80
+      name: http
       targetPort: 8080
       protocol: TCP

@@ -2,16 +2,27 @@
 FROM registry.access.redhat.com/ubi9/nodejs-20:latest AS frontend-build
 
 WORKDIR /opt/app-root/src
+ENV NPM_CONFIG_CACHE=/tmp/npm-build-cache
 
-COPY frontend/package.json ./
-COPY frontend/package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY --chown=1001:0 --chmod=0644 package.json package-lock.json ./
+# Install a pinned npm directly in this build stage, then run npm ci directly
+# from the project directory so it reads the staged lockfile.
+USER 0
+RUN npm install --global npm@10.9.4 --no-audit --no-fund --cache /tmp/npm-bootstrap-cache \
+    && rm -rf /tmp/npm-bootstrap-cache
+USER 1001
+RUN test -s /opt/app-root/src/package.json \
+    && test -s /opt/app-root/src/package-lock.json \
+    && test -r /opt/app-root/src/package-lock.json \
+    && node -p "require('./package-lock.json').lockfileVersion" \
+    && npm --version \
+    && npm ci --cache /tmp/npm-build-cache
 
-COPY frontend/src ./src
-COPY frontend/index.html ./index.html
-COPY frontend/tsconfig.json ./tsconfig.json
-COPY frontend/tsconfig.node.json ./tsconfig.node.json
-COPY frontend/vite.config.ts ./vite.config.ts
+COPY --chown=1001:0 frontend/src ./src
+COPY --chown=1001:0 --chmod=0644 frontend/index.html ./index.html
+COPY --chown=1001:0 --chmod=0644 frontend/tsconfig.json ./tsconfig.json
+COPY --chown=1001:0 --chmod=0644 frontend/tsconfig.node.json ./tsconfig.node.json
+COPY --chown=1001:0 --chmod=0644 frontend/vite.config.ts ./vite.config.ts
 
 RUN npm run build
 
@@ -21,7 +32,7 @@ FROM registry.access.redhat.com/ubi9/python-311:latest
 WORKDIR /opt/app-root/src
 
 # Install Python dependencies
-COPY backend/requirements.txt .
+COPY --chown=1001:0 --chmod=0644 backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy and install memoryhub_core library (contains SQLAlchemy models +
@@ -34,7 +45,7 @@ RUN pip install --no-cache-dir ./memoryhub_core/
 COPY --chown=1001:0 backend/src/ ./src/
 
 # Copy built frontend from stage 1 (vite outputs to dist/ relative to project root)
-COPY --from=frontend-build /opt/app-root/src/dist ./frontend/dist
+COPY --chown=1001:0 --from=frontend-build /opt/app-root/src/dist ./frontend/dist
 
 # Fix permissions for OpenShift arbitrary UIDs
 RUN find ./src -name "*.py" -exec chmod 644 {} \;

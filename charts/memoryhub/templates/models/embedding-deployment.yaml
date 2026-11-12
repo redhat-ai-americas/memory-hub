@@ -1,0 +1,58 @@
+{{- if .Values.models.enabled }}
+{{- $variant := .Values.models.variant -}}
+{{- $name := ternary "all-minilm-l6-v2" "granite-embedding" (eq $variant "cpu") -}}
+{{- $resources := ternary .Values.models.embedding.resources .Values.models.embedding.gpuResources (eq $variant "cpu") -}}
+{{- $probes := index .Values.models.embedding.probes $variant -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespaces.embeddingModel }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" $name) | nindent 4 }}
+spec:
+  replicas: {{ .Values.models.embedding.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "memoryhub.componentLabels" (dict "root" . "component" $name) | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "memoryhub.imagePullSecrets" . | nindent 6 }}
+      {{- if eq $variant "gpu" }}
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      {{- end }}
+      containers:
+        - name: tei
+          image: {{ include "memoryhub.imageRef" (index .Values.models.image $variant) | quote }}
+          imagePullPolicy: {{ (index .Values.models.image $variant).pullPolicy }}
+          args: [--model-id, {{ (index .Values.models.embedding.modelId $variant) | quote }}, --port, "8080"]
+          env:
+            - { name: HF_HUB_CACHE, value: /data/models }
+            - { name: TRANSFORMERS_CACHE, value: /data/models }
+            {{- with .Values.models.embedding.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          {{- with $probes.readiness }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $probes.liveness }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - { name: cache, mountPath: /data }
+      volumes:
+        - name: cache
+          persistentVolumeClaim: { claimName: embedding-model-cache }
+{{- end }}

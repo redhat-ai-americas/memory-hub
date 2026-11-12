@@ -1,0 +1,17 @@
+{{- if and .Values.postgresql.enabled .Values.openshift.enabled .Values.openshift.sccBindings .Values.openshift.scc.postgresql (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memoryhub-postgresql-anyuid
+  namespace: {{ .Values.namespaces.database }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-pg") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.postgresql.serviceAccountName }}
+    namespace: {{ .Values.namespaces.database }}
+{{- end }}

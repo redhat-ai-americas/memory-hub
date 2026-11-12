@@ -28,10 +28,15 @@ main_py = os.environ["MAIN_PY"]
 tools_dir = os.environ["TOOLS_DIR"]
 
 non_tool_files = {"auth.py", "backfill_entities.py"}
+# These implementations are exposed through the `persona` action dispatcher,
+# not as standalone MCP tools. Keep them out of the direct registration set,
+# but verify the dispatcher still imports them.
+delegated_tool_files = {"compile_persona.py", "edit_persona.py", "get_persona.py"}
 files = {
     f[:-3]
     for f in os.listdir(tools_dir)
-    if f.endswith(".py") and not f.startswith("_") and f not in non_tool_files
+    if f.endswith(".py") and not f.startswith("_")
+    and f not in non_tool_files and f not in delegated_tool_files
 }
 
 with open(main_py) as f:
@@ -45,6 +50,15 @@ if not loop and not profile_lists:
 registered_text = (loop.group(1) if loop else "") + " ".join(profile_lists)
 registered = set(re.findall(r"[a-z_][a-z_0-9]*", registered_text))
 
+with open(os.path.join(tools_dir, "persona.py")) as f:
+    dispatcher_source = f.read()
+delegated_imports = set(re.findall(
+    r"^\s*from src\.tools\.([a-z_][a-z_0-9]*) import",
+    dispatcher_source,
+    re.M,
+))
+missing_delegated = {name[:-3] for name in delegated_tool_files} - delegated_imports
+
 errors = []
 if files - imports:
     errors.append(f"files NOT imported: {sorted(files - imports)}")
@@ -52,6 +66,8 @@ if imports - files:
     errors.append(f"imports without files: {sorted(imports - files)}")
 if files - registered:
     errors.append(f"files NOT registered: {sorted(files - registered)}")
+if missing_delegated:
+    errors.append(f"persona dispatcher does not import delegated tools: {sorted(missing_delegated)}")
 if errors:
     print("ERROR: tool registration mismatch in src/main.py")
     print("\n".join(errors))

@@ -1,6 +1,6 @@
 # NOTE: The official postgres image runs as uid 999. OpenShift assigns random
 # UIDs by default via the restricted SCC. This StatefulSet requires the
-# "anyuid" SCC granted to the default service account in this namespace.
+# "anyuid" SCC granted only to the memoryhub-postgresql service account.
 # See README.md for the prerequisite oc adm command.
 #
 # We set PGDATA to a subdirectory of the mount point because the postgres
@@ -26,6 +26,7 @@ spec:
         app.kubernetes.io/part-of: memoryhub
         app.kubernetes.io/component: database
     spec:
+      serviceAccountName: memoryhub-postgresql
       securityContext:
         runAsUser: 999
         fsGroup: 999

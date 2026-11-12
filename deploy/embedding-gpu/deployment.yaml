@@ -13,6 +13,7 @@ spec:
       labels:
         app: granite-embedding
     spec:
+      automountServiceAccountToken: false
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists

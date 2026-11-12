@@ -1,0 +1,17 @@
+{{- if and .Values.minio.enabled .Values.openshift.enabled .Values.openshift.sccBindings .Values.openshift.scc.minio (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memoryhub-minio-anyuid
+  namespace: {{ .Values.namespaces.storage }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-minio") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.minio.serviceAccountName }}
+    namespace: {{ .Values.namespaces.storage }}
+{{- end }}
