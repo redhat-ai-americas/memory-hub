@@ -1,0 +1,4 @@
+{{- $names := list .Release.Namespace .Values.namespaces.database .Values.namespaces.storage .Values.namespaces.auth .Values.namespaces.ui .Values.namespaces.embeddingModel .Values.namespaces.rerankerModel -}}
+{{- if ne (len $names) (len (uniq $names)) -}}
+{{- fail "MemoryHub component namespace names must be distinct" -}}
+{{- end -}}

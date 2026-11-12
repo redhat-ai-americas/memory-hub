@@ -51,23 +51,58 @@ Full governed stack on OpenShift AI: PostgreSQL + pgvector, OAuth 2.1, embedding
 ```bash
 git clone https://github.com/redhat-ai-americas/memory-hub.git
 cd memory-hub
-oc login <cluster-api-url>      # cluster-admin required
-make install                    # full stack deploy (~10 min)
+oc whoami --context mcp-rhoai   # verify the configured project cluster context
+MEMORYHUB_CONTEXT=mcp-rhoai make install  # full stack deploy (~10 min)
 ```
+
+The equivalent fresh-install path using Helm is also a single command:
+
+```bash
+MEMORYHUB_CONTEXT=mcp-rhoai make helm-install
+```
+
+It creates the same core services and namespaces, generates cluster Secrets,
+runs database migrations, builds the MCP/auth/UI images, and installs the
+workloads with Helm. To apply chart settings, copy the included example,
+fill in your cluster hosts, and pass it:
+
+```bash
+cp values-openshift.example.yaml values-openshift.yaml
+# Replace example.com hosts with your cluster's actual hosts.
+MEMORYHUB_CONTEXT=mcp-rhoai make helm-install ARGS="--values values-openshift.yaml"
+```
+
+The optional RHOAI dashboard tile remains on its existing integration path.
+
+To avoid image builds during install, publish MCP, auth, and UI images to a
+registry the cluster can access, configure their image references in a values
+file, and run:
+
+```bash
+cp charts/memoryhub/values-openshift.prebuilt.example.yaml values-openshift.yaml
+# Replace the three image paths and tags with published images.
+MEMORYHUB_CONTEXT=mcp-rhoai make helm-install \
+  ARGS="--prebuilt-images --values values-openshift.yaml"
+```
+
+The repository does not currently publish these images in CI; see the
+[Helm chart guide](charts/memoryhub/README.md#build-or-publish-the-application-images)
+for the required image and pull-secret setup.
 
 To build application images without rolling out deployments, use:
 
 ```bash
-make build                      # MCP, auth, and UI images
-make deploy                     # deploy existing ImageStream images
-make build-mcp                  # build one component
-make deploy-mcp                 # deploy one component without rebuilding
+MEMORYHUB_CONTEXT=mcp-rhoai make build      # MCP, auth, and UI images
+MEMORYHUB_CONTEXT=mcp-rhoai make deploy    # deploy existing ImageStream images
+MEMORYHUB_CONTEXT=mcp-rhoai make build-mcp # build one component
+MEMORYHUB_CONTEXT=mcp-rhoai make deploy-mcp # deploy one component without rebuilding
 ```
 
-`make install` remains the combined build-and-deploy workflow. The equivalent
-deployment-only option is `scripts/deploy-full.sh --skip-builds`.
+`make install` remains the Kustomize-based combined build-and-deploy workflow.
+The equivalent deployment-only option is
+`MEMORYHUB_CONTEXT=mcp-rhoai scripts/deploy-full.sh --skip-builds`.
 
-The deploy script auto-creates a Python virtualenv, generates API keys, writes the first key to `~/.config/memoryhub/api-key`, and runs a smoke test. See the [cluster install guide](docs/guides/cluster-install.md) for prerequisites, deploy options, troubleshooting, and post-install setup.
+The deploy script auto-creates a Python virtualenv, generates API keys, writes the first key to `~/.config/memoryhub/api-key`, and runs a smoke test. See the [cluster install guide](docs/guides/cluster-install.md) for prerequisites, deploy options, troubleshooting, post-install setup, and the alternative fresh-install path using Helm.
 
 ## Why MemoryHub
 

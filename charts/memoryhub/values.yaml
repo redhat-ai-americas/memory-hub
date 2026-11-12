@@ -1,0 +1,404 @@
+# The release namespace hosts MCP and maintenance jobs. The other component
+# namespaces match scripts/deploy-full.sh.
+namespaces:
+  create: true
+  database: memoryhub-db
+  storage: memoryhub-storage
+  auth: memoryhub-auth
+  ui: memoryhub-ui
+  embeddingModel: embedding-model
+  rerankerModel: reranker-model
+
+# Kubernetes Service DNS suffix. Change this for clusters that use a DNS
+# domain other than the common cluster.local default.
+clusterDomain: cluster.local
+
+# Registry credentials are namespace-scoped. Create each named Secret in every
+# namespace that runs a chart workload.
+imagePullSecrets: []
+
+openshift:
+  enabled: true
+  # Master switch for chart-created SCC RoleBindings. The per-workload
+  # switches below can disable individual bindings when administrators manage
+  # them separately.
+  sccBindings: true
+  scc:
+    postgresql: true
+    minio: true
+    valkey: true
+  routes: true
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
+postgresql:
+  enabled: true
+  image: { repository: pgvector/pgvector, tag: 0.8.2-pg16, pullPolicy: IfNotPresent }
+  replicas: 1
+  serviceAccountName: memoryhub-postgresql
+  # Name of the externally provisioned Secret in namespaces.database.
+  secretName: memoryhub-pg-credentials
+  # Retain this PVC on uninstall by default. Set false in an upgrade before
+  # uninstalling to delete the claim. Leave existingClaim empty for a fresh
+  # install; set it only to mount an existing claim intentionally.
+  retainPvcOnUninstall: true
+  existingClaim: ""
+  database: memoryhub
+  username: memoryhub
+  storage: 10Gi
+  storageClassName: ""
+  initSql: |
+    -- Enable required extensions for MemoryHub
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+    -- Verify extensions loaded
+    DO $$
+    DECLARE
+      vec_version text;
+    BEGIN
+      SELECT extversion INTO vec_version FROM pg_extension WHERE extname = 'vector';
+      RAISE NOTICE 'pgvector version: %', vec_version;
+      RAISE NOTICE 'uuid-ossp loaded: %', EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp');
+    END $$;
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  probes:
+    liveness:
+      exec:
+        command: [pg_isready, -U, "{{ .Values.postgresql.username }}", -d, "{{ .Values.postgresql.database }}"]
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 6
+    readiness:
+      exec:
+        command: [pg_isready, -U, "{{ .Values.postgresql.username }}", -d, "{{ .Values.postgresql.database }}"]
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+  extraEnv: []
+
+minio:
+  enabled: true
+  replicas: 1
+  image:
+    repository: cgr.dev/chainguard/minio
+    tag: ""
+    digest: sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
+    pullPolicy: IfNotPresent
+  serviceAccountName: memoryhub-minio
+  # Name of the externally provisioned Secret in namespaces.storage.
+  secretName: memoryhub-minio-credentials
+  # Retain this PVC on uninstall by default. Set false in an upgrade before
+  # uninstalling to delete the claim. Leave existingClaim empty for a fresh
+  # install; set it only to mount an existing claim intentionally.
+  retainPvcOnUninstall: true
+  existingClaim: ""
+  storage: 10Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  probes:
+    liveness:
+      httpGet: { path: /minio/health/live, port: 9000 }
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
+    readiness:
+      httpGet: { path: /minio/health/live, port: 9000 }
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+  extraEnv: []
+
+valkey:
+  enabled: true
+  replicas: 1
+  image: { repository: docker.io/valkey/valkey, tag: 8.0-alpine, pullPolicy: IfNotPresent }
+  serviceAccountName: memoryhub-valkey
+  storage: 5Gi
+  storageClassName: ""
+  maxMemory: 512mb
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 768Mi }
+  probes:
+    liveness:
+      exec: { command: [valkey-cli, ping] }
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
+    readiness:
+      exec: { command: [valkey-cli, ping] }
+      initialDelaySeconds: 3
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+  extraEnv: []
+
+mcp:
+  enabled: true
+  image: { repository: memory-hub-mcp, tag: latest, pullPolicy: Always }
+  replicas: 1
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  probes:
+    liveness:
+      tcpSocket: { port: 8080 }
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readiness:
+      tcpSocket: { port: 8080 }
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  secrets:
+    # These Secrets must already exist in the release namespace. The chart
+    # references names only; it never accepts or renders credential values.
+    database: memoryhub-db-credentials
+    minio: memoryhub-minio-credentials
+    authInternal: auth-internal-service-key
+  usersConfigMap: memoryhub-users
+  authJwksUri: ""
+  authApiKeyValidateUrl: ""
+  embeddingUrl: ""
+  rerankerUrl: ""
+  valkeyUrl: ""
+  s3Endpoint: ""
+  route:
+    enabled: true
+    host: ""
+    path: /mcp/
+    tlsTermination: edge
+    insecurePolicy: Redirect
+  ingress:
+    enabled: false
+    host: ""
+    path: /mcp/
+  env:
+    MCP_TRANSPORT: http
+    MCP_HTTP_HOST: 0.0.0.0
+    MCP_HTTP_PORT: "8080"
+    MCP_HTTP_PATH: /mcp/
+    MCP_LOG_LEVEL: INFO
+    AUTH_AUDIENCE: memoryhub
+    MEMORYHUB_S3_BUCKET: memoryhub
+    MEMORYHUB_S3_SECURE: "false"
+  extraEnv: []
+
+auth:
+  enabled: true
+  image: { repository: auth-server, tag: latest, pullPolicy: Always }
+  replicas: 1
+  serviceAccountName: auth-server
+  rbac:
+    # Set enabled=false when an administrator pre-provisions these grants.
+    enabled: true
+    authDelegator: true
+    namespaceReader: true
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 250m, memory: 256Mi }
+  probes:
+    liveness:
+      httpGet: { path: /healthz, port: 8081 }
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readiness:
+      httpGet: { path: /healthz, port: 8081 }
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  secrets:
+    # These Secrets must already exist in namespaces.auth. The chart
+    # references names only; it never accepts or renders credential values.
+    database: memoryhub-pg-credentials
+    rsaKeys: auth-rsa-keys
+    adminKey: auth-admin-key
+    internalServiceKey: auth-internal-service-key
+    oauthClient: openshift-oauth-client-secret
+  extraEnv: []
+  issuer: ""
+  oauthAuthorizeUrl: ""
+  allowedGroup: memoryhub-users
+  oauthClientId: memoryhub-auth-broker
+  route:
+    enabled: true
+    host: ""
+    tlsTermination: edge
+    insecurePolicy: Redirect
+  ingress:
+    enabled: false
+    host: ""
+
+ui:
+  enabled: true
+  image: { repository: memoryhub-ui, tag: latest, pullPolicy: Always }
+  oauthProxyImage: { repository: registry.redhat.io/openshift4/ose-oauth-proxy, tag: v4.14, pullPolicy: IfNotPresent }
+  replicas: 1
+  serviceAccountName: memoryhub-ui
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  probes:
+    liveness:
+      httpGet: { path: /healthz, port: 8080 }
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readiness:
+      httpGet: { path: /healthz, port: 8080 }
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  proxyResources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }
+  secrets:
+    # These Secrets must already exist in namespaces.ui, except tls: on
+    # OpenShift the Service CA creates that Secret from the Service annotation.
+    database: memoryhub-db-credentials
+    adminKey: memoryhub-ui-admin-key
+    proxy: memoryhub-ui-proxy
+    tls: memoryhub-ui-tls
+  extraEnv: []
+  mcpServerUrl: ""
+  authServiceUrl: ""
+  publicMcpUrl: https://mcp-server.example.com/mcp/
+  publicAuthUrl: https://auth-server.example.com
+  embeddingUrl: ""
+  route:
+    enabled: true
+    host: ""
+    tlsTermination: reencrypt
+    insecurePolicy: Redirect
+  ingress:
+    enabled: false
+    host: ""
+    servicePort: 8443
+
+models:
+  enabled: true
+  variant: cpu # cpu or gpu; the CPU manifests are the current deploy-full.sh defaults.
+  image:
+    cpu: { repository: ghcr.io/huggingface/text-embeddings-inference, tag: cpu-1.6, pullPolicy: IfNotPresent }
+    gpu: { repository: ghcr.io/huggingface/text-embeddings-inference, tag: "1.9", pullPolicy: IfNotPresent }
+  embedding:
+    replicas: 1
+    modelId:
+      cpu: sentence-transformers/all-MiniLM-L6-v2
+      gpu: ibm-granite/granite-embedding-small-english-r2
+    storage: 10Gi
+    storageClassName: ""
+    storageAccessMode: ReadWriteOnce
+    resources:
+      requests: { cpu: "1", memory: 2Gi }
+      limits: { cpu: "2", memory: 4Gi }
+    probes:
+      cpu:
+        liveness:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          failureThreshold: 3
+        readiness:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          failureThreshold: 10
+      gpu:
+        liveness:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 300
+          periodSeconds: 30
+          failureThreshold: 3
+        readiness:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 180
+          periodSeconds: 10
+          failureThreshold: 60
+    extraEnv: []
+    gpuResources:
+      requests: { cpu: "1", memory: 4Gi, nvidia.com/gpu: "1" }
+      limits: { cpu: "4", memory: 8Gi, nvidia.com/gpu: "1" }
+    route:
+      enabled: true
+      host: ""
+      timeout: ""
+    ingress:
+      enabled: false
+      host: ""
+  reranker:
+    replicas: 1
+    modelId:
+      cpu: cross-encoder/ms-marco-MiniLM-L12-v2
+      gpu: ibm-granite/granite-embedding-reranker-english-r2
+    storage: 10Gi
+    storageClassName: ""
+    storageAccessMode: ReadWriteOnce
+    resources:
+      requests: { cpu: "1", memory: 2Gi }
+      limits: { cpu: "2", memory: 4Gi }
+    probes:
+      cpu:
+        liveness:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          failureThreshold: 3
+        readiness:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          failureThreshold: 10
+      gpu:
+        liveness:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 300
+          periodSeconds: 30
+          failureThreshold: 3
+        readiness:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 300
+          periodSeconds: 10
+          failureThreshold: 10
+    extraEnv: []
+    gpuResources:
+      requests: { cpu: "1", memory: 4Gi }
+      limits: { cpu: "4", memory: 8Gi }
+    route:
+      enabled: true
+      host: ""
+      timeout: ""
+    ingress:
+      enabled: false
+      host: ""
+
+maintenance:
+  retention:
+    enabled: true
+    schedule: "0 2 * * *"
+    # Defaults to the MCP image so a single published image override also
+    # updates the retention job. Set repository/tag/digest to override it.
+    image: {}
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { cpu: 200m, memory: 256Mi }
+  cleanup:
+    # This test-data cleanup job is a manually applied repository manifest,
+    # not part of deploy-full.sh. Keep it opt-in.
+    enabled: false
+    schedule: "0 3 * * 0"
+    image: { repository: registry.redhat.io/rhel9/postgresql-16, tag: latest, pullPolicy: IfNotPresent }
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 100m, memory: 128Mi }

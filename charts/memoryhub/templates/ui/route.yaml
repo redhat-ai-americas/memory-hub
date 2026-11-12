@@ -1,0 +1,18 @@
+{{- if and .Values.ui.enabled .Values.ui.route.enabled .Values.openshift.routes (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: memoryhub-ui
+  namespace: {{ .Values.namespaces.ui }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-ui") | nindent 4 }}
+spec:
+  {{- with .Values.ui.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  to: { kind: Service, name: memoryhub-ui }
+  port: { targetPort: proxy }
+  tls:
+    termination: {{ .Values.ui.route.tlsTermination }}
+    insecureEdgeTerminationPolicy: {{ .Values.ui.route.insecurePolicy }}
+{{- end }}

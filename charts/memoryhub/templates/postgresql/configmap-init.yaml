@@ -1,0 +1,12 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memoryhub-pg-init
+  namespace: {{ .Values.namespaces.database }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-pg") | nindent 4 }}
+data:
+  01-extensions.sql: |
+    {{- .Values.postgresql.initSql | nindent 4 }}
+{{- end }}

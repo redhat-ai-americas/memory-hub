@@ -1,0 +1,112 @@
+{{- if .Values.ui.enabled }}
+{{- $embeddingUrl := .Values.ui.embeddingUrl -}}
+{{- if and (not $embeddingUrl) .Values.models.enabled -}}
+  {{- $embeddingService := ternary "all-minilm-l6-v2" "granite-embedding" (eq .Values.models.variant "cpu") -}}
+  {{- $embeddingUrl = printf "http://%s:80" (include "memoryhub.serviceDNS" (dict "name" $embeddingService "namespace" .Values.namespaces.embeddingModel "domain" .Values.clusterDomain)) -}}
+{{- end -}}
+{{- $mcpServerUrl := .Values.ui.mcpServerUrl -}}
+{{- if and (not $mcpServerUrl) .Values.mcp.enabled -}}
+  {{- $mcpServerUrl = printf "http://%s:8080/mcp/" (include "memoryhub.serviceDNS" (dict "name" "memory-hub-mcp" "namespace" .Release.Namespace "domain" .Values.clusterDomain)) -}}
+{{- end -}}
+{{- $authServiceUrl := .Values.ui.authServiceUrl -}}
+{{- if and (not $authServiceUrl) .Values.auth.enabled -}}
+  {{- $authServiceUrl = printf "http://%s:8081" (include "memoryhub.serviceDNS" (dict "name" "auth-server" "namespace" .Values.namespaces.auth "domain" .Values.clusterDomain)) -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memoryhub-ui
+  namespace: {{ .Values.namespaces.ui }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-ui") | nindent 4 }}
+spec:
+  replicas: {{ .Values.ui.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoryhub-ui
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-ui") | nindent 8 }}
+      annotations:
+        alpha.image.policy.openshift.io/resolve-names: '*'
+    spec:
+      serviceAccountName: {{ .Values.ui.serviceAccountName }}
+      {{- include "memoryhub.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: memoryhub-ui
+          image: {{ include "memoryhub.imageRef" .Values.ui.image | quote }}
+          imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
+          ports:
+            - { name: app, containerPort: 8080, protocol: TCP }
+          {{- with .Values.ui.probes.liveness }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ui.probes.readiness }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: MEMORYHUB_DB_HOST
+              value: {{ include "memoryhub.serviceDNS" (dict "name" "memoryhub-pg" "namespace" .Values.namespaces.database "domain" .Values.clusterDomain) | quote }}
+            - name: MEMORYHUB_DB_PORT
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.ui.secrets.database }}, key: MEMORYHUB_DB_PORT }
+            - name: MEMORYHUB_DB_NAME
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.ui.secrets.database }}, key: MEMORYHUB_DB_NAME }
+            - name: MEMORYHUB_DB_USER
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.ui.secrets.database }}, key: MEMORYHUB_DB_USER }
+            - name: MEMORYHUB_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.ui.secrets.database }}, key: MEMORYHUB_DB_PASSWORD }
+            {{- if $mcpServerUrl }}
+            - { name: MEMORYHUB_MCP_SERVER_URL, value: {{ $mcpServerUrl | quote }} }
+            {{- end }}
+            {{- if $authServiceUrl }}
+            - { name: MEMORYHUB_AUTH_SERVICE_URL, value: {{ $authServiceUrl | quote }} }
+            {{- end }}
+            - { name: MEMORYHUB_PUBLIC_MCP_URL, value: {{ .Values.ui.publicMcpUrl | quote }} }
+            - { name: MEMORYHUB_PUBLIC_AUTH_URL, value: {{ .Values.ui.publicAuthUrl | quote }} }
+            {{- if $embeddingUrl }}
+            - { name: MEMORYHUB_EMBEDDING_URL, value: {{ $embeddingUrl | quote }} }
+            {{- end }}
+            - name: MEMORYHUB_ADMIN_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.ui.secrets.adminKey }}, key: MEMORYHUB_ADMIN_KEY }
+            {{- with .Values.ui.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+        - name: oauth-proxy
+          image: {{ include "memoryhub.imageRef" .Values.ui.oauthProxyImage | quote }}
+          imagePullPolicy: {{ .Values.ui.oauthProxyImage.pullPolicy }}
+          ports:
+            - { name: proxy, containerPort: 8443, protocol: TCP }
+          args:
+            - --http-address=127.0.0.1:4180
+            - --https-address=:8443
+            - --provider=openshift
+            - --openshift-service-account={{ .Values.ui.serviceAccountName }}
+            - --upstream=http://localhost:8080
+            - --tls-cert=/etc/tls/private/tls.crt
+            - --tls-key=/etc/tls/private/tls.key
+            - --cookie-secret-file=/etc/proxy/secrets/session-secret
+            - --pass-basic-auth=false
+            - --pass-access-token=true
+            - --skip-auth-regex=^/healthz$
+          volumeMounts:
+            - { name: proxy-tls, mountPath: /etc/tls/private, readOnly: true }
+            - { name: proxy-secret, mountPath: /etc/proxy/secrets, readOnly: true }
+          resources:
+            {{- toYaml .Values.ui.proxyResources | nindent 12 }}
+      volumes:
+        - name: proxy-tls
+          secret: { secretName: {{ .Values.ui.secrets.tls }} }
+        - name: proxy-secret
+          secret: { secretName: {{ .Values.ui.secrets.proxy }} }
+{{- end }}

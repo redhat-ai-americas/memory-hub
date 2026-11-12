@@ -2,19 +2,20 @@
 # Runs Alembic migrations against the in-cluster PostgreSQL by port-forwarding
 # locally. Intended to be called from scripts/deploy-full.sh or manually.
 #
-# Usage: ./scripts/run-migrations.sh [db-namespace]
+# Usage: ./scripts/run-migrations.sh [db-namespace] [db-secret]
 #
 # The script:
 #   1. Verifies the local venv has alembic installed
 #   2. Checks the PostgreSQL pod is Ready
-#   3. Port-forwards svc/memoryhub-pg to localhost:15432
+#   3. Port-forwards svc/memoryhub-pg to localhost:$MEMORYHUB_MIGRATION_LOCAL_PORT
 #   4. Runs `alembic upgrade head` with MEMORYHUB_DB_* env vars
 #   5. Cleans up the port-forward on exit (including errors/signals)
 set -euo pipefail
 
 DB_NAMESPACE="${1:-memoryhub-db}"
-CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
-LOCAL_PORT=15432
+DB_SECRET_NAME="${2:-${MEMORYHUB_DB_SECRET_NAME:-memoryhub-pg-credentials}}"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+LOCAL_PORT="${MEMORYHUB_MIGRATION_LOCAL_PORT:-15432}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${REPO_ROOT}/.venv"
 PF_PID=""
@@ -26,6 +27,7 @@ cleanup() {
   if [[ -n "$PF_PID" ]] && kill -0 "$PF_PID" 2>/dev/null; then
     echo "Stopping port-forward (pid $PF_PID)..."
     kill "$PF_PID" 2>/dev/null || true
+    wait "$PF_PID" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -57,6 +59,11 @@ echo "  PostgreSQL pod is Running."
 # ---------------------------------------------------------------------------
 # 3. Start port-forward
 # ---------------------------------------------------------------------------
+if nc -z localhost "$LOCAL_PORT" 2>/dev/null; then
+  echo "ERROR: Local port $LOCAL_PORT is already in use. Set MEMORYHUB_MIGRATION_LOCAL_PORT to another port."
+  exit 1
+fi
+
 echo "Starting port-forward: localhost:${LOCAL_PORT} -> svc/memoryhub-pg:5432..."
 oc port-forward --context "$CONTEXT" -n "$DB_NAMESPACE" svc/memoryhub-pg "${LOCAL_PORT}:5432" &
 PF_PID=$!
@@ -64,7 +71,7 @@ PF_PID=$!
 # Wait up to 10s for the port to be available
 WAITED=0
 until nc -z localhost "$LOCAL_PORT" 2>/dev/null; do
-  if [[ $WAITED -ge 10 ]]; then
+  if ! kill -0 "$PF_PID" 2>/dev/null || [[ $WAITED -ge 10 ]]; then
     echo "ERROR: Port-forward did not become ready within 10 seconds."
     exit 1
   fi
@@ -79,12 +86,17 @@ echo "  Port-forward ready (waited ${WAITED}s)."
 echo "Running: alembic upgrade head"
 cd "$REPO_ROOT"
 
-: "${MEMORYHUB_DB_PASSWORD:?MEMORYHUB_DB_PASSWORD must be set (matching the POSTGRES_PASSWORD in deploy/postgresql/secret.yaml)}"
+DB_USER="${MEMORYHUB_DB_USER:-$(oc get secret "$DB_SECRET_NAME" --context "$CONTEXT" -n "$DB_NAMESPACE" -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)}"
+DB_NAME="${MEMORYHUB_DB_NAME:-$(oc get secret "$DB_SECRET_NAME" --context "$CONTEXT" -n "$DB_NAMESPACE" -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)}"
+DB_PASSWORD="${MEMORYHUB_DB_PASSWORD:-$(oc get secret "$DB_SECRET_NAME" --context "$CONTEXT" -n "$DB_NAMESPACE" -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)}"
+: "${DB_USER:?Could not read POSTGRES_USER from Secret ${DB_NAMESPACE}/${DB_SECRET_NAME}}"
+: "${DB_NAME:?Could not read POSTGRES_DB from Secret ${DB_NAMESPACE}/${DB_SECRET_NAME}}"
+: "${DB_PASSWORD:?Could not read POSTGRES_PASSWORD from Secret ${DB_NAMESPACE}/${DB_SECRET_NAME}}"
 MEMORYHUB_DB_HOST=localhost \
 MEMORYHUB_DB_PORT=$LOCAL_PORT \
-MEMORYHUB_DB_USER=memoryhub \
-MEMORYHUB_DB_PASSWORD="$MEMORYHUB_DB_PASSWORD" \
-MEMORYHUB_DB_NAME=memoryhub \
+MEMORYHUB_DB_USER="$DB_USER" \
+MEMORYHUB_DB_PASSWORD="$DB_PASSWORD" \
+MEMORYHUB_DB_NAME="$DB_NAME" \
   "${VENV}/bin/alembic" upgrade head
 
 echo ""

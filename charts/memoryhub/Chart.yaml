@@ -1,0 +1,14 @@
+apiVersion: v2
+name: memoryhub
+description: MemoryHub multi-namespace OpenShift deployment chart
+type: application
+home: https://github.com/redhat-ai-americas/memory-hub
+sources:
+  - https://github.com/redhat-ai-americas/memory-hub
+keywords:
+  - memory
+  - ai
+  - mcp
+  - openshift
+version: 0.1.0
+appVersion: "0.1.0"

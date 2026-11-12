@@ -13,6 +13,7 @@ spec:
       labels:
         app: ms-marco-minilm-l12-v2
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: tei
           image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6

@@ -1,0 +1,21 @@
+{{- if and .Values.postgresql.enabled (not .Values.postgresql.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memoryhub-pg-data
+  namespace: {{ .Values.namespaces.database }}
+  {{- if .Values.postgresql.retainPvcOnUninstall }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-pg") | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.postgresql.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.storage | quote }}
+{{- end }}

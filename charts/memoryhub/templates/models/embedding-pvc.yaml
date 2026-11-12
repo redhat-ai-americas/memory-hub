@@ -1,0 +1,16 @@
+{{- if .Values.models.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: embedding-model-cache
+  namespace: {{ .Values.namespaces.embeddingModel }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "embedding-model") | nindent 4 }}
+spec:
+  accessModes: [{{ .Values.models.embedding.storageAccessMode }}]
+  {{- with .Values.models.embedding.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests: { storage: {{ .Values.models.embedding.storage | quote }} }
+{{- end }}

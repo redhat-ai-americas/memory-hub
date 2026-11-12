@@ -26,6 +26,7 @@ spec:
       activeDeadlineSeconds: 120
       template:
         spec:
+          automountServiceAccountToken: false
           restartPolicy: Never
           containers:
             - name: cleanup

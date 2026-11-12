@@ -1,0 +1,21 @@
+{{- if and .Values.models.enabled .Values.models.reranker.route.enabled .Values.openshift.routes (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+{{- $name := ternary "ms-marco-minilm-l12-v2" "granite-reranker" (eq .Values.models.variant "cpu") -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespaces.rerankerModel }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" $name) | nindent 4 }}
+  {{- with .Values.models.reranker.route.timeout }}
+  annotations:
+    haproxy.router.openshift.io/timeout: {{ . | quote }}
+  {{- end }}
+spec:
+  {{- with .Values.models.reranker.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  to: { kind: Service, name: {{ $name }} }
+  port: { targetPort: http }
+  tls: { termination: edge }
+{{- end }}

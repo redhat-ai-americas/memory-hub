@@ -1,0 +1,19 @@
+{{- if and .Values.mcp.enabled .Values.mcp.route.enabled .Values.openshift.routes (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: memory-hub-mcp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memory-hub-mcp") | nindent 4 }}
+spec:
+  {{- with .Values.mcp.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  path: {{ .Values.mcp.route.path | quote }}
+  to: { kind: Service, name: memory-hub-mcp }
+  port: { targetPort: http }
+  tls:
+    termination: {{ .Values.mcp.route.tlsTermination }}
+    insecureEdgeTerminationPolicy: {{ .Values.mcp.route.insecurePolicy }}
+{{- end }}

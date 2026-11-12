@@ -1,0 +1,19 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: memoryhub-pg
+  namespace: {{ .Values.namespaces.database }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-pg") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: memoryhub-pg
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+{{- end }}
