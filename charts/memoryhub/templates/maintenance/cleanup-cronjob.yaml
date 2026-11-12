@@ -1,0 +1,99 @@
+{{- if .Values.maintenance.cleanup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: memoryhub-test-data-cleanup
+  namespace: {{ .Values.namespaces.database }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-test-data-cleanup") | nindent 4 }}
+spec:
+  schedule: {{ .Values.maintenance.cleanup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 120
+      template:
+        metadata:
+          labels:
+            {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-test-data-cleanup") | nindent 12 }}
+        spec:
+          automountServiceAccountToken: false
+          {{- include "memoryhub.imagePullSecrets" . | nindent 10 }}
+          restartPolicy: Never
+          containers:
+            - name: cleanup
+              image: {{ include "memoryhub.imageRef" .Values.maintenance.cleanup.image | quote }}
+              imagePullPolicy: {{ .Values.maintenance.cleanup.image.pullPolicy }}
+              command: [/bin/bash, -c]
+              args:
+                - |
+                  echo "=== MemoryHub test data cleanup ==="
+                  echo "Target: ${PGHOST}:${PGPORT}/${PGDATABASE}"
+
+                  BEFORE=$(psql -tA -c "SELECT count(*) FROM memory_nodes WHERE deleted_at IS NULL")
+                  TEST_COUNT=$(psql -tA -c "
+                    SELECT count(*) FROM memory_nodes
+                    WHERE deleted_at IS NULL
+                    AND (
+                      content ILIKE '[test]%'
+                      OR stub ILIKE '[test]%'
+                      OR owner_id IN (
+                        'test-user', 'dup-test-user', 'similarity-score-test',
+                        'seed-test-user', 'rollback-test-user', 'session-reuse-test',
+                        'domain-test-user', 'near-dup-user', 'similarity-direct-test',
+                        'seed-idempotency-user', 'multi-domain-user', 'e2e-test'
+                      )
+                    )
+                  ")
+
+                  echo "Active memories: ${BEFORE}"
+                  echo "Test data found: ${TEST_COUNT}"
+
+                  if [ "${TEST_COUNT}" -eq 0 ]; then
+                    echo "Nothing to clean up."
+                    exit 0
+                  fi
+
+                  DELETED=$(psql -tA -c "
+                    UPDATE memory_nodes
+                    SET deleted_at = NOW(), is_current = false
+                    WHERE deleted_at IS NULL
+                    AND (
+                      content ILIKE '[test]%'
+                      OR stub ILIKE '[test]%'
+                      OR owner_id IN (
+                        'test-user', 'dup-test-user', 'similarity-score-test',
+                        'seed-test-user', 'rollback-test-user', 'session-reuse-test',
+                        'domain-test-user', 'near-dup-user', 'similarity-direct-test',
+                        'seed-idempotency-user', 'multi-domain-user', 'e2e-test'
+                      )
+                    )
+                  ")
+
+                  echo "Soft-deleted: ${DELETED} rows"
+              env:
+                - name: PGHOST
+                  value: {{ include "memoryhub.serviceDNS" (dict "name" "memoryhub-pg" "namespace" .Values.namespaces.database "domain" .Values.clusterDomain) | quote }}
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgresql.secretName }}
+                      key: POSTGRES_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgresql.secretName }}
+                      key: POSTGRES_PASSWORD
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgresql.secretName }}
+                      key: POSTGRES_DB
+              resources:
+                {{- toYaml .Values.maintenance.cleanup.resources | nindent 16 }}
+{{- end }}

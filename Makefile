@@ -1,6 +1,6 @@
 .PHONY: help install uninstall dev local-install local-up local-down local-logs local-auth-up check-prereqs test test-integration test-auth \
         deploy-all deploy-db deploy-mcp deploy-auth deploy-ui deploy-tile \
-        migrate clean-mcp clean-auth build build-mcp build-auth build-ui
+        migrate clean-mcp clean-auth build build-mcp build-auth build-ui helm-check helm-install helm-uninstall
 
 # Default target
 help:
@@ -15,6 +15,10 @@ help:
 	@echo "  make build-mcp      - Build the MCP server image only"
 	@echo "  make build-auth     - Build the auth server image only"
 	@echo "  make build-ui       - Build the dashboard UI image only"
+	@echo "  make helm-check     - Lint and compare Helm output with deployment manifests"
+	@echo "  make helm-install   - Fresh OpenShift install using Helm (or ARGS=--prebuilt-images)"
+	@echo "  make helm-uninstall                          - Remove a Helm-managed install (retains data PVCs and namespaces by default)"
+	@echo "  make helm-uninstall ARGS='--delete-namespaces --yes' - Remove install and delete all namespaces and data"
 	@echo "  make uninstall      - Remove all MemoryHub resources from the cluster"
 	@echo ""
 	@echo "Partial deploys (advanced):"
@@ -63,6 +67,15 @@ build-auth:
 
 build-ui:
 	MEMORYHUB_CONTEXT=$(or $(MEMORYHUB_CONTEXT),mcp-rhoai) memoryhub-ui/deploy/build.sh
+
+helm-check:
+	bash scripts/check-helm-chart.sh
+
+helm-install:
+	bash scripts/helm-install.sh $(ARGS)
+
+helm-uninstall:
+	bash scripts/helm-uninstall.sh $(ARGS)
 
 uninstall:
 	scripts/uninstall-full.sh $(ARGS)

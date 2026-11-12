@@ -1,0 +1,17 @@
+{{- if .Values.valkey.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memoryhub-valkey-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-valkey") | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.valkey.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.valkey.storage | quote }}
+{{- end }}

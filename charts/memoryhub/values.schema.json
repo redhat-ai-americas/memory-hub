@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["namespaces", "clusterDomain", "imagePullSecrets", "openshift", "ingress", "postgresql", "minio", "valkey", "mcp", "auth", "ui", "models", "maintenance"],
+  "properties": {
+    "clusterDomain": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$" },
+    "imagePullSecrets": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "type": "string", "minLength": 1 } } } },
+    "namespaces": {
+      "type": "object", "additionalProperties": false,
+      "required": ["create", "database", "storage", "auth", "ui", "embeddingModel", "rerankerModel"],
+      "properties": {
+        "create": { "type": "boolean" },
+        "database": { "$ref": "#/definitions/namespaceName" },
+        "storage": { "$ref": "#/definitions/namespaceName" },
+        "auth": { "$ref": "#/definitions/namespaceName" },
+        "ui": { "$ref": "#/definitions/namespaceName" },
+        "embeddingModel": { "$ref": "#/definitions/namespaceName" },
+        "rerankerModel": { "$ref": "#/definitions/namespaceName" }
+      }
+    },
+    "openshift": { "$ref": "#/definitions/openShift" },
+    "ingress": { "$ref": "#/definitions/ingress" },
+    "postgresql": { "$ref": "#/definitions/persistentComponent" },
+    "minio": { "$ref": "#/definitions/persistentComponent" },
+    "valkey": { "$ref": "#/definitions/singleInstanceComponent" },
+    "mcp": { "$ref": "#/definitions/component" },
+    "auth": { "$ref": "#/definitions/authComponent" },
+    "ui": { "$ref": "#/definitions/component" },
+    "models": { "$ref": "#/definitions/modelsComponent" },
+    "maintenance": { "$ref": "#/definitions/component" }
+  },
+  "definitions": {
+    "namespaceName": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+    "image": { "type": "object", "required": ["repository", "pullPolicy"], "properties": { "repository": { "type": "string", "minLength": 1 }, "tag": { "type": "string" }, "digest": { "type": "string", "pattern": "^(sha256:[a-f0-9]{64})?$" }, "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] } } },
+    "resources": { "type": "object", "properties": { "requests": { "type": "object" }, "limits": { "type": "object" } } },
+    "component": { "type": "object", "additionalProperties": true, "properties": { "enabled": { "type": "boolean" }, "replicas": { "type": "integer", "minimum": 0 }, "image": { "$ref": "#/definitions/image" }, "resources": { "$ref": "#/definitions/resources" } } },
+    "singleInstanceComponent": { "type": "object", "additionalProperties": true, "properties": { "enabled": { "type": "boolean" }, "replicas": { "const": 1 }, "image": { "$ref": "#/definitions/image" }, "resources": { "$ref": "#/definitions/resources" } } },
+    "persistentComponent": { "allOf": [{ "$ref": "#/definitions/singleInstanceComponent" }, { "type": "object", "properties": { "retainPvcOnUninstall": { "type": "boolean" }, "existingClaim": { "type": "string", "maxLength": 253, "pattern": "^$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" } } }] },
+    "modelsComponent": { "type": "object", "additionalProperties": true, "properties": { "enabled": { "type": "boolean" }, "variant": { "enum": ["cpu", "gpu"] }, "image": { "type": "object", "properties": { "cpu": { "$ref": "#/definitions/image" }, "gpu": { "$ref": "#/definitions/image" } } } } },
+    "openShift": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean" }, "sccBindings": { "type": "boolean" }, "scc": { "type": "object", "additionalProperties": false, "properties": { "postgresql": { "type": "boolean" }, "minio": { "type": "boolean" }, "valkey": { "type": "boolean" } } }, "routes": { "type": "boolean" } } },
+    "authRbac": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean" }, "authDelegator": { "type": "boolean" }, "namespaceReader": { "type": "boolean" } } },
+    "authComponent": { "allOf": [{ "$ref": "#/definitions/component" }, { "type": "object", "properties": { "rbac": { "$ref": "#/definitions/authRbac" } } }] },
+    "ingress": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean" }, "className": { "type": "string" }, "annotations": { "type": "object" }, "host": { "type": "string" }, "tls": { "type": "array" } } }
+  }
+}

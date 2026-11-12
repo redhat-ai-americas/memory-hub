@@ -16,6 +16,7 @@ CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
 LOCAL_PORT=15432
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${REPO_ROOT}/.venv"
+SEED_CLIENTS_FILE="${MEMORYHUB_SEED_CLIENTS_FILE:-}"
 PF_PID=""
 
 # ---------------------------------------------------------------------------
@@ -66,4 +67,12 @@ export MEMORYHUB_DB_PASSWORD=$(oc get secret --context "$CONTEXT" memoryhub-pg-c
   -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
 
 echo "Running seed script..."
-"$VENV/bin/python" "$REPO_ROOT/scripts/seed-oauth-clients.py"
+if [[ -n "$SEED_CLIENTS_FILE" ]]; then
+  if [[ ! -f "$SEED_CLIENTS_FILE" ]]; then
+    echo "ERROR: seed clients file does not exist: $SEED_CLIENTS_FILE" >&2
+    exit 1
+  fi
+  "$VENV/bin/python" "$REPO_ROOT/scripts/seed-oauth-clients.py" "$SEED_CLIENTS_FILE"
+else
+  "$VENV/bin/python" "$REPO_ROOT/scripts/seed-oauth-clients.py"
+fi

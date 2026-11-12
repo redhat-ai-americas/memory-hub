@@ -1,0 +1,23 @@
+# Minimal OpenShift values for a standard MemoryHub Helm install.
+# Copy this file to values-openshift.yaml, fill in your cluster hosts, and pass
+# it to helm-install: make helm-install ARGS="--values values-openshift.yaml"
+# Keep credentials in Kubernetes Secrets; do not add them here.
+openshift:
+  enabled: true
+  routes: true
+
+auth:
+  issuer: https://auth.example.com
+  oauthAuthorizeUrl: https://oauth-openshift.apps.cluster.example.com/oauth/authorize
+  route:
+    host: auth.example.com
+
+mcp:
+  route:
+    host: mcp.example.com
+
+ui:
+  route:
+    host: ui.example.com
+  publicMcpUrl: https://mcp.example.com/mcp/
+  publicAuthUrl: https://auth.example.com

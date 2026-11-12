@@ -8,6 +8,7 @@ resources:
   # preserves it on subsequent runs.  See secret.yaml for the
   # expected schema (reference only).
   - pvc.yaml
+  - serviceaccount.yaml
   - configmap-init.yaml
   - statefulset.yaml
   - service.yaml

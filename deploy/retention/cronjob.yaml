@@ -26,6 +26,7 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          automountServiceAccountToken: false
           containers:
             - name: retention-sweep
               image: image-registry.openshift-image-registry.svc:5000/memory-hub-mcp/memory-hub-mcp:latest

@@ -1,0 +1,66 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: memoryhub-pg
+  namespace: {{ .Values.namespaces.database }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-pg") | nindent 4 }}
+spec:
+  serviceName: memoryhub-pg
+  replicas: {{ .Values.postgresql.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoryhub-pg
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-pg") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.postgresql.serviceAccountName }}
+      {{- include "memoryhub.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: postgresql
+          image: {{ include "memoryhub.imageRef" .Values.postgresql.image | quote }}
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          ports:
+            - name: postgresql
+              containerPort: 5432
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: {{ .Values.postgresql.secretName }}
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            {{- with .Values.postgresql.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+          volumeMounts:
+            - name: pg-data
+              mountPath: /var/lib/postgresql/data
+            - name: pg-init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          {{- with .Values.postgresql.probes.liveness }}
+          livenessProbe:
+            {{- tpl (toYaml .) $ | nindent 12 }}
+          {{- end }}
+          {{- with .Values.postgresql.probes.readiness }}
+          readinessProbe:
+            {{- tpl (toYaml .) $ | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: pg-data
+          persistentVolumeClaim:
+            claimName: {{ default "memoryhub-pg-data" .Values.postgresql.existingClaim }}
+        - name: pg-init
+          configMap:
+            name: memoryhub-pg-init
+{{- end }}

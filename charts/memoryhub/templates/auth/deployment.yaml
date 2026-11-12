@@ -1,0 +1,93 @@
+{{- if .Values.auth.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-server
+  namespace: {{ .Values.namespaces.auth }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "auth-server") | nindent 4 }}
+spec:
+  replicas: {{ .Values.auth.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-server
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "memoryhub.componentLabels" (dict "root" . "component" "auth-server") | nindent 8 }}
+      annotations:
+        alpha.image.policy.openshift.io/resolve-names: '*'
+    spec:
+      serviceAccountName: {{ .Values.auth.serviceAccountName }}
+      {{- include "memoryhub.imagePullSecrets" . | nindent 6 }}
+      {{- if and .Values.openshift.enabled (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+      initContainers:
+        - name: combine-ca
+          image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+          command: [sh, -c]
+          args:
+            - cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt /etc/pki/service-ca/service-ca.crt > /etc/pki/combined-ca/ca-bundle.crt
+          volumeMounts:
+            - { name: service-ca, mountPath: /etc/pki/service-ca, readOnly: true }
+            - { name: combined-ca, mountPath: /etc/pki/combined-ca }
+      {{- end }}
+      containers:
+        - name: auth-server
+          image: {{ include "memoryhub.imageRef" .Values.auth.image | quote }}
+          imagePullPolicy: {{ .Values.auth.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8081, protocol: TCP }
+          {{- with .Values.auth.probes.liveness }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.auth.probes.readiness }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if and .Values.openshift.enabled (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+          volumeMounts:
+            - { name: combined-ca, mountPath: /etc/pki/combined-ca, readOnly: true }
+          {{- end }}
+          envFrom:
+            - secretRef: { name: {{ .Values.auth.secrets.database }} }
+            - secretRef: { name: {{ .Values.auth.secrets.rsaKeys }} }
+            - secretRef: { name: {{ .Values.auth.secrets.adminKey }} }
+            - secretRef: { name: {{ .Values.auth.secrets.internalServiceKey }} }
+          env:
+            - { name: AUTH_HOST, value: "0.0.0.0" }
+            - { name: AUTH_PORT, value: "8081" }
+            - { name: AUTH_DB_HOST, value: {{ include "memoryhub.serviceDNS" (dict "name" "memoryhub-pg" "namespace" .Values.namespaces.database "domain" .Values.clusterDomain) | quote }} }
+            - { name: AUTH_DB_PORT, value: "5432" }
+            - { name: AUTH_DB_NAME, value: {{ .Values.postgresql.database | quote }} }
+            - { name: AUTH_DB_USER, value: {{ .Values.postgresql.username | quote }} }
+            - name: AUTH_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.auth.secrets.database }}, key: POSTGRES_PASSWORD }
+            - { name: AUTH_ISSUER, value: {{ .Values.auth.issuer | quote }} }
+            - { name: AUTH_OPENSHIFT_OAUTH_AUTHORIZE_URL, value: {{ .Values.auth.oauthAuthorizeUrl | quote }} }
+            - { name: AUTH_OPENSHIFT_OAUTH_TOKEN_URL, value: {{ printf "https://%s/oauth/token" (include "memoryhub.serviceDNS" (dict "name" "oauth-openshift" "namespace" "openshift-authentication" "domain" .Values.clusterDomain)) | quote }} }
+            - { name: AUTH_OPENSHIFT_USER_INFO_URL, value: {{ printf "https://%s/apis/user.openshift.io/v1/users/~" (include "memoryhub.serviceDNS" (dict "name" "kubernetes" "namespace" "default" "domain" .Values.clusterDomain)) | quote }} }
+            - { name: AUTH_OPENSHIFT_TLS_VERIFY, value: "true" }
+            {{- if and .Values.openshift.enabled (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+            - { name: AUTH_OPENSHIFT_CA_BUNDLE, value: /etc/pki/combined-ca/ca-bundle.crt }
+            {{- end }}
+            - { name: AUTH_OPENSHIFT_ALLOWED_GROUP, value: {{ .Values.auth.allowedGroup | quote }} }
+            - { name: AUTH_OPENSHIFT_OAUTH_CLIENT_ID, value: {{ .Values.auth.oauthClientId | quote }} }
+            - name: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.auth.secrets.oauthClient }}, key: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET }
+            {{- with .Values.auth.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.auth.resources | nindent 12 }}
+      {{- if and .Values.openshift.enabled (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+      volumes:
+        - name: service-ca
+          configMap: { name: service-ca-bundle }
+        - name: combined-ca
+          emptyDir: {}
+      {{- end }}
+{{- end }}

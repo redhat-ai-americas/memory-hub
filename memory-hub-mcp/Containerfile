@@ -4,7 +4,7 @@ WORKDIR /opt/app-root/src
 
 # Install dependencies
 # build-context.sh stages requirements.txt at the context root.
-COPY requirements.txt .
+COPY --chown=1001:0 --chmod=0644 requirements.txt .
 RUN pip install --no-cache-dir --upgrade wheel setuptools && \
     pip install --no-cache-dir -r requirements.txt
 
@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir --upgrade wheel setuptools && \
 # We use --no-build-isolation to avoid setuptools trying to create egg-info
 # in the read-only source directory. This works because all build deps are
 # already installed above.
-COPY memoryhub_core/ ./memoryhub_core/
+COPY --chown=1001:0 memoryhub_core/ ./memoryhub_core/
 # Install without [extraction] extra to reduce image size (~4GB savings).
 # Entity extraction is feature-flagged (MEMORYHUB_ENTITY_EXTRACTION_ENABLED)
 # and disabled by default. Re-add [extraction] when the cluster has more
@@ -24,8 +24,8 @@ RUN pip install --no-cache-dir --no-build-isolation -e './memoryhub_core/'
 RUN pip install --no-cache-dir 'fastmcp==3.4.2'
 
 # Copy MCP server application code
-COPY src/ ./src/
-COPY conftest.py ./
+COPY --chown=1001:0 src/ ./src/
+COPY --chown=1001:0 --chmod=0644 conftest.py ./
 
 # Fix permissions for OpenShift arbitrary UIDs
 RUN find ./src -name "*.py" -exec chmod 644 {} \;

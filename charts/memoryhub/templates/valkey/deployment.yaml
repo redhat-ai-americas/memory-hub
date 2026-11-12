@@ -1,0 +1,54 @@
+{{- if .Values.valkey.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memoryhub-valkey
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-valkey") | nindent 4 }}
+spec:
+  replicas: {{ .Values.valkey.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoryhub-valkey
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-valkey") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.valkey.serviceAccountName }}
+      {{- include "memoryhub.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: valkey
+          image: {{ include "memoryhub.imageRef" .Values.valkey.image | quote }}
+          imagePullPolicy: {{ .Values.valkey.image.pullPolicy }}
+          args: [--appendonly, "yes", --dir, /data, --save, "60 1000", --maxmemory, {{ .Values.valkey.maxMemory | quote }}, --maxmemory-policy, noeviction]
+          {{- with .Values.valkey.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - { name: valkey, containerPort: 6379, protocol: TCP }
+          resources:
+            {{- toYaml .Values.valkey.resources | nindent 12 }}
+          volumeMounts:
+            - { name: valkey-data, mountPath: /data }
+          {{- with .Values.valkey.probes.liveness }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.valkey.probes.readiness }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: valkey-data
+          persistentVolumeClaim:
+            claimName: memoryhub-valkey-data
+{{- end }}

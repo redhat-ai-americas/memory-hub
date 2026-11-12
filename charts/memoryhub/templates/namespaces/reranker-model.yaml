@@ -1,0 +1,13 @@
+{{- $namespace := .Values.namespaces.rerankerModel -}}
+{{- if and .Values.namespaces.create (eq (include "memoryhub.namespaceShouldRender" (dict "root" . "name" $namespace) | trim) "true") }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $namespace }}
+  labels:
+    {{- include "memoryhub.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    meta.helm.sh/release-name: {{ .Release.Name | quote }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace | quote }}
+{{- end }}
