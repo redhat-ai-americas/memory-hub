@@ -334,6 +334,8 @@ export const api = {
   breakGlass: () => get<BreakGlassState>('/break-glass'),
   startBreakGlass: (body: { incident_ref: string; justification: string; hours?: number }) => post<BreakGlassGrant>('/break-glass', body).then(authorizationChanged),
   endBreakGlass: () => post<{ ended: string }>('/break-glass/end').then(authorizationChanged),
+  /** Optional, newer servers: an admin asks Super Admins for an incident grant. */
+  requestEscalation: (body: { target: string; observed: string }) => post<{ id: string }>('/break-glass/escalations', body),
   breakGlassReport: (month?: string) => get<BreakGlassReport>(`/break-glass/report${month ? `?month=${month}` : ''}`),
   // Connection check (R1-024)
   verifyResults: () => get<VerifyList>('/verify'),

@@ -463,3 +463,4 @@ const Health: React.FC = () => {
 };
 
 export default Quality;
+export { Checks, Runs };

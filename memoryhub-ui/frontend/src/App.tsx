@@ -6,6 +6,7 @@ import { ToastProvider } from '@/components/ui';
 import { navigate, useHashRoute, type HashRoute } from '@/hooks/useHashRoute';
 import Accounts from '@/pages/Accounts';
 import Audit from '@/pages/Audit';
+import AdminAudit from '@/pages/AdminAudit';
 import Preferences from '@/pages/Preferences';
 import WhoRead from '@/pages/WhoRead';
 import Dreaming from '@/pages/Dreaming';
@@ -80,7 +81,7 @@ const SCREENS: Record<string, Screen> = {
   '/preferences': { nav: '/preferences', title: 'Preferences & privacy', render: () => <Preferences /> },
   '/review': { nav: '/review', title: 'Review queue', render: (r) => <ByRole user={<MyRequests route={r} />} other={<Review route={r} />} /> },
   '/curation': { nav: '/curation', title: 'Curation rules', render: (r) => <Curation route={r} /> },
-  '/audit': { nav: '/audit', title: 'Audit & forensics', render: (r) => <ByRole user={<MyActivity route={r} />} other={<Audit route={r} />} /> },
+  '/audit': { nav: '/audit', title: 'Audit & forensics', render: (r) => <ByRole user={<MyActivity route={r} />} other={<AdminOr admin={<AdminAudit route={r} />} other={<Audit route={r} />} />} /> },
   '/identities': { nav: '/identities', title: 'Users & agents', render: (r) => <ByRole user={<MyAgents route={r} />} other={<Identities route={r} />} /> },
   '/clients': { nav: '/clients', title: 'OAuth clients & keys', render: (r) => <Clients route={r} /> },
   '/connect': { nav: '/connect', title: 'Connect an agent', render: () => <Connect /> },

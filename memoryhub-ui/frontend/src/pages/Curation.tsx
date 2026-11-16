@@ -1,15 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '@/api/client';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
-import { Empty, ErrorState, Seg, SkTable, Switch, useToast } from '@/components/ui';
+import { Empty, ErrorState, Modal, SkLines, SkTable, Switch, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { CurationRule, RuleTestResult } from '@/types';
-import { errorMessage, fmtInt, fmtRelative, SCOPE_ORDER, scopeMeta } from '@/utils/format';
+import type { CurationPolicy, CurationRule, RuleTestResult } from '@/types';
+import { errorMessage, fmtInt, fmtRelative, SCOPE_ORDER, truncate } from '@/utils/format';
 import { ConfirmModal } from './common';
+import { LockIcon } from './MemoryGraph';
 
 const ACTIONS = ['quarantine', 'flag', 'block', 'reject_with_pointer', 'decay_weight', 'merge'];
-const ACTION_CLS: Record<string, string> = { block: 'red', quarantine: 'org', reject_with_pointer: 'blue', flag: 'ylw', decay_weight: 'g', merge: 'pur' };
+const ACTION_LABEL: Record<string, string> = {
+  block: 'Block',
+  quarantine: 'Quarantine',
+  reject_with_pointer: 'Route to project',
+  flag: 'Flag for review',
+  decay_weight: 'Decay weight',
+  merge: 'Suggest merge',
+};
+const actionLabel = (a: string) => ACTION_LABEL[a] ?? a;
+const APPLIES: Record<string, string> = {
+  '': 'All scopes',
+  user: 'Personal scope · all users',
+  project: 'Project scope',
+  campaign: 'Campaign scope',
+  role: 'Role scope',
+  organizational: 'Organizational scope',
+  enterprise: 'Enterprise scope',
+};
 const LAYER: Record<string, { cls: string; label: string }> = {
   system: { cls: 'g', label: 'System' },
   organizational: { cls: 'pur', label: 'Organization' },
@@ -65,9 +83,8 @@ const toDraft = (r?: CurationRule): Draft => {
 
 const Curation: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
-  const { me, role } = useApp();
+  const { role } = useApp();
   const isUser = role === 'user';
-  const own = (r: CurationRule) => !isUser || (r.layer === 'user' && r.owner_id === me?.username);
   const layer = route.params.get('layer') || 'all';
   const selectedId = route.params.get('rule');
   const rules = useApi(() => api.rules(), []);
@@ -94,16 +111,6 @@ const Curation: React.FC<{ route: HashRoute }> = ({ route }) => {
     if (id) next.set('rule', id);
     else next.delete('rule');
     navigate('/curation', next, { replace: true });
-  };
-
-  const toggle = async (r: CurationRule) => {
-    try {
-      await api.updateRule(r.id, { enabled: !r.enabled, edited_by: me?.username });
-      toast(`${r.name} ${r.enabled ? 'disabled' : 'enabled'}.`);
-      rules.reload();
-    } catch (e) {
-      toast(errorMessage(e), 'err');
-    }
   };
 
   const scan = async () => {
@@ -177,60 +184,87 @@ const Curation: React.FC<{ route: HashRoute }> = ({ route }) => {
                 </Empty>
               ) : (
                 <div className="scroll">
-                  <table className="tbl mid" style={{ minWidth: 820 }}>
+                  <table className="tbl mid" style={{ minWidth: 640 }}>
                     <thead>
                       <tr>
-                        <th>Prio</th>
-                        <th>Rule</th>
+                        <th style={{ minWidth: 150 }}>Rule</th>
                         <th>Layer</th>
-                        <th>Tier</th>
+                        <th>Precedence</th>
+                        <th>Protected</th>
+                        <th>Type</th>
                         <th>Action</th>
-                        <th>Scope filter</th>
-                        <th>Matches · 7 d</th>
-                        <th>Enabled</th>
+                        <th style={{ whiteSpace: "nowrap" }}>Hits · 7 d</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((r) => (
-                        <tr key={r.id} className={`clickable ${draft?.id === r.id ? 'is-sel' : ''}`} onClick={() => select(r.id)}>
-                          <td className="mono">{r.priority}</td>
-                          <td>
-                            <a
-                              href={`#/curation?rule=${r.id}`}
-                              style={{ fontWeight: 600, textDecoration: 'none' }}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                select(r.id);
-                              }}
-                            >
-                              {r.name}
-                            </a>
-                            <div className="sm muted">{r.description || describeConfig(r) || '—'}</div>
-                          </td>
-                          <td>
-                            <span className={`lbl ${LAYER[r.layer]?.cls ?? 'g'}`}>
-                              {LAYER[r.layer]?.label ?? r.layer}
-                              {r.layer === 'user' && r.owner_id ? ` · ${r.owner_id}` : ''}
-                            </span>
-                          </td>
-                          <td className="mono">{r.tier}</td>
-                          <td>
-                            <span className={`lbl ${ACTION_CLS[r.action] ?? 'g'}`}>{r.action}</span>
-                          </td>
-                          <td className="sm">{r.scope_filter ? r.scope_filter.split(',').map((s) => scopeMeta(s.trim()).label).join(', ') : 'All scopes'}</td>
-                          <td title={matches.data?.available ? undefined : 'The MCP server does not record rule names in audit events yet'}>
-                            {matches.data?.available ? fmtInt(matches.data.counts[r.name] ?? 0) : '—'}
-                          </td>
-                          <td onClick={(e) => e.stopPropagation()}>
-                            <Switch on={r.enabled} label={`${r.name} enabled`} onChange={own(r) ? () => toggle(r) : undefined} />
-                          </td>
-                        </tr>
-                      ))}
+                      {rows.map((r) => {
+                        const detail = describeConfig(r);
+                        return (
+                          <tr key={r.id} className={`clickable ${draft?.id === r.id ? 'is-sel' : ''}`} onClick={() => select(draft?.id === r.id ? undefined : r.id)}>
+                            <td>
+                              <a
+                                href={`#/curation?rule=${r.id}`}
+                                style={{ fontWeight: 600, textDecoration: 'none' }}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  select(draft?.id === r.id ? undefined : r.id);
+                                }}
+                              >
+                                {r.name}
+                              </a>
+                              {!r.enabled && <span className="lbl g" style={{ marginLeft: 6 }}>off</span>}
+                              <div className="sm muted">{r.description || detail || '—'}</div>
+                              {typeof r.config?.pattern === 'string' && <div className="sm mono muted">{truncate(r.config.pattern as string, 40)}</div>}
+                            </td>
+                            <td>
+                              <span className={`lbl ${LAYER[r.layer]?.cls ?? 'g'}`}>
+                                {LAYER[r.layer]?.label ?? r.layer}
+                                {r.layer === 'user' && r.owner_id ? ` · ${r.owner_id}` : ''}
+                              </span>
+                            </td>
+                            <td className="mono">{r.priority}</td>
+                            <td className="sm">
+                              {r.layer === 'system' ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <LockIcon size={12} /> yes
+                                </span>
+                              ) : (
+                                <span className="muted">no</span>
+                              )}
+                            </td>
+                            <td className="mono sm">{r.tier}</td>
+                            <td className="sm">{actionLabel(r.action)}</td>
+                            <td title={matches.data?.available ? undefined : 'The MCP server does not record rule names in audit events yet'}>
+                              {matches.data?.available ? fmtInt(matches.data.counts[r.name] ?? 0) : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               )}
             </section>
+            {draft ? (
+              <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <RuleEditor
+                  key={draft.id ?? 'new'}
+                  initial={draft}
+                  rule={all.find((r) => r.id === draft.id)}
+                  onClose={() => select(undefined)}
+                  onDelete={(r) => setDeleting(r)}
+                  onSaved={(saved) => {
+                    rules.reload();
+                    select(saved.id);
+                  }}
+                />
+              </section>
+            ) : (
+              rows.length > 0 && <p className="sm muted" style={{ margin: '-8px 0 0' }}>Click a rule to edit it below.</p>
+            )}
+          </div>
+
+          <aside className="col-side" style={{ flex: '1 1 320px', maxWidth: 380 }}>
             <div className="card">
               <h3 style={{ marginBottom: 6 }}>How rules are layered</h3>
               <div className="layer">
@@ -256,26 +290,7 @@ const Curation: React.FC<{ route: HashRoute }> = ({ route }) => {
                 </div>
               </div>
             </div>
-          </div>
-
-          <aside className="card" style={{ flex: '1 1 380px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {draft ? (
-              <RuleEditor
-                key={draft.id ?? 'new'}
-                initial={draft}
-                rule={all.find((r) => r.id === draft.id)}
-                onClose={() => select(undefined)}
-                onDelete={(r) => setDeleting(r)}
-                onSaved={(saved) => {
-                  rules.reload();
-                  select(saved.id);
-                }}
-              />
-            ) : (
-              <Empty compact title="Select a rule">
-                Pick a rule to tune its pattern, action and scope, and test it against sample text before saving.
-              </Empty>
-            )}
+            {!isUser && <PolicyCard />}
           </aside>
         </div>
       </div>
@@ -312,6 +327,7 @@ const RuleEditor: React.FC<{
   const readOnly = isUser && !!rule && !(rule.layer === 'user' && rule.owner_id === me?.username);
   const [d, setD] = useState<Draft>(isUser && !rule ? { ...initial, layer: 'user', owner_id: me?.username ?? '' } : initial);
   const [sample, setSample] = useState('');
+  const [testing, setTesting] = useState(false);
   const [test, setTest] = useState<RuleTestResult | null>(null);
   const [testErr, setTestErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -388,94 +404,24 @@ const RuleEditor: React.FC<{
   };
 
   const firstMatch = test?.matches?.[0];
+  const lay = LAYER[d.layer];
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ fontSize: 18 }}>{d.id ? 'Edit rule' : 'Create rule'}</h3>
-        <button type="button" className="btn bl" aria-label="Close editor" onClick={onClose}>
-          ✕
-        </button>
-      </div>
-      {rule && (
-        <span className="sm muted">
-          v{rule.version}
-          {rule.edited_by ? ` · edited by ${rule.edited_by}` : ''} · {fmtRelative(rule.updated_at)}
-        </span>
-      )}
-      <div className="f">
-        <label htmlFor="rn">Name</label>
-        <input id="rn" className="in" value={d.name} onChange={(e) => set('name', e.target.value)} />
-      </div>
-      <div className="f">
-        <label htmlFor="rdsc">Description</label>
-        <input id="rdsc" className="in" value={d.description} onChange={(e) => set('description', e.target.value)} />
-      </div>
-      <div className="f">
-        <label>Tier</label>
-        <Seg
-          label="Tier"
-          value={d.tier}
-          onChange={(v) => set('tier', v)}
-          options={[
-            { value: 'regex', label: 'regex' },
-            { value: 'embedding', label: 'embedding' },
-          ]}
-        />
-      </div>
-      {d.tier === 'regex' ? (
-        d.pattern_set ? (
-          <div className="f">
-            <label>Pattern set</label>
-            <div className="br sm">
-              Built-in <span className="mono">{d.pattern_set}</span> scanner.{' '}
-              <button type="button" className="link-btn" onClick={() => set('pattern_set', '')}>
-                Use a custom pattern instead
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="f">
-            <label htmlFor="pt">Pattern</label>
-            <input id="pt" className="in mono" value={d.pattern} onChange={(e) => set('pattern', e.target.value)} placeholder="(def |class |import )" />
-            <span className="sm muted">Python-style regex, evaluated on content and branches.</span>
-          </div>
-        )
-      ) : (
-        <>
-          <div className="f">
-            <label htmlFor="ref">Reference text</label>
-            <textarea id="ref" className="in" style={{ minHeight: 60 }} value={d.reference} onChange={(e) => set('reference', e.target.value)} placeholder="weekly sync notes" />
-          </div>
-          <div className="f">
-            <label htmlFor="th">Similarity threshold · {d.threshold.toFixed(2)}</label>
-            <input id="th" type="range" min={50} max={100} value={Math.round(d.threshold * 100)} onChange={(e) => set('threshold', Number(e.target.value) / 100)} />
-          </div>
-        </>
-      )}
-      <div className="f">
-        <label htmlFor="ac">Action</label>
-        <select id="ac" className="in" value={d.action} onChange={(e) => set('action', e.target.value)}>
-          {[...new Set([...ACTIONS, d.action])].map((a) => (
-            <option key={a}>{a}</option>
-          ))}
-        </select>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <div className="f">
-          <label htmlFor="sf">Scope filter</label>
-          <select id="sf" className="in" value={d.scope_filter} onChange={(e) => set('scope_filter', e.target.value)}>
-            <option value="">all scopes</option>
-            {SCOPE_ORDER.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-            {d.scope_filter && !SCOPE_ORDER.includes(d.scope_filter as never) && <option value={d.scope_filter}>{d.scope_filter}</option>}
-          </select>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div>
+          <h3 style={{ fontSize: 18 }}>{d.id ? `Edit rule · ${rule?.name ?? d.name}` : 'Create rule'}</h3>
+          {rule && (
+            <span className="sm muted">
+              v{rule.version}
+              {rule.edited_by ? ` · edited by ${rule.edited_by}` : ''} · {fmtRelative(rule.updated_at)}
+            </span>
+          )}
         </div>
-        <div className="f">
-          <label htmlFor="pr">Priority</label>
-          <input id="pr" className="in" type="number" value={d.priority} onChange={(e) => set('priority', Number(e.target.value))} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {lay && <span className={`lbl ${lay.cls}`}>{lay.label}</span>}
+          <button type="button" className="btn bl" aria-label="Close editor" onClick={onClose}>
+            ✕
+          </button>
         </div>
       </div>
       {readOnly && (
@@ -484,65 +430,298 @@ const RuleEditor: React.FC<{
           platform admins can change it.
         </div>
       )}
-      {!d.id && !isUser && (
+      <div className="rule-edit-grid">
         <div className="f">
-          <label htmlFor="ly">Layer</label>
-          <select id="ly" className="in" value={d.layer} onChange={(e) => set('layer', e.target.value)}>
-            <option value="organizational">Organization</option>
-            <option value="user">User</option>
-            <option value="system">System</option>
+          <label htmlFor="rn">Name</label>
+          <input id="rn" className="in" value={d.name} onChange={(e) => set('name', e.target.value)} />
+        </div>
+        <div className="f">
+          <label htmlFor="pr">Precedence</label>
+          <input id="pr" className="in" type="number" value={d.priority} onChange={(e) => set('priority', Number(e.target.value))} />
+        </div>
+        <div className="f">
+          <label htmlFor="tp">Type</label>
+          <select id="tp" className="in" value={d.tier} onChange={(e) => set('tier', e.target.value as Draft['tier'])}>
+            <option value="regex">regex</option>
+            <option value="embedding">embedding</option>
           </select>
         </div>
-      )}
-      <div style={{ border: '1px solid #d2d2d2', borderRadius: 12, padding: 14 }}>
-        <div className="f">
-          <label htmlFor="tt">Test against sample text</label>
-          <textarea id="tt" className="in mono" style={{ minHeight: 70 }} value={sample} onChange={(e) => setSample(e.target.value)} placeholder="Paste text an agent might write…" />
-        </div>
-        {test && (
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, background: test.matched ? '#fff0dd' : '#f3faf0', borderRadius: 8, padding: '8px 12px', fontSize: 14, flexWrap: 'wrap' }}>
-            <span className={`lbl ${test.matched ? 'org' : 'grn'}`}>{test.matched ? 'match' : 'no match'}</span>
-            {test.matched ? (
-              <span>
-                Would <b>{test.action}</b>
-                {firstMatch?.text !== undefined && (
-                  <>
-                    {' '}
-                    — matched <span className="mono">{firstMatch.text}</span> at col {firstMatch.col}
-                    {firstMatch.line && firstMatch.line > 1 ? `, line ${firstMatch.line}` : ''}
-                  </>
-                )}
-                {firstMatch?.name && <> — {firstMatch.detail}</>}
-                {test.score !== undefined && <> — cosine {test.score.toFixed(2)} ≥ {test.threshold}</>}
-              </span>
-            ) : (
-              <span>
-                Would allow{test.score !== undefined ? ` — cosine ${test.score.toFixed(2)} < ${test.threshold}` : ''}
-              </span>
-            )}
+        {d.tier === 'regex' ? (
+          d.pattern_set ? (
+            <div className="f">
+              <label>Pattern set</label>
+              <div className="sm" style={{ padding: '8px 0' }}>
+                Built-in <span className="mono">{d.pattern_set}</span> scanner.{' '}
+                <button type="button" className="link-btn" onClick={() => set('pattern_set', '')}>
+                  Use a custom pattern
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="f">
+              <label htmlFor="pt">Pattern</label>
+              <input id="pt" className="in mono" value={d.pattern} onChange={(e) => set('pattern', e.target.value)} placeholder="(def |class |import )" />
+            </div>
+          )
+        ) : (
+          <div className="f">
+            <label htmlFor="th">Similarity threshold</label>
+            <input
+              id="th"
+              className="in"
+              type="number"
+              min={0.5}
+              max={1}
+              step={0.01}
+              value={d.threshold}
+              onChange={(e) => set('threshold', Math.min(1, Math.max(0, Number(e.target.value))))}
+            />
           </div>
         )}
-        {testErr && <div className="sm err" style={{ marginTop: 8 }}>{testErr}</div>}
+        <div className="f">
+          <label htmlFor="ac">Action</label>
+          <select id="ac" className="in" value={d.action} onChange={(e) => set('action', e.target.value)}>
+            {[...new Set([...ACTIONS, d.action])].map((a) => (
+              <option key={a} value={a}>
+                {actionLabel(a)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="f">
+          <label htmlFor="sf">Applies to</label>
+          <select id="sf" className="in" value={d.scope_filter} onChange={(e) => set('scope_filter', e.target.value)}>
+            <option value="">{APPLIES['']}</option>
+            {SCOPE_ORDER.map((sc) => (
+              <option key={sc} value={sc}>
+                {APPLIES[sc] ?? sc}
+              </option>
+            ))}
+            {d.scope_filter && !SCOPE_ORDER.includes(d.scope_filter as never) && <option value={d.scope_filter}>{d.scope_filter}</option>}
+          </select>
+        </div>
+        {d.tier === 'embedding' && (
+          <div className="f" style={{ gridColumn: '1 / -1' }}>
+            <label htmlFor="ref">Reference text</label>
+            <textarea id="ref" className="in" style={{ minHeight: 56 }} value={d.reference} onChange={(e) => set('reference', e.target.value)} placeholder="weekly sync notes" />
+          </div>
+        )}
+        <div className="f" style={{ gridColumn: '1 / -1' }}>
+          <label htmlFor="rdsc">Description</label>
+          <input id="rdsc" className="in" value={d.description} onChange={(e) => set('description', e.target.value)} />
+        </div>
+        {!d.id && !isUser && (
+          <div className="f">
+            <label htmlFor="ly">Layer</label>
+            <select id="ly" className="in" value={d.layer} onChange={(e) => set('layer', e.target.value)}>
+              <option value="organizational">Organization</option>
+              <option value="user">User</option>
+              <option value="system">System</option>
+            </select>
+          </div>
+        )}
+        <div className="f" style={{ justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, minHeight: 38 }}>
+            <Switch on={d.enabled} label="Rule enabled" onChange={(v) => set('enabled', v)} />
+            <span>{d.enabled ? 'Enabled' : 'Disabled'}</span>
+          </div>
+        </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
-        <span>Enabled</span>
-        <Switch on={d.enabled} label="Rule enabled" onChange={(v) => set('enabled', v)} />
-      </div>
+      {testing && (
+        <div style={{ border: '1px solid #d2d2d2', borderRadius: 12, padding: 14 }}>
+          <div className="f">
+            <label htmlFor="tt">Sample text</label>
+            <textarea id="tt" className="in mono" style={{ minHeight: 70 }} value={sample} onChange={(e) => setSample(e.target.value)} placeholder="Paste text an agent might write…" autoFocus />
+          </div>
+          {test && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, background: test.matched ? '#fff0dd' : '#f3faf0', borderRadius: 8, padding: '8px 12px', fontSize: 14, flexWrap: 'wrap' }}>
+              <span className={`lbl ${test.matched ? 'org' : 'grn'}`}>{test.matched ? 'match' : 'no match'}</span>
+              {test.matched ? (
+                <span>
+                  Would <b>{actionLabel(test.action)}</b>
+                  {firstMatch?.text !== undefined && (
+                    <>
+                      {' '}
+                      — matched <span className="mono">{firstMatch.text}</span> at col {firstMatch.col}
+                      {firstMatch.line && firstMatch.line > 1 ? `, line ${firstMatch.line}` : ''}
+                    </>
+                  )}
+                  {firstMatch?.name && <> — {firstMatch.detail}</>}
+                  {test.score !== undefined && <> — cosine {test.score.toFixed(2)} ≥ {test.threshold}</>}
+                </span>
+              ) : (
+                <span>Would allow{test.score !== undefined ? ` — cosine ${test.score.toFixed(2)} < ${test.threshold}` : ''}</span>
+              )}
+            </div>
+          )}
+          {testErr && <div className="sm err" style={{ marginTop: 8 }}>{testErr}</div>}
+        </div>
+      )}
       {err && <div className="alert err-a">{err}</div>}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <button type="button" className="btn bp" disabled={readOnly || busy || !d.name.trim() || (d.tier === 'regex' && !d.pattern && !d.pattern_set)} onClick={save}>
-          {busy ? 'Saving…' : 'Save rule'}
+          {busy ? 'Saving…' : 'Save · audited'}
         </button>
-        <button type="button" className="btn bg" onClick={onClose}>
-          Cancel
+        <button type="button" className={`btn ${testing ? 'bg' : 'bs'}`} onClick={() => setTesting((t) => !t)}>
+          {testing ? 'Hide test' : 'Test on sample'}
         </button>
         {rule && rule.layer !== 'system' && !readOnly && (
-          <button type="button" className="btn bl danger" style={{ marginLeft: 'auto' }} onClick={() => onDelete(rule)}>
-            Delete rule
+          <button type="button" className="link-btn" style={{ color: '#c9190b', textDecoration: 'none', marginLeft: 6 }} onClick={() => onDelete(rule)}>
+            Delete
           </button>
         )}
       </div>
     </>
+  );
+};
+
+const POLICY_DEFAULTS: CurationPolicy = {
+  dreaming_schedule: 'Daily 06:00',
+  age_trigger_days: 90,
+  size_trigger_records: 5000,
+  auto_quarantine_score: 0.9,
+  compaction: 'suggest',
+  compaction_preview: true,
+  keep_provenance: 'always',
+  org_compaction_approval: true,
+};
+const COMPACTION: Record<CurationPolicy['compaction'], string> = { off: 'Off', suggest: 'Suggest', auto: 'Automatic' };
+const PROVENANCE: Record<CurationPolicy['keep_provenance'], string> = { always: 'Always', '90d': '90 days', never: 'Not kept' };
+
+/** Tenant-wide dreaming and compaction policy, summarised next to the curation rules. */
+const PolicyCard: React.FC = () => {
+  const toast = useToast();
+  const settings = useApi(() => api.settings(), []);
+  const [editing, setEditing] = useState(false);
+  const saved = settings.data?.values.curation;
+  const p: CurationPolicy = { ...POLICY_DEFAULTS, ...(saved ?? {}) };
+  const save = async (next: CurationPolicy) => {
+    try {
+      await api.saveSettings({ curation: next });
+      toast('Dreaming & compaction policy saved.');
+      setEditing(false);
+      settings.reload();
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+    }
+  };
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h3>Dreaming &amp; compaction policy</h3>
+        <button type="button" className="link-btn" style={{ textDecoration: 'none' }} onClick={() => setEditing(true)} disabled={!settings.data}>
+          Edit
+        </button>
+      </div>
+      {settings.loading && !settings.data ? (
+        <SkLines lines={6} />
+      ) : (
+        <dl className="policy-kv">
+          <dt>Dreaming schedule</dt>
+          <dd>{p.dreaming_schedule}</dd>
+          <dt>Age trigger</dt>
+          <dd>{p.age_trigger_days} days unused</dd>
+          <dt>Size trigger</dt>
+          <dd>&gt; {fmtInt(p.size_trigger_records)} records in a project</dd>
+          <dt>Auto-quarantine threshold</dt>
+          <dd>Policy score ≥ {p.auto_quarantine_score.toFixed(2)}</dd>
+          <dt>Compaction</dt>
+          <dd>
+            {COMPACTION[p.compaction]}
+            {p.compaction !== 'off' && p.compaction_preview ? ' · preview required' : ''}
+          </dd>
+          <dt>Keep provenance &amp; history</dt>
+          <dd>{PROVENANCE[p.keep_provenance]}</dd>
+          <dt>Approval for org compaction</dt>
+          <dd>{p.org_compaction_approval ? 'Required' : 'Not required'}</dd>
+        </dl>
+      )}
+      <p className="sm muted" style={{ marginTop: 14 }}>
+        For personal records you only see an aggregate
+        {p.personal_suggestions ? ` (${fmtInt(p.personal_suggestions.suggestions)} suggestions sent to ${fmtInt(p.personal_suggestions.owners)} owners)` : ''}; the decision stays with the owner or an
+        addressed incident process.
+      </p>
+      {settings.data && !saved && <p className="sm muted" style={{ marginTop: 6 }}>Showing defaults — no tenant policy saved yet.</p>}
+      {editing && <PolicyModal initial={p} onClose={() => setEditing(false)} onSave={save} />}
+    </section>
+  );
+};
+
+const PolicyModal: React.FC<{ initial: CurationPolicy; onClose: () => void; onSave: (p: CurationPolicy) => Promise<void> }> = ({ initial, onClose, onSave }) => {
+  const [p, setP] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const set = <K extends keyof CurationPolicy>(k: K, v: CurationPolicy[K]) => setP((x) => ({ ...x, [k]: v }));
+  return (
+    <Modal
+      title="Dreaming & compaction policy"
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="btn bg" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn bp"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await onSave(p);
+              setBusy(false);
+            }}
+          >
+            {busy ? 'Saving…' : 'Save · audited'}
+          </button>
+        </>
+      }
+    >
+      <div className="rule-edit-grid" style={{ marginTop: 12 }}>
+        <div className="f">
+          <label htmlFor="pds">Dreaming schedule</label>
+          <select id="pds" className="in" value={p.dreaming_schedule} onChange={(e) => set('dreaming_schedule', e.target.value)}>
+            {[...new Set(['Daily 02:00', 'Daily 06:00', 'Weekly · Sunday 03:00', 'Off', p.dreaming_schedule])].map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </select>
+        </div>
+        <div className="f">
+          <label htmlFor="pag">Age trigger · days unused</label>
+          <input id="pag" className="in" type="number" min={1} value={p.age_trigger_days} onChange={(e) => set('age_trigger_days', Number(e.target.value))} />
+        </div>
+        <div className="f">
+          <label htmlFor="psz">Size trigger · records in a project</label>
+          <input id="psz" className="in" type="number" min={100} step={100} value={p.size_trigger_records} onChange={(e) => set('size_trigger_records', Number(e.target.value))} />
+        </div>
+        <div className="f">
+          <label htmlFor="paq">Auto-quarantine · policy score ≥</label>
+          <input id="paq" className="in" type="number" min={0.5} max={1} step={0.01} value={p.auto_quarantine_score} onChange={(e) => set('auto_quarantine_score', Number(e.target.value))} />
+        </div>
+        <div className="f">
+          <label htmlFor="pcm">Compaction</label>
+          <select id="pcm" className="in" value={p.compaction} onChange={(e) => set('compaction', e.target.value as CurationPolicy['compaction'])}>
+            <option value="off">Off</option>
+            <option value="suggest">Suggest</option>
+            <option value="auto">Automatic</option>
+          </select>
+        </div>
+        <div className="f">
+          <label htmlFor="ppv">Keep provenance &amp; history</label>
+          <select id="ppv" className="in" value={p.keep_provenance} onChange={(e) => set('keep_provenance', e.target.value as CurationPolicy['keep_provenance'])}>
+            <option value="always">Always</option>
+            <option value="90d">90 days</option>
+            <option value="never">Not kept</option>
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14 }}>
+          <Switch on={p.compaction_preview} label="Preview required" onChange={(v) => set('compaction_preview', v)} />
+          Preview required before compaction
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14 }}>
+          <Switch on={p.org_compaction_approval} label="Approval for org compaction" onChange={(v) => set('org_compaction_approval', v)} />
+          Approval for org compaction
+        </div>
+      </div>
+    </Modal>
   );
 };
 

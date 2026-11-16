@@ -16,11 +16,12 @@ const STATUS: Record<string, { cls: string; label: string }> = {
 };
 
 /** What the dashboard did in the background: dreams, rebuilds, checks, reprocesses. */
-const Operations: React.FC = () => {
+const Operations: React.FC<{ days?: string; initialStatus?: string; description?: React.ReactNode }> = ({ days: fixedDays, initialStatus, description }) => {
   const toast = useToast();
   const { role } = useApp();
-  const [days, setDays] = useState('7');
-  const [status, setStatus] = useState('');
+  const [ownDays, setDays] = useState('7');
+  const days = fixedDays ?? ownDays;
+  const [status, setStatus] = useState(initialStatus ?? '');
   const [kind, setKind] = useState('');
   const [corr, setCorr] = useState<string | null>(null);
   const { data, error, loading, reload } = useApi<OperationsResponse>(
@@ -44,12 +45,12 @@ const Operations: React.FC = () => {
       <PageHeader
         title={role === 'user' ? 'Background jobs' : 'Operations'}
         description={
-          role === 'user'
+          description ?? (role === 'user'
             ? 'Work the dashboard did for you in the background: dreams, knowledge page rebuilds, retrieval check runs and document reprocessing.'
-            : 'Every background job in the tenant — dreams, knowledge rebuilds, check runs, document reprocessing and scheduler ticks — with status, duration, attempts and a correlation ID. Metadata only.'
+            : 'Every background job in the tenant — dreams, knowledge rebuilds, check runs, document reprocessing and scheduler ticks — with status, duration, attempts and a correlation ID. Metadata only.')
         }
         actions={
-          <Seg
+          fixedDays ? undefined : <Seg
             label="Period"
             value={days}
             onChange={setDays}

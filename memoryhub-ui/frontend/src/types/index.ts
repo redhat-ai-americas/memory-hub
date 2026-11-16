@@ -1008,11 +1008,41 @@ export interface TenantSettingsValues {
     read_detail: 'full' | 'summary' | 'sample';
     full_retention_days: number;
     mcp_profile: 'compact' | 'full';
+    /** Optional, newer servers: per-record-type retention, global ceilings and storage stats. */
+    retention?: AuditRetention;
   };
   organization: { name: string; contact_email: string };
   signup: { mode: SignupMode; allowed_domains: string[]; require_approval: boolean };
   privacy: SetupPayload['privacy'];
   security: SetupPayload['security'];
+  /** Optional, newer servers: tenant dreaming & compaction policy. */
+  curation?: CurationPolicy;
+}
+
+export interface AuditRetention {
+  admin_full_days?: number;
+  admin_summary_days?: number;
+  summary_days?: number;
+  denied_full_days?: number;
+  denied_summary_days?: number;
+  conversation_days?: number;
+  purge_schedule?: string;
+  reason?: string;
+  /** [full detail, summary] ceilings in days, set in Global policies. */
+  ceilings?: { admin: [number, number]; data: [number, number]; denied: [number, number]; conversations: [number, number] };
+  stats?: Record<string, { stored?: number; oldest?: string }>;
+}
+
+export interface CurationPolicy {
+  dreaming_schedule: string;
+  age_trigger_days: number;
+  size_trigger_records: number;
+  auto_quarantine_score: number;
+  compaction: 'off' | 'suggest' | 'auto';
+  compaction_preview: boolean;
+  keep_provenance: 'always' | '90d' | 'never';
+  org_compaction_approval: boolean;
+  personal_suggestions?: { suggestions: number; owners: number };
 }
 
 export interface SettingsResponse {
@@ -1270,6 +1300,14 @@ export interface SearchHealth {
   cut?: Record<'filters' | 'rbac' | 'weight' | 'limit' | 'budget', number>;
   empty_share?: number;
   by_day: { date: string; runs: number }[];
+  /** Optional, newer servers: tenant-wide retrieval health extras. */
+  success_rate?: number;
+  zero_result_share?: number;
+  stale_filtered?: number;
+  stages_p95?: { name: string; p95: number }[];
+  share?: { vector?: number; lexical?: number; rerank_changed_top1?: number; fallback_no_rerank?: number };
+  cut_extra?: { superseded?: number; index_lag?: number };
+  index_backlog?: number;
 }
 
 /* ---------------- Context packs ---------------- */

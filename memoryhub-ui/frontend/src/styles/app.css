@@ -734,3 +734,44 @@ button.tag { cursor: pointer; border: 1px solid transparent; font: inherit; font
 .detail-grid > .card:only-child { flex: 1 1 100%; }
 .settings-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; align-items: start; }
 .proj-tbl td { vertical-align: middle; }
+
+/* ---------- Retrieval health ---------- */
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.stage-bars { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.stage-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.job-filter .link-btn { text-decoration: none; color: var(--mh-ink-2, #6a6e73); }
+.job-filter .link-btn.on { color: var(--mh-primary); font-weight: 600; }
+
+/* ---------- Curation: policy + inline rule editor ---------- */
+.policy-kv { display: grid; grid-template-columns: 130px 1fr; gap: 12px 16px; margin: 14px 0 0; font-size: 14px; }
+.policy-kv dt { color: #4d5258; }
+.policy-kv dd { margin: 0; }
+.rule-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+@media (max-width: 760px) { .rule-edit-grid { grid-template-columns: 1fr; } .policy-kv { grid-template-columns: 1fr; } }
+
+/* ---------- Admin audit & forensics ---------- */
+.cat-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: -8px 0 0; }
+.cat-chip { border: 0; background: #f0f0f0; color: #383838; border-radius: 6px; padding: 3px 8px; font-size: 12.5px; cursor: pointer; font-family: inherit; }
+.cat-chip:hover { background: #e4e4e4; }
+.cat-chip.on { background: #0066cc; color: #fff; }
+.detail-kv { display: grid; grid-template-columns: 120px 1fr; gap: 10px 14px; margin: 14px 0 0; font-size: 14px; }
+.detail-kv dt { color: #4d5258; }
+.detail-kv dd { margin: 0; overflow-wrap: anywhere; }
+.detail-kv.nums { grid-template-columns: 1fr auto; }
+.detail-kv.nums dd { text-align: right; }
+.fx-form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 12px; }
+@media (max-width: 860px) { .fx-form { grid-template-columns: 1fr; } }
+.reason-bars { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.attn { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; }
+.attn li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--mh-border-soft); font-size: 14px; }
+.attn li:last-child { border-bottom: 0; }
+.attn .legend-dot { margin-top: 6px; flex: none; }
+.role-list { list-style: none; padding: 0; margin: 12px 0 0; }
+.role-list li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--mh-border-soft); font-size: 13.5px; }
+.role-list li:last-child { border-bottom: 0; }
+.role-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 20px; border-radius: 999px; border: 1px solid #d2d2d2; color: #6a6e73; background: #f5f5f5; }
+.role-mark.on { border-color: #afdc8f; background: #f3faf0; color: #3e8635; }
+.locked-row td { color: #4d5258; }
+.audit-tbl td { vertical-align: top; }
+.denied-tbl .lbl { white-space: normal; line-height: 16px; padding: 3px 10px; }
+.audit-tbl .hidden-box { padding: 4px 8px; font-size: 12px; }
