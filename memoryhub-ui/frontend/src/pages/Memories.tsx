@@ -34,7 +34,7 @@ const readCols = (admin = false): Column[] => {
 
 const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
-  const { standby, refreshCounts, role, me, superuser } = useApp();
+  const { standby, refreshCounts, role, me, superuser, tenantContext } = useApp();
   const isAdmin = role === 'admin';
   const grant = me?.access?.break_glass ?? null;
   const p = route.params;
@@ -938,6 +938,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
           </section>
         </div>
         )}
+        {tenantContext && <TenantContextCards tenant={tenantContext.tenant} grant={grant} />}
       </div>
 
       {docOpen && <UploadDocumentModal onClose={() => setDocOpen(false)} />}
@@ -1179,3 +1180,47 @@ const ScopeBar: React.FC<{ project: string; onProject: (v: string) => void; tena
     </div>
   );
 };
+
+
+/** Super Admin in a tenant console: what the context changes, and how to reach a hidden record. */
+const TenantContextCards: React.FC<{ tenant: string; grant: { id: string; incident_ref: string; expires_at: string } | null }> = ({ tenant, grant }) => (
+  <div className="acc-cards two">
+    <section className="card">
+      <h3>What changes in tenant context</h3>
+      <ul className="role-list">
+        {(
+          [
+            [true, 'Tenant administration: people, projects, clients, settings, review'],
+            [true, 'Personal records isolated on a policy signal, by metadata'],
+            [false, <>Reading personal content — needs an <span className="lbl inspect">inspect</span> grant</>],
+            [false, <>Changing a personal record — needs a <span className="lbl remediate">remediate</span> grant</>],
+            [false, 'Acting as a Platform Admin or any user'],
+          ] as const
+        ).map(([ok, l], i) => (
+          <li key={i}>
+            <span className={`role-mark ${ok ? 'on' : ''}`}>{ok ? <Icon.Check size={12} /> : <Icon.X size={12} />}</span>
+            <span>{l}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+    <section className="card">
+      <h3>Need this record?</h3>
+      <p className="sm" style={{ margin: '10px 0 14px', lineHeight: 1.55 }}>
+        {grant
+          ? `Your grant ${grant.id} (${grant.incident_ref}, until ${new Date(grant.expires_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}) covers its named records. Open them under the grant, or request a remediate grant to restore or delete one.`
+          : `Personal records in ${tenant} stay closed in tenant context. Request an inspect grant for an open incident to read named records, or a remediate grant to restore or delete one.`}
+      </p>
+      <div className="rq-actions">
+        {grant ? (
+          <a className="btn bs sm-btn" href={buildHash(`/grant/${grant.id}`)}>
+            Open under {grant.id.startsWith('grt_') ? grant.id : 'grant'}
+          </a>
+        ) : null}
+        <a className="link-btn" href={buildHash('/incident-request')}>
+          Request {grant ? 'remediate' : 'inspect'} grant…
+        </a>
+      </div>
+    </section>
+  </div>
+);

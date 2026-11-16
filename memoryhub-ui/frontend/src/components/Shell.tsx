@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { api, AUTHORIZATION_CHANGED_EVENT } from '@/api/client';
 import type { BreakGlassGrant, Me, NavFeatures, NotificationsResponse, Role, SwitchTargets } from '@/types';
 import { buildHash, navigate } from '@/hooks/useHashRoute';
+import { platform } from '@/api/platform';
 import { Dropdown, Icon } from './ui';
 
 const REPO_URL = 'https://github.com/redhat-ai-americas/memory-hub';
@@ -25,7 +26,28 @@ export interface AppState {
   /** Which content-backed tabs have something in them (null until loaded). */
   features: NavFeatures | null;
   refreshCounts: () => void;
+  /** Super Admin: the tenant whose Tenant Console is open (null = Platform Operations). */
+  tenantContext: TenantContext | null;
+  /** Super Admin outside a tenant context: the Platform Operations menu. */
+  platformMode: boolean;
+  enterTenant: (tenant: string, reason: string) => void;
+  exitTenant: () => void;
 }
+
+export interface TenantContext {
+  tenant: string;
+  reason: string;
+  since: string;
+}
+const CTX_KEY = 'memoryhub.tenantContext';
+const readCtx = (): TenantContext | null => {
+  try {
+    const raw = window.sessionStorage.getItem(CTX_KEY);
+    return raw ? (JSON.parse(raw) as TenantContext) : null;
+  } catch {
+    return null;
+  }
+};
 
 const AppContext = createContext<AppState>({
   me: null,
@@ -37,6 +59,10 @@ const AppContext = createContext<AppState>({
   reviewCount: 0,
   features: null,
   refreshCounts: () => undefined,
+  tenantContext: null,
+  platformMode: false,
+  enterTenant: () => undefined,
+  exitTenant: () => undefined,
 });
 export const useApp = () => useContext(AppContext);
 
@@ -132,6 +158,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [memoryCount]);
 
   const refreshCounts = useCallback(() => setToken((t) => t + 1), []);
+  const [tenantContext, setTenantContext] = useState<TenantContext | null>(readCtx);
+  const enterTenant = useCallback((tenant: string, reason: string) => {
+    const ctx = { tenant, reason, since: new Date().toISOString() };
+    try {
+      window.sessionStorage.setItem(CTX_KEY, JSON.stringify(ctx));
+    } catch {
+      /* storage unavailable */
+    }
+    setTenantContext(ctx);
+    navigate('/overview');
+  }, []);
+  const exitTenant = useCallback(() => {
+    try {
+      window.sessionStorage.removeItem(CTX_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+    setTenantContext(null);
+    navigate('/platform');
+  }, []);
+  const isSuper = me?.role === 'superuser';
   return (
     <AppContext.Provider
       value={{
@@ -144,6 +191,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reviewCount,
         features,
         refreshCounts,
+        tenantContext: isSuper ? tenantContext : null,
+        platformMode: isSuper && !tenantContext,
+        enterTenant,
+        exitTenant,
       }}
     >
       {me ? <React.Fragment key={authorizationKey}>{children}</React.Fragment> : (
@@ -327,6 +378,30 @@ export const ADMIN_NAV: { group?: string; items: NavItem[] }[] = [
   { group: 'Tenant', items: [{ path: '/settings', label: 'Tenant settings' }] },
 ];
 
+/** The Super Admin's Platform Operations menu (outside a tenant context). */
+export const SUPER_NAV: { group?: string; items: NavItem[] }[] = [
+  { items: [{ path: '/platform', label: 'Global overview' }] },
+  {
+    group: 'Platform',
+    items: [
+      { path: '/tenants', label: 'Tenants' },
+      { path: '/admins', label: 'Administrators' },
+      { path: '/platform-health', label: 'Platform health & deployments' },
+    ],
+  },
+  {
+    group: 'Control',
+    items: [
+      { path: '/policies', label: 'Global policies & models' },
+      { path: '/security', label: 'Security center' },
+      { path: '/global-audit', label: 'Global audit' },
+    ],
+  },
+  { group: 'Privileged access', items: [{ path: '/incident', label: 'Incident access' }] },
+  { group: 'Optional module', items: [{ path: '/runbooks', label: 'Operations knowledge' }] },
+];
+const SUPER_LINK_ONLY = ['/incident-request', '/grant'];
+
 /** Admin screens without their own menu item: where they live now, or reachable by link only. */
 export const ADMIN_MOVED: Record<string, { path: string; view: string }> = {
   '/operations': { path: '/quality', view: 'jobs' },
@@ -336,8 +411,10 @@ const ADMIN_LINK_ONLY = ['/search', '/graph'];
 /** Where a moved screen lives for this role, if it moved. */
 export const movedFor = (role: Role, path: string) => (role === 'user' ? USER_MOVED[path] : role === 'admin' ? ADMIN_MOVED[path] : undefined);
 
-export const canSee = (path: string, role: Role, superuser = false) =>
-  role === 'admin'
+export const canSee = (path: string, role: Role, superuser = false, platformMode = false) =>
+  platformMode
+    ? SUPER_NAV.some((s) => s.items.some((i) => i.path === path)) || SUPER_LINK_ONLY.includes(path)
+    : role === 'admin'
     ? ADMIN_NAV.some((s) => s.items.some((i) => i.path === path && (!i.superuser || superuser))) || path in ADMIN_MOVED || ADMIN_LINK_ONLY.includes(path)
     : role === 'user'
     ? USER_NAV.some((s) => s.items.some((i) => i.path === path)) || path in USER_MOVED
@@ -352,11 +429,13 @@ const hasContent = (item: NavItem, role: Role, features: NavFeatures | null) => 
 export const isLabsPath = (path: string, role?: Role) =>
   (role === 'user' ? USER_NAV : role === 'admin' ? ADMIN_NAV : NAV).some((s) => s.items.some((i) => i.path === path && i.labs));
 
-export const navFor = (role: Role, features: NavFeatures | null = null, labs = false, superuser = false) =>
-  role === 'user'
+export const navFor = (role: Role, features: NavFeatures | null = null, labs = false, superuser = false, platformMode = false) =>
+  platformMode
+    ? SUPER_NAV
+    : role === 'user'
     ? USER_NAV.map((s) => ({ group: s.group, items: s.items.filter((i) => labs || !i.labs) })).filter((s) => s.items.length > 0)
     : role === 'admin'
-      ? ADMIN_NAV.map((s) => ({ group: s.group, items: s.items.filter((i) => !i.superuser || superuser) })).filter((s) => s.items.length > 0)
+      ? ADMIN_NAV.map((s) => ({ group: s.group, items: s.items.filter((i) => !i.superuser) })).filter((s) => s.items.length > 0)
       : NAV.map((s) => ({
     group: s.groupFor?.[role] ?? s.group,
     items: s.items
@@ -367,7 +446,7 @@ export const navFor = (role: Role, features: NavFeatures | null = null, labs = f
       .map((i) => ({ ...i, label: i.labelFor?.[role] ?? i.label })),
   })).filter((s) => s.items.length > 0);
 
-export const ROLE_LABEL: Record<Role | 'superuser', string> = { admin: 'Platform admin', superuser: 'Super-user', user: 'User', operator: 'Open mode' };
+export const ROLE_LABEL: Record<Role | 'superuser', string> = { admin: 'Platform admin', superuser: 'Super Admin', user: 'User', operator: 'Open mode' };
 
 const NAV_PREF = 'memoryhub.navOpen';
 const readNavPref = () => {
@@ -379,7 +458,7 @@ const readNavPref = () => {
 };
 
 export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> = ({ activePath, children }) => {
-  const { me, role, superuser, tenant, reviewCount, features } = useApp();
+  const { me, role, superuser, tenant, reviewCount, features, platformMode, tenantContext, exitTenant } = useApp();
   const narrow = () => window.innerWidth < 960;
   const [open, setOpen] = useState<boolean>(() => (narrow() ? false : readNavPref()));
 
@@ -482,7 +561,7 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
         <button type="button" className="icb" aria-label={open ? 'Hide navigation' : 'Show navigation'} aria-expanded={open} onClick={toggle}>
           <Icon.Menu />
         </button>
-        <a className="brand" href={buildHash('/overview')}>
+        <a className="brand" href={buildHash(platformMode ? '/platform' : '/overview')}>
           <span className="mark">
             <Icon.Mark />
           </span>
@@ -490,24 +569,27 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
             MemoryHub<small>for OpenShift AI</small>
           </span>
         </a>
-        {role !== 'operator' && (
-          <span
-            className={`role-pill ${superuser ? 'superuser' : role}`}
-            title={
-              superuser
-                ? 'Platform admin who can open user memories for an incident, with an incident reference'
-                : role === 'admin'
-                  ? 'You moderate every scope except user; personal memories show metadata only'
-                  : 'You see memories you are allowed to read'
-            }
-          >
-            {ROLE_LABEL[superuser ? 'superuser' : role]}
-          </span>
-        )}
-        {tenant && (
-          <span className="ctx" title="Each dashboard deployment serves one tenant (MEMORYHUB_UI_TENANT_ID)">
-            Tenant: {tenant}
-          </span>
+        {superuser ? (
+          <>
+            <span className="mast-section">{platformMode ? 'Platform operations' : 'Tenant console'}</span>
+            <ScopeSwitcher />
+          </>
+        ) : (
+          <>
+            {role !== 'operator' && (
+              <span
+                className={`role-pill ${role}`}
+                title={role === 'admin' ? 'You moderate every scope except user; personal memories show metadata only' : 'You see memories you are allowed to read'}
+              >
+                {ROLE_LABEL[role]}
+              </span>
+            )}
+            {tenant && (
+              <span className="ctx" title="Each dashboard deployment serves one tenant (MEMORYHUB_UI_TENANT_ID)">
+                Tenant: {tenant}
+              </span>
+            )}
+          </>
         )}
         <div className="mast-r">
           {role !== 'admin' && (
@@ -550,6 +632,7 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
               >
                 <span className="av">{me?.initials ?? '··'}</span>
                 {me?.name ?? ''}
+                {superuser && <span className="sa-badge">Super Admin</span>}
                 {me?.test_mode && <Icon.Chevron />}
               </button>
             )}
@@ -618,6 +701,16 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
         </div>
       </header>
       {me?.access?.break_glass && <IncidentBanner grant={me.access.break_glass} />}
+      {tenantContext && (
+        <div className="ctx-banner" role="status">
+          <Icon.Shield size={16} />
+          <b>Super Admin in tenant context: {tenantContext.tenant}</b>
+          <span>You act as a tenant administrator here, not as any user. Personal content stays closed; every action is logged with your platform identity.</span>
+          <button type="button" className="btn ctx-exit" onClick={exitTenant}>
+            Exit to All tenants
+          </button>
+        </div>
+      )}
       {me?.real_username && (
         <div className="viewing-as" role="status">
           <b>Test mode:</b> viewing as {me.username} · {ROLE_LABEL[superuser ? 'superuser' : role]} (signed in as {me.real_username}).
@@ -628,7 +721,7 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
       )}
       <div className={`shell ${open ? 'nav-open' : 'nav-closed'}`}>
         <nav className="nav" aria-label="Primary">
-          {navFor(role, features, !!me?.labs, superuser).map((section, i) => (
+          {navFor(role, features, !!me?.labs, superuser, platformMode).map((section, i) => (
             <React.Fragment key={section.group ?? i}>
               {section.group && <div className="ng">{section.group}</div>}
               {section.items.map((item) => (
@@ -639,10 +732,63 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
               ))}
             </React.Fragment>
           ))}
+          {tenantContext && (
+            <div className="eff-perm">
+              <b>Effective permissions</b>
+              <div>
+                Super Admin in tenant context tenant.* for {tenantContext.tenant} · same read rules as a PA: no personal content, project content only by membership
+              </div>
+              <div className="muted">Resolved by the API from /api/me</div>
+            </div>
+          )}
         </nav>
         <main className="main">{children}</main>
       </div>
     </div>
+  );
+};
+
+/** Super Admin: All tenants, or one tenant's console (asks for a reason first, on Tenants). */
+const ScopeSwitcher: React.FC = () => {
+  const { platformMode, tenantContext, exitTenant, tenant } = useApp();
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!platformMode) return;
+    platform
+      .tenants()
+      .then((r) => setCount(r.items.length))
+      .catch(() => undefined);
+  }, [platformMode]);
+  return (
+    <Dropdown
+      toggle={(p) => (
+        <button type="button" className="scope-pill" {...p}>
+          {platformMode ? `Scope: All tenants${count !== null ? ` (${count})` : ''}` : `Tenant: ${tenantContext?.tenant ?? tenant} · admin context`}
+          <Icon.Chevron />
+        </button>
+      )}
+    >
+      {(close) => (
+        <>
+          {platformMode ? (
+            <div className="mh muted sm">Open a tenant’s console from Tenants — it asks for a reason and is logged.</div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                close();
+                exitTenant();
+              }}
+            >
+              Exit to All tenants
+            </button>
+          )}
+          <a href={buildHash('/tenants')} onClick={() => close()}>
+            Tenants…
+          </a>
+        </>
+      )}
+    </Dropdown>
   );
 };
 
@@ -681,7 +827,7 @@ export const PageHeader: React.FC<{
   return (
   <div className={`ph ${tabs ? 'has-tabs' : ''}`}>
     <div className="crumbs">
-      <a href={buildHash('/overview')}>MemoryHub</a>
+      <CrumbRoot />
       {(crumbs ?? [{ label: title }]).map((c, i) => (
         <React.Fragment key={i}>
           <span>/</span>
@@ -699,6 +845,22 @@ export const PageHeader: React.FC<{
     </div>
     {tabs}
   </div>
+  );
+};
+
+const CrumbRoot: React.FC = () => {
+  const { superuser, tenantContext } = useApp();
+  if (!superuser) return <a href={buildHash('/overview')}>MemoryHub</a>;
+  return (
+    <>
+      <a href={buildHash('/platform')}>Platform Operations</a>
+      {tenantContext && (
+        <>
+          <span>/</span>
+          <a href={buildHash('/overview')}>{tenantContext.tenant}</a>
+        </>
+      )}
+    </>
   );
 };
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api, AUTH_REQUIRED_EVENT } from '@/api/client';
-import { AppProvider, canSee, isLabsPath, movedFor, NAV, Shell, useApp } from '@/components/Shell';
+import { AppProvider, canSee, isLabsPath, movedFor, NAV, Shell, SUPER_NAV, useApp } from '@/components/Shell';
 import { Empty } from '@/components/ui';
 import { ToastProvider } from '@/components/ui';
 import { navigate, useHashRoute, type HashRoute } from '@/hooks/useHashRoute';
@@ -36,6 +36,15 @@ import MyProjects from '@/pages/MyProjects';
 import MyRequests from '@/pages/MyRequests';
 import RetrievalOps from '@/pages/RetrievalOps';
 import AdminProjects, { ProjectSettings, TeamSettings } from '@/pages/AdminProjects';
+import GlobalOverview from '@/pages/platform/GlobalOverview';
+import Tenants from '@/pages/platform/Tenants';
+import Administrators from '@/pages/platform/Administrators';
+import PlatformHealth from '@/pages/platform/PlatformHealth';
+import Policies from '@/pages/platform/Policies';
+import SecurityCenter from '@/pages/platform/SecurityCenter';
+import GlobalAudit from '@/pages/platform/GlobalAudit';
+import Runbooks from '@/pages/platform/Runbooks';
+import { GrantDetail, IncidentRequest } from '@/pages/Incident';
 
 /** Users get their own version of a few screens; everyone else the shared one. */
 const ByRole: React.FC<{ user: React.ReactNode; other: React.ReactNode }> = ({ user, other }) => {
@@ -86,7 +95,17 @@ const SCREENS: Record<string, Screen> = {
   '/clients': { nav: '/clients', title: 'OAuth clients & keys', render: (r) => <Clients route={r} /> },
   '/connect': { nav: '/connect', title: 'Connect an agent', render: () => <Connect /> },
   '/verify': { nav: '/verify', title: 'Connection check', render: () => <Verify /> },
-  '/incident': { nav: '/incident', title: 'Incident access', render: () => <Incident /> },
+  '/incident': { nav: '/incident', title: 'Incident access', render: (r) => <Incident route={r} /> },
+  '/incident-request': { nav: '/incident-request', title: 'Request incident access', render: () => <IncidentRequest /> },
+  '/grant': { nav: '/grant', title: 'Grant', render: (r) => <GrantDetail route={r} /> },
+  '/platform': { nav: '/platform', title: 'Global overview', render: () => <GlobalOverview /> },
+  '/tenants': { nav: '/tenants', title: 'Tenants', render: (r) => <Tenants route={r} /> },
+  '/admins': { nav: '/admins', title: 'Administrators', render: (r) => <Administrators route={r} /> },
+  '/platform-health': { nav: '/platform-health', title: 'Platform health & deployments', render: () => <PlatformHealth /> },
+  '/policies': { nav: '/policies', title: 'Global policies & models', render: (r) => <Policies route={r} /> },
+  '/security': { nav: '/security', title: 'Security center', render: (r) => <SecurityCenter route={r} /> },
+  '/global-audit': { nav: '/global-audit', title: 'Global audit', render: (r) => <GlobalAudit route={r} /> },
+  '/runbooks': { nav: '/runbooks', title: 'Operations knowledge', render: (r) => <Runbooks route={r} /> },
   '/settings': { nav: '/settings', title: 'Settings', render: () => <Settings /> },
 };
 
@@ -105,7 +124,42 @@ const LEGACY: Record<string, { path: string; params?: Record<string, string> }> 
 const AUTH_PATHS = ['/login', '/register', '/setup'];
 
 /** Screens a role may not open show a short explanation instead. */
+const PLATFORM_PATHS = [...SUPER_NAV.flatMap((s) => s.items.map((i) => i.path)).filter((p) => p !== '/incident'), '/incident-request', '/grant'];
+
 const Guarded: React.FC<{ nav: string; children: React.ReactNode }> = ({ nav, children }) => {
+  const { role, superuser, platformMode, tenantContext, exitTenant } = useApp();
+  const toPlatform = platformMode && !canSee(nav, role, superuser, true);
+  useEffect(() => {
+    if (toPlatform) navigate('/platform', undefined, { replace: true });
+  }, [toPlatform]);
+  if (toPlatform) return null;
+  // Grants are personal to the Super Admin: reachable from a tenant console too.
+  if (PLATFORM_PATHS.includes(nav) && !platformMode && !(tenantContext && ['/grant', '/incident-request'].includes(nav))) {
+    return (
+      <div className="body">
+        <div className="card">
+          <Empty
+            title={tenantContext ? 'You are in a tenant context' : 'Only Super Admins can open Platform Operations'}
+            action={
+              tenantContext && (
+                <button type="button" className="btn bp" onClick={exitTenant}>
+                  Exit to All tenants
+                </button>
+              )
+            }
+          >
+            {tenantContext
+              ? `Platform Operations opens outside a tenant console. Exit ${tenantContext.tenant} first.`
+              : 'Super Admins are set by the deployment (MEMORYHUB_UI_SUPERUSER_GROUP), never in the dashboard.'}
+          </Empty>
+        </div>
+      </div>
+    );
+  }
+  return <GuardedTenant nav={nav}>{children}</GuardedTenant>;
+};
+
+const GuardedTenant: React.FC<{ nav: string; children: React.ReactNode }> = ({ nav, children }) => {
   const { me, role, superuser } = useApp();
   const route = useHashRoute();
   const moved = movedFor(role, nav);
@@ -150,6 +204,7 @@ const Guarded: React.FC<{ nav: string; children: React.ReactNode }> = ({ nav, ch
 };
 
 const screenKey = (path: string) => {
+  if (path.startsWith('/grant/')) return '/grant';
   if (path.startsWith('/memory/')) return '/memory';
   if (path.startsWith('/project/')) return '/project';
   if (path.startsWith('/team/')) return '/team';

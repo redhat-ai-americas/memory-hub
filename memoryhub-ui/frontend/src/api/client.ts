@@ -107,6 +107,16 @@ function authorizationChanged<T>(result: T): T {
   return result;
 }
 
+/** Super Admin in a tenant console: the server logs every call with the context it was made in. */
+const tenantContextHeader = (): Record<string, string> => {
+  try {
+    const raw = window.sessionStorage.getItem('memoryhub.tenantContext');
+    return raw ? { 'X-MemoryHub-Tenant-Context': (JSON.parse(raw) as { tenant: string }).tenant } : {};
+  } catch {
+    return {};
+  }
+};
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let response: Response;
   try {
@@ -119,6 +129,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       headers: {
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(method === 'GET' ? { 'X-MemoryHub-Request': 'background' } : {}),
+        ...tenantContextHeader(),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
@@ -142,6 +153,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (await response.json()) as T;
 }
 
+/** For api/platform.ts: the same request path (and the same demo wiring). */
+export const rawRequest = <T,>(method: string, path: string, body?: unknown) => request<T>(method, path, body);
 const get = <T,>(path: string) => request<T>('GET', path);
 const post = <T,>(path: string, body: unknown = {}) => request<T>('POST', path, body);
 const patch = <T,>(path: string, body: unknown) => request<T>('PATCH', path, body);
