@@ -274,18 +274,19 @@ If your agent framework pre-loads memory context at startup, use it as
 your working set. Otherwise, follow the manual flow below.
 
 1. Authenticate with `register_session(api_key=<your_key>)`.
-2. Immediately call `search_memory(query="", mode="index", max_results=50)`
+2. Immediately call
+   `memory(action="search", query="", options={"mode": "index", "max_results": 50})`
    to load the full working set as lightweight stubs. The empty query plus
    `mode="index"` returns headers for everything visible to your user.
 3. Hold the returned working set in context for the entire session.
 
 ## During the session
 
-- When a stub looks load-bearing for the current task, call `read_memory`
-  to expand it into full content.
+- When a stub looks load-bearing for the current task, call
+  `memory(action="read", memory_id="...")` to expand it into full content.
 - New writes (your own or another agent's) are NOT pushed automatically.
-  If a decision depends on the latest state, call `search_memory` again
-  rather than trusting the working set you loaded at session start.
+  If a decision depends on the latest state, call `memory(action="search")`
+  again rather than trusting the working set you loaded at session start.
 """,
     "lazy": """\
 ## At session start
@@ -296,9 +297,9 @@ your working set. Otherwise, follow the manual flow below.
 Authenticate with `register_session(api_key=<your_key>)`, then wait until
 the user states a task or question with enough detail to form a meaningful
 search query. Derive a 1-2 sentence summary and call
-`search_memory(query=<summary>)`. If the opening turn is low-signal
-("hi", "can you help me?"), do not search yet -- wait for a follow-up
-that reveals the topic.
+`memory(action="search", query=<summary>)`. If the opening turn is
+low-signal ("hi", "can you help me?"), do not search yet -- wait for a
+follow-up that reveals the topic.
 
 ## During the session
 
@@ -314,9 +315,9 @@ your working set. Otherwise, follow the manual flow below.
 Authenticate with `register_session(api_key=<your_key>)`, then wait until
 the user states a task or question with enough detail to form a meaningful
 search query. Derive a 1-2 sentence summary and call
-`search_memory(query=<summary>)`. If the opening turn is low-signal
-("hi", "can you help me?"), do not search yet -- wait for a follow-up
-that reveals the topic.
+`memory(action="search", query=<summary>)`. If the opening turn is
+low-signal ("hi", "can you help me?"), do not search yet -- wait for a
+follow-up that reveals the topic.
 
 ## During the session -- watch for pivots
 
@@ -330,10 +331,10 @@ A pivot is any of:
 3. **Explicit switch** -- the user says "let's switch to...", "now let's
    talk about...", or similar phrasing.
 
-When you detect a pivot, call `search_memory` with a query for the new
-topic. **ADD the results to your working set; do not replace it.** The
-prior topic may come back later in the same session, and the agent should
-not have to re-search for memories it already saw.
+When you detect a pivot, call `memory(action="search", ...)` with a query
+for the new topic. **ADD the results to your working set; do not replace it.**
+The prior topic may come back later in the same session, and the agent
+should not have to re-search for memories it already saw.
 """,
     "jit": """\
 ## At session start
@@ -342,12 +343,12 @@ If your agent framework pre-loads memory context at startup, use it as
 initial context. Otherwise, follow the manual flow below.
 
 Authenticate with `register_session(api_key=<your_key>)`. Do NOT call
-`search_memory` -- there is no working set in this pattern.
+`memory(action="search")` -- there is no working set in this pattern.
 
 ## During the session
 
-- Call `search_memory` only when you encounter a question whose answer
-  might be in memory. Each search is one-shot.
+- Call `memory(action="search", query="...")` only when you encounter a
+  question whose answer might be in memory. Each search is one-shot.
 - Triggers that warrant a search: the user asks "what did we decide
   about X?", references a project-specific term you don't recognize, or
   asks for a recommendation that should reflect prior decisions.
@@ -426,12 +427,12 @@ _CAMPAIGN_BLOCK = """\
 This project is enrolled in the following campaigns:
 {campaign_list}
 
-When calling `search_memory`, pass `project_id` set to this project's
-identifier so campaign-scoped memories appear in your results. Campaign
-memories contain cross-project knowledge shared by all enrolled projects.
-When writing campaign-scoped memories, use `scope="campaign"` with
-`owner_id` set to the campaign UUID and `project_id` for enrollment
-verification.
+When calling `memory(action="search", ...)`, pass `project_id` set to
+this project's identifier so campaign-scoped memories appear in your
+results. Campaign memories contain cross-project knowledge shared by all
+enrolled projects. When writing campaign-scoped memories, use
+`scope="campaign"` with `owner_id` set to the campaign UUID and
+`project_id` for enrollment verification.
 """
 
 

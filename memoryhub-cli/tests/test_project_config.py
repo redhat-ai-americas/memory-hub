@@ -146,7 +146,7 @@ def test_rule_file_eager_required_phrases():
     assert "Eager" in out
     # Loads index of everything at startup.
     assert 'mode="index"' in out
-    assert "max_results" in out and "50" in out
+    assert '"max_results": 50' in out
     # Honest about not getting push notifications.
     assert "NOT pushed automatically" in out
     # Shared blocks present.
