@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import warnings
@@ -61,6 +62,7 @@ from memoryhub_cli.project_config import (
     write_init_files,
 )
 
+_log = logging.getLogger(__name__)
 _MAX_TESTED_PYTHON = (3, 13)
 _DOCTOR_SESSION_EXPIRY_WARNING_SECONDS = 5 * 60
 
@@ -2952,6 +2954,7 @@ def _doctor_cluster(
                             f"The test memory {memory_id} may remain; delete it manually.",
                         )
                 except Exception:
+                    _log.debug("doctor: smoke-test delete raised an exception", exc_info=True)
                     _record_cleanup_failure(
                         "Could not delete the smoke-test memory.",
                         f"The test memory {memory_id} may remain; delete it manually.",
@@ -2962,8 +2965,8 @@ def _doctor_cluster(
             try:
                 await client.__aexit__(None, None, None)
             except Exception:
-                # Closing the client must not replace the check or cleanup result.
-                pass
+                # Must not replace an already-recorded check or cleanup result.
+                _log.debug("doctor: client teardown raised an exception", exc_info=True)
 
     _run(_do_checks())
     report = _report()
