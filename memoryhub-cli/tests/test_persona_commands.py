@@ -230,7 +230,11 @@ class TestPersonaEdit:
         assert result.exit_code == 0
         mock._call.assert_called_once_with(
             "persona",
-            {"action": "add_pin", "user_id": "alice", "content": "I prefer Rust for systems code."},
+            {
+                "action": "edit",
+                "user_id": "alice",
+                "options": {"edit_action": "add_pin", "content": "I prefer Rust for systems code."},
+            },
         )
         assert "Pin stored" in result.output
 
@@ -244,7 +248,8 @@ class TestPersonaEdit:
 
         tool, payload = mock._call.call_args[0]
         assert tool == "persona"
-        assert payload["action"] == "add_pin"
+        assert payload["action"] == "edit"
+        assert payload["options"] == {"edit_action": "add_pin", "content": "some fact"}
 
     def test_json_output(self):
         mock = _mock_client(PIN_RESULT)

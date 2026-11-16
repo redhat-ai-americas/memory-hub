@@ -305,7 +305,11 @@ def edit_cmd(
             try:
                 return await client._call(
                     "persona",
-                    {"action": "add_pin", "user_id": user_id, "content": fact},
+                    {
+                        "action": "edit",
+                        "user_id": user_id,
+                        "options": {"edit_action": "add_pin", "content": fact},
+                    },
                 )
             except Exception as exc:
                 handle_error("edit_failed", str(exc), output, EXIT_SERVER_ERROR)
