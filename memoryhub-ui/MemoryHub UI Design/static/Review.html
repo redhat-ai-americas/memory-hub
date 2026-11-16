@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>MemoryHub · Review queue</title>
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f2f2f2;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.mast{min-height:60px;background:#151515;color:#fff;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 16px}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none}
+.brand:hover{color:#fff}
+.mark{width:30px;height:30px;border-radius:8px;background:#ee0000;display:grid;place-items:center}
+.wm{font-family:'Red Hat Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.wm small{font-weight:400;color:#c7c7c7;font-size:13px;margin-left:6px}
+.ctx{margin-left:12px;border:1px solid #4d4d4d;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:#e0e0e0;background:transparent;display:flex;gap:8px;align-items:center}
+.mast-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.icb{width:40px;height:40px;border-radius:999px;border:0;background:transparent;color:#e0e0e0;display:grid;place-items:center;cursor:pointer;position:relative}
+.icb:hover{background:#2c2c2c}
+.dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;border-radius:999px;background:#ee0000;color:#fff;font-size:10px;font-weight:600;display:grid;place-items:center;padding:0 4px}
+.av{width:32px;height:32px;border-radius:999px;background:#5e40be;color:#fff;font-size:13px;font-weight:600;display:grid;place-items:center}
+.who{font-size:14px;color:#e0e0e0;padding:0 8px}
+.shell{display:flex;flex-wrap:wrap;align-items:stretch}
+.nav{flex:1 1 256px;background:#212427;padding:12px 0 32px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;color:#e0e0e0;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+.nav a:hover{background:#2c3035;color:#fff}
+.nav a.on{background:#3a3f45;color:#fff;border-left-color:#ee0000;font-weight:600}
+.ng{padding:18px 24px 6px;font-size:12px;color:#a3a3a3;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.cnt{background:#4d4d4d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;font-weight:600}
+.main{flex:999 1 560px;min-width:0}
+.ph{background:#fff;border-bottom:1px solid #d2d2d2;padding:20px 32px 0}
+.crumbs{font-size:13px;color:#4d4d4d;display:flex;gap:8px;flex-wrap:wrap}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+h1{font-family:'Red Hat Display',sans-serif;font-size:28px;font-weight:500;margin:8px 0 6px;letter-spacing:-.01em}
+.desc{color:#4d4d4d;font-size:14px;margin:0;max-width:760px;line-height:1.5}
+.body{padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:20px 24px;min-width:0}
+.card h3{font-family:'Red Hat Display',sans-serif;font-size:16px;font-weight:600;margin:0}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bs{background:#fff;color:#0066cc;border-color:#0066cc}
+.bl{background:transparent;color:#0066cc;padding:8px 6px}
+.bd{background:#b1380b;color:#fff}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.s-user{background:#e7f1fa;color:#004d99;border-color:#b9dafc}
+.s-project{background:#daf2f2;color:#004d4d;border-color:#9ad8d8}
+.s-role{background:#fff0dd;color:#8f4700;border-color:#f8c48a}
+.s-org{background:#e9f7df;color:#204d00;border-color:#afdc8f}
+.s-ent{background:#fce3e3;color:#a60000;border-color:#f9a8a8}
+.g{background:#f2f2f2;color:#383838;border-color:#d2d2d2}
+.muted{color:#4d4d4d}
+.ok{color:#3d7317}.err{color:#b1380b}.warn{color:#8f6100}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12.5px}
+.sm{font-size:13px}
+.tabs{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
+.tab{padding:10px 16px;font-size:14px;color:#4d4d4d;border-bottom:3px solid transparent;text-decoration:none}
+.tab.on{color:#151515;border-bottom-color:#0066cc;font-weight:600}
+.item{display:block;border:1px solid #d2d2d2;border-radius:14px;padding:14px 16px;background:#fff;text-decoration:none;color:#151515}
+.item.on{border:2px solid #0066cc;padding:13px 15px;background:#f5f9fc}
+.item:hover{color:#151515;border-color:#8a8d90}
+.chk{display:flex;gap:10px;align-items:flex-start;font-size:14px;padding:8px 0;border-bottom:1px solid #eeeeee}
+.quote{background:#fafafa;border:1px solid #e0e0e0;border-radius:12px;padding:16px 18px;font-size:17px;line-height:1.5;font-family:'Red Hat Display',sans-serif}
+.in{font:inherit;font-size:14px;border:1px solid #c7c7c7;border-radius:8px;padding:8px 12px;background:#fff;color:#151515;width:100%}
+</style>
+</head>
+<body>
+
+
+<div>
+<header class="mast">
+<button class="icb" aria-label="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button>
+<a class="brand" href="Main.html"><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span><span class="wm">MemoryHub<small>for OpenShift AI</small></span></a>
+<button class="ctx">Tenant: org-acme-healthcare <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="mast-r">
+<button class="icb" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+<button class="icb" aria-label="Notifications, 4 unread"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg><span class="dot">4</span></button>
+<button class="icb" aria-label="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"></path></svg></button>
+<span class="av">AR</span><span class="who">Alex Rivera</span>
+</div>
+</header>
+<div class="shell">
+<nav class="nav" aria-label="Primary">
+<a href="Main.html">Overview</a>
+<div class="ng">Memory</div>
+<a href="Memories.html">Memory browser</a>
+<a href="Graph.html">Memory graph</a>
+<a href="Search.html">Search playground</a>
+<a href="Projects.html">Projects &amp; campaigns</a>
+<div class="ng">Governance</div>
+<a href="Review.html" class="on">Review queue <span class="cnt">12</span></a>
+<a href="Curation.html">Curation rules</a>
+<a href="Audit.html">Audit &amp; forensics</a>
+<div class="ng">Access</div>
+<a href="Identities.html">Users &amp; agents</a>
+<a href="Clients.html">OAuth clients &amp; keys</a>
+<div class="ng">Platform</div>
+<a href="Settings.html">Settings</a>
+</nav>
+<main class="main">
+<div class="ph">
+<div class="crumbs"><a href="Main.html">MemoryHub</a><span>/</span><span>Review queue</span></div>
+<div class="ph-row">
+<div>
+<h1>Review queue</h1>
+<p class="desc">Everything waiting on a human: enterprise approvals, curator promotions, contradictions past threshold and quarantined writes.</p>
+</div>
+<div style="display: flex; gap: 8px; padding-bottom: 6px"><button class="btn bg">Assigned to me</button></div>
+</div>
+<nav class="tabs" aria-label="Queue"><a class="tab on" href="Review.html">Enterprise approvals <span class="muted">3</span></a><a class="tab" href="Review.html">Promotions <span class="muted">4</span></a><a class="tab" href="Review.html">Contradictions <span class="muted">2</span></a><a class="tab" href="Review.html">Quarantine <span class="muted">3</span></a><a class="tab" href="Review.html">History</a></nav>
+</div>
+<div class="body">
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<div style="flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<a class="item on" href="Review.html"><div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px"><span class="lbl s-ent">Enterprise</span><span class="sm muted">requested 2 h ago</span></div><div style="font-weight: 600; line-height: 1.4">Agents must never execute production database migrations without a linked change ticket.</div><div class="sm muted" style="margin-top: 6px">by dkim · policy proposal</div></a>
+<a class="item" href="Review.html"><div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px"><span class="lbl s-ent">Enterprise</span><span class="sm muted">yesterday</span></div><div style="font-weight: 600; line-height: 1.4">Retain clinical intake memories for 7 years in project scope only.</div><div class="sm muted" style="margin-top: 6px">by compliance-bot · regulation update</div></a>
+<a class="item" href="Review.html"><div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px"><span class="lbl s-ent">Enterprise</span><span class="sm muted">Oct 14</span></div><div style="font-weight: 600; line-height: 1.4">Customer names may appear in memories only in pseudonymised form.</div><div class="sm muted" style="margin-top: 6px">by arivera · edit of v1</div></a>
+<div class="sm muted" style="padding: 10px 4px 0">Also waiting</div>
+<a class="item" href="Review.html"><div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px"><span class="lbl s-org">Promotion → org</span><span class="lbl g">6 sources</span></div><div style="font-weight: 600; line-height: 1.4">Use UBI9 base images for all MemoryHub containers.</div><div class="sm muted" style="margin-top: 6px">curator-agent · pattern seen across 4 projects</div></a>
+<a class="item" href="MemoryDetail.html"><div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px"><span class="lbl s-role">Contradiction 5/5</span></div><div style="font-weight: 600; line-height: 1.4">Default reranker is ms-marco-MiniLM-L-6.</div><div class="sm muted" style="margin-top: 6px">fact-checker · revision prompt due</div></a>
+</div>
+
+<section class="card" style="flex: 999 1 560px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center">
+<div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="lbl s-ent">Enterprise · new memory</span><span class="mono muted">req_0193</span></div>
+<span class="sm muted">Needs 1 of 2 approvers: dkim (requester, excluded) · <b>arivera</b> · jsmith</span>
+</div>
+<div class="quote">Agents must never execute production database migrations without a linked change ticket.</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; font-size: 14px">
+<div><div class="sm muted">Requested by</div><b>Dana Kim</b> · compliance-approver</div>
+<div><div class="sm muted">Weight</div><b>1.00</b> · always injected in full</div>
+<div><div class="sm muted">Reach</div><b>All 37 agents</b> in tenant</div>
+</div>
+<div>
+<div class="sm" style="font-weight: 600; margin-bottom: 6px">Rationale branch</div>
+<p style="margin: 0; font-size: 14px; line-height: 1.55" class="muted">Incident INC-2291: an agent applied an Alembic migration to prod while summarising a PR. Change-management policy CM-4 requires a ticket for every prod schema change.</p>
+</div>
+<div>
+<div class="sm" style="font-weight: 600; margin-bottom: 4px">Policy checks</div>
+<div class="chk"><span class="ok" style="font-weight: 700">✓</span><span style="flex: 1">Secrets &amp; PII scan</span><span class="sm muted">clean</span></div>
+<div class="chk"><span class="ok" style="font-weight: 700">✓</span><span style="flex: 1">Enterprise rate limit</span><span class="sm muted">3 of 5 used this month</span></div>
+<div class="chk"><span class="warn" style="font-weight: 700">!</span><span style="flex: 1">Similar existing memory <a href="MemoryDetail.html">“Prod changes require CAB approval”</a></span><span class="sm muted">cosine 0.84</span></div>
+<div class="chk" style="border-bottom: 0"><span class="ok" style="font-weight: 700">✓</span><span style="flex: 1">Provenance attached</span><span class="sm muted">rationale · evidence</span></div>
+</div>
+<div>
+<label for="cm" class="sm" style="font-weight: 600; display: block; margin-bottom: 6px">Decision comment · recorded in the audit trail</label>
+<textarea id="cm" class="in" style="min-height: 70px" placeholder="Why are you approving or rejecting?"></textarea>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn bp">Approve &amp; publish</button><button class="btn bs">Request changes</button><button class="btn bd">Reject</button><span class="sm muted" style="margin-left: auto; align-self: center">Approval creates an <span class="mono">approval</span> branch signed by you.</span></div>
+</section>
+</div>
+</div>
+</main>
+</div>
+</div>
+
+
+
+
+</body></html>

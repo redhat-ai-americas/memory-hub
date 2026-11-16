@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MemoryHub · OAuth clients and API keys</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f2f2f2;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.mast{min-height:60px;background:#151515;color:#fff;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 16px}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none}
+.brand:hover{color:#fff}
+.mark{width:30px;height:30px;border-radius:8px;background:#ee0000;display:grid;place-items:center}
+.wm{font-family:'Red Hat Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.wm small{font-weight:400;color:#c7c7c7;font-size:13px;margin-left:6px}
+.ctx{margin-left:12px;border:1px solid #4d4d4d;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:#e0e0e0;background:transparent;display:flex;gap:8px;align-items:center}
+.mast-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.icb{width:40px;height:40px;border-radius:999px;border:0;background:transparent;color:#e0e0e0;display:grid;place-items:center;cursor:pointer;position:relative}
+.icb:hover{background:#2c2c2c}
+.dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;border-radius:999px;background:#ee0000;color:#fff;font-size:10px;font-weight:600;display:grid;place-items:center;padding:0 4px}
+.av{width:32px;height:32px;border-radius:999px;background:#5e40be;color:#fff;font-size:13px;font-weight:600;display:grid;place-items:center}
+.who{font-size:14px;color:#e0e0e0;padding:0 8px}
+.shell{display:flex;flex-wrap:wrap;align-items:stretch}
+.nav{flex:1 1 256px;background:#212427;padding:12px 0 32px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;color:#e0e0e0;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+.nav a:hover{background:#2c3035;color:#fff}
+.nav a.on{background:#3a3f45;color:#fff;border-left-color:#ee0000;font-weight:600}
+.ng{padding:18px 24px 6px;font-size:12px;color:#a3a3a3;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.cnt{background:#4d4d4d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;font-weight:600}
+.main{flex:999 1 560px;min-width:0}
+.ph{background:#fff;border-bottom:1px solid #d2d2d2;padding:20px 32px 0}
+.crumbs{font-size:13px;color:#4d4d4d;display:flex;gap:8px;flex-wrap:wrap}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+h1{font-family:'Red Hat Display',sans-serif;font-size:28px;font-weight:500;margin:8px 0 6px;letter-spacing:-.01em}
+.desc{color:#4d4d4d;font-size:14px;margin:0;max-width:760px;line-height:1.5}
+.body{padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:20px 24px;min-width:0}
+.card h3{font-family:'Red Hat Display',sans-serif;font-size:16px;font-weight:600;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bs{background:#fff;color:#0066cc;border-color:#0066cc}
+.bl{background:transparent;color:#0066cc;padding:8px 6px}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.g{background:#f2f2f2;color:#383838;border-color:#d2d2d2}
+.blue{background:#e7f1fa;color:#004d99;border-color:#b9dafc}
+.pur{background:#ece6ff;color:#3d2785;border-color:#cbc1ff}
+.grn{background:#e9f7df;color:#204d00;border-color:#afdc8f}
+.ylw{background:#fff7d6;color:#6b4d00;border-color:#f3d36b}
+.red{background:#fce3e3;color:#a60000;border-color:#f9a8a8}
+.muted{color:#4d4d4d}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font-weight:600;font-size:13px;padding:10px 12px;border-bottom:1px solid #d2d2d2;white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid #e6e6e6;vertical-align:top}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12.5px}
+.sm{font-size:13px}
+.scroll{overflow-x:auto}
+.tabs{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
+.tab{padding:10px 16px;font-size:14px;color:#4d4d4d;border-bottom:3px solid transparent;text-decoration:none}
+.tab.on{color:#151515;border-bottom-color:#0066cc;font-weight:600}
+.code{font-family:'Red Hat Mono',monospace;font-size:11.5px;background:#f2f2f2;border:1px solid #e0e0e0;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.secret{display:flex;gap:8px;align-items:center;border:1px solid #c7c7c7;border-radius:8px;padding:8px 10px;font-family:'Red Hat Mono',monospace;font-size:13px;background:#fafafa}
+pre{margin:0;background:#1f1f1f;color:#e0e0e0;border-radius:12px;padding:14px 16px;font-family:'Red Hat Mono',monospace;font-size:12px;white-space:pre-wrap;line-height:1.55;overflow-wrap:anywhere}
+</style>
+</helmet>
+<div>
+<header class="mast">
+<button class="icb" aria-label="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button>
+<a class="brand" href="Main.dc.html"><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span><span class="wm">MemoryHub<small>for OpenShift AI</small></span></a>
+<button class="ctx">Tenant: org-acme-healthcare <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="mast-r">
+<button class="icb" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+<button class="icb" aria-label="Notifications, 4 unread"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg><span class="dot">4</span></button>
+<button class="icb" aria-label="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"></path></svg></button>
+<span class="av">AR</span><span class="who">Alex Rivera</span>
+</div>
+</header>
+<div class="shell">
+<nav class="nav" aria-label="Primary">
+<a href="Main.dc.html">Overview</a>
+<div class="ng">Memory</div>
+<a href="Memories.dc.html">Memory browser</a>
+<a href="Graph.dc.html">Memory graph</a>
+<a href="Search.dc.html">Search playground</a>
+<a href="Projects.dc.html">Projects &amp; campaigns</a>
+<div class="ng">Governance</div>
+<a href="Review.dc.html">Review queue <span class="cnt">12</span></a>
+<a href="Curation.dc.html">Curation rules</a>
+<a href="Audit.dc.html">Audit &amp; forensics</a>
+<div class="ng">Access</div>
+<a href="Identities.dc.html">Users &amp; agents</a>
+<a href="Clients.dc.html" class="on">OAuth clients &amp; keys</a>
+<div class="ng">Platform</div>
+<a href="Settings.dc.html">Settings</a>
+</nav>
+<main class="main">
+<div class="ph">
+<div class="crumbs"><a href="Main.dc.html">MemoryHub</a><span>/</span><span>OAuth clients &amp; keys</span></div>
+<div class="ph-row">
+<div>
+<h1>OAuth clients &amp; API keys</h1>
+<p class="desc">Credentials agents use to reach the MCP server and SDK. Start with an API key; move to OAuth 2.1 client credentials or platform token exchange for production fleets.</p>
+</div>
+<div style="display: flex; gap: 8px; padding-bottom: 6px"><button class="btn bs">Issue API key</button><button class="btn bp">Create OAuth client</button></div>
+</div>
+<nav class="tabs" aria-label="Credential type"><a class="tab on" href="Clients.dc.html">OAuth clients <span class="muted">18</span></a><a class="tab" href="Clients.dc.html">API keys <span class="muted">23</span></a><a class="tab" href="Clients.dc.html">Trusted issuers <span class="muted">2</span></a></nav>
+</div>
+<div class="body">
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<section class="card" style="flex: 999 1 560px; padding: 0">
+<div class="scroll"><table class="tbl" style="min-width: 820px">
+<thead><tr><th>Client</th><th>Bound identity</th><th>Grant</th><th>Scopes</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+<tbody>
+<sc-for list="{{cl}}" as="c" hint-placeholder-count="8">
+<tr style="background: {{c.bg}}">
+<td><div style="font-weight: 600">{{c.name}}</div><div class="mono muted">{{c.id}}</div></td>
+<td class="sm">{{c.who}}</td>
+<td><span class="lbl {{c.gcls}}">{{c.grant}}</span></td>
+<td style="max-width: 240px"><div style="display: flex; flex-wrap: wrap; gap: 4px"><sc-for list="{{c.sc}}" as="s"><span class="code">{{s}}</span></sc-for></div></td>
+<td class="sm muted" style="white-space: nowrap">{{c.used}}</td>
+<td><span class="lbl {{c.scls}}">{{c.st}}</span></td>
+<td><button class="btn bl" aria-label="Client actions" style="padding: 4px 8px">⋮</button></td>
+</tr>
+</sc-for>
+</tbody></table></div>
+</section>
+
+<aside style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<div class="card" style="border-color: #afdc8f">
+<div class="ch"><div style="display: flex; gap: 10px; align-items: center"><span style="width: 28px; height: 28px; border-radius: 99px; background: #3d7317; color: #fff; display: grid; place-items: center; font-weight: 700">✓</span><h3>Client created · jenkins-release-bot</h3></div></div>
+<p class="sm" style="margin: 0 0 12px">Copy the secret now. It is shown <b>once</b> and stored only as a hash.</p>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div><div class="sm" style="font-weight: 600; margin-bottom: 4px">client_id</div><div class="secret"><span style="flex: 1">jenkins-release-bot</span><button class="btn bl sm" style="padding: 2px 6px">Copy</button></div></div>
+<div><div class="sm" style="font-weight: 600; margin-bottom: 4px">client_secret</div><div class="secret"><span style="flex: 1">mhs_••••••••••••••••••••••4f2a</span><button class="btn bl sm" style="padding: 2px 6px">Show</button><button class="btn bl sm" style="padding: 2px 6px">Copy</button></div></div>
+</div>
+<div class="sm" style="font-weight: 600; margin: 16px 0 6px">Connect from Claude Code</div>
+<pre>claude mcp add memoryhub --transport http -s user \
+  https://memory-hub-mcp.apps.&lt;cluster&gt;/mcp/</pre>
+<div class="sm" style="font-weight: 600; margin: 14px 0 6px">Or from the Python SDK</div>
+<pre>export MEMORYHUB_CLIENT_ID=jenkins-release-bot
+export MEMORYHUB_CLIENT_SECRET=…
+client = MemoryHubClient.from_env()</pre>
+</div>
+
+<div class="card">
+<div class="ch"><h3>Trusted token issuers</h3><button class="btn bl sm">+ Add issuer</button></div>
+<p class="sm muted" style="margin: 0 0 12px">Workloads exchange their platform token (RFC 8693) for a scoped MemoryHub JWT — no API keys to manage.</p>
+<div style="display: flex; flex-direction: column; gap: 10px; font-size: 14px">
+<div style="border: 1px solid #d2d2d2; border-radius: 12px; padding: 12px 14px"><div style="display: flex; justify-content: space-between"><b>local-cluster</b><span class="lbl grn">Active</span></div><div class="sm muted" style="margin-top: 4px">Kubernetes · tenant from namespace annotation <span class="mono">memoryhub.redhat.com/tenant-id</span></div></div>
+<div style="border: 1px solid #d2d2d2; border-radius: 12px; padding: 12px 14px"><div style="display: flex; justify-content: space-between"><b>corp-oidc</b><span class="lbl ylw">Draft</span></div><div class="sm muted" style="margin-top: 4px">External OIDC · claim mapping not yet validated</div></div>
+</div>
+</div>
+</aside>
+</div>
+</div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      cl: [
+        { name: 'jenkins-release-bot', id: 'jenkins-release-bot', who: 'service · new', grant: 'client_credentials', gcls: 'blue', sc: ['memory:read:project', 'memory:write:project'], used: 'Never', st: 'New', scls: 'grn', bg: '#f3faf0' },
+        { name: 'claude-code (arivera)', id: 'cc-arivera', who: 'arivera', grant: 'client_credentials', gcls: 'blue', sc: ['memory:read', 'memory:write:user', 'memory:write:project'], used: '2 min ago', st: 'Active', scls: 'grn', bg: '#fff' },
+        { name: 'curator-agent', id: 'curator-agent', who: 'service', grant: 'client_credentials', gcls: 'blue', sc: ['memory:read', 'memory:write:organizational', 'memory:write:role'], used: '1 min ago', st: 'Active', scls: 'grn', bg: '#fff' },
+        { name: 'soc-triage', id: 'sa:soc/triage', who: 'service · namespace soc', grant: 'token exchange', gcls: 'pur', sc: ['memory:read:project', 'memory:write:project'], used: 'Just now', st: 'Active', scls: 'grn', bg: '#fff' },
+        { name: 'MemoryHub dashboard', id: 'memoryhub-ui', who: 'humans via OpenShift login', grant: 'auth code + PKCE', gcls: 'g', sc: ['memory:read', 'memory:admin'], used: 'Just now', st: 'Active', scls: 'grn', bg: '#fff' },
+        { name: 'langgraph-intake (mchen)', id: 'lg-intake', who: 'mchen', grant: 'client_credentials', gcls: 'blue', sc: ['memory:read:user', 'memory:write:user'], used: '1 h ago', st: 'Secret expires in 6 d', scls: 'ylw', bg: '#fff' },
+        { name: 'legacy-notebook', id: 'nb-ds-team', who: 'jpatel', grant: 'API key', gcls: 'g', sc: ['memory:read'], used: '41 days ago', st: 'Stale', scls: 'ylw', bg: '#fff' },
+        { name: 'demo-himss', id: 'demo-himss', who: 'service', grant: 'client_credentials', gcls: 'blue', sc: ['memory:read'], used: 'Sep 2', st: 'Revoked', scls: 'red', bg: '#fff' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MemoryHub · Audit and forensics</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f2f2f2;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.mast{min-height:60px;background:#151515;color:#fff;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 16px}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none}
+.brand:hover{color:#fff}
+.mark{width:30px;height:30px;border-radius:8px;background:#ee0000;display:grid;place-items:center}
+.wm{font-family:'Red Hat Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.wm small{font-weight:400;color:#c7c7c7;font-size:13px;margin-left:6px}
+.ctx{margin-left:12px;border:1px solid #4d4d4d;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:#e0e0e0;background:transparent;display:flex;gap:8px;align-items:center}
+.mast-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.icb{width:40px;height:40px;border-radius:999px;border:0;background:transparent;color:#e0e0e0;display:grid;place-items:center;cursor:pointer;position:relative}
+.icb:hover{background:#2c2c2c}
+.dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;border-radius:999px;background:#ee0000;color:#fff;font-size:10px;font-weight:600;display:grid;place-items:center;padding:0 4px}
+.av{width:32px;height:32px;border-radius:999px;background:#5e40be;color:#fff;font-size:13px;font-weight:600;display:grid;place-items:center}
+.who{font-size:14px;color:#e0e0e0;padding:0 8px}
+.shell{display:flex;flex-wrap:wrap;align-items:stretch}
+.nav{flex:1 1 256px;background:#212427;padding:12px 0 32px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;color:#e0e0e0;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+.nav a:hover{background:#2c3035;color:#fff}
+.nav a.on{background:#3a3f45;color:#fff;border-left-color:#ee0000;font-weight:600}
+.ng{padding:18px 24px 6px;font-size:12px;color:#a3a3a3;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.cnt{background:#4d4d4d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;font-weight:600}
+.main{flex:999 1 560px;min-width:0}
+.ph{background:#fff;border-bottom:1px solid #d2d2d2;padding:20px 32px 0}
+.crumbs{font-size:13px;color:#4d4d4d;display:flex;gap:8px;flex-wrap:wrap}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+h1{font-family:'Red Hat Display',sans-serif;font-size:28px;font-weight:500;margin:8px 0 6px;letter-spacing:-.01em}
+.desc{color:#4d4d4d;font-size:14px;margin:0;max-width:760px;line-height:1.5}
+.body{padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:20px 24px;min-width:0}
+.card h3{font-family:'Red Hat Display',sans-serif;font-size:16px;font-weight:600;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bs{background:#fff;color:#0066cc;border-color:#0066cc}
+.bl{background:transparent;color:#0066cc;padding:8px 6px}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.s-user{background:#e7f1fa;color:#004d99;border-color:#b9dafc}
+.s-project{background:#daf2f2;color:#004d4d;border-color:#9ad8d8}
+.s-org{background:#e9f7df;color:#204d00;border-color:#afdc8f}
+.s-ent{background:#fce3e3;color:#a60000;border-color:#f9a8a8}
+.g{background:#f2f2f2;color:#383838;border-color:#d2d2d2}
+.muted{color:#4d4d4d}
+.ok{color:#3d7317}.err{color:#b1380b}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font-weight:600;font-size:13px;padding:10px 12px;border-bottom:1px solid #d2d2d2;white-space:nowrap}
+.tbl td{padding:11px 12px;border-bottom:1px solid #e6e6e6;vertical-align:top}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12.5px}
+.sm{font-size:13px}
+.scroll{overflow-x:auto}
+.tabs{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
+.tab{padding:10px 16px;font-size:14px;color:#4d4d4d;border-bottom:3px solid transparent;text-decoration:none}
+.tab.on{color:#151515;border-bottom-color:#0066cc;font-weight:600}
+.f{display:flex;flex-direction:column;gap:6px;flex:1 1 200px}
+.f label{font-size:13px;font-weight:600}
+.in{font:inherit;font-size:14px;border:1px solid #c7c7c7;border-radius:8px;padding:8px 12px;background:#fff;color:#151515;width:100%}
+.ctxi{display:flex;gap:12px;align-items:flex-start;border:1px solid #d2d2d2;border-radius:12px;padding:12px 14px;font-size:14px}
+.ctxi .n{font-family:'Red Hat Mono',monospace;font-size:12px;color:#4d4d4d;width:20px;flex:none;padding-top:2px}
+pre{margin:0;background:#f5f5f5;border-radius:10px;padding:10px 12px;font-family:'Red Hat Mono',monospace;font-size:12px;white-space:pre-wrap;line-height:1.5}
+</style>
+</helmet>
+<div>
+<header class="mast">
+<button class="icb" aria-label="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button>
+<a class="brand" href="Main.dc.html"><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span><span class="wm">MemoryHub<small>for OpenShift AI</small></span></a>
+<button class="ctx">Tenant: org-acme-healthcare <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="mast-r">
+<button class="icb" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+<button class="icb" aria-label="Notifications, 4 unread"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg><span class="dot">4</span></button>
+<button class="icb" aria-label="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"></path></svg></button>
+<span class="av">AR</span><span class="who">Alex Rivera</span>
+</div>
+</header>
+<div class="shell">
+<nav class="nav" aria-label="Primary">
+<a href="Main.dc.html">Overview</a>
+<div class="ng">Memory</div>
+<a href="Memories.dc.html">Memory browser</a>
+<a href="Graph.dc.html">Memory graph</a>
+<a href="Search.dc.html">Search playground</a>
+<a href="Projects.dc.html">Projects &amp; campaigns</a>
+<div class="ng">Governance</div>
+<a href="Review.dc.html">Review queue <span class="cnt">12</span></a>
+<a href="Curation.dc.html">Curation rules</a>
+<a href="Audit.dc.html" class="on">Audit &amp; forensics</a>
+<div class="ng">Access</div>
+<a href="Identities.dc.html">Users &amp; agents</a>
+<a href="Clients.dc.html">OAuth clients &amp; keys</a>
+<div class="ng">Platform</div>
+<a href="Settings.dc.html">Settings</a>
+</nav>
+<main class="main">
+<div class="ph">
+<div class="crumbs"><a href="Main.dc.html">MemoryHub</a><span>/</span><span>Audit &amp; forensics</span></div>
+<div class="ph-row">
+<div>
+<h1>Audit &amp; forensics</h1>
+<p class="desc">An append-only record of every memory operation, and the ability to reconstruct exactly what an agent knew at any moment.</p>
+</div>
+<div style="display: flex; gap: 8px; padding-bottom: 6px"><button class="btn bg">Export for compliance</button></div>
+</div>
+<nav class="tabs" aria-label="Audit views"><a class="tab on" href="Audit.dc.html">Forensics</a><a class="tab" href="Audit.dc.html">Audit log</a><a class="tab" href="Audit.dc.html">Denied only <span class="muted">41</span></a><a class="tab" href="Audit.dc.html">Retention</a></nav>
+</div>
+<div class="body">
+<section class="card">
+<div class="ch"><h3>What did the agent know?</h3><span class="sm muted">Correlates read entries with version history</span></div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+<div class="f"><label for="ag">Agent</label><input id="ag" class="in" value="langgraph-intake · mchen"></div>
+<div class="f"><label for="ss">Session</label><input id="ss" class="in mono" value="sess_8c1e…a04"></div>
+<div class="f"><label for="tm">Point in time</label><input id="tm" class="in" value="2026-10-15 14:30 UTC"></div>
+<button class="btn bp">Reconstruct context</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px">
+<div style="flex: 2 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<div class="sm muted">6 memories in context · 2,214 tokens · served by search at 14:29:58</div>
+<sc-for list="{{ctx}}" as="c" hint-placeholder-count="5">
+<div class="ctxi"><span class="n">{{c.n}}</span><div style="flex: 1; min-width: 0"><div>{{c.t}}</div><div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; align-items: center"><span class="lbl {{c.cls}}">{{c.scope}}</span><span class="mono muted">v{{c.v}} at that time</span><span class="sm {{c.ncls}}">{{c.note}}</span></div></div></div>
+</sc-for>
+</div>
+<div style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 12px">
+<div style="border: 1px solid #f9a8a8; background: #fdf1f1; border-radius: 12px; padding: 14px; font-size: 14px"><b>Finding</b><p class="muted" style="margin: 6px 0 0; line-height: 1.5">Memory #3 was at <b>v2</b> when served; it was corrected to v3 forty minutes later by mchen. The agent acted on the outdated instruction.</p></div>
+<div style="border: 1px solid #d2d2d2; border-radius: 12px; padding: 14px; font-size: 14px"><b>Other agents exposed</b><p class="muted" style="margin: 6px 0 8px">v2 was served to 3 more sessions before correction.</p><a href="Audit.dc.html">List sessions</a></div>
+</div>
+</div>
+</section>
+
+<section class="card" style="padding: 0">
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 16px 20px">
+<h3 style="margin-right: auto">Audit log</h3>
+<button class="in" style="width: auto; cursor: pointer">Operation: all ▾</button>
+<button class="in" style="width: auto; cursor: pointer">Decision: all ▾</button>
+<button class="in" style="width: auto; cursor: pointer">Last 24 hours ▾</button>
+</div>
+<div class="scroll"><table class="tbl" style="min-width: 880px">
+<thead><tr><th>Timestamp (UTC)</th><th>Operation</th><th>Actor</th><th>Target</th><th>Scope</th><th>Decision</th></tr></thead>
+<tbody>
+<sc-for list="{{log}}" as="l" hint-placeholder-count="6">
+<tr><td class="mono muted" style="white-space: nowrap">{{l.t}}</td><td class="mono">{{l.op}}</td><td class="sm"><b>{{l.a}}</b><div class="muted">{{l.at}}</div></td><td style="max-width: 320px">{{l.m}}</td><td><span class="lbl {{l.cls}}">{{l.s}}</span></td><td class="sm"><span class="{{l.dcls}}" style="font-weight: 600">{{l.d}}</span><div class="muted">{{l.r}}</div></td></tr>
+</sc-for>
+<tr style="background: #fafafa"><td colspan="6" style="padding: 14px 20px">
+<div class="sm" style="font-weight: 600; margin-bottom: 8px">update_memory · mem_3a90…e17 · state before / after</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px">
+<pre>{ "version": 2,
+  "content": "Escalate intake to on-call nurse after 30 min",
+  "weight": 0.8 }</pre>
+<pre>{ "version": 3,
+  "content": "Escalate intake to on-call nurse after 10 min",
+  "weight": 0.9 }</pre>
+</div>
+</td></tr>
+</tbody></table></div>
+<div class="sm muted" style="padding: 12px 20px">Entries are immutable · full detail kept 90 days, summaries 1 year, then archived to object storage.</div>
+</section>
+</div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      ctx: [
+        { n: 1, t: 'No PHI may be stored in user-scope memories.', scope: 'Enterprise', cls: 's-ent', v: 1, note: 'unchanged', ncls: 'muted' },
+        { n: 2, t: 'Intake forms are triaged by acuity before insurance checks.', scope: 'Project', cls: 's-project', v: 4, note: 'unchanged', ncls: 'muted' },
+        { n: 3, t: 'Escalate intake to on-call nurse after 30 min without response.', scope: 'Project', cls: 's-project', v: 2, note: 'now v3 — changed after this session', ncls: 'err' },
+        { n: 4, t: 'Prefers summaries as bullet points, max 5.', scope: 'User', cls: 's-user', v: 1, note: 'unchanged', ncls: 'muted' },
+        { n: 5, t: 'Use UBI9 base images for all containers.', scope: 'Organizational', cls: 's-org', v: 1, note: 'stub only', ncls: 'muted' }
+      ],
+      log: [
+        { t: '2026-10-16 14:48:12', op: 'write_memory', a: 'claude-code', at: 'for arivera', m: 'Prefers Podman over Docker…', s: 'User', cls: 's-user', d: 'Permitted', dcls: 'ok', r: '' },
+        { t: '2026-10-16 14:44:40', op: 'write_memory', a: 'langgraph-intake', at: 'for mchen', m: 'Patient record export contains MRN…', s: 'User', cls: 's-user', d: 'Denied', dcls: 'err', r: 'rule no-phi-user-scope' },
+        { t: '2026-10-16 14:41:03', op: 'read_memory', a: 'soc-triage-agent', at: 'service', m: 'Payroll export schedule', s: 'Project', cls: 's-project', d: 'Denied', dcls: 'err', r: 'not a member of finance-ops' },
+        { t: '2026-10-16 14:39:27', op: 'search', a: 'claude-code', at: 'for mchen', m: '“intake escalation” · 6 results', s: 'Project', cls: 's-project', d: 'Permitted', dcls: 'ok', r: '' },
+        { t: '2026-10-16 14:31:55', op: 'promote', a: 'curator-agent', at: 'service', m: 'Use UBI9 base images… (6 sources)', s: 'Organizational', cls: 's-org', d: 'Permitted', dcls: 'ok', r: 'queued for review' },
+        { t: '2026-10-16 14:30:12', op: 'update_memory', a: 'mchen', at: 'dashboard', m: 'Escalate intake to on-call nurse…', s: 'Project', cls: 's-project', d: 'Permitted', dcls: 'ok', r: 'v2 → v3 · expanded below' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

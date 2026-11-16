@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>MemoryHub · Overview</title>
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f2f2f2;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.mast{min-height:60px;background:#151515;color:#fff;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 16px}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none}
+.brand:hover{color:#fff}
+.mark{width:30px;height:30px;border-radius:8px;background:#ee0000;display:grid;place-items:center}
+.wm{font-family:'Red Hat Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.wm small{font-weight:400;color:#c7c7c7;font-size:13px;margin-left:6px}
+.ctx{margin-left:12px;border:1px solid #4d4d4d;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:#e0e0e0;background:transparent;display:flex;gap:8px;align-items:center}
+.mast-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.icb{width:40px;height:40px;border-radius:999px;border:0;background:transparent;color:#e0e0e0;display:grid;place-items:center;cursor:pointer;position:relative}
+.icb:hover{background:#2c2c2c}
+.dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;border-radius:999px;background:#ee0000;color:#fff;font-size:10px;font-weight:600;display:grid;place-items:center;padding:0 4px}
+.av{width:32px;height:32px;border-radius:999px;background:#5e40be;color:#fff;font-size:13px;font-weight:600;display:grid;place-items:center}
+.who{font-size:14px;color:#e0e0e0;padding:0 8px}
+.shell{display:flex;flex-wrap:wrap;align-items:stretch}
+.nav{flex:1 1 256px;background:#212427;padding:12px 0 32px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;color:#e0e0e0;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+.nav a:hover{background:#2c3035;color:#fff}
+.nav a.on{background:#3a3f45;color:#fff;border-left-color:#ee0000;font-weight:600}
+.ng{padding:18px 24px 6px;font-size:12px;color:#a3a3a3;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.cnt{background:#4d4d4d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;font-weight:600}
+.main{flex:999 1 560px;min-width:0}
+.ph{background:#fff;border-bottom:1px solid #d2d2d2;padding:20px 32px 22px}
+.crumbs{font-size:13px;color:#4d4d4d;display:flex;gap:8px;flex-wrap:wrap}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+h1{font-family:'Red Hat Display',sans-serif;font-size:28px;font-weight:500;margin:8px 0 6px;letter-spacing:-.01em}
+.desc{color:#4d4d4d;font-size:14px;margin:0;max-width:760px;line-height:1.5}
+.body{padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:20px 24px;min-width:0}
+.card h3{font-family:'Red Hat Display',sans-serif;font-size:16px;font-weight:600;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bs{background:#fff;color:#0066cc;border-color:#0066cc}
+.bl{background:transparent;color:#0066cc;padding:8px 6px}
+.bd{background:#b1380b;color:#fff}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.s-user{background:#e7f1fa;color:#004d99;border-color:#b9dafc}
+.s-project{background:#daf2f2;color:#004d4d;border-color:#9ad8d8}
+.s-campaign{background:#ece6ff;color:#3d2785;border-color:#cbc1ff}
+.s-role{background:#fff0dd;color:#8f4700;border-color:#f8c48a}
+.s-org{background:#e9f7df;color:#204d00;border-color:#afdc8f}
+.s-ent{background:#fce3e3;color:#a60000;border-color:#f9a8a8}
+.g{background:#f2f2f2;color:#383838;border-color:#d2d2d2}
+.ok{color:#3d7317}.warn{color:#8f6100}.err{color:#b1380b}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font-weight:600;font-size:13px;padding:10px 12px;border-bottom:1px solid #d2d2d2;white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid #e6e6e6;vertical-align:top}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12.5px}
+.muted{color:#4d4d4d}
+.sm{font-size:13px}
+.kpi{font-family:'Red Hat Display',sans-serif;font-size:34px;font-weight:500;letter-spacing:-.02em;margin:6px 0 2px}
+.alert{display:flex;gap:12px;align-items:flex-start;background:#e7f1fa;border:1px solid #b9dafc;border-radius:12px;padding:12px 16px;font-size:14px}
+.bar{height:8px;border-radius:999px;background:#e6e6e6;overflow:hidden}
+.bar span{display:block;height:100%;border-radius:999px}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+
+
+<div>
+<header class="mast">
+<button class="icb" aria-label="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button>
+<a class="brand" href="Main.html"><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span><span class="wm">MemoryHub<small>for OpenShift AI</small></span></a>
+<button class="ctx">Tenant: org-acme-healthcare <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="mast-r">
+<button class="icb" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+<button class="icb" aria-label="Notifications, 4 unread"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg><span class="dot">4</span></button>
+<button class="icb" aria-label="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"></path></svg></button>
+<span class="av">AR</span><span class="who">Alex Rivera</span>
+</div>
+</header>
+<div class="shell">
+<nav class="nav" aria-label="Primary">
+<a href="Main.html" class="on">Overview</a>
+<div class="ng">Memory</div>
+<a href="Memories.html">Memory browser</a>
+<a href="Graph.html">Memory graph</a>
+<a href="Search.html">Search playground</a>
+<a href="Projects.html">Projects &amp; campaigns</a>
+<div class="ng">Governance</div>
+<a href="Review.html">Review queue <span class="cnt">12</span></a>
+<a href="Curation.html">Curation rules</a>
+<a href="Audit.html">Audit &amp; forensics</a>
+<div class="ng">Access</div>
+<a href="Identities.html">Users &amp; agents</a>
+<a href="Clients.html">OAuth clients &amp; keys</a>
+<div class="ng">Platform</div>
+<a href="Settings.html">Settings</a>
+</nav>
+<main class="main">
+<div class="ph">
+<div class="crumbs"><span>MemoryHub</span><span>/</span><span>Overview</span></div>
+<div class="ph-row">
+<div>
+<h1>Overview</h1>
+<p class="desc">Health and activity of governed agent memory for tenant <b>org-acme-healthcare</b>. Every number links to the records behind it.</p>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap">
+<a class="btn bs" href="Clients.html">Connect an agent</a>
+<a class="btn bp" href="Memories.html"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Write memory</a>
+</div>
+</div>
+</div>
+<div class="body">
+<div class="alert"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0066cc" stroke-width="2" aria-hidden="true" style="flex: none; margin-top: 1px"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M11 12h1v5h1"></path></svg><div style="flex: 1"><b>3 enterprise-scope memories are waiting for approval.</b> Enterprise memories never reach agents until a designated approver signs off.</div><a href="Review.html" style="white-space: nowrap; font-weight: 500">Open review queue</a></div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px">
+<div class="card"><div class="sm muted">Current memories</div><div class="kpi">48,213</div><div class="sm"><span class="ok">▲ 3.2%</span> <span class="muted">vs. previous 7 days</span></div></div>
+<div class="card"><div class="sm muted">Agents connected</div><div class="kpi">37</div><div class="sm muted">12 with an active session now</div></div>
+<div class="card"><div class="sm muted">Searches · 24 h</div><div class="kpi">182,406</div><div class="sm muted">p95 latency 142 ms · R@5 0.97</div></div>
+<div class="card"><div class="sm muted">Open contradictions</div><div class="kpi">9</div><div class="sm"><span class="err">2 over revision threshold</span></div></div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px">
+<div class="card" style="grid-column: span 2">
+<div class="ch"><h3>Memory operations · last 14 days</h3><div style="display: flex; gap: 16px; font-size: 13px"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 10px; height: 10px; border-radius: 3px; background: #0066cc"></span>Searches</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 10px; height: 10px; border-radius: 3px; background: #92c5f9"></span>Writes &amp; updates</span></div></div>
+<svg viewBox="0 0 640 220" role="img" aria-label="Daily searches and writes for the last 14 days, trending upward" style="width: 100%; height: auto; display: block">
+<g stroke="#e6e6e6" stroke-width="1"><line x1="40" y1="20" x2="640" y2="20"></line><line x1="40" y1="70" x2="640" y2="70"></line><line x1="40" y1="120" x2="640" y2="120"></line><line x1="40" y1="170" x2="640" y2="170"></line></g>
+<g font-size="11" fill="#4d4d4d" font-family="Red Hat Text"><text x="0" y="24">200k</text><text x="0" y="74">150k</text><text x="0" y="124">100k</text><text x="0" y="174">50k</text><text x="54" y="214">Oct 3</text><text x="310" y="214">Oct 9</text><text x="585" y="214">Oct 16</text></g>
+<g fill="#0066cc"><rect x="52" y="78" width="16" height="142" rx="3" transform="translate(0,-22)"></rect><rect x="94" y="74" width="16" height="124" rx="3"></rect><rect x="136" y="84" width="16" height="114" rx="3"></rect><rect x="178" y="70" width="16" height="128" rx="3"></rect><rect x="220" y="98" width="16" height="100" rx="3"></rect><rect x="262" y="120" width="16" height="78" rx="3"></rect><rect x="304" y="66" width="16" height="132" rx="3"></rect><rect x="346" y="60" width="16" height="138" rx="3"></rect><rect x="388" y="56" width="16" height="142" rx="3"></rect><rect x="430" y="50" width="16" height="148" rx="3"></rect><rect x="472" y="88" width="16" height="110" rx="3"></rect><rect x="514" y="112" width="16" height="86" rx="3"></rect><rect x="556" y="44" width="16" height="154" rx="3"></rect><rect x="598" y="38" width="16" height="160" rx="3"></rect></g>
+<g fill="#92c5f9"><rect x="70" y="168" width="10" height="30" rx="2"></rect><rect x="112" y="164" width="10" height="34" rx="2"></rect><rect x="154" y="170" width="10" height="28" rx="2"></rect><rect x="196" y="160" width="10" height="38" rx="2"></rect><rect x="238" y="176" width="10" height="22" rx="2"></rect><rect x="280" y="184" width="10" height="14" rx="2"></rect><rect x="322" y="158" width="10" height="40" rx="2"></rect><rect x="364" y="156" width="10" height="42" rx="2"></rect><rect x="406" y="150" width="10" height="48" rx="2"></rect><rect x="448" y="152" width="10" height="46" rx="2"></rect><rect x="490" y="172" width="10" height="26" rx="2"></rect><rect x="532" y="182" width="10" height="16" rx="2"></rect><rect x="574" y="146" width="10" height="52" rx="2"></rect><rect x="616" y="142" width="10" height="56" rx="2"></rect></g>
+</svg>
+</div>
+<div class="card">
+<div class="ch"><h3>Memories by scope</h3><a class="sm" href="Memories.html">View all</a></div>
+<div style="display: flex; flex-direction: column; gap: 14px">
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; align-items: center"><span class="lbl s-user">User</span><span class="sm"><b>31,402</b> <span class="muted">65%</span></span></div>
+<div class="bar"><span style="width: 65%; background: #0066cc"></span></div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; align-items: center"><span class="lbl s-project">Project</span><span class="sm"><b>11,870</b> <span class="muted">25%</span></span></div>
+<div class="bar"><span style="width: 25%; background: #009596"></span></div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; align-items: center"><span class="lbl s-campaign">Campaign</span><span class="sm"><b>2,315</b> <span class="muted">5%</span></span></div>
+<div class="bar"><span style="width: 5%; background: #5e40be"></span></div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; align-items: center"><span class="lbl s-role">Role</span><span class="sm"><b>1,488</b> <span class="muted">3%</span></span></div>
+<div class="bar"><span style="width: 3%; background: #ca6c0f"></span></div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; align-items: center"><span class="lbl s-org">Organizational</span><span class="sm"><b>1,021</b> <span class="muted">2%</span></span></div>
+<div class="bar"><span style="width: 2%; background: #3d7317"></span></div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; align-items: center"><span class="lbl s-ent">Enterprise</span><span class="sm"><b>117</b> <span class="muted">3 pending</span></span></div>
+<div class="bar"><span style="width: 1%; background: #ee0000"></span></div>
+</div>
+
+</div>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px">
+<div class="card" style="grid-column: span 2">
+<div class="ch"><h3>Recent activity</h3><a class="sm" href="Audit.html">Open audit log</a></div>
+<div class="scroll"><table class="tbl">
+<thead><tr><th>Time</th><th>Actor</th><th>Operation</th><th>Memory</th><th>Scope</th><th>Decision</th></tr></thead>
+<tbody>
+
+<tr><td class="mono muted">15:48:12</td><td><div style="font-weight: 500">claude-code · arivera</div><div class="sm muted">user agent</div></td><td class="mono">write_memory</td><td style="max-width: 360px"><a href="MemoryDetail.html">Prefers Podman over Docker for local containers</a></td><td><span class="lbl s-user">User</span></td><td class="ok" style="font-weight: 500">Permitted</td></tr>
+
+<tr><td class="mono muted">15:47:55</td><td><div style="font-weight: 500">curator-agent</div><div class="sm muted">service agent</div></td><td class="mono">promote</td><td style="max-width: 360px"><a href="MemoryDetail.html">Use UBI9 base images for all MemoryHub containers</a></td><td><span class="lbl s-org">Organizational</span></td><td class="warn" style="font-weight: 500">Queued for review</td></tr>
+
+<tr><td class="mono muted">15:47:31</td><td><div style="font-weight: 500">soc-triage-agent</div><div class="sm muted">service agent</div></td><td class="mono">search_memory</td><td style="max-width: 360px"><a href="MemoryDetail.html">“lateral movement playbook” · 8 results</a></td><td><span class="lbl s-project">Project</span></td><td class="ok" style="font-weight: 500">Permitted</td></tr>
+
+<tr><td class="mono muted">15:46:02</td><td><div style="font-weight: 500">fact-checker</div><div class="sm muted">service agent</div></td><td class="mono">report_contradiction</td><td style="max-width: 360px"><a href="MemoryDetail.html">Default reranker is ms-marco-MiniLM-L-6</a></td><td><span class="lbl s-project">Project</span></td><td class="muted" style="font-weight: 500">Logged</td></tr>
+
+<tr><td class="mono muted">15:44:40</td><td><div style="font-weight: 500">langgraph-intake · mchen</div><div class="sm muted">user agent</div></td><td class="mono">write_memory</td><td style="max-width: 360px"><a href="MemoryDetail.html">Patient record export contains MRN 4471-…</a></td><td><span class="lbl s-user">User</span></td><td class="err" style="font-weight: 500">Blocked · PII</td></tr>
+
+<tr><td class="mono muted">15:43:18</td><td><div style="font-weight: 500">arivera</div><div class="sm muted">human · dashboard</div></td><td class="mono">update_memory</td><td style="max-width: 360px"><a href="MemoryDetail.html">Release train cuts every second Tuesday</a></td><td><span class="lbl s-campaign">Campaign</span></td><td class="ok" style="font-weight: 500">Permitted</td></tr>
+
+</tbody></table></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div class="card">
+<div class="ch"><h3>Component health</h3><span class="lbl s-org">All systems normal</span></div>
+<div style="display: flex; flex-direction: column">
+
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eeeeee; font-size: 14px"><span>MCP server · 3/3 pods</span><span class="ok" style="display: flex; align-items: center; gap: 6px; font-weight: 500"><span style="width: 8px; height: 8px; border-radius: 99px; background: currentColor"></span>Healthy</span></div>
+
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eeeeee; font-size: 14px"><span>Auth service (OAuth 2.1)</span><span class="ok" style="display: flex; align-items: center; gap: 6px; font-weight: 500"><span style="width: 8px; height: 8px; border-radius: 99px; background: currentColor"></span>Healthy</span></div>
+
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eeeeee; font-size: 14px"><span>PostgreSQL + pgvector</span><span class="ok" style="display: flex; align-items: center; gap: 6px; font-weight: 500"><span style="width: 8px; height: 8px; border-radius: 99px; background: currentColor"></span>Healthy</span></div>
+
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eeeeee; font-size: 14px"><span>Embedding model</span><span class="ok" style="display: flex; align-items: center; gap: 6px; font-weight: 500"><span style="width: 8px; height: 8px; border-radius: 99px; background: currentColor"></span>Healthy</span></div>
+
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eeeeee; font-size: 14px"><span>Cross-encoder reranker</span><span class="warn" style="display: flex; align-items: center; gap: 6px; font-weight: 500"><span style="width: 8px; height: 8px; border-radius: 99px; background: currentColor"></span>Degraded · 410 ms</span></div>
+
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eeeeee; font-size: 14px"><span>Valkey (push + jobs)</span><span class="ok" style="display: flex; align-items: center; gap: 6px; font-weight: 500"><span style="width: 8px; height: 8px; border-radius: 99px; background: currentColor"></span>Healthy</span></div>
+
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eeeeee; font-size: 14px"><span>Curator agents · leader elected</span><span class="ok" style="display: flex; align-items: center; gap: 6px; font-weight: 500"><span style="width: 8px; height: 8px; border-radius: 99px; background: currentColor"></span>Healthy</span></div>
+
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eeeeee; font-size: 14px"><span>MinIO object storage</span><span class="ok" style="display: flex; align-items: center; gap: 6px; font-weight: 500"><span style="width: 8px; height: 8px; border-radius: 99px; background: currentColor"></span>Healthy</span></div>
+
+</div>
+</div>
+<div class="card">
+<h3 style="margin-bottom: 12px">Context assembly</h3>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+<div><div class="sm muted">KV-cache prefix hits</div><div class="kpi" style="font-size: 26px">71%</div></div>
+<div><div class="sm muted">Avg tokens / injection</div><div class="kpi" style="font-size: 26px">2,840</div></div>
+</div>
+<p class="sm muted" style="margin: 8px 0 0">Epoch-locked ordering keeps shared memory prefixes cache-friendly across agents.</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+
+
+
+
+</body></html>

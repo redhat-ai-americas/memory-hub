@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>MemoryHub · Curation rules</title>
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f2f2f2;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.mast{min-height:60px;background:#151515;color:#fff;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 16px}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none}
+.brand:hover{color:#fff}
+.mark{width:30px;height:30px;border-radius:8px;background:#ee0000;display:grid;place-items:center}
+.wm{font-family:'Red Hat Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.wm small{font-weight:400;color:#c7c7c7;font-size:13px;margin-left:6px}
+.ctx{margin-left:12px;border:1px solid #4d4d4d;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:#e0e0e0;background:transparent;display:flex;gap:8px;align-items:center}
+.mast-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.icb{width:40px;height:40px;border-radius:999px;border:0;background:transparent;color:#e0e0e0;display:grid;place-items:center;cursor:pointer;position:relative}
+.icb:hover{background:#2c2c2c}
+.dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;border-radius:999px;background:#ee0000;color:#fff;font-size:10px;font-weight:600;display:grid;place-items:center;padding:0 4px}
+.av{width:32px;height:32px;border-radius:999px;background:#5e40be;color:#fff;font-size:13px;font-weight:600;display:grid;place-items:center}
+.who{font-size:14px;color:#e0e0e0;padding:0 8px}
+.shell{display:flex;flex-wrap:wrap;align-items:stretch}
+.nav{flex:1 1 256px;background:#212427;padding:12px 0 32px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;color:#e0e0e0;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+.nav a:hover{background:#2c3035;color:#fff}
+.nav a.on{background:#3a3f45;color:#fff;border-left-color:#ee0000;font-weight:600}
+.ng{padding:18px 24px 6px;font-size:12px;color:#a3a3a3;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.cnt{background:#4d4d4d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;font-weight:600}
+.main{flex:999 1 560px;min-width:0}
+.ph{background:#fff;border-bottom:1px solid #d2d2d2;padding:20px 32px 0}
+.crumbs{font-size:13px;color:#4d4d4d;display:flex;gap:8px;flex-wrap:wrap}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+h1{font-family:'Red Hat Display',sans-serif;font-size:28px;font-weight:500;margin:8px 0 6px;letter-spacing:-.01em}
+.desc{color:#4d4d4d;font-size:14px;margin:0;max-width:760px;line-height:1.5}
+.body{padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:20px 24px;min-width:0}
+.card h3{font-family:'Red Hat Display',sans-serif;font-size:16px;font-weight:600;margin:0}
+.ch{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bs{background:#fff;color:#0066cc;border-color:#0066cc}
+.bl{background:transparent;color:#0066cc;padding:8px 6px}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.g{background:#f2f2f2;color:#383838;border-color:#d2d2d2}
+.blue{background:#e7f1fa;color:#004d99;border-color:#b9dafc}
+.pur{background:#ece6ff;color:#3d2785;border-color:#cbc1ff}
+.ylw{background:#fff7d6;color:#6b4d00;border-color:#f3d36b}
+.org{background:#fff0dd;color:#8f4700;border-color:#f8c48a}
+.red{background:#fce3e3;color:#a60000;border-color:#f9a8a8}
+.muted{color:#4d4d4d}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font-weight:600;font-size:13px;padding:10px 12px;border-bottom:1px solid #d2d2d2;white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid #e6e6e6;vertical-align:middle}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12.5px}
+.sm{font-size:13px}
+.scroll{overflow-x:auto}
+.tabs{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
+.tab{padding:10px 16px;font-size:14px;color:#4d4d4d;border-bottom:3px solid transparent;text-decoration:none}
+.tab.on{color:#151515;border-bottom-color:#0066cc;font-weight:600}
+.f{display:flex;flex-direction:column;gap:6px}
+.f label{font-size:13px;font-weight:600}
+.in{font:inherit;font-size:14px;border:1px solid #c7c7c7;border-radius:8px;padding:8px 12px;background:#fff;color:#151515;width:100%}
+.seg{display:inline-flex;border:1px solid #c7c7c7;border-radius:999px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;border:0;background:#fff;padding:6px 14px;cursor:pointer;color:#151515}
+.seg button.on{background:#0066cc;color:#fff}
+.sw{width:40px;height:22px;border-radius:999px;background:#0066cc;position:relative;display:inline-block;flex:none}
+.sw::after{content:'';position:absolute;top:3px;left:21px;width:16px;height:16px;border-radius:99px;background:#fff}
+.sw.off{background:#8a8d90}
+.sw.off::after{left:3px}
+.layer{display:flex;gap:10px;align-items:flex-start;padding:12px 0;border-bottom:1px solid #eeeeee;font-size:14px}
+.num{width:24px;height:24px;border-radius:99px;background:#151515;color:#fff;display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
+</style>
+</head>
+<body>
+
+
+<div>
+<header class="mast">
+<button class="icb" aria-label="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button>
+<a class="brand" href="Main.html"><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span><span class="wm">MemoryHub<small>for OpenShift AI</small></span></a>
+<button class="ctx">Tenant: org-acme-healthcare <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="mast-r">
+<button class="icb" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+<button class="icb" aria-label="Notifications, 4 unread"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg><span class="dot">4</span></button>
+<button class="icb" aria-label="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"></path></svg></button>
+<span class="av">AR</span><span class="who">Alex Rivera</span>
+</div>
+</header>
+<div class="shell">
+<nav class="nav" aria-label="Primary">
+<a href="Main.html">Overview</a>
+<div class="ng">Memory</div>
+<a href="Memories.html">Memory browser</a>
+<a href="Graph.html">Memory graph</a>
+<a href="Search.html">Search playground</a>
+<a href="Projects.html">Projects &amp; campaigns</a>
+<div class="ng">Governance</div>
+<a href="Review.html">Review queue <span class="cnt">12</span></a>
+<a href="Curation.html" class="on">Curation rules</a>
+<a href="Audit.html">Audit &amp; forensics</a>
+<div class="ng">Access</div>
+<a href="Identities.html">Users &amp; agents</a>
+<a href="Clients.html">OAuth clients &amp; keys</a>
+<div class="ng">Platform</div>
+<a href="Settings.html">Settings</a>
+</nav>
+<main class="main">
+<div class="ph">
+<div class="crumbs"><a href="Main.html">MemoryHub</a><span>/</span><span>Curation rules</span></div>
+<div class="ph-row">
+<div>
+<h1>Curation rules</h1>
+<p class="desc">Rules run inline on every write and again in curator batch scans. Lower priority numbers run first; the first blocking match wins.</p>
+</div>
+<div style="display: flex; gap: 8px; padding-bottom: 6px"><button class="btn bs">Run batch scan now</button><button class="btn bp">Create rule</button></div>
+</div>
+<nav class="tabs" aria-label="Rule layer"><a class="tab on" href="Curation.html">All rules <span class="muted">17</span></a><a class="tab" href="Curation.html">System <span class="muted">5</span></a><a class="tab" href="Curation.html">Organization <span class="muted">6</span></a><a class="tab" href="Curation.html">User <span class="muted">6</span></a></nav>
+</div>
+<div class="body">
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<section class="card" style="padding: 0">
+<div class="scroll"><table class="tbl" style="min-width: 820px">
+<thead><tr><th>Prio</th><th>Rule</th><th>Layer</th><th>Tier</th><th>Action</th><th>Scope filter</th><th>Matches · 7 d</th><th>Enabled</th></tr></thead>
+<tbody>
+
+<tr style="background: #fff">
+<td class="mono">1</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">secrets-scan</a><div class="sm muted">AWS, GCP, Azure, GitHub tokens; private keys</div></td>
+<td><span class="lbl g">System</span></td>
+<td class="mono">regex</td>
+<td><span class="lbl red">block</span></td>
+<td class="sm">All scopes</td>
+<td>14</td>
+<td><span class="sw " role="switch" aria-checked="true" aria-label="Enabled"></span></td>
+</tr>
+
+<tr style="background: #fff">
+<td class="mono">2</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">pii-scan</a><div class="sm muted">Email, phone, SSN, card numbers, MRN</div></td>
+<td><span class="lbl g">System</span></td>
+<td class="mono">regex</td>
+<td><span class="lbl org">quarantine</span></td>
+<td class="sm">All scopes</td>
+<td>37</td>
+<td><span class="sw " role="switch" aria-checked="true" aria-label="Enabled"></span></td>
+</tr>
+
+<tr style="background: #fff">
+<td class="mono">5</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">near-duplicate</a><div class="sm muted">Cosine ≥ 0.92 against current memories</div></td>
+<td><span class="lbl g">System</span></td>
+<td class="mono">embedding</td>
+<td><span class="lbl blue">reject_with_pointer</span></td>
+<td class="sm">User, Project</td>
+<td>212</td>
+<td><span class="sw " role="switch" aria-checked="true" aria-label="Enabled"></span></td>
+</tr>
+
+<tr style="background: #fff">
+<td class="mono">10</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">no-phi-user-scope</a><div class="sm muted">Clinical identifiers in user memories</div></td>
+<td><span class="lbl pur">Organization</span></td>
+<td class="mono">regex</td>
+<td><span class="lbl red">block</span></td>
+<td class="sm">User</td>
+<td>6</td>
+<td><span class="sw " role="switch" aria-checked="true" aria-label="Enabled"></span></td>
+</tr>
+
+<tr style="background: #f5f9fc">
+<td class="mono">20</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">no-source-code</a><div class="sm muted">Code belongs in Git, not in memory</div></td>
+<td><span class="lbl pur">Organization</span></td>
+<td class="mono">regex</td>
+<td><span class="lbl org">quarantine</span></td>
+<td class="sm">Project, Organizational</td>
+<td>9</td>
+<td><span class="sw " role="switch" aria-checked="true" aria-label="Enabled"></span></td>
+</tr>
+
+<tr style="background: #fff">
+<td class="mono">30</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">stale-decay</a><div class="sm muted">Unread for 90 days</div></td>
+<td><span class="lbl pur">Organization</span></td>
+<td class="mono">embedding</td>
+<td><span class="lbl g">decay_weight</span></td>
+<td class="sm">Project</td>
+<td>488</td>
+<td><span class="sw " role="switch" aria-checked="true" aria-label="Enabled"></span></td>
+</tr>
+
+<tr style="background: #fff">
+<td class="mono">40</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">enterprise-rate-limit</a><div class="sm muted">Max 5 enterprise memories per month</div></td>
+<td><span class="lbl pur">Organization</span></td>
+<td class="mono">policy</td>
+<td><span class="lbl red">block</span></td>
+<td class="sm">Enterprise</td>
+<td>0</td>
+<td><span class="sw " role="switch" aria-checked="true" aria-label="Enabled"></span></td>
+</tr>
+
+<tr style="background: #fff">
+<td class="mono">50</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">flag-vendor-names</a><div class="sm muted">Competitor product names</div></td>
+<td><span class="lbl blue">User · arivera</span></td>
+<td class="mono">regex</td>
+<td><span class="lbl ylw">flag</span></td>
+<td class="sm">User</td>
+<td>3</td>
+<td><span class="sw " role="switch" aria-checked="true" aria-label="Enabled"></span></td>
+</tr>
+
+<tr style="background: #fff">
+<td class="mono">60</td>
+<td><a href="Curation.html" style="font-weight: 600; text-decoration: none">meeting-notes</a><div class="sm muted">Similar to “weekly sync notes” cluster</div></td>
+<td><span class="lbl blue">User · mchen</span></td>
+<td class="mono">embedding</td>
+<td><span class="lbl ylw">flag</span></td>
+<td class="sm">User</td>
+<td>0</td>
+<td><span class="sw off" role="switch" aria-checked="false" aria-label="Enabled"></span></td>
+</tr>
+
+</tbody></table></div>
+</section>
+<div class="card">
+<h3 style="margin-bottom: 6px">How rules are layered</h3>
+<div class="layer"><span class="num">1</span><div><b>System</b> <span class="muted">— shipped defaults: secrets and PII scanning, near-duplicate detection. Can be tuned, not deleted.</span></div></div>
+<div class="layer"><span class="num">2</span><div><b>Organization</b> <span class="muted">— policies set by administrators, such as “no source code in memories”. Apply to every scope they filter on.</span></div></div>
+<div class="layer" style="border-bottom: 0"><span class="num">3</span><div><b>User</b> <span class="muted">— personal rules created through <span class="mono">set_curation_rule</span>; only affect that user’s writes.</span></div></div>
+</div>
+</div>
+
+<aside class="card" style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; align-items: center"><h3 style="font-size: 18px">Edit rule</h3><button class="btn bl" aria-label="Close editor">✕</button></div>
+<div class="f"><label for="rn">Name</label><input id="rn" class="in" value="no-source-code"></div>
+<div class="f"><label>Tier</label><div class="seg" role="group" aria-label="Tier"><button class="on">regex</button><button>embedding</button></div></div>
+<div class="f"><label for="pt">Pattern</label><input id="pt" class="in mono" value="(def |class |import |function\s*\(|=&gt;\s*\{)"><span class="sm muted">Python-style regex, evaluated on content and branches.</span></div>
+<div class="f"><label for="ac">Action</label><select id="ac" class="in"><option>quarantine</option><option>flag</option><option>block</option><option>reject_with_pointer</option><option>decay_weight</option></select></div>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+<div class="f"><label for="sf">Scope filter</label><select id="sf" class="in"><option>project, organizational</option></select></div>
+<div class="f"><label for="pr">Priority</label><input id="pr" class="in" value="20"></div>
+</div>
+<div style="border: 1px solid #d2d2d2; border-radius: 12px; padding: 14px">
+<div class="f"><label for="tt">Test against sample text</label><textarea id="tt" class="in mono" style="min-height: 70px">def rotate_key(client): return client.secrets.rotate()</textarea></div>
+<div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; background: #fff0dd; border-radius: 8px; padding: 8px 12px; font-size: 14px"><span class="lbl org">match</span>Would <b>quarantine</b> — matched <span class="mono">def </span> at col 0</div>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: center; font-size: 14px"><span>Enabled</span><span class="sw" role="switch" aria-checked="true" aria-label="Rule enabled"></span></div>
+<div style="display: flex; gap: 8px"><button class="btn bp">Save rule</button><button class="btn bg">Cancel</button></div>
+</aside>
+</div>
+</div>
+</main>
+</div>
+</div>
+
+
+
+
+</body></html>

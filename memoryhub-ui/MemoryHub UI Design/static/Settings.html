@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>MemoryHub · Settings</title>
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&amp;family=Red+Hat+Mono:wght@400;500&amp;family=Red+Hat+Text:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f2f2f2;color:#151515;font-family:'Red Hat Text',system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0066cc}a:hover{color:#004d99}
+.mast{min-height:60px;background:#151515;color:#fff;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 16px}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none}
+.brand:hover{color:#fff}
+.mark{width:30px;height:30px;border-radius:8px;background:#ee0000;display:grid;place-items:center}
+.wm{font-family:'Red Hat Display',sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+.wm small{font-weight:400;color:#c7c7c7;font-size:13px;margin-left:6px}
+.ctx{margin-left:12px;border:1px solid #4d4d4d;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:#e0e0e0;background:transparent;display:flex;gap:8px;align-items:center}
+.mast-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.icb{width:40px;height:40px;border-radius:999px;border:0;background:transparent;color:#e0e0e0;display:grid;place-items:center;cursor:pointer;position:relative}
+.icb:hover{background:#2c2c2c}
+.dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;border-radius:999px;background:#ee0000;color:#fff;font-size:10px;font-weight:600;display:grid;place-items:center;padding:0 4px}
+.av{width:32px;height:32px;border-radius:999px;background:#5e40be;color:#fff;font-size:13px;font-weight:600;display:grid;place-items:center}
+.who{font-size:14px;color:#e0e0e0;padding:0 8px}
+.shell{display:flex;flex-wrap:wrap;align-items:stretch}
+.nav{flex:1 1 256px;background:#212427;padding:12px 0 32px}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 24px;color:#e0e0e0;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+.nav a:hover{background:#2c3035;color:#fff}
+.nav a.on{background:#3a3f45;color:#fff;border-left-color:#ee0000;font-weight:600}
+.ng{padding:18px 24px 6px;font-size:12px;color:#a3a3a3;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.cnt{background:#4d4d4d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;font-weight:600}
+.main{flex:999 1 560px;min-width:0}
+.ph{background:#fff;border-bottom:1px solid #d2d2d2;padding:20px 32px 22px}
+.crumbs{font-size:13px;color:#4d4d4d;display:flex;gap:8px;flex-wrap:wrap}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+h1{font-family:'Red Hat Display',sans-serif;font-size:28px;font-weight:500;margin:8px 0 6px;letter-spacing:-.01em}
+.desc{color:#4d4d4d;font-size:14px;margin:0;max-width:760px;line-height:1.5}
+.body{padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px}
+.card{background:#fff;border:1px solid #d2d2d2;border-radius:16px;padding:22px 24px;min-width:0}
+.card h3{font-family:'Red Hat Display',sans-serif;font-size:18px;font-weight:600;margin:0 0 4px}
+.btn{font:inherit;font-size:14px;border-radius:999px;padding:8px 18px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap}
+.bp{background:#0066cc;color:#fff}.bp:hover{background:#004d99;color:#fff}
+.bs{background:#fff;color:#0066cc;border-color:#0066cc}
+.bl{background:transparent;color:#0066cc;padding:8px 6px}
+.bg{background:#fff;color:#151515;border-color:#c7c7c7}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 10px;border-radius:999px;border:1px solid;white-space:nowrap;line-height:20px;font-weight:500}
+.grn{background:#e9f7df;color:#204d00;border-color:#afdc8f}
+.ylw{background:#fff7d6;color:#6b4d00;border-color:#f3d36b}
+.muted{color:#4d4d4d}
+.mono{font-family:'Red Hat Mono',monospace;font-size:12.5px}
+.sm{font-size:13px}
+.jl{flex:1 1 200px;display:flex;flex-direction:column;gap:2px;font-size:14px}
+.jl a{padding:8px 14px;border-left:2px solid #d2d2d2;color:#4d4d4d;text-decoration:none}
+.jl a.on{border-left-color:#0066cc;color:#151515;font-weight:600}
+.fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:16px}
+.f{display:flex;flex-direction:column;gap:6px}
+.f label{font-size:13px;font-weight:600}
+.in{font:inherit;font-size:14px;border:1px solid #c7c7c7;border-radius:8px;padding:8px 12px;background:#fff;color:#151515;width:100%}
+.hint{font-size:12px;color:#4d4d4d;line-height:1.4}
+.row{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;padding:14px 0;border-bottom:1px solid #eeeeee}
+.row:last-child{border-bottom:0}
+.sw{width:40px;height:22px;border-radius:999px;background:#0066cc;position:relative;display:inline-block;flex:none;margin-top:2px}
+.sw::after{content:'';position:absolute;top:3px;left:21px;width:16px;height:16px;border-radius:99px;background:#fff}
+.sw.off{background:#8a8d90}.sw.off::after{left:3px}
+.seg{display:inline-flex;border:1px solid #c7c7c7;border-radius:999px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;border:0;background:#fff;padding:6px 14px;cursor:pointer;color:#151515}
+.seg button.on{background:#0066cc;color:#fff}
+.model{display:flex;gap:14px;align-items:center;border:1px solid #d2d2d2;border-radius:12px;padding:14px 16px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+
+<div>
+<header class="mast">
+<button class="icb" aria-label="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button>
+<a class="brand" href="Main.html"><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 7.5l-3 8M8.5 6h7"></path></svg></span><span class="wm">MemoryHub<small>for OpenShift AI</small></span></a>
+<button class="ctx">Tenant: org-acme-healthcare <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="mast-r">
+<button class="icb" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+<button class="icb" aria-label="Notifications, 4 unread"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg><span class="dot">4</span></button>
+<button class="icb" aria-label="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"></path></svg></button>
+<span class="av">AR</span><span class="who">Alex Rivera</span>
+</div>
+</header>
+<div class="shell">
+<nav class="nav" aria-label="Primary">
+<a href="Main.html">Overview</a>
+<div class="ng">Memory</div>
+<a href="Memories.html">Memory browser</a>
+<a href="Graph.html">Memory graph</a>
+<a href="Search.html">Search playground</a>
+<a href="Projects.html">Projects &amp; campaigns</a>
+<div class="ng">Governance</div>
+<a href="Review.html">Review queue <span class="cnt">12</span></a>
+<a href="Curation.html">Curation rules</a>
+<a href="Audit.html">Audit &amp; forensics</a>
+<div class="ng">Access</div>
+<a href="Identities.html">Users &amp; agents</a>
+<a href="Clients.html">OAuth clients &amp; keys</a>
+<div class="ng">Platform</div>
+<a href="Settings.html" class="on">Settings</a>
+</nav>
+<main class="main">
+<div class="ph">
+<div class="crumbs"><a href="Main.html">MemoryHub</a><span>/</span><span>Settings</span></div>
+<div class="ph-row">
+<div>
+<h1>Settings</h1>
+<p class="desc">Tenant-wide defaults. Agents can narrow these per request; project <span class="mono">.memoryhub.yaml</span> files override retrieval defaults.</p>
+</div>
+<div style="display: flex; gap: 8px"><button class="btn bg">Discard</button><button class="btn bp">Save changes</button></div>
+</div>
+</div>
+<div class="body">
+<div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+<nav class="jl" aria-label="Settings sections" style="max-width: 240px">
+<a href="Settings.html" class="on">Retrieval</a>
+<a href="Settings.html">Models</a>
+<a href="Settings.html">Isolation &amp; governance</a>
+<a href="Settings.html">Audit &amp; retention</a>
+<a href="Settings.html">MCP endpoint</a>
+<a href="Settings.html">Notifications</a>
+<a href="Settings.html">Tenant</a>
+</nav>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<section class="card">
+<h3>Retrieval</h3>
+<p class="sm muted" style="margin: 0">Defaults for <span class="mono">search_memory</span> when an agent does not pass a value.</p>
+<div class="fg">
+<div class="f"><label for="mr">Max results</label><input id="mr" class="in" value="10"><span class="hint">1 – 50</span></div>
+<div class="f"><label for="tk">Max response tokens</label><input id="tk" class="in" value="4000"><span class="hint">Hard cap on assembled context</span></div>
+<div class="f"><label for="fw">Session focus weight</label><input id="fw" class="in" value="0.40"><span class="hint">0 ignores focus, 1 ignores the query</span></div>
+<div class="f"><label for="st">Full-content weight threshold</label><input id="st" class="in" value="0.80"><span class="hint">Below this, results return as stubs</span></div>
+</div>
+<div style="margin-top: 14px">
+<div class="row"><div><b style="font-size: 14px">Cross-encoder reranking</b><div class="hint">Adds ~90 ms; improves precision on ambiguous queries.</div></div><span class="sw" role="switch" aria-checked="true" aria-label="Cross-encoder reranking"></span></div>
+<div class="row"><div><b style="font-size: 14px">Cache-optimized ordering</b><div class="hint">Deterministic, epoch-locked order so agents share KV-cache prefixes. Epoch rolls every 6 h.</div></div><span class="sw" role="switch" aria-checked="true" aria-label="Cache-optimized ordering"></span></div>
+<div class="row"><div><b style="font-size: 14px">Real-time push to sessions</b><div class="hint">Broadcast new memories to sessions whose focus matches.</div></div><span class="sw" role="switch" aria-checked="true" aria-label="Real-time push"></span></div>
+</div>
+</section>
+
+<section class="card">
+<h3>Models</h3>
+<p class="sm muted" style="margin: 0 0 14px">Served on-cluster through OpenShift AI model serving. Changing the embedding model triggers a background re-embed.</p>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div class="model"><div style="flex: 1; min-width: 220px"><b>Embedding</b><div class="mono muted">all-MiniLM-L6-v2 · 384 dims</div></div><span class="mono muted">kserve://memory-hub/embedder</span><span class="lbl grn">Ready · 9 ms p50</span><button class="btn bl">Change</button></div>
+<div class="model"><div style="flex: 1; min-width: 220px"><b>Reranker</b><div class="mono muted">ms-marco-MiniLM-L-6-v2</div></div><span class="mono muted">kserve://memory-hub/reranker</span><span class="lbl ylw">Degraded · 410 ms p95</span><button class="btn bl">Change</button></div>
+</div>
+</section>
+
+<section class="card">
+<h3>Isolation &amp; governance</h3>
+<div class="row"><div><b style="font-size: 14px">Project isolation</b><div class="hint">Project memories are readable only by project members.</div></div><span class="sw" role="switch" aria-checked="true" aria-label="Project isolation"></span></div>
+<div class="row"><div><b style="font-size: 14px">Role isolation</b><div class="hint">Role memories are readable only by holders of that OpenShift role.</div></div><span class="sw" role="switch" aria-checked="true" aria-label="Role isolation"></span></div>
+<div class="row"><div><b style="font-size: 14px">Contradiction revision threshold</b><div class="hint">Reports needed before the curator prompts a revision.</div></div><input class="in" value="5" style="width: 80px" aria-label="Contradiction threshold"></div>
+<div class="row"><div><b style="font-size: 14px">Enterprise approvers required</b><div class="hint">Requesters can never approve their own proposal.</div></div><input class="in" value="1" style="width: 80px" aria-label="Approvers required"></div>
+</section>
+
+<section class="card">
+<h3>Audit &amp; retention</h3>
+<div class="row"><div><b style="font-size: 14px">Read operation detail</b><div class="hint">Writes and governance decisions are always logged in full.</div></div><div class="seg" role="group" aria-label="Read detail"><button>full</button><button class="on">summary</button><button>sample 1/N</button></div></div>
+<div class="row"><div><b style="font-size: 14px">Full-detail retention</b><div class="hint">Older partitions are summarised, then archived to MinIO.</div></div><input class="in" value="90 days" style="width: 120px" aria-label="Full detail retention"></div>
+<div class="row"><div><b style="font-size: 14px">MCP tool profile</b><div class="hint">Compact exposes 4 action-dispatch tools; full exposes 14 individual tools.</div></div><div class="seg" role="group" aria-label="Tool profile"><button class="on">compact</button><button>full</button></div></div>
+</section>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+
+
+
+
+</body></html>

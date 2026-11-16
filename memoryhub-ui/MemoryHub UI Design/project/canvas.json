@@ -1,0 +1,190 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Audit.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "is_interactive": true,
+      "title": "11 · Audit & forensics",
+      "w": 1440,
+      "x": 3040,
+      "y": 3240
+    },
+    "Clients.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "is_interactive": true,
+      "title": "08 · OAuth clients & API keys",
+      "w": 1440,
+      "x": 4560,
+      "y": 1640
+    },
+    "Curation.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "is_interactive": true,
+      "title": "09 · Curation rules",
+      "w": 1440,
+      "x": 0,
+      "y": 3240
+    },
+    "Graph.dc.html": {
+      "expand": "fill",
+      "h": 1240,
+      "is_interactive": true,
+      "title": "04 · Memory graph",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    },
+    "Identities.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "is_interactive": true,
+      "title": "07 · Users & agents",
+      "w": 1440,
+      "x": 3040,
+      "y": 1640
+    },
+    "Login.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "title": "13 · Login",
+      "w": 1440,
+      "x": 0,
+      "y": 5240
+    },
+    "Main.dc.html": {
+      "expand": "fill",
+      "h": 1240,
+      "is_interactive": true,
+      "title": "01 · Overview",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Memories.dc.html": {
+      "expand": "fill",
+      "h": 1240,
+      "is_interactive": true,
+      "title": "02 · Memory browser",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "MemoryDetail.dc.html": {
+      "expand": "fill",
+      "h": 1240,
+      "is_interactive": true,
+      "title": "03 · Memory detail",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Projects.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "is_interactive": true,
+      "title": "06 · Projects & campaigns",
+      "w": 1440,
+      "x": 1520,
+      "y": 1640
+    },
+    "Review.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "is_interactive": true,
+      "title": "10 · Review queue",
+      "w": 1440,
+      "x": 1520,
+      "y": 3240
+    },
+    "Search.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "is_interactive": true,
+      "title": "05 · Search playground",
+      "w": 1440,
+      "x": 0,
+      "y": 1640
+    },
+    "Settings.dc.html": {
+      "expand": "fill",
+      "h": 1600,
+      "is_interactive": true,
+      "title": "12 · Settings",
+      "w": 1440,
+      "x": 4560,
+      "y": 3240
+    },
+    "StyleGuide.dc.html": {
+      "h": 1100,
+      "title": "14 · Foundations & components",
+      "w": 1440,
+      "x": 1520,
+      "y": 5240
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-16T15:20:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "t1": {
+      "kind": "title1",
+      "maxW": 6000,
+      "text": "Memory: overview, browser, card, graph",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t2": {
+      "kind": "title1",
+      "maxW": 6000,
+      "text": "Search, projects, access",
+      "w": 240,
+      "x": 0,
+      "y": 1340
+    },
+    "t3": {
+      "kind": "title1",
+      "maxW": 6000,
+      "text": "Governance and settings",
+      "w": 240,
+      "x": 0,
+      "y": 2940
+    },
+    "t4": {
+      "kind": "title1",
+      "maxW": 6000,
+      "text": "Introduction and Design Fundamentals",
+      "w": 240,
+      "x": 0,
+      "y": 4940
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Memories.dc.html",
+    "MemoryDetail.dc.html",
+    "Graph.dc.html",
+    "Search.dc.html",
+    "Projects.dc.html",
+    "Identities.dc.html",
+    "Clients.dc.html",
+    "Curation.dc.html",
+    "Review.dc.html",
+    "Audit.dc.html",
+    "Settings.dc.html",
+    "Login.dc.html",
+    "StyleGuide.dc.html"
+  ],
+  "pages": [],
+  "title": "MemoryHub UI Design"
+}

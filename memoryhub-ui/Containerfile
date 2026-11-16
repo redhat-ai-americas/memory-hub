@@ -1,47 +1,16 @@
-# Stage 1: Build the frontend
-FROM registry.access.redhat.com/ubi9/nodejs-20:latest AS frontend-build
-
+FROM registry.access.redhat.com/ubi9/nodejs-20:latest AS build
 WORKDIR /opt/app-root/src
-
-COPY frontend/package.json ./
-COPY frontend/package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
-COPY frontend/src ./src
-COPY frontend/index.html ./index.html
-COPY frontend/tsconfig.json ./tsconfig.json
-COPY frontend/tsconfig.node.json ./tsconfig.node.json
-COPY frontend/vite.config.ts ./vite.config.ts
-
+COPY --chown=1001:0 frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY --chown=1001:0 frontend/src ./src
+COPY --chown=1001:0 frontend/index.html frontend/tsconfig.json frontend/tsconfig.node.json frontend/vite.config.ts ./
 RUN npm run build
 
-# Stage 2: Python runtime serving backend + built frontend
-FROM registry.access.redhat.com/ubi9/python-311:latest
-
+FROM registry.access.redhat.com/ubi9/nodejs-20:latest
 WORKDIR /opt/app-root/src
-
-# Install Python dependencies
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy and install memoryhub_core library (contains SQLAlchemy models +
-# services that the BFF imports). Distinct from the `memoryhub` SDK on PyPI;
-# see docs/package-layout.md.
-COPY --chown=1001:0 memoryhub_core/ ./memoryhub_core/
-RUN pip install --no-cache-dir ./memoryhub_core/
-
-# Copy backend application code
-COPY --chown=1001:0 backend/src/ ./src/
-
-# Copy built frontend from stage 1 (vite outputs to dist/ relative to project root)
-COPY --from=frontend-build /opt/app-root/src/dist ./frontend/dist
-
-# Fix permissions for OpenShift arbitrary UIDs
-RUN find ./src -name "*.py" -exec chmod 644 {} \;
-
-ENV HOST=0.0.0.0 \
-    PORT=8080
-
+COPY --from=build --chown=1001:0 /opt/app-root/src/dist ./dist
+COPY --chown=1001:0 server.mjs ./server.mjs
+ENV PORT=8080
+EXPOSE 8080
 USER 1001
-
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["node", "server.mjs"]
