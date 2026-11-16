@@ -52,6 +52,59 @@ class TestGetClient:
                 client_secret="csec",
             )
 
+    def test_named_context_selects_api_key_and_url(self, monkeypatch):
+        monkeypatch.setattr(
+            "memoryhub_cli.main.read_credentials_section",
+            lambda context: {
+                "api_key": "staging-key",
+                "url": "https://staging.example.com/mcp/",
+            } if context == "staging" else None,
+        )
+        monkeypatch.setattr(
+            "memoryhub_cli.main.get_api_key",
+            lambda context=None: "staging-key" if context == "staging" else None,
+        )
+        monkeypatch.setattr(
+            "memoryhub_cli.main.get_server_url",
+            lambda context=None: "https://staging.example.com/mcp/"
+            if context == "staging" else None,
+        )
+
+        with patch("memoryhub.MemoryHubClient", autospec=True) as mock_cls:
+            mock_cls.return_value = MagicMock()
+            _get_client(context="staging")
+            mock_cls.assert_called_once_with(
+                url="https://staging.example.com/mcp/",
+                api_key="staging-key",
+            )
+
+    def test_named_context_supplies_url_for_oauth_fallback(self, monkeypatch):
+        monkeypatch.setattr(
+            "memoryhub_cli.main.read_credentials_section",
+            lambda context: {"url": "https://staging.example.com/mcp/"}
+            if context == "staging" else None,
+        )
+        monkeypatch.setattr("memoryhub_cli.main.get_api_key", lambda context=None: None)
+        monkeypatch.setattr(
+            "memoryhub_cli.main.get_connection_params",
+            lambda: {
+                "url": "https://default.example.com/mcp/",
+                "auth_url": "https://auth.example.com",
+                "client_id": "cid",
+                "client_secret": "csec",
+            },
+        )
+
+        with patch("memoryhub.MemoryHubClient", autospec=True) as mock_cls:
+            mock_cls.return_value = MagicMock()
+            _get_client(context="staging")
+            mock_cls.assert_called_once_with(
+                url="https://staging.example.com/mcp/",
+                auth_url="https://auth.example.com",
+                client_id="cid",
+                client_secret="csec",
+            )
+
     def test_no_auth_at_all_errors(self, monkeypatch):
         monkeypatch.setattr("memoryhub_cli.main.get_api_key", lambda: None)
         monkeypatch.setattr("memoryhub_cli.main.get_connection_params", lambda: {

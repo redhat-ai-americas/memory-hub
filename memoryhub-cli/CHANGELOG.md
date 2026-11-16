@@ -12,6 +12,13 @@ All notable changes to the `memoryhub-cli` package.
   - `report_contradiction` → `memory(action="report", ..., options={"observed_behavior": "..."})` (compact profile; correct parameter name)
   - Contradiction handling no longer emits `manage_curation(...)` (a `full`-profile-only tool) for the default compact profile
   - Added S3 content-delivery section (`content_truncated`, `hydrate`) to the generated rule
+- **`memoryhub doctor`**: When `memoryhub-local` is not installed, check the
+  configured cluster endpoint, authentication, and a write/search/read/delete
+  smoke test. Report per-stage results, authenticated session identity/scopes/
+  expiry/project memberships, selected context and sanitized endpoint,
+  actionable failures, and health-based exit codes; keep personal-edition checks
+  unchanged. Add `--edition local`, `--edition cluster`, and `--context` options
+  (#654).
 
 ## [0.12.1] -- 2026-07-29
 
