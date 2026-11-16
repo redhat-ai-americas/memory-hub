@@ -27,6 +27,24 @@ REPO=redhat-ai-americas/memory-hub
 OWNER=redhat-ai-americas
 ```
 
+### Do not use `gh project item-list` to find a single item
+
+It defaults to 30 items and the board returns oldest-first, so the default
+window holds only the oldest issues. A lookup for a newly created issue
+reports "not found" even though the item is on the board. Raising `--limit`
+past the board size fixes the truncation but pages the whole board on every
+lookup, which trips GitHub's secondary rate limit during a run of several
+issue operations.
+
+Use whichever of these fits:
+
+- **Just added the item?** `gh project item-add --format json --jq '.id'`
+  returns its ID. No lookup needed.
+- **Item already on the board?** Use the GraphQL query in
+  [Find an item ID](#find-an-item-id). One request, cannot truncate.
+- **Need the whole board** (list, backlog)? `item-list` with an explicit
+  `--limit` above `totalCount`. Do not call it in a loop.
+
 ---
 
 ## Labels
@@ -121,15 +139,55 @@ gh project item-edit \
 
 ---
 
+## Find an item ID
+
+For an issue already on the board. One request, and it cannot truncate.
+
+```bash
+item_id() {
+  local resp id
+  resp=$(gh api graphql -f query='
+  query($owner:String!, $repo:String!, $num:Int!) {
+    repository(owner:$owner, name:$repo) {
+      issue(number:$num) {
+        projectItems(first:10) {
+          nodes { id project { number } }
+        }
+      }
+    }
+  }' -f owner="$OWNER" -f repo=memory-hub -F num="$1") || return 1
+
+  if jq -e '.errors' >/dev/null 2>&1 <<<"$resp"; then
+    echo "GraphQL error for #$1: $(jq -r '.errors[0].message' <<<"$resp")" >&2
+    return 1
+  fi
+
+  id=$(jq -r ".data.repository.issue.projectItems.nodes[]
+              | select(.project.number == $PROJECT_NUMBER) | .id" <<<"$resp")
+  case "$id" in
+    PVTI_*) echo "$id" ;;
+    "")     echo "#$1 is not on board $PROJECT_NUMBER" >&2; return 1 ;;
+    *)      echo "unexpected item id for #$1: $id" >&2; return 1 ;;
+  esac
+}
+```
+
+The explicit error check matters. With `--jq`, `gh` prints the GraphQL
+error body to stdout and still exits 0, so a rate-limited query returns a
+JSON error blob that a bare non-empty test would accept as an item ID and
+pass to `item-edit`.
+
+A `return 1` with "not on board" means exactly that. Add it with
+`gh project item-add` before setting a status.
+
+---
+
 ## Start Work (`/issue-tracker start <issue-number>`)
 
 Move an issue from Backlog to In Progress.
 
 ```bash
-# Find the project item ID for this issue
-ITEM_ID=$(gh project item-list PROJECT_NUMBER \
-  --owner "$OWNER" \
-  --format json | jq -r '.items[] | select(.content.number == <NUMBER>) | .id')
+ITEM_ID=$(item_id <NUMBER>) || exit 1
 
 # Update status to In Progress
 gh project item-edit \
@@ -154,10 +212,7 @@ gh issue edit <NUMBER> --repo "$REPO" --add-assignee "@me"
 Only after confirmation:
 
 ```bash
-# Find the project item ID
-ITEM_ID=$(gh project item-list PROJECT_NUMBER \
-  --owner "$OWNER" \
-  --format json | jq -r '.items[] | select(.content.number == <NUMBER>) | .id')
+ITEM_ID=$(item_id <NUMBER>) || exit 1
 
 # Update status to Done
 gh project item-edit \
@@ -179,6 +234,7 @@ Show issues grouped by status column.
 ```bash
 gh project item-list PROJECT_NUMBER \
   --owner "$OWNER" \
+  --limit 1000 \
   --format json | jq '
     .items
     | group_by(.status)
@@ -197,6 +253,7 @@ Show only Backlog items.
 ```bash
 gh project item-list PROJECT_NUMBER \
   --owner "$OWNER" \
+  --limit 1000 \
   --format json | jq '
     [.items[] | select(.status == "Backlog") | {number: .content.number, title: .content.title}]
   '
