@@ -3,7 +3,9 @@ import { api } from '@/api/client';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
 import { copyText, Empty, ErrorState, Icon, Modal, SkLines, SkTable, Switch, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
-import type { AccountRow, AccountsResponse, InviteCreated, SettingsResponse, SignupMode, TenantSettingsValues } from '@/types';
+import type { AccountRow, AccountsResponse, InviteCreated, SettingsResponse, SignupMode, TeamsResponse, TenantSettingsValues } from '@/types';
+import { buildHash, navigate } from '@/hooks/useHashRoute';
+import { TeamsTable } from './Teams';
 import { errorMessage, fmtRelative } from '@/utils/format';
 
 /**
@@ -11,7 +13,7 @@ import { errorMessage, fmtRelative } from '@/utils/format';
  * approval, invite codes, and the tenant's sign-up and privacy policy.
  * Shown when local accounts are enabled (MEMORYHUB_UI_LOCAL_ACCOUNTS=true).
  */
-type Tab = 'people' | 'invites' | 'policy';
+type Tab = 'people' | 'teams' | 'invites' | 'policy';
 
 const MODE_LABEL: Record<SignupMode, string> = { invite: 'Invite only', domain: 'Company email domains', open: 'Open', closed: 'Closed' };
 
@@ -23,6 +25,13 @@ const Accounts: React.FC = () => {
   // Tenant overview › Invite users links here with ?invite=1.
   const [inviteOpen, setInviteOpen] = useState(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('invite') === '1');
   const [created, setCreated] = useState<InviteCreated | null>(null);
+  const [statusF, setStatusF] = useState('');
+  useEffect(() => {
+    const h = (e: Event) => setTab((e as CustomEvent<Tab>).detail);
+    window.addEventListener('memoryhub:accounts-tab', h);
+    return () => window.removeEventListener('memoryhub:accounts-tab', h);
+  }, []);
+  const teams = useApi<TeamsResponse>(() => api.teams(), []);
 
   const change = async (a: AccountRow, body: { status?: 'active' | 'disabled'; role?: 'admin' | 'user' }, done: string) => {
     try {
@@ -34,14 +43,13 @@ const Accounts: React.FC = () => {
     }
   };
 
-  const pending = data?.items.filter((a) => a.status === 'pending') ?? [];
-  const others = data?.items.filter((a) => a.status !== 'pending') ?? [];
 
   return (
     <>
       <PageHeader
         title="Users & access"
-        description="Dashboard accounts for people. Agents and service identities live under Agents & identities. Admins manage accounts; they never read personal memories."
+        crumbs={[{ label: 'Users & access' }]}
+        description={`People in ${me?.tenant_id ?? 'this tenant'}, invitations, who can create an account, and what each role sees.`}
         actions={
           <button type="button" className="btn bp" onClick={() => setInviteOpen(true)}>
             <Icon.Plus />
@@ -55,6 +63,7 @@ const Accounts: React.FC = () => {
             onChange={setTab}
             tabs={[
               { value: 'people', label: 'People', count: data?.counts.all ?? null },
+              { value: 'teams', label: 'Teams', count: teams.data ? teams.data.items.length : null },
               { value: 'invites', label: 'Invites', count: data ? data.invites.filter((i) => i.state === 'open').length : null },
               { value: 'policy', label: 'Sign-up & privacy policy' },
             ]}
@@ -140,84 +149,10 @@ const Accounts: React.FC = () => {
               </div>
             )}
           </section>
+        ) : tab === 'teams' ? (
+          <TeamsTab />
         ) : (
-          <>
-            <div className="grid-kpi">
-              {[
-                ['Accounts', data!.counts.all],
-                ['Waiting for approval', data!.counts.pending],
-                ['Platform admins', data!.counts.admins],
-                ['Disabled', data!.counts.disabled],
-              ].map(([label, n]) => (
-                <div className="card" key={label as string}>
-                  <div className="sm muted">{label}</div>
-                  <div className="kpi">{(n as number).toLocaleString()}</div>
-                </div>
-              ))}
-            </div>
-            {pending.length > 0 && (
-              <section className="card" style={{ padding: 0 }}>
-                <div className="ch" style={{ padding: '18px 20px 0' }}>
-                  <h3>Waiting for approval</h3>
-                  <span className="sm muted">Approving gives a user account. Project access still comes from project owners.</span>
-                </div>
-                <AccountTable
-                  rows={pending}
-                  me={me?.username}
-                  actions={(a) => (
-                    <>
-                      <button type="button" className="btn bp sm" onClick={() => change(a, { status: 'active' }, `${a.username} approved.`)}>
-                        Approve
-                      </button>
-                      <button type="button" className="btn bl danger sm" onClick={() => change(a, { status: 'disabled' }, `${a.username} declined.`)}>
-                        Decline
-                      </button>
-                    </>
-                  )}
-                />
-              </section>
-            )}
-            <section className="card" style={{ padding: 0 }}>
-              {others.length === 0 ? (
-                <Empty title="No accounts yet">People appear here when they sign up or accept an invite.</Empty>
-              ) : (
-                <AccountTable
-                  rows={others}
-                  me={me?.username}
-                  actions={(a) => (
-                    <>
-                      {a.status === 'disabled' ? (
-                        <button type="button" className="btn bl sm" onClick={() => change(a, { status: 'active' }, `${a.username} re-enabled.`)}>
-                          Enable
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="btn bl sm"
-                            disabled={a.username === me?.username}
-                            onClick={() =>
-                              change(a, { role: a.role === 'admin' ? 'user' : 'admin' }, a.role === 'admin' ? `${a.username} is now a user.` : `${a.username} is now a platform admin.`)
-                            }
-                          >
-                            {a.role === 'admin' ? 'Make user' : 'Make admin'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn bl danger sm"
-                            disabled={a.username === me?.username}
-                            onClick={() => change(a, { status: 'disabled' }, `${a.username} disabled.`)}
-                          >
-                            Disable
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                />
-              )}
-            </section>
-          </>
+          <PeopleTab data={data!} me={me?.username} change={change} reload={reload} onReview={() => setStatusF('pending')} statusF={statusF} setStatusF={setStatusF} />
         )}
       </div>
       {inviteOpen && (
@@ -257,70 +192,395 @@ const Accounts: React.FC = () => {
   );
 };
 
-const AccountTable: React.FC<{ rows: AccountRow[]; me?: string; actions: (a: AccountRow) => React.ReactNode }> = ({ rows, me, actions }) => (
-  <div className="scroll">
-    <table className="tbl mid">
-      <thead>
-        <tr>
-          <th>Person</th>
-          <th>Role</th>
-          <th>Status</th>
-          <th>Asked for projects</th>
-          <th>Joined</th>
-          <th>Last sign-in</th>
-          <th>
-            <span className="vh">Actions</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((a) => (
-          <tr key={a.id}>
-            <td>
-              <div className="b5">
-                {a.display_name}
-                {a.username === me && <span className="muted sm"> (you)</span>}
-              </div>
-              <div className="sm muted">
-                <span className="mono">{a.username}</span> · {a.email}
-                {a.job_title ? ` · ${a.job_title}` : ''}
-              </div>
-            </td>
-            <td>
-              <span className={`lbl ${a.role === 'admin' ? 'red' : 'g'}`}>{a.role === 'admin' ? 'Platform admin' : 'User'}</span>
-            </td>
-            <td className="sm">
-              <span className={a.status === 'active' ? 'ok' : a.status === 'pending' ? 'warn' : 'muted'}>
-                {a.status === 'active' ? 'Active' : a.status === 'pending' ? 'Waiting' : 'Disabled'}
+const ROLE_FILTERS: [string, string][] = [
+  ['', 'Role: any'],
+  ['user', 'Role: user'],
+  ['admin', 'Role: platform admin'],
+];
+const STATUS_FILTERS: [string, string][] = [
+  ['active', 'Status: active'],
+  ['', 'Status: any'],
+  ['pending', 'Status: waiting for approval'],
+  ['incident', 'Status: under incident'],
+  ['disabled', 'Status: disabled'],
+];
+
+const PeopleTab: React.FC<{
+  data: AccountsResponse;
+  me?: string;
+  change: (a: AccountRow, body: { status?: 'active' | 'disabled'; role?: 'admin' | 'user' }, done: string) => Promise<void>;
+  reload: () => void;
+  onReview: () => void;
+  statusF: string;
+  setStatusF: (v: string) => void;
+}> = ({ data, me, change, onReview, statusF, setStatusF }) => {
+  const settings = useApi<SettingsResponse>(() => api.settings(), []);
+  const [q, setQ] = useState('');
+  const [roleF, setRoleF] = useState('');
+  const [roleFor, setRoleFor] = useState<AccountRow | null>(null);
+  const rows = data.items.filter((a) => {
+    if (roleF && a.role !== roleF) return false;
+    if (statusF === 'incident' && !a.incident_ref) return false;
+    if (statusF && statusF !== 'incident' && a.status !== statusF) return false;
+    if (q && !`${a.display_name} ${a.username} ${a.email}`.toLowerCase().includes(q.toLowerCase())) return false;
+    return true;
+  });
+  const signup = settings.data?.values.signup;
+  return (
+    <>
+      {data.counts.pending > 0 && (
+        <div className="alert warn-a" role="status" style={{ alignItems: 'center' }}>
+          <Icon.Clock size={16} />
+          <span style={{ flex: 1 }}>
+            <b>
+              {data.counts.pending} account{data.counts.pending === 1 ? ' is' : 's are'} waiting for approval.
+            </b>{' '}
+            {signup ? `Self sign-up is set to “${signup.mode === 'invite' ? 'invite only' : signup.require_approval ? 'approval required' : MODE_LABEL[signup.mode].toLowerCase()}”.` : ''}
+          </span>
+          <button type="button" className="btn bs sm-btn" onClick={onReview}>
+            Review
+          </button>
+        </div>
+      )}
+      <div className="filters">
+        <span className="in-icon">
+          <Icon.Search size={15} />
+          <label htmlFor="pp-q" className="vh">
+            Search people
+          </label>
+          <input id="pp-q" className="in" placeholder="Search people" value={q} onChange={(e) => setQ(e.target.value)} />
+        </span>
+        <label htmlFor="pp-r" className="vh">
+          Role
+        </label>
+        <select id="pp-r" className="in auto" value={roleF} onChange={(e) => setRoleF(e.target.value)}>
+          {ROLE_FILTERS.map(([v, l]) => (
+            <option key={v} value={v}>
+              {l}
+            </option>
+          ))}
+        </select>
+        <label htmlFor="pp-s" className="vh">
+          Status
+        </label>
+        <select id="pp-s" className="in auto" value={statusF} onChange={(e) => setStatusF(e.target.value)}>
+          {STATUS_FILTERS.map(([v, l]) => (
+            <option key={v} value={v}>
+              {l}
+            </option>
+          ))}
+        </select>
+      </div>
+      <section className="card" style={{ padding: '6px 12px' }}>
+        {rows.length === 0 ? (
+          <Empty compact title="No people match">
+            {statusF === 'pending' ? 'Nobody is waiting for approval.' : 'People appear here when they sign up or accept an invite.'}
+          </Empty>
+        ) : (
+          <div className="scroll">
+            <table className="tbl mid">
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  <th>Tenant role</th>
+                  <th>Projects</th>
+                  <th>Agents</th>
+                  <th>Last active</th>
+                  <th>Status</th>
+                  <th>
+                    <span className="vh">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((a) => {
+                  const self = a.username === me;
+                  const last = a.last_active_at ?? a.last_login_at;
+                  return (
+                    <tr key={a.id}>
+                      <td>
+                        <b>{a.display_name}</b>
+                        {self && <span className="muted sm"> (you)</span>}
+                        <div className="sm muted">{a.username}</div>
+                      </td>
+                      <td>
+                        {a.superuser ? (
+                          <span className="lbl org">Super Admin</span>
+                        ) : a.role === 'admin' ? (
+                          <span className="lbl role-pa">Platform Admin</span>
+                        ) : (
+                          'User'
+                        )}
+                      </td>
+                      <td>{a.status === 'pending' ? '—' : a.projects ?? '—'}</td>
+                      <td>{a.status === 'pending' ? '—' : a.agents ?? '—'}</td>
+                      <td className="sm">{a.status === 'pending' || !last ? '—' : fmtRelative(last)}</td>
+                      <td>
+                        {a.incident_ref ? (
+                          <span className="lbl ylw">Under incident {a.incident_ref}</span>
+                        ) : a.status === 'pending' ? (
+                          <span className="lbl blue">Waiting for approval</span>
+                        ) : a.status === 'disabled' ? (
+                          <span className="lbl g">Disabled</span>
+                        ) : (
+                          <span className="lbl grn">Active</span>
+                        )}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <span className="row-links">
+                          {a.status === 'pending' ? (
+                            <>
+                              <button type="button" className="btn bs sm-btn" onClick={() => change(a, { status: 'active' }, `${a.username} approved.`)}>
+                                Approve
+                              </button>
+                              <button type="button" className="link-btn" onClick={() => change(a, { status: 'disabled' }, `${a.username} declined.`)}>
+                                Decline
+                              </button>
+                            </>
+                          ) : a.status === 'disabled' ? (
+                            <button type="button" className="link-btn" onClick={() => change(a, { status: 'active' }, `${a.username} re-enabled.`)}>
+                              Enable
+                            </button>
+                          ) : a.incident_ref ? (
+                            <button type="button" className="link-btn" onClick={() => navigate('/identities', new URLSearchParams({ q: a.username }))}>
+                              Revoke sessions
+                            </button>
+                          ) : (
+                            <>
+                              <button type="button" className="link-btn" disabled={self} onClick={() => setRoleFor(a)}>
+                                Change role
+                              </button>
+                              {a.role !== 'admin' && (
+                                <a className="link-btn" href={buildHash('/identities', { q: a.username })}>
+                                  Sessions
+                                </a>
+                              )}
+                            </>
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      <AccessCards settings={settings} />
+      {roleFor && <RoleModal account={roleFor} onClose={() => setRoleFor(null)} change={change} />}
+    </>
+  );
+};
+
+const RoleModal: React.FC<{
+  account: AccountRow;
+  onClose: () => void;
+  change: (a: AccountRow, body: { status?: 'active' | 'disabled'; role?: 'admin' | 'user' }, done: string) => Promise<void>;
+}> = ({ account: a, onClose, change }) => {
+  const [role, setRole] = useState<'user' | 'admin' | 'disabled'>(a.role);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal
+      title={`Change role · ${a.display_name}`}
+      onClose={onClose}
+      actions={
+        <>
+          <button
+            type="button"
+            className={`btn ${role === 'disabled' ? 'bd' : 'bp'}`}
+            disabled={busy || role === a.role}
+            onClick={async () => {
+              setBusy(true);
+              if (role === 'disabled') await change(a, { status: 'disabled' }, `${a.username} disabled.`);
+              else await change(a, { role }, role === 'admin' ? `${a.username} is now a platform admin.` : `${a.username} is now a user.`);
+              setBusy(false);
+              onClose();
+            }}
+          >
+            {role === 'disabled' ? 'Disable account' : 'Save role'}
+          </button>
+          <button type="button" className="btn bg" onClick={onClose}>
+            Cancel
+          </button>
+        </>
+      }
+    >
+      <div className="radio-list">
+        {(
+          [
+            ['user', 'User', 'Own memory and the projects they are a member of.'],
+            ['admin', 'Platform Admin', 'Tenant control and moderation; memory metadata only, never personal content.'],
+            ['disabled', 'Disable account', 'Signs the person out and blocks their agents; nothing is deleted.'],
+          ] as const
+        ).map(([v, l, d]) => (
+          <label key={v} className={`radio ${role === v ? 'on' : ''}`}>
+            <input type="radio" name="acc-role" checked={role === v} onChange={() => setRole(v)} />
+            <span>
+              <b>{l}</b>
+              <span className="hint" style={{ display: 'block' }}>
+                {d}
               </span>
-            </td>
-            <td className="sm">
-              {a.requested_projects.length ? (
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {a.requested_projects.map((p) => (
-                    <span className="tag" key={p}>
-                      {p}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <span className="muted">—</span>
-              )}
-            </td>
-            <td className="sm muted" style={{ whiteSpace: 'nowrap' }}>
-              {fmtRelative(a.created_at)}
-              {a.invited_by && <div>invited by {a.invited_by}</div>}
-            </td>
-            <td className="sm muted" style={{ whiteSpace: 'nowrap' }}>
-              {a.last_login_at ? fmtRelative(a.last_login_at) : 'Never'}
-            </td>
-            <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>{actions(a)}</td>
-          </tr>
+            </span>
+          </label>
         ))}
-      </tbody>
-    </table>
-  </div>
-);
+      </div>
+      <p className="sm muted" style={{ margin: '10px 0 0' }}>
+        Super Admin is granted by the platform, not here. The change is recorded as an administrative event.
+      </p>
+    </Modal>
+  );
+};
+
+const ALL_SCOPES = ['project', 'campaign', 'role', 'organizational', 'enterprise'] as const;
+const SCOPE_NAME: Record<string, string> = { project: 'Project*', campaign: 'Campaign', role: 'Role', organizational: 'Org', enterprise: 'Enterprise' };
+
+/** Sign-up mode, which scopes admins moderate, and what each role sees. */
+const AccessCards: React.FC<{ settings: ReturnType<typeof useApi<SettingsResponse>> }> = ({ settings }) => {
+  const toast = useToast();
+  const [v, setV] = useState<TenantSettingsValues | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (settings.data) setV(structuredClone(settings.data.values));
+  }, [settings.data]);
+  if (!v || !settings.data)
+    return (
+      <div className="card">
+        <SkLines lines={4} />
+      </div>
+    );
+  const domain = v.signup.allowed_domains[0];
+  const mode = v.signup.mode === 'invite' || v.signup.mode === 'closed' ? 'invite' : v.signup.mode === 'domain' ? 'domain' : 'approval';
+  const setMode = (m: string) =>
+    setV({ ...v, signup: { ...v.signup, mode: m === 'invite' ? 'invite' : m === 'domain' ? 'domain' : 'open', require_approval: m === 'approval' ? true : v.signup.require_approval } });
+  const scopes = v.privacy.admin_readable_scopes;
+  const dirty = JSON.stringify({ s: v.signup, p: v.privacy }) !== JSON.stringify({ s: settings.data.values.signup, p: settings.data.values.privacy });
+  const save = async () => {
+    setBusy(true);
+    try {
+      const res = await api.saveSettings({ signup: v.signup, privacy: v.privacy });
+      settings.setData(res);
+      toast('Access policy saved.');
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <div className="acc-cards">
+        <section className="card">
+          <h3>Who can create an account</h3>
+          <div className="radio-plain">
+            {(
+              [
+                ['invite', 'Invite only'],
+                ['approval', 'Self sign-up, approval required'],
+                ['domain', `Self sign-up for ${domain ? `@${domain}` : 'company domains'}`],
+              ] as const
+            ).map(([m, l]) => (
+              <label key={m}>
+                <input type="radio" name="who-signup" checked={mode === m} onChange={() => setMode(m)} />
+                {l}
+              </label>
+            ))}
+          </div>
+          {mode === 'domain' && !domain && <p className="sm muted">Set the allowed domains on the Sign-up &amp; privacy policy tab.</p>}
+        </section>
+        <section className="card">
+          <h3>Admin access to memory content</h3>
+          <p className="sm muted" style={{ margin: '8px 0 12px' }}>
+            Scopes admins may moderate in this tenant. Personal content is never readable to admins — only through an addressed incident grant approved by two Super Admins.
+          </p>
+          <div className="scope-checks">
+            {ALL_SCOPES.map((sc) => (
+              <label key={sc} className="scope-check">
+                <input
+                  type="checkbox"
+                  checked={scopes.includes(sc)}
+                  onChange={() => setV({ ...v, privacy: { ...v.privacy, admin_readable_scopes: scopes.includes(sc) ? scopes.filter((x) => x !== sc) : [...scopes, sc] } })}
+                />
+                {SCOPE_NAME[sc]}
+              </label>
+            ))}
+            <label className="scope-check dis">
+              <input type="checkbox" checked={false} disabled />
+              Personal
+            </label>
+          </div>
+          <p className="sm muted" style={{ margin: '10px 0 0' }}>
+            * moderation actions on all projects; reading project text needs membership or an assigned workflow
+          </p>
+        </section>
+        <section className="card">
+          <h3>What each role sees</h3>
+          <ul className="role-sees">
+            <li>
+              <span className="lbl blue">User</span> Own + member scopes
+            </li>
+            <li>
+              <span className="lbl role-pa">PA</span> Tenant control, metadata
+            </li>
+            <li>
+              <span className="lbl org">SA</span> Platform control, incident grants
+            </li>
+          </ul>
+          <a className="sm" href={buildHash('/accounts', { tab: 'policy' })} onClick={(e) => {
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent('memoryhub:accounts-tab', { detail: 'policy' }));
+          }}>
+            Full permission matrix
+          </a>
+        </section>
+      </div>
+      {dirty && (
+        <div className="savebar" role="status">
+          <span style={{ flex: 1 }}>Access policy changed.</span>
+          <button type="button" className="btn bg" onClick={() => setV(structuredClone(settings.data!.values))}>
+            Discard
+          </button>
+          <button type="button" className="btn bp" disabled={busy} onClick={save}>
+            Save · audited
+          </button>
+        </div>
+      )}
+    </>
+  );
+};
+
+const TeamsTab: React.FC = () => {
+  const { data, loading, error, reload } = useApi<TeamsResponse>(() => api.teams(), []);
+  const [q, setQ] = useState('');
+  if (error && !data) return <ErrorState error={error} onRetry={reload} />;
+  return (
+    <>
+      <div className="filters">
+        <span className="in-icon">
+          <Icon.Search size={15} />
+          <label htmlFor="tm-q" className="vh">
+            Search teams
+          </label>
+          <input id="tm-q" className="in" placeholder="Search teams or members" value={q} onChange={(e) => setQ(e.target.value)} />
+        </span>
+        <span className="sm muted" style={{ marginLeft: 'auto' }}>
+          Double-click a team for its summary · manage teams in Projects &amp; teams
+        </span>
+      </div>
+      <section className="card" style={{ padding: 0 }}>
+        <TeamsTable
+          teams={data?.items ?? []}
+          loading={loading && !data}
+          active={null}
+          filter={q}
+          onSelect={(id) => navigate(`/team/${id}`)}
+          onOpen={(id) => navigate(`/team/${id}`)}
+          onCreate={() => navigate('/projects', new URLSearchParams({ kind: 'teams' }))}
+        />
+      </section>
+    </>
+  );
+};
 
 const InviteModal: React.FC<{ onClose: () => void; onCreated: (i: InviteCreated) => void }> = ({ onClose, onCreated }) => {
   const toast = useToast();

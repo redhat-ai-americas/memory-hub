@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { api } from '@/api/client';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
 import { renderWelcomeEmail } from '@/components/welcomeEmail';
-import { copyText, Dropdown, Empty, ErrorState, Modal, SkTable, useToast } from '@/components/ui';
+import { copyText, Empty, ErrorState, Icon, Modal, SkLines, SkTable, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
-import { navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { CredentialRow, PublicConfig } from '@/types';
+import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
+import type { CredentialRow, PublicConfig, SettingsResponse } from '@/types';
 import { errorMessage, fmtRelative } from '@/utils/format';
 import { ConfirmModal } from './common';
 
@@ -80,6 +80,18 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
         : c,
     );
   const rows = withApplied(tab === 'keys' ? data?.api_keys ?? [] : data?.clients ?? []);
+  const [q, setQ] = useState('');
+  const [statusF, setStatusF] = useState('');
+  const [ownerF, setOwnerF] = useState('');
+  const shown = rows.filter((c) => {
+    if (ownerF && c.identity_type !== ownerF) return false;
+    if (statusF === 'suspended' && !c.suspended_incident) return false;
+    if (statusF === 'active' && !(c.active && c.status !== 'stale' && !c.suspended_incident)) return false;
+    if (statusF === 'stale' && c.status !== 'stale') return false;
+    if (statusF === 'revoked' && c.active) return false;
+    if (q && !`${c.client_name} ${c.client_id} ${c.owner ?? ''}`.toLowerCase().includes(q.toLowerCase())) return false;
+    return true;
+  });
 
   const doConfirm = async () => {
     if (!confirm) return;
@@ -101,16 +113,20 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
   return (
     <>
       <PageHeader
-        title="OAuth clients & API keys"
+        title="OAuth clients & keys"
         crumbs={[{ label: 'OAuth clients & keys' }]}
-        description="Credentials agents use to reach the MCP server and SDK. Start with an API key; move to OAuth 2.1 client credentials or platform token exchange for production fleets."
+        description={
+          role === 'user'
+            ? 'Credentials your agents use to reach the MCP server and SDK. A secret is shown once when it is issued; nobody can view it later.'
+            : 'The tenant’s client registry: OAuth clients, API keys and trusted token issuers. A secret is shown once when it is issued; nobody can view it later, including you.'
+        }
         actions={
           <>
             <button type="button" className="btn bs" disabled={data ? !data.auth_available : true} onClick={() => setModal('key')}>
-              Issue API key
+              New API key
             </button>
             <button type="button" className="btn bp" disabled={data ? !data.auth_available : true} onClick={() => setModal('client')}>
-              Create OAuth client
+              <Icon.Plus /> New OAuth client
             </button>
           </>
         }
@@ -128,145 +144,184 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
         }
       />
       <div className="body">
-        <div className="row-wrap">
-          <section className="card" style={{ flex: '999 1 560px', padding: 0, minWidth: 0 }}>
-            {error && !data ? (
-              <ErrorState error={error} onRetry={reload} />
-            ) : loading && !data ? (
-              <SkTable rows={7} cols={6} />
-            ) : !data!.auth_available ? (
-              <Empty title="Auth service unavailable" action={<button type="button" className="btn bs" onClick={reload}>Try again</button>}>
-                The dashboard could not reach the MemoryHub auth service (MEMORYHUB_AUTH_SERVICE_URL), so clients and keys cannot be listed or issued.
-              </Empty>
-            ) : tab === 'issuers' ? (
-              <IssuerList issuers={data!.issuers} issuer={data!.issuer} />
-            ) : rows.length === 0 ? (
-              <Empty
-                title={tab === 'keys' ? 'No API keys yet' : 'No OAuth clients yet'}
-                action={
+        {revealed && <RevealCard revealed={revealed} onDismiss={() => setRevealed(null)} />}
+        {tab !== 'issuers' && data?.auth_available && (
+          <div className="filters">
+            <span className="in-icon">
+              <Icon.Search size={15} />
+              <label htmlFor="cl-q" className="vh">
+                Search clients
+              </label>
+              <input id="cl-q" className="in" placeholder={tab === 'keys' ? 'Search keys' : 'Search clients'} value={q} onChange={(e) => setQ(e.target.value)} />
+            </span>
+            <label htmlFor="cl-s" className="vh">
+              Status
+            </label>
+            <select id="cl-s" className="in auto" value={statusF} onChange={(e) => setStatusF(e.target.value)}>
+              <option value="">Status: any</option>
+              <option value="active">Status: Active</option>
+              <option value="suspended">Status: Suspended</option>
+              <option value="stale">Status: Stale &gt; 30 d</option>
+              <option value="revoked">Status: Revoked</option>
+            </select>
+            {role !== 'user' && (
+              <>
+                <label htmlFor="cl-o" className="vh">
+                  Owner type
+                </label>
+                <select id="cl-o" className="in auto" value={ownerF} onChange={(e) => setOwnerF(e.target.value)}>
+                  <option value="">Owner type: any</option>
+                  <option value="service">Owner type: service identity</option>
+                  <option value="user">Owner type: person</option>
+                </select>
+              </>
+            )}
+          </div>
+        )}
+        <section className="card" style={{ padding: tab === 'issuers' ? undefined : '6px 12px' }}>
+          {error && !data ? (
+            <ErrorState error={error} onRetry={reload} />
+          ) : loading && !data ? (
+            <SkTable rows={7} cols={6} />
+          ) : !data!.auth_available ? (
+            <Empty title="Auth service unavailable" action={<button type="button" className="btn bs" onClick={reload}>Try again</button>}>
+              The dashboard could not reach the MemoryHub auth service (MEMORYHUB_AUTH_SERVICE_URL), so clients and keys cannot be listed or issued.
+            </Empty>
+          ) : tab === 'issuers' ? (
+            <IssuerList issuers={data!.issuers} issuer={data!.issuer} />
+          ) : shown.length === 0 ? (
+            <Empty
+              compact
+              title={rows.length ? 'Nothing matches' : tab === 'keys' ? 'No API keys yet' : 'No OAuth clients yet'}
+              action={
+                !rows.length && (
                   <button type="button" className="btn bp" onClick={() => setModal(tab === 'keys' ? 'key' : 'client')}>
-                    {tab === 'keys' ? 'Issue API key' : 'Create OAuth client'}
+                    {tab === 'keys' ? 'New API key' : 'New OAuth client'}
                   </button>
-                }
-              >
-                Create a client for each agent or service that should read or write memory.
-              </Empty>
-            ) : (
-              <div className="scroll">
-                <table className="tbl" style={{ minWidth: 820 }}>
-                  <thead>
-                    <tr>
-                      <th>Client</th>
-                      <th>Bound identity</th>
-                      <th>Grant</th>
-                      <th>Scopes</th>
-                      <th>Last used</th>
-                      <th>Status</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((c) => (
+                )
+              }
+            >
+              {rows.length ? 'Clear a filter to see more.' : 'Create a client for each agent or service that should read or write memory.'}
+            </Empty>
+          ) : (
+            <div className="scroll">
+              <table className="tbl mid" style={{ minWidth: 820 }}>
+                <thead>
+                  <tr>
+                    <th>Client</th>
+                    <th>Owner</th>
+                    <th>Grant type</th>
+                    <th>Scopes allowed</th>
+                    <th>Last used</th>
+                    <th>Status</th>
+                    <th>
+                      <span className="vh">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((c) => {
+                    const st = statusOf(c);
+                    return (
                       <tr key={c.client_id} className={c.status === 'new' ? 'new' : c.client_id === focusClient ? 'is-sel' : ''}>
                         <td>
-                          <div style={{ fontWeight: 600 }}>{c.client_name}</div>
-                          <div className="mono muted">{c.client_id}</div>
+                          <b>{c.client_name}</b>
+                          <div className="mono sm muted">{c.client_id.length > 10 ? `${c.client_id.slice(0, 7)}…` : c.client_id}</div>
                         </td>
-                        <td className="sm">
-                          {c.identity_type}
-                          {c.status === 'new' ? ' · new' : ''}
+                        <td>{c.identity_type === 'service' ? 'service identity' : c.owner ?? 'person'}</td>
+                        <td className="sm">{tab === 'keys' ? 'API key' : c.grant === 'authorization_code' ? 'authorization_code + PKCE' : c.grant}</td>
+                        <td className="sm" style={{ maxWidth: 240 }}>
+                          {c.identity_type === 'user' && c.default_scopes.length === 0
+                            ? 'owner’s scopes ∩ agent permissions'
+                            : c.default_scopes.map((x) => x.replace(/^memory:/, '').replace(/^project:/, 'project: ')).join(' · ') || '—'}
                         </td>
-                        <td>
-                          <span className={`lbl ${tab === 'keys' ? 'g' : c.grant === 'client_credentials' ? 'blue' : 'g'}`}>{tab === 'keys' ? 'API key' : c.grant}</span>
-                        </td>
-                        <td style={{ maxWidth: 240 }}>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                            {c.default_scopes.map((s) => (
-                              <span className="code" key={s}>
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="sm muted" style={{ whiteSpace: 'nowrap' }}>
-                          {fmtRelative(c.last_used)}
+                        <td className="sm" style={{ whiteSpace: 'nowrap' }}>
+                          {lastUsed(c.last_used)}
                         </td>
                         <td>
-                          <span className={`lbl ${STATUS[c.status].cls}`}>{STATUS[c.status].label}</span>
+                          <span className={`lbl ${st.cls}`}>{st.label}</span>
                         </td>
-                        <td>
-                          <Dropdown
-                            align="right"
-                            toggle={(p) => (
-                              <button type="button" className="btn bl" aria-label="Client actions" style={{ padding: '4px 8px' }} {...p}>
-                                ⋮
-                              </button>
-                            )}
-                          >
-                            {(close) => (
-                              <>
-                                <button type="button" onClick={() => { close(); setEditing(c); }}>
-                                  Edit name and scopes
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <span className="row-links stack-links">
+                            {c.suspended_incident ? (
+                              <a className="link-btn" href={buildHash('/audit', { tab: 'grants' })}>
+                                Details
+                              </a>
+                            ) : !c.active ? (
+                              role !== 'user' ? (
+                                <button type="button" className="link-btn" onClick={() => setConfirm({ kind: 'restore', row: c })}>
+                                  Re-issue
                                 </button>
-                                {!c.public && (
-                                  <button type="button" onClick={() => { close(); setConfirm({ kind: 'secret', row: c }); }}>
-                                    Rotate client secret
+                              ) : (
+                                <span className="sm muted">Ask an admin</span>
+                              )
+                            ) : (
+                              <>
+                                {!c.public && c.identity_type === 'service' && c.status !== 'stale' && (
+                                  <button type="button" className="link-btn" onClick={() => setConfirm({ kind: tab === 'keys' ? 'key' : 'secret', row: c })}>
+                                    {tab === 'keys' ? 'Rotate key' : 'Rotate secret'}
                                   </button>
                                 )}
-                                {!c.public && (
-                                  <button type="button" onClick={() => { close(); setConfirm({ kind: 'key', row: c }); }}>
-                                    Rotate API key
-                                  </button>
-                                )}
-                                <hr />
-                                {c.active ? (
-                                  <button type="button" className="danger" onClick={() => { close(); setConfirm({ kind: 'revoke', row: c }); }}>
-                                    Revoke
-                                  </button>
-                                ) : role !== 'user' ? (
-                                  <button type="button" onClick={() => { close(); setConfirm({ kind: 'restore', row: c }); }}>
-                                    Re-activate
-                                  </button>
-                                ) : <span className="sm muted">Ask an admin to reactivate</span>}
+                                <button type="button" className="link-btn" onClick={() => setConfirm({ kind: 'revoke', row: c })}>
+                                  Revoke
+                                </button>
                               </>
                             )}
-                          </Dropdown>
+                            <button type="button" className="link-btn muted-link" onClick={() => setEditing(c)}>
+                              Edit
+                            </button>
+                          </span>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+        {data?.auth_available && tab !== 'issuers' && (
+          <div className="acc-cards two">
+            <section className="card">
+              <div className="card-head">
+                <h3>Trusted token issuers</h3>
+                <button
+                  type="button"
+                  className="btn bs sm-btn"
+                  onClick={() => setTab('issuers')}
+                  title="Issuers are configured on the auth service (MEMORYHUB_TRUSTED_ISSUERS)"
+                >
+                  {role === 'user' ? 'View all' : 'Add issuer'}
+                </button>
               </div>
-            )}
-          </section>
-
-          <aside className="col-side" style={{ flex: '1 1 380px' }}>
-            {revealed && <RevealCard revealed={revealed} onDismiss={() => setRevealed(null)} />}
-            {tab !== 'issuers' && data && (
-              <div className="card">
-                <div className="ch">
-                  <h3>Trusted token issuers</h3>
-                  <button type="button" className="btn bl sm" onClick={() => setTab('issuers')}>
-                    View all
-                  </button>
-                </div>
-                <p className="sm muted" style={{ margin: '0 0 12px' }}>
-                  Workloads exchange their platform token (RFC 8693) for a scoped MemoryHub JWT — no API keys to manage.
+              {data.issuers.length === 0 ? (
+                <p className="sm muted" style={{ marginTop: 10 }}>
+                  No trusted issuers. Token exchange is disabled in the auth service.
                 </p>
-                <IssuerCards issuers={data.issuers} />
-              </div>
-            )}
-            {!revealed && tab === 'issuers' && (
-              <div className="card">
-                <h3 style={{ marginBottom: 8 }}>Adding an issuer</h3>
-                <p className="sm muted" style={{ margin: 0, lineHeight: 1.5 }}>
-                  The local cluster issuer is enabled in the auth service with token exchange. Additional OIDC issuers are configured on the auth service; list them for
-                  operators by setting <span className="mono">MEMORYHUB_TRUSTED_ISSUERS</span> on the dashboard.
-                </p>
-              </div>
-            )}
-          </aside>
-        </div>
+              ) : (
+                <ul className="issuer-list">
+                  {data.issuers.map((i) => (
+                    <li key={i.name}>
+                      <span className="mono">{i.name}</span>
+                      <span className={`lbl ${i.status === 'verified' || i.status === 'active' ? 'grn' : 'ylw'}`}>
+                        {i.status === 'verified' || i.status === 'active' ? 'Verified · JWKS' : i.status ?? 'Draft'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            {role !== 'user' && <ClientPolicy />}
+          </div>
+        )}
+        {role !== 'user' && (
+          <div className="alert" role="note">
+            <Icon.Info size={16} />
+            <span className="sm">
+              Users manage their own agents’ keys in My agents. Here you can suspend or revoke any client in the tenant, but a client never grants more than its owner can read.
+            </span>
+          </div>
+        )}
       </div>
 
       {(modal === 'client' || modal === 'key') && (
@@ -312,6 +367,53 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
         </ConfirmModal>
       )}
     </>
+  );
+};
+
+const statusOf = (c: CredentialRow) =>
+  c.suspended_incident
+    ? { cls: 'ylw', label: `Suspended · ${c.suspended_incident}` }
+    : !c.active
+      ? { cls: 'g', label: 'Revoked' }
+      : c.status === 'stale'
+        ? { cls: 'ylw', label: 'Stale > 30 d' }
+        : STATUS[c.status];
+const lastUsed = (iso: string | null) => {
+  if (!iso) return 'Never';
+  const d = new Date(iso);
+  if (Date.now() - d.getTime() < 3600000) return fmtRelative(iso);
+  if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+/** Tenant client policy, within the limits set in Global policies. */
+const ClientPolicy: React.FC = () => {
+  const { data } = useApi<SettingsResponse>(() => api.settings(), []);
+  const qv = data?.values.quotas;
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h3>Client policy</h3>
+        <span className="sm muted">within global limits</span>
+      </div>
+      {!data ? (
+        <SkLines lines={3} />
+      ) : (
+        <dl className="detail-kv nums">
+          <dt>Allowed connection methods</dt>
+          <dd>{qv?.connection_methods === 'oauth' ? 'OAuth 2.1 only' : 'OAuth 2.1 · API key'}</dd>
+          <dt>Key lifetime</dt>
+          <dd>
+            {qv?.key_lifetime_days ?? 90} days (max {qv?.key_lifetime_max_days ?? 365})
+          </dd>
+          <dt>Revoke stale after</dt>
+          <dd>{qv?.revoke_stale_days ?? 60} days</dd>
+        </dl>
+      )}
+      <a className="sm" href={buildHash('/settings')} style={{ display: 'inline-block', marginTop: 12 }}>
+        Change in Tenant settings
+      </a>
+    </section>
   );
 };
 

@@ -99,6 +99,12 @@ export interface AccountRow {
   last_login_at: string | null;
   approved_by: string | null;
   invited_by: string | null;
+  /** Optional, newer servers: counts and live state for the people table. */
+  projects?: number;
+  agents?: number;
+  last_active_at?: string | null;
+  incident_ref?: string | null;
+  superuser?: boolean;
 }
 
 export interface InviteRow {
@@ -767,12 +773,16 @@ export interface IdentityRow {
   memory_count: number;
   last_active: string | null;
   active_now: boolean;
+  /** Optional, newer servers. */
+  client_id?: string | null;
+  suspended_incident?: string | null;
 }
 
 export interface IdentitiesResponse {
   items: IdentityRow[];
   auth_available: boolean;
-  roles: { name: string; members: number }[];
+  /** memories / agents: optional, newer servers. */
+  roles: { name: string; members: number; memories?: number; agents?: number }[];
   counts: { all: number; users: number; user_agents: number; service_agents: number; roles: number };
 }
 
@@ -800,6 +810,9 @@ export interface CredentialRow extends ClientResponse {
   grant: string;
   last_used: string | null;
   status: 'new' | 'active' | 'stale' | 'revoked';
+  /** Optional, newer servers: the person a user agent belongs to, and an incident suspension. */
+  owner?: string | null;
+  suspended_incident?: string | null;
 }
 
 export interface CredentialsResponse {
@@ -892,7 +905,7 @@ export interface RuleTestResult {
 }
 
 export interface ReviewSummary {
-  kind: 'approval' | 'promotion' | 'contradiction' | 'quarantine' | 'history';
+  kind: 'approval' | 'promotion' | 'contradiction' | 'quarantine' | 'hard_delete' | 'history';
   id: string;
   stub: string;
   content: string;
@@ -908,7 +921,8 @@ export interface ReviewSummary {
 
 export interface ReviewQueue {
   tab: string;
-  counts: { approvals: number; promotions: number; contradictions: number; quarantine: number };
+  /** hard_delete: optional, newer servers with the two-person hard-delete workflow. */
+  counts: { approvals: number; promotions: number; contradictions: number; quarantine: number; hard_delete?: number };
   items: (ReviewSummary | (AuditEvent & { kind: 'history' }))[];
   also_waiting: ReviewSummary[];
   approvers_required: number;
@@ -1003,6 +1017,9 @@ export interface TenantSettingsValues {
     role_isolation: boolean;
     contradiction_threshold: number;
     enterprise_approvers: number;
+    /** Optional, newer servers. */
+    hard_delete_two_person?: boolean;
+    notify_review_reads?: boolean;
   };
   audit: {
     read_detail: 'full' | 'summary' | 'sample';
@@ -1011,12 +1028,23 @@ export interface TenantSettingsValues {
     /** Optional, newer servers: per-record-type retention, global ceilings and storage stats. */
     retention?: AuditRetention;
   };
-  organization: { name: string; contact_email: string };
+  organization: { name: string; contact_email: string; time_zone?: string };
   signup: { mode: SignupMode; allowed_domains: string[]; require_approval: boolean };
   privacy: SetupPayload['privacy'];
   security: SetupPayload['security'];
   /** Optional, newer servers: tenant dreaming & compaction policy. */
   curation?: CurationPolicy;
+  /** Optional, newer servers: quotas and client policy (the tenant quota itself is set by a Super Admin). */
+  quotas?: TenantQuotas;
+}
+
+export interface TenantQuotas {
+  tenant_memory_quota?: number | null;
+  default_project_quota?: number | null;
+  connection_methods?: 'oauth_keys' | 'oauth' | 'keys';
+  key_lifetime_days?: number;
+  key_lifetime_max_days?: number;
+  revoke_stale_days?: number;
 }
 
 export interface AuditRetention {

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { api } from '@/api/client';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
-import { Empty, ErrorState, Modal, SelectMenu, SkLines, SkTable, useToast } from '@/components/ui';
+import { Empty, ErrorState, Icon, Modal, SelectMenu, SkLines, SkTable, useToast } from '@/components/ui';
+import { ConfirmModal } from './common';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
 import type { IdentityDetail, IdentityRow } from '@/types';
@@ -15,6 +16,11 @@ const TYPE_LABEL: Record<string, { cls: string; label: string }> = {
 };
 
 const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
+  const { role } = useApp();
+  return role === 'user' ? <UserIdentities route={route} /> : <AdminIdentities route={route} />;
+};
+
+const UserIdentities: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
   const { role: viewerRole, me } = useApp();
   const isUser = viewerRole === 'user';
@@ -258,6 +264,369 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
     </>
   );
 };
+
+const STATUS_OPTS: [string, string][] = [
+  ['', 'Status: any'],
+  ['active', 'Status: active now'],
+  ['recent', 'Status: active · 30 d'],
+  ['suspended', 'Status: suspended'],
+  ['revoked', 'Status: revoked'],
+  ['stale', 'Status: stale > 30 d'],
+];
+const STALE_MS = 30 * 86400000;
+const isStale = (i: IdentityRow) => i.active && !i.active_now && (!i.last_active || Date.now() - Date.parse(i.last_active) > STALE_MS);
+const lastCall = (iso: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Date.now() - d.getTime() < 3600000) return fmtRelative(iso);
+  if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+/** Platform admin: every identity that can call MemoryHub, with roles, client and status. */
+const AdminIdentities: React.FC<{ route: HashRoute }> = ({ route }) => {
+  const toast = useToast();
+  const { me } = useApp();
+  const tab = route.params.get('tab') === 'roles' ? 'roles' : 'identities';
+  const type = route.params.get('type') || 'all';
+  const [filter, setFilter] = useState(route.params.get('q') ?? '');
+  const [role, setRole] = useState('');
+  const [status, setStatus] = useState('');
+  const [modal, setModal] = useState<null | 'service' | 'link' | 'role'>(null);
+  const [details, setDetails] = useState<IdentityRow | null>(null);
+  const [revoke, setRevoke] = useState<IdentityRow | null>(null);
+  const { data, error, loading, reload } = useApi(() => api.identities(), []);
+  const creds = useApi(() => api.credentials(), []);
+
+  const setParam = (changes: Record<string, string | undefined>) => {
+    const next = new URLSearchParams(route.params);
+    Object.entries(changes).forEach(([k, v]) => (v ? next.set(k, v) : next.delete(k)));
+    navigate('/identities', next, { replace: true });
+  };
+  const items = data?.items ?? [];
+  const rows = items.filter((i) => {
+    if (type === 'users' && i.type !== 'user') return false;
+    if (type === 'agents' && i.type !== 'user agent') return false;
+    if (type === 'services' && i.type !== 'service') return false;
+    if (role && !i.roles.includes(role)) return false;
+    if (status === 'active' && !(i.active && i.active_now)) return false;
+    if (status === 'recent' && !(i.active && !isStale(i))) return false;
+    if (status === 'suspended' && !i.suspended_incident) return false;
+    if (status === 'revoked' && i.active) return false;
+    if (status === 'stale' && !isStale(i)) return false;
+    const f = filter.toLowerCase();
+    return !f || i.id.toLowerCase().includes(f) || i.name.toLowerCase().includes(f) || (i.bound_to ?? '').toLowerCase().includes(f);
+  });
+  const nameOf = (id: string | null | undefined) => (id ? items.find((x) => x.id === id && x.type === 'user')?.name ?? id : null);
+  const counts = {
+    services: items.filter((i) => i.type === 'service').length,
+    agents: items.filter((i) => i.type === 'user agent').length,
+    suspended: items.filter((i) => i.suspended_incident).length,
+    stale: items.filter((i) => i.type !== 'user' && isStale(i)).length,
+  };
+
+  const doRevoke = async () => {
+    if (!revoke) return;
+    await api.updateClient(revoke.client_id ?? revoke.id, { active: false });
+    toast(`${revoke.name} revoked. New tokens are refused now; existing sessions stop within 5 seconds.`);
+    reload();
+  };
+  const action = (i: IdentityRow) => {
+    if (i.suspended_incident) return <button type="button" className="link-btn" onClick={() => setDetails(i)}>Details</button>;
+    if (i.type === 'user')
+      return (
+        <button type="button" className="link-btn" onClick={() => setModal('link')}>
+          Link agent
+        </button>
+      );
+    if (!i.active)
+      return (
+        <a className="link-btn" href={buildHash('/clients', { client: i.client_id ?? i.id })}>
+          Re-issue
+        </a>
+      );
+    if (i.type === 'service')
+      return (
+        <button type="button" className="link-btn" onClick={() => setModal('role')}>
+          Edit roles
+        </button>
+      );
+    return (
+      <button type="button" className="link-btn" onClick={() => setRevoke(i)}>
+        Revoke
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Agents & identities"
+        crumbs={[{ label: 'Agents & roles' }]}
+        description="Every identity that can call MemoryHub in this tenant: people, user agents and service identities, with their roles and status. OAuth clients, keys and trusted issuers have their own screen."
+        actions={
+          <>
+            <button type="button" className="btn bs" onClick={() => setModal('role')}>
+              Assign role
+            </button>
+            <button type="button" className="btn bp" onClick={() => setModal('service')}>
+              <Icon.Plus /> New service identity
+            </button>
+          </>
+        }
+        tabs={
+          <Tabs
+            label="Identities"
+            value={tab}
+            onChange={(t) => setParam({ tab: t === 'identities' ? undefined : t })}
+            tabs={[
+              { value: 'identities', label: 'Identities', count: data?.counts.all ?? null },
+              { value: 'roles', label: 'Roles', count: data?.counts.roles ?? null },
+            ]}
+          />
+        }
+      />
+      <div className="body">
+        {data && !data.auth_available && (
+          <div className="alert warn-a">
+            The auth service did not answer, so identities are inferred from memory owners and audit events only. Roles, clients and grant types may be incomplete.
+          </div>
+        )}
+        {tab === 'roles' ? (
+          <section className="card" style={{ padding: 0 }}>
+            <RolesTable roles={data?.roles ?? []} loading={loading && !data} onAssign={() => setModal('role')} />
+          </section>
+        ) : (
+          <>
+            <div className="filters">
+              <div className="type-chips" role="group" aria-label="Identity type">
+                {(
+                  [
+                    ['all', 'All'],
+                    ['users', 'Users'],
+                    ['agents', 'User agents'],
+                    ['services', 'Service agents'],
+                  ] as const
+                ).map(([v, l]) => (
+                  <button key={v} type="button" className={type === v ? 'on' : ''} aria-pressed={type === v} onClick={() => setParam({ type: v === 'all' ? undefined : v })}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <span className="in-icon">
+                <Icon.Search size={15} />
+                <label htmlFor="id-q" className="vh">
+                  Search identities
+                </label>
+                <input id="id-q" className="in" placeholder="Search name or ID" value={filter} onChange={(e) => setFilter(e.target.value)} />
+              </span>
+              <label htmlFor="id-r" className="vh">
+                Role
+              </label>
+              <select id="id-r" className="in auto" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="">Role: any</option>
+                {(data?.roles ?? []).map((r) => (
+                  <option key={r.name} value={r.name}>
+                    Role: {r.name}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor="id-s" className="vh">
+                Status
+              </label>
+              <select id="id-s" className="in auto" value={status} onChange={(e) => setStatus(e.target.value)}>
+                {STATUS_OPTS.map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <section className="card" style={{ padding: '6px 12px' }}>
+              {error && !data ? (
+                <ErrorState error={error} onRetry={reload} />
+              ) : loading && !data ? (
+                <SkTable rows={6} cols={7} />
+              ) : rows.length === 0 ? (
+                <Empty compact title="No identities match">
+                  Clear a filter to see more.
+                </Empty>
+              ) : (
+                <div className="scroll">
+                  <table className="tbl mid" style={{ minWidth: 820 }}>
+                    <thead>
+                      <tr>
+                        <th>Identity</th>
+                        <th>Type</th>
+                        <th>Acts for</th>
+                        <th>Roles</th>
+                        <th>Client</th>
+                        <th>Last call</th>
+                        <th>Status</th>
+                        <th>
+                          <span className="vh">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((i) => (
+                        <tr key={i.id} className="clickable" onClick={() => setDetails(i)}>
+                          <td>
+                            <b>
+                              {i.name}
+                              {i.type === 'user agent' && i.bound_to && !i.name.includes(i.bound_to) ? ` · ${i.bound_to}` : ''}
+                            </b>
+                            {i.id !== i.name && <div className="sm muted mono">{i.id}</div>}
+                          </td>
+                          <td>
+                            <span className={`lbl ${i.type === 'service' ? 'blue' : 'g'}`}>{TYPE_LABEL[i.type]?.label ?? i.type}</span>
+                          </td>
+                          <td>{i.type === 'service' ? 'tenant' : i.type === 'user agent' ? nameOf(i.owner ?? i.bound_to) ?? '—' : '—'}</td>
+                          <td>
+                            {i.roles.length ? (
+                              <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+                                {i.roles.map((r) => (
+                                  <span className="tag" key={r}>
+                                    {r}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </td>
+                          <td className="mono sm">{i.client || i.client_id ? truncateId(i.client_id ?? i.id) : '—'}</td>
+                          <td className="sm">{lastCall(i.last_active)}</td>
+                          <td className="sm">
+                            {i.suspended_incident ? (
+                              <span className="warn">● Suspended · {i.suspended_incident}</span>
+                            ) : !i.active ? (
+                              <span className="muted">● Revoked</span>
+                            ) : isStale(i) && i.type !== 'user' ? (
+                              <span className="warn">● Stale &gt; 30 d</span>
+                            ) : (
+                              <span className="ok">● Active</span>
+                            )}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                            {action(i)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+            <div className="acc-cards two">
+              <section className="card">
+                <div className="card-head">
+                  <h3>Roles</h3>
+                  <a className="sm" href={buildHash('/memories', { scope: 'role' })}>
+                    Role memories
+                  </a>
+                </div>
+                {(data?.roles ?? []).length === 0 ? (
+                  <p className="sm muted" style={{ marginTop: 10 }}>
+                    No roles assigned yet.
+                  </p>
+                ) : (
+                  <table className="tbl" style={{ marginTop: 8 }}>
+                    <thead>
+                      <tr>
+                        <th>Role</th>
+                        <th>Members</th>
+                        <th>Role-scope memories</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(data?.roles ?? []).slice(0, 5).map((r) => (
+                        <tr key={r.name}>
+                          <td>
+                            <span className="tag">{r.name}</span>
+                          </td>
+                          <td>{r.agents && r.agents === r.members ? `${r.agents} agents` : r.members}</td>
+                          <td>{r.memories !== undefined ? fmtInt(r.memories) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </section>
+              <section className="card">
+                <div className="card-head">
+                  <h3>Credentials behind these identities</h3>
+                  <a className="sm" href={buildHash('/clients')}>
+                    OAuth clients &amp; keys
+                  </a>
+                </div>
+                <dl className="detail-kv nums">
+                  <dt>Service identities</dt>
+                  <dd>{counts.services}</dd>
+                  <dt>User agents</dt>
+                  <dd>{counts.agents}</dd>
+                  <dt>Suspended by incident</dt>
+                  <dd>{counts.suspended}</dd>
+                  <dt>Stale &gt; 30 days</dt>
+                  <dd>{counts.stale}</dd>
+                  {creds.data && (
+                    <>
+                      <dt>OAuth clients · API keys</dt>
+                      <dd>
+                        {creds.data.clients.length} · {creds.data.api_keys.length}
+                      </dd>
+                    </>
+                  )}
+                </dl>
+                <p className="sm muted" style={{ marginTop: 12 }}>
+                  A user’s own agent keys are visible to the user only; here you can suspend or revoke, never read them.
+                </p>
+              </section>
+            </div>
+            <div className="alert" role="note">
+              <Icon.Info size={16} />
+              <span className="sm">Seeing a user agent here never opens its owner’s memory. Revoke, suspend and re-issue are allowed; reading as that agent is not.</span>
+            </div>
+          </>
+        )}
+      </div>
+      {details && (
+        <Modal title="Identity" onClose={() => setDetails(null)} wide>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <IdentityPanel row={details} canAssignOwner self={me?.username} onClose={() => setDetails(null)} onChanged={reload} />
+          </div>
+        </Modal>
+      )}
+      {revoke && (
+        <ConfirmModal title={`Revoke ${revoke.name}?`} confirmLabel="Revoke" danger onClose={() => setRevoke(null)} onConfirm={doRevoke}>
+          <b>{revoke.id}</b> can no longer obtain tokens; existing sessions stop within 5 seconds. Its memories stay with {revoke.owner ?? revoke.bound_to ?? 'its owner'}. Audited.
+        </ConfirmModal>
+      )}
+      {modal === 'service' && <CreateClientModal defaultType="service" onClose={() => setModal(null)} onCreated={() => reload()} />}
+      {modal === 'link' && (
+        <LinkAgentModal
+          onClose={() => setModal(null)}
+          onLinked={(id) => {
+            setModal(null);
+            toast(`${id} is now linked.`);
+            reload();
+          }}
+        />
+      )}
+      {modal === 'role' && (
+        <AssignRoleModal
+          onClose={() => setModal(null)}
+          onSaved={() => {
+            toast('Role assigned.');
+            reload();
+          }}
+        />
+      )}
+    </>
+  );
+};
+
+const truncateId = (id: string) => (id.length > 10 ? `${id.slice(0, 7)}…` : id);
 
 const RolesTable: React.FC<{ roles: { name: string; members: number }[]; loading: boolean; onAssign: () => void }> = ({ roles, loading, onAssign }) => (
   <>
