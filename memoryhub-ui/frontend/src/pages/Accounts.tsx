@@ -62,9 +62,9 @@ const Accounts: React.FC = () => {
             value={tab}
             onChange={setTab}
             tabs={[
-              { value: 'people', label: 'People', count: data?.counts.all ?? null },
-              { value: 'teams', label: 'Teams', count: teams.data ? teams.data.items.length : null },
-              { value: 'invites', label: 'Invites', count: data ? data.invites.filter((i) => i.state === 'open').length : null },
+              { value: 'people', label: 'People', count: data?.counts?.all ?? null },
+              { value: 'teams', label: 'Teams', count: teams.data?.items ? teams.data.items.length : null },
+              { value: 'invites', label: 'Invites', count: data?.invites ? data.invites.filter((i) => i.state === 'open').length : null },
               { value: 'policy', label: 'Sign-up & privacy policy' },
             ]}
           />
@@ -81,7 +81,7 @@ const Accounts: React.FC = () => {
           </div>
         ) : tab === 'invites' ? (
           <section className="card" style={{ padding: 0 }}>
-            {data!.invites.length === 0 ? (
+            {(data!.invites ?? []).length === 0 ? (
               <Empty title="No invites yet" action={<button type="button" className="btn bs" onClick={() => setInviteOpen(true)}>Invite people</button>}>
                 Invite codes are single-use and expire. Invited people skip the approval queue.
               </Empty>
@@ -96,7 +96,7 @@ const Accounts: React.FC = () => {
                       <th>State</th>
                       <th>Created</th>
                       <th>Expires</th>
-                      <th />
+                      <th><span className="vh">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -218,7 +218,7 @@ const PeopleTab: React.FC<{
   const [q, setQ] = useState('');
   const [roleF, setRoleF] = useState('');
   const [roleFor, setRoleFor] = useState<AccountRow | null>(null);
-  const rows = data.items.filter((a) => {
+  const rows = (data.items ?? []).filter((a) => {
     if (roleF && a.role !== roleF) return false;
     if (statusF === 'incident' && !a.incident_ref) return false;
     if (statusF && statusF !== 'incident' && a.status !== statusF) return false;
@@ -228,7 +228,7 @@ const PeopleTab: React.FC<{
   const signup = settings.data?.values.signup;
   return (
     <>
-      {data.counts.pending > 0 && (
+      {(data.counts?.pending ?? 0) > 0 && (
         <div className="alert warn-a" role="status" style={{ alignItems: 'center' }}>
           <Icon.Clock size={16} />
           <span style={{ flex: 1 }}>
@@ -471,7 +471,7 @@ const AccessCards: React.FC<{ settings: ReturnType<typeof useApi<SettingsRespons
     <>
       <div className="acc-cards">
         <section className="card">
-          <h3>Who can create an account</h3>
+          <h2 data-h="3">Who can create an account</h2>
           <div className="radio-plain">
             {(
               [
@@ -489,7 +489,7 @@ const AccessCards: React.FC<{ settings: ReturnType<typeof useApi<SettingsRespons
           {mode === 'domain' && !domain && <p className="sm muted">Set the allowed domains on the Sign-up &amp; privacy policy tab.</p>}
         </section>
         <section className="card">
-          <h3>Admin access to memory content</h3>
+          <h2 data-h="3">Admin access to memory content</h2>
           <p className="sm muted" style={{ margin: '8px 0 12px' }}>
             Scopes admins may moderate in this tenant. Personal content is never readable to admins — only through an addressed incident grant approved by two Super Admins.
           </p>
@@ -514,7 +514,7 @@ const AccessCards: React.FC<{ settings: ReturnType<typeof useApi<SettingsRespons
           </p>
         </section>
         <section className="card">
-          <h3>What each role sees</h3>
+          <h2 data-h="3">What each role sees</h2>
           <ul className="role-sees">
             <li>
               <span className="lbl blue">User</span> Own + member scopes
@@ -684,7 +684,7 @@ const PolicyEditor: React.FC = () => {
       <div className="col-main">
         <section className="card">
           <div className="ch">
-            <h3>Organization</h3>
+            <h2 data-h="3">Organization</h2>
           </div>
           <div className="fg" style={{ marginTop: 0 }}>
             <div className="f">
@@ -699,7 +699,7 @@ const PolicyEditor: React.FC = () => {
         </section>
         <section className="card">
           <div className="ch">
-            <h3>Who can create an account</h3>
+            <h2 data-h="3">Who can create an account</h2>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(Object.keys(MODE_LABEL) as SignupMode[]).map((m) => (
@@ -732,7 +732,7 @@ const PolicyEditor: React.FC = () => {
         </section>
         <section className="card">
           <div className="ch">
-            <h3>Admin access to memory content</h3>
+            <h2 data-h="3">Admin access to memory content</h2>
           </div>
           <p className="sm muted" style={{ marginTop: 0 }}>
             Admins moderate the scopes you tick below. User (personal) memories are never readable to admins: only a super-user, with an incident reference and
@@ -782,7 +782,7 @@ const PolicyEditor: React.FC = () => {
       </div>
       <aside className="col-side">
         <section className="card">
-          <h3>What each role sees</h3>
+          <h2 data-h="3">What each role sees</h2>
           <dl className="dl wide" style={{ marginTop: 14 }}>
             <dt>User</dt>
             <dd className="sm">Full content of their own memories and of the projects, roles and campaigns they belong to, plus organizational and enterprise memories.</dd>

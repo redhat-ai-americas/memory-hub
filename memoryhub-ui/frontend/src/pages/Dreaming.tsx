@@ -222,7 +222,7 @@ const Dreaming: React.FC = () => {
             <aside className="col-side">
               {data && (
                 <section className="card">
-                  <h3>Schedule</h3>
+                  <h2 data-h="3">Schedule</h2>
                   <div className="seg full" role="group" aria-label="Dreaming schedule" style={{ marginTop: 14 }}>
                     {(['nightly', 'weekly', 'off'] as const).map((s) => (
                       <button key={s} type="button" className={data.settings.schedule === s ? 'on' : ''} aria-pressed={data.settings.schedule === s} onClick={() => saveSettings({ schedule: s })}>
@@ -273,7 +273,7 @@ const Dreaming: React.FC = () => {
 
               {data && data.history.length > 0 && (
                 <section className="card">
-                  <h3>Run history</h3>
+                  <h2 data-h="3">Run history</h2>
                   <div style={{ display: 'flex', flexDirection: 'column', marginTop: 10 }}>
                     {data.history.map((h) => (
                       <div key={h.id} className="hrow">
@@ -330,7 +330,7 @@ const InsightCard: React.FC<{ insight: DreamInsight; onDecide: (i: DreamInsight,
             {i.confidence !== null && <span className="sm muted">{Math.round(i.confidence * 100)}% similar</span>}
             {i.auto && <span className="lbl g">done automatically</span>}
           </div>
-          <h3 style={{ marginTop: 8 }}>{i.title}</h3>
+          <h2 data-h="3" style={{ marginTop: 8 }}>{i.title}</h2>
           <p className="sm muted" style={{ margin: '4px 0 12px' }}>
             {i.detail}
           </p>

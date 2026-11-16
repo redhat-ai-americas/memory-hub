@@ -85,10 +85,10 @@ const WhoRead: React.FC<{ route: HashRoute }> = ({ route }) => {
                 <div className="col-main">
                   <section className="card">
                     <div className="ch">
-                      <h3>Readers</h3>
+                      <h2 data-h="3">Readers</h2>
                       <span className="sm muted">{fmtInt(data.total)} events</span>
                     </div>
-                    {data.readers.length === 0 ? (
+                    {(data.readers ?? []).length === 0 ? (
                       <Empty compact title={who === 'others' ? 'Nobody else touched your memories' : 'No activity on your memories'}>
                         {who === 'others'
                           ? `In this period only you and your agents (${data.identities.join(', ')}) used your memories.`
@@ -107,7 +107,7 @@ const WhoRead: React.FC<{ route: HashRoute }> = ({ route }) => {
                             </tr>
                           </thead>
                           <tbody>
-                            {data.readers.map((r) => (
+                            {(data.readers ?? []).map((r) => (
                               <tr key={r.actor_id}>
                                 <td>
                                   {r.actor_id}
@@ -136,9 +136,9 @@ const WhoRead: React.FC<{ route: HashRoute }> = ({ route }) => {
                     )}
                   </section>
                   <section className="card">
-                    <h3 style={{ marginBottom: 6 }}>Recent events</h3>
-                    {data.events.length === 0 && <p className="sm muted">No events in this period.</p>}
-                    {data.events.map((e) => (
+                    <h2 data-h="3" style={{ marginBottom: 6 }}>Recent events</h2>
+                    {(data.events ?? []).length === 0 && <p className="sm muted">No events in this period.</p>}
+                    {(data.events ?? []).map((e) => (
                       <div key={String(e.id)} className="evrow">
                         <span className="mono muted" style={{ width: 56, flex: 'none' }}>
                           {isToday(e.timestamp) ? fmtTime(e.timestamp) : fmtMonthDay(e.timestamp)}
@@ -162,10 +162,10 @@ const WhoRead: React.FC<{ route: HashRoute }> = ({ route }) => {
                 </div>
                 <aside className="col-side">
                   <section className="card">
-                    <h3>Most used memories</h3>
+                    <h2 data-h="3">Most used memories</h2>
                     <div style={{ display: 'flex', flexDirection: 'column', marginTop: 8 }}>
-                      {data.top_memories.length === 0 && <p className="sm muted">Nothing read in this period.</p>}
-                      {data.top_memories.map((m) => (
+                      {(data.top_memories ?? []).length === 0 && <p className="sm muted">Nothing read in this period.</p>}
+                      {(data.top_memories ?? []).map((m) => (
                         <div key={m.id} className="evrow">
                           <span className="sm muted" style={{ width: 28, flex: 'none' }}>
                             {m.count}
@@ -178,9 +178,9 @@ const WhoRead: React.FC<{ route: HashRoute }> = ({ route }) => {
                     </div>
                   </section>
                   <section className="card">
-                    <h3>Whose activity counts as yours</h3>
+                    <h2 data-h="3">Whose activity counts as yours</h2>
                     <p className="sm" style={{ margin: '10px 0 0' }}>
-                      You, and agents registered to you: {data.identities.length ? data.identities.join(', ') : 'none yet'}. Toggle “Include my agents” to see their reads too.
+                      You, and agents registered to you: {data.identities?.length ? data.identities.join(', ') : 'none yet'}. Toggle “Include my agents” to see their reads too.
                     </p>
                     <a className="btn bl sm" href={buildHash('/identities')} style={{ marginTop: 6, paddingLeft: 0 }}>
                       Manage my agents

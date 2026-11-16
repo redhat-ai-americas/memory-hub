@@ -82,7 +82,7 @@ export const initials = (name: string): string => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
-const AVATAR_COLORS = ['#5e40be', '#8f4700', '#3d7317', '#004d4d', '#a60000', '#004d99', '#383838', '#ca6c0f'];
+const AVATAR_COLORS = ['#5e40be', '#8f4700', '#3d7317', '#004d4d', '#a60000', '#004d99', '#383838', '#a33f00'];
 export const avatarColor = (key: string): string => {
   let h = 0;
   for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;

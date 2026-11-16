@@ -131,7 +131,7 @@ const GrantsTable: React.FC<{ grants: BreakGlassGrant[]; selected: string | null
   return (
     <section className="card">
       <div className="card-head">
-        <h3>Grants</h3>
+        <h2 data-h="3">Grants</h2>
         <span className="sm muted">State read from /api/break-glass on every load</span>
       </div>
       {grants.length === 0 ? (
@@ -209,7 +209,7 @@ const ApproveCards: React.FC<{ items: GrantRequest[]; me: string; single: boolea
       {items.map((r) => (
         <section className="card" key={r.id}>
           <div className="card-head">
-            <h3>Waiting for your approval</h3>
+            <h2 data-h="3">Waiting for your approval</h2>
             <TypeLabel t={r.type} />
           </div>
           <dl className="detail-kv">
@@ -245,7 +245,7 @@ const ApproveCards: React.FC<{ items: GrantRequest[]; me: string; single: boolea
 
 const MineTable: React.FC<{ items: GrantRequest[]; single: boolean }> = ({ items, single }) => (
   <section className="card">
-    <h3>My requests</h3>
+    <h2 data-h="3">My requests</h2>
     {items.length === 0 ? (
       <Empty compact title="No open requests">
         {single ? 'On this server a request starts the grant at once — it appears under Grants.' : 'Requests you send wait for another Super Admin.'}
@@ -300,7 +300,7 @@ const UseLog: React.FC<{ grant: BreakGlassGrant; onRevoked: () => void; actions?
   return (
     <section className="card">
       <div className="card-head">
-        <h3>{grantId(grant.id)} · use log</h3>
+        <h2 data-h="3">{grantId(grant.id)} · use log</h2>
         <span className="sm muted">immutable · high severity</span>
       </div>
       {log.loading && !log.data ? (
@@ -353,7 +353,7 @@ const UseLog: React.FC<{ grant: BreakGlassGrant; onRevoked: () => void; actions?
 
 const RulesCard: React.FC<{ hours: number; notify: boolean }> = ({ hours, notify }) => (
   <section className="card">
-    <h3>Rules</h3>
+    <h2 data-h="3">Rules</h2>
     <ul className="rule-list">
       <li>Super Admins are set by the deployment, never in the dashboard.</li>
       <li>A second Super Admin approves; you can’t approve your own.</li>
@@ -384,7 +384,7 @@ const ReportCard: React.FC<{ report: ReturnType<typeof useApi<BreakGlassReport>>
   };
   return (
     <section className="card">
-      <h3>Monthly report · {new Date().toLocaleDateString('en-US', { month: 'long' })}</h3>
+      <h2 data-h="3">Monthly report · {new Date().toLocaleDateString('en-US', { month: 'long' })}</h2>
       <button type="button" className="link-btn" style={{ textDecoration: 'none', marginTop: 6 }} disabled={!r} onClick={download}>
         Download
       </button>
@@ -641,7 +641,7 @@ export const IncidentRequest: React.FC = () => {
             )}
             {step === 3 && (
               <div>
-                <h3>Independent approver</h3>
+                <h2 data-h="3">Independent approver</h2>
                 <p className="sm" style={{ margin: '8px 0' }}>
                   Another Super Admin approves in their own session. You cannot approve your own request, and approval does not start the grant — activation does.
                 </p>
@@ -654,7 +654,7 @@ export const IncidentRequest: React.FC = () => {
             )}
             {step === 4 && (
               <div>
-                <h3>Step-up MFA &amp; activate</h3>
+                <h2 data-h="3">Step-up MFA &amp; activate</h2>
                 <p className="sm" style={{ margin: '8px 0' }}>
                   At activation you confirm with your second factor. The grant then opens exactly these records for {Math.min(hours, maxHours)} h:
                 </p>
@@ -696,7 +696,7 @@ export const IncidentRequest: React.FC = () => {
           </section>
           <aside className="col-side" style={{ flex: '1 1 300px', maxWidth: 420 }}>
             <section className="card">
-              <h3>What happens next</h3>
+              <h2 data-h="3">What happens next</h2>
               <ul className="next-list">
                 <li>
                   <Icon.Check size={14} />
@@ -828,7 +828,7 @@ export const GrantDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           <div className="col-main" style={{ minWidth: 0 }}>
             <section className="card">
               <div className="card-head">
-                <h3>Record under investigation</h3>
+                <h2 data-h="3">Record under investigation</h2>
                 <span className="lbl ylw">
                   <Icon.EyeOff size={12} /> This read is audited
                 </span>
@@ -887,7 +887,7 @@ export const GrantDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           </div>
           <aside className="col-side" style={{ flex: '1 1 300px', maxWidth: 400 }}>
             <section className="card">
-              <h3>Grant record</h3>
+              <h2 data-h="3">Grant record</h2>
               <dl className="detail-kv">
                 <dt>Requested by</dt>
                 <dd>{g.username}</dd>
@@ -922,7 +922,7 @@ export const GrantDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
               )}
             </section>
             <section className="card">
-              <h3>After expiry</h3>
+              <h2 data-h="3">After expiry</h2>
               <p className="sm" style={{ margin: '10px 0 0', lineHeight: 1.55 }}>
                 Content disappears from every open screen, the API returns “not available” again, and the grant moves to History with its full read log. The monthly
                 privileged-access report lists it for the tenant owner.

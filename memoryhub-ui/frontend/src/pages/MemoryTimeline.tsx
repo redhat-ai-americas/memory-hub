@@ -134,7 +134,7 @@ const MemoryTimeline: React.FC<{
   return (
     <div className="row-wrap">
       <aside className="card gset" aria-label="Timeline settings">
-        <h3>Timeline settings</h3>
+        <h2 data-h="3">Timeline settings</h2>
         <div>
           <p className="fh">Period</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -300,7 +300,7 @@ const MemoryTimeline: React.FC<{
                 </div>
               </div>
             ) : (
-              <h3 style={{ fontSize: 18, lineHeight: 1.35 }}>{sel.stub}</h3>
+              <h2 data-h="3" style={{ fontSize: 18, lineHeight: 1.35 }}>{sel.stub}</h2>
             )}
             <dl className="dl">
               <dt>Owner</dt>
@@ -337,7 +337,7 @@ const MemoryTimeline: React.FC<{
           </>
         ) : (
           <>
-            <h3>Newest</h3>
+            <h2 data-h="3">Newest</h2>
             {newest.length === 0 ? (
               <p className="sm muted">Nothing here yet.</p>
             ) : (

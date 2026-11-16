@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, AUTH_REQUIRED_EVENT } from '@/api/client';
-import { AppProvider, canSee, isLabsPath, movedFor, NAV, Shell, SUPER_NAV, useApp } from '@/components/Shell';
+import { AppProvider, canSee, isLabsPath, movedFor, NAV, navFor, Shell, SUPER_NAV, useApp } from '@/components/Shell';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Empty } from '@/components/ui';
 import { ToastProvider } from '@/components/ui';
 import { navigate, useHashRoute, type HashRoute } from '@/hooks/useHashRoute';
@@ -213,6 +214,22 @@ const screenKey = (path: string) => {
   return path;
 };
 
+/** Browser tab title: the menu label this role sees for a top-level screen, the screen title for detail pages. */
+const DocTitle: React.FC<{ path: string; screen: Screen }> = ({ path, screen }) => {
+  const { me, role, superuser, platformMode, features } = useApp();
+  const label =
+    path === screen.nav
+      ? navFor(role, features, !!me?.labs, superuser, platformMode)
+          .flatMap((s) => s.items)
+          .find((i) => i.path === screen.nav)?.label
+      : undefined;
+  const title = label ?? screen.title;
+  useEffect(() => {
+    document.title = `MemoryHub · ${title}`;
+  }, [title]);
+  return null;
+};
+
 const Routed: React.FC = () => {
   const route = useHashRoute();
   const [authRequired, setAuthRequired] = useState(false);
@@ -240,10 +257,9 @@ const Routed: React.FC = () => {
   const screen = SCREENS[key];
 
   useEffect(() => {
-    const title =
-      route.path === '/login' ? 'Log in' : route.path === '/register' ? 'Create account' : route.path === '/setup' ? 'Set up' : screen?.title;
-    document.title = title ? `MemoryHub · ${title}` : 'MemoryHub';
-  }, [screen, route.path]);
+    const title = route.path === '/login' ? 'Log in' : route.path === '/register' ? 'Create account' : route.path === '/setup' ? 'Set up' : null;
+    if (title) document.title = `MemoryHub · ${title}`;
+  }, [route.path]);
 
   if (AUTH_PATHS.includes(route.path) || authRequired) {
     const view = route.path === '/register' ? 'register' : route.path === '/setup' ? 'setup' : 'login';
@@ -263,7 +279,10 @@ const Routed: React.FC = () => {
       <Shell activePath={known ? screen.nav : ''}>
         {/* key resets page state when moving between screens */}
         <React.Fragment key={key}>
-          <Guarded nav={screen.nav}>{screen.render(route)}</Guarded>
+          <DocTitle path={key} screen={screen} />
+          <ErrorBoundary key={route.path}>
+            <Guarded nav={screen.nav}>{screen.render(route)}</Guarded>
+          </ErrorBoundary>
         </React.Fragment>
       </Shell>
     </AppProvider>

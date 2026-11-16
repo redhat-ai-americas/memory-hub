@@ -160,7 +160,7 @@ const Administrators: React.FC<{ route: HashRoute }> = ({ route }) => {
             />
           ) : (
             <section className="card">
-              <h3>Assign an administrator</h3>
+              <h2 data-h="3">Assign an administrator</h2>
               <p className="sm muted" style={{ margin: '10px 0 14px' }}>
                 A Platform Admin runs one tenant’s console. A Super Admin runs the platform and approves incident grants; further Super Admins need another Super Admin.
               </p>
@@ -170,7 +170,7 @@ const Administrators: React.FC<{ route: HashRoute }> = ({ route }) => {
             </section>
           )}
           <section className="card">
-            <h3>Rules</h3>
+            <h2 data-h="3">Rules</h2>
             <ul className="rule-list">
               <li>Super Admins are seeded by deployment config; further SAs need another SA.</li>
               <li>No one can assign or extend their own administrative role.</li>
@@ -236,7 +236,7 @@ const AssignForm: React.FC<{ role: 'admin' | 'superuser'; tenant?: string; tenan
   };
   return (
     <section className="card">
-      <h3>{role === 'admin' ? 'Assign Platform Admin' : 'Assign Super Admin'}</h3>
+      <h2 data-h="3">{role === 'admin' ? 'Assign Platform Admin' : 'Assign Super Admin'}</h2>
       <div className="f set-f">
         <label htmlFor="as-p">Person</label>
         <input id="as-p" className="in" value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Priya Shah (pshah)" autoFocus />

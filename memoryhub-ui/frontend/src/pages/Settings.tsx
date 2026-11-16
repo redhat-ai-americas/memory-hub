@@ -40,7 +40,13 @@ const Settings: React.FC = () => {
   const refs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
-    if (data) setValues(structuredClone(data.values));
+    if (data) {
+      const v = structuredClone(data.values);
+      // An older server may not send every section; the form needs each one present.
+      const sections = v as unknown as Record<string, Record<string, unknown> | undefined>;
+      for (const key of ['retrieval', 'governance', 'audit', 'organization', 'signup', 'privacy', 'security']) sections[key] = sections[key] ?? {};
+      setValues(v);
+    }
   }, [data]);
 
   useEffect(() => {
@@ -123,9 +129,9 @@ const Settings: React.FC = () => {
               <div className="set-grid">
                 {/* Tenant */}
                 <section className="card" id="set-tenant" ref={sec('tenant')}>
-                  <h3>Tenant</h3>
+                  <h2 data-h="3">Tenant</h2>
                   <Field id="org-name" label="Display name">
-                    <input id="org-name" className="in" value={values.organization.name} onChange={(e) => set('organization', 'name', e.target.value)} />
+                    <input id="org-name" className="in" value={values.organization.name ?? ''} onChange={(e) => set('organization', 'name', e.target.value)} />
                   </Field>
                   <Field id="tid" label="Tenant ID" hint="Set by the platform at creation">
                     <input id="tid" className="in mono" value={data.tenant.tenant_id} readOnly disabled />
@@ -138,13 +144,13 @@ const Settings: React.FC = () => {
                     </select>
                   </Field>
                   <Field id="org-mail" label="Contact email" hint="Shown on sign-up and in invitations">
-                    <input id="org-mail" className="in" type="email" value={values.organization.contact_email} onChange={(e) => set('organization', 'contact_email', e.target.value)} />
+                    <input id="org-mail" className="in" type="email" value={values.organization.contact_email ?? ''} onChange={(e) => set('organization', 'contact_email', e.target.value)} />
                   </Field>
                 </section>
 
                 {/* MCP endpoint */}
                 <section className="card" id="set-mcp" ref={sec('mcp')}>
-                  <h3>MCP endpoint</h3>
+                  <h2 data-h="3">MCP endpoint</h2>
                   <dl className="set-kv">
                     <dt>Public URL</dt>
                     <dd className="mono">{data.mcp.public_url}</dd>
@@ -170,7 +176,7 @@ const Settings: React.FC = () => {
 
                 {/* Retrieval */}
                 <section className="card" id="set-retrieval" ref={sec('retrieval')}>
-                  <h3>Retrieval</h3>
+                  <h2 data-h="3">Retrieval</h2>
                   <Check
                     label="Cross-encoder reranking"
                     checked={values.retrieval.rerank && !!rerankerReady}
@@ -207,7 +213,7 @@ const Settings: React.FC = () => {
 
                 {/* Isolation & governance */}
                 <section className="card" id="set-governance" ref={sec('governance')}>
-                  <h3>Isolation &amp; governance</h3>
+                  <h2 data-h="3">Isolation &amp; governance</h2>
                   <Check label="Project isolation" checked={values.governance.project_isolation} disabled hint="Set at deploy time" />
                   <Check label="Role isolation" checked={values.governance.role_isolation} disabled hint="Set at deploy time" />
                   <Field id="ea" label="Enterprise approvers required" hint="Requesters can never approve their own proposal">
@@ -221,7 +227,7 @@ const Settings: React.FC = () => {
 
                 {/* Moderation & compaction */}
                 <section className="card" id="set-moderation" ref={sec('moderation')}>
-                  <h3>Moderation &amp; compaction</h3>
+                  <h2 data-h="3">Moderation &amp; compaction</h2>
                   {(() => {
                     const c = { ...CURATION_DEFAULTS, ...(values.curation ?? {}) };
                     const mode = c.compaction === 'suggest' ? (c.compaction_preview ? 'suggest_preview' : 'suggest') : c.compaction;
@@ -269,7 +275,7 @@ const Settings: React.FC = () => {
 
                 {/* Audit & retention */}
                 <section className="card" id="set-audit" ref={sec('audit')}>
-                  <h3>Audit &amp; retention</h3>
+                  <h2 data-h="3">Audit &amp; retention</h2>
                   {(() => {
                     const ceil = values.audit.retention?.ceilings;
                     const maxFull = ceil?.data?.[0] ?? 90;
@@ -321,7 +327,7 @@ const Settings: React.FC = () => {
 
                 {/* Quotas & client policy */}
                 <section className="card" id="set-quotas" ref={sec('quotas')}>
-                  <h3>Quotas &amp; client policy</h3>
+                  <h2 data-h="3">Quotas &amp; client policy</h2>
                   <Field id="tq" label="Tenant memory quota" lock="Set per tenant by Super Admin in Tenants">
                     <input id="tq" className="in" value={values.quotas?.tenant_memory_quota ? fmtInt(values.quotas.tenant_memory_quota) : 'No limit'} readOnly disabled />
                   </Field>
@@ -361,7 +367,7 @@ const Settings: React.FC = () => {
 
                 {/* Models */}
                 <section className="card" id="set-models" ref={sec('models')}>
-                  <h3>Models</h3>
+                  <h2 data-h="3">Models</h2>
                   <dl className="set-kv">
                     {(['embedding', 'reranker'] as const).map((k) => {
                       const m = data.models[k];

@@ -267,7 +267,7 @@ const DocumentPage: React.FC<{ id: string }> = ({ id }) => {
         <div className="row-wrap">
           <section className="card col-main" aria-label="Passages">
             <div className="ch">
-              <h3>Passages</h3>
+              <h2 data-h="3">Passages</h2>
               <span className="sm muted">Tick passages, or select any text inside one.</span>
             </div>
             {custom && (
@@ -312,7 +312,7 @@ const DocumentPage: React.FC<{ id: string }> = ({ id }) => {
           </section>
           <aside className="col-side">
             <section className="card">
-              <h3>Memories from this document</h3>
+              <h2 data-h="3">Memories from this document</h2>
               {data.links.length === 0 ? (
                 <p className="sm muted">None yet. Tick the passages worth remembering and press Write memories.</p>
               ) : (

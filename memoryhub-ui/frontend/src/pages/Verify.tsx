@@ -128,7 +128,7 @@ const Verify: React.FC = () => {
               </div>
               <aside className="col-side">
                 <section className="card">
-                  <h3>History</h3>
+                  <h2 data-h="3">History</h2>
                   {data.results.length === 0 ? (
                     <p className="sm muted">Results you run or add appear here. The last 20 are kept.</p>
                   ) : (
@@ -152,7 +152,7 @@ const Verify: React.FC = () => {
                   )}
                 </section>
                 <section className="card">
-                  <h3>Next steps</h3>
+                  <h2 data-h="3">Next steps</h2>
                   <p className="sm" style={{ margin: '8px 0' }}>
                     Not connected yet? <a href={buildHash('/connect')}>Connect an agent</a> shows the supported hosts and the setup command.
                   </p>

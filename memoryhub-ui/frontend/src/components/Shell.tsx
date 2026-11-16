@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, AUTHORIZATION_CHANGED_EVENT } from '@/api/client';
 import type { BreakGlassGrant, Me, NavFeatures, NotificationsResponse, Role, SwitchTargets } from '@/types';
 import { buildHash, navigate } from '@/hooks/useHashRoute';
@@ -84,12 +84,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [reviewCount, setReviewCount] = useState(0);
   const [token, setToken] = useState(0);
   const [features, setFeatures] = useState<NavFeatures | null>(null);
+  // Which /api/me request produced `me`, and from which request on a tenant context must be confirmed.
+  const [meFrom, setMeFrom] = useState(-1);
+  const [ctxFrom, setCtxFrom] = useState(0);
+  const accessRef = useRef(0);
+  accessRef.current = accessCheck;
 
   useEffect(() => {
     let cancelled = false;
+    const at = accessCheck;
     api.me().then((viewer) => {
       if (cancelled) return;
       setMe(expireGrant(viewer));
+      setMeFrom(at);
       setAccessError(false);
     }).catch(() => {
       if (cancelled) return;
@@ -167,6 +174,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       /* storage unavailable */
     }
     setTenantContext(ctx);
+    // Ask the server again: the console is kept only if /api/me answers for this tenant.
+    setCtxFrom(accessRef.current + 1);
+    setAccessCheck((value) => value + 1);
     navigate('/overview');
   }, []);
   const exitTenant = useCallback(() => {
@@ -179,6 +189,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     navigate('/platform');
   }, []);
   const isSuper = me?.role === 'superuser';
+  // The tenant shown in the console is the server's, never only the browser's: a stored context
+  // that /api/me does not confirm is dropped and the Super Admin returns to Platform Operations.
+  useEffect(() => {
+    if (!me || !tenantContext || meFrom < ctxFrom) return;
+    if (me.role === 'superuser' && me.tenant_id === tenantContext.tenant) return;
+    try {
+      window.sessionStorage.removeItem(CTX_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+    setTenantContext(null);
+    if (me.role === 'superuser') navigate('/platform', undefined, { replace: true });
+  }, [me, meFrom, ctxFrom, tenantContext]);
+  const confirmedCtx = isSuper && tenantContext && meFrom >= ctxFrom && me?.tenant_id === tenantContext.tenant ? tenantContext : null;
+  const pendingCtx = isSuper && tenantContext && meFrom < ctxFrom ? tenantContext : null;
   return (
     <AppContext.Provider
       value={{
@@ -191,8 +216,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reviewCount,
         features,
         refreshCounts,
-        tenantContext: isSuper ? tenantContext : null,
-        platformMode: isSuper && !tenantContext,
+        tenantContext: confirmedCtx ?? pendingCtx,
+        platformMode: isSuper && !(confirmedCtx ?? pendingCtx),
         enterTenant,
         exitTenant,
       }}
@@ -623,7 +648,6 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
               <button
                 type="button"
                 className="who"
-                aria-label={me?.test_mode ? 'Account and test-mode account switcher' : 'Account'}
                 {...p}
                 onClick={() => {
                   loadTargets();
@@ -633,6 +657,7 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
                 <span className="av">{me?.initials ?? '··'}</span>
                 {me?.name ?? ''}
                 {superuser && <span className="sa-badge">Super Admin</span>}
+                <span className="vh"> · {me?.test_mode ? 'account menu and test-mode account switcher' : 'account menu'}</span>
                 {me?.test_mode && <Icon.Chevron />}
               </button>
             )}

@@ -135,7 +135,7 @@ const Forensics: React.FC<{ route: HashRoute }> = ({ route }) => {
   return (
     <section className="card">
       <div className="ch">
-        <h3>What did the agent know?</h3>
+        <h2 data-h="3">What did the agent know?</h2>
         <span className="sm muted">Correlates read entries with version history</span>
       </div>
       <form style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }} onSubmit={run}>
@@ -287,7 +287,7 @@ const AuditLog: React.FC<{
   return (
     <section className="card" style={{ padding: 0 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', padding: '16px 20px' }}>
-        <h3 style={{ marginRight: 'auto' }}>{deniedOnly ? 'Denied operations' : personal ? 'Your activity' : 'Audit log'}</h3>
+        <h2 data-h="3" style={{ marginRight: 'auto' }}>{deniedOnly ? 'Denied operations' : personal ? 'Your activity' : 'Audit log'}</h2>
         {actor && (
           <span className="chip">
             Actor: {actor}
@@ -442,7 +442,7 @@ const Retention: React.FC = () => {
   const a = data.values.audit;
   return (
     <section className="card">
-      <h3>Retention</h3>
+      <h2 data-h="3">Retention</h2>
       <div className="row">
         <div>
           <b style={{ fontSize: 14 }}>Full-detail retention</b>

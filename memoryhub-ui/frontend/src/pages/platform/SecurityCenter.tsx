@@ -22,7 +22,7 @@ const SecurityCenter: React.FC<{ route: HashRoute }> = ({ route }) => {
 
   const incidents = (
     <section className="card">
-      <h3>Incidents</h3>
+      <h2 data-h="3">Incidents</h2>
       {first ? (
         <SkTable rows={3} cols={7} />
       ) : d!.incidents.length === 0 ? (
@@ -77,7 +77,7 @@ const SecurityCenter: React.FC<{ route: HashRoute }> = ({ route }) => {
   );
   const cross = (
     <section className="card">
-      <h3>Denied cross-tenant attempts · 24 h</h3>
+      <h2 data-h="3">Denied cross-tenant attempts · 24 h</h2>
       {first ? (
         <SkLines lines={3} />
       ) : d!.cross_tenant.length === 0 ? (
@@ -116,7 +116,7 @@ const SecurityCenter: React.FC<{ route: HashRoute }> = ({ route }) => {
   );
   const revoked = (
     <section className="card">
-      <h3>Revoked clients</h3>
+      <h2 data-h="3">Revoked clients</h2>
       {first ? (
         <SkLines lines={3} />
       ) : d!.revoked.length === 0 ? (
@@ -155,7 +155,7 @@ const SecurityCenter: React.FC<{ route: HashRoute }> = ({ route }) => {
   );
   const anomalies = (
     <section className="card">
-      <h3>Anomalies</h3>
+      <h2 data-h="3">Anomalies</h2>
       {first ? (
         <SkLines lines={3} />
       ) : d!.alerts.length === 0 ? (
@@ -180,7 +180,7 @@ const SecurityCenter: React.FC<{ route: HashRoute }> = ({ route }) => {
   const grants = (
     <section className="card">
       <div className="card-head">
-        <h3>Privileged grants</h3>
+        <h2 data-h="3">Privileged grants</h2>
         <a href={buildHash('/incident')}>Incident access</a>
       </div>
       {first ? (

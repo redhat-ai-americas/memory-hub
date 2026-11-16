@@ -147,7 +147,7 @@ const Connect: React.FC = () => {
           data && (
             <>
               <section className="card">
-                <h3>Supported hosts</h3>
+                <h2 data-h="3">Supported hosts</h2>
                 <p className="sm muted" style={{ margin: '6px 0 12px' }}>
                   From the Release 1 issue audit (upstream main 4218eb5). This table is replaced by the published support manifest when it exists (R1-007).
                 </p>
@@ -192,7 +192,7 @@ const Connect: React.FC = () => {
 
               <div className="row-wrap">
                 <section className="card col-main">
-                  <h3>Set up</h3>
+                  <h2 data-h="3">Set up</h2>
                   <div className="fg" style={{ marginTop: 12 }}>
                     <div className="f">
                       <label htmlFor="ch">Host</label>
@@ -237,7 +237,7 @@ const Connect: React.FC = () => {
                 </section>
                 <aside className="col-side">
                   <section className="card">
-                    <h3>This MemoryHub</h3>
+                    <h2 data-h="3">This MemoryHub</h2>
                     <dl className="dl" style={{ marginTop: 14 }}>
                       <dt>MCP URL</dt>
                       <dd className="mono">{data.mcp_url}</dd>
@@ -248,7 +248,7 @@ const Connect: React.FC = () => {
                     </dl>
                   </section>
                   <section className="card">
-                    <h3>Agent identity</h3>
+                    <h2 data-h="3">Agent identity</h2>
                     <p className="sm" style={{ margin: '8px 0' }}>
                       {data.agents.length ? (
                         <>
@@ -268,7 +268,7 @@ const Connect: React.FC = () => {
                     </div>
                   </section>
                   <section className="card">
-                    <h3>What gets remembered</h3>
+                    <h2 data-h="3">What gets remembered</h2>
                     <p className="sm" style={{ margin: '8px 0 0' }}>
                       Choose a memory-behavior profile in <a href={buildHash('/preferences')}>Preferences</a>.
                     </p>

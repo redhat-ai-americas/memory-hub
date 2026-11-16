@@ -489,7 +489,7 @@ const EventDetail: React.FC<{ e: AuditEvent | null; onRelated: (e: AuditEvent) =
   if (!e)
     return (
       <section className="card">
-        <h3>Event detail</h3>
+        <h2 data-h="3">Event detail</h2>
         <p className="sm muted" style={{ marginTop: 10 }}>
           Select an event to see its detail.
         </p>
@@ -507,7 +507,7 @@ const EventDetail: React.FC<{ e: AuditEvent | null; onRelated: (e: AuditEvent) =
   return (
     <section className="card">
       <div className="card-head">
-        <h3>Event detail</h3>
+        <h2 data-h="3">Event detail</h2>
         <span className="tag">{CATEGORY_LABEL[categoryOf(e)]}</span>
       </div>
       <dl className="detail-kv">
@@ -720,7 +720,7 @@ const ActivityView: React.FC<{ route: HashRoute }> = ({ route }) => {
             </section>
             <aside className="col-side" style={{ flex: '1 1 280px', maxWidth: 330 }}>
               <section className="card">
-                <h3>Most active · {per}</h3>
+                <h2 data-h="3">Most active · {per}</h2>
                 {top.length === 0 ? (
                   <p className="sm muted" style={{ marginTop: 10 }}>No activity.</p>
                 ) : (
@@ -906,7 +906,7 @@ const DeniedView: React.FC<{ route: HashRoute }> = ({ route }) => {
                           <th>Target</th>
                           <th>Reason</th>
                           <th>{grouped ? 'Repeats' : ''}</th>
-                          <th />
+                          <th><span className="vh">Actions</span></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -949,7 +949,7 @@ const DeniedView: React.FC<{ route: HashRoute }> = ({ route }) => {
             <aside className="col-side" style={{ flex: '1 1 280px', maxWidth: 330 }}>
               <section className="card">
                 <div className="card-head">
-                  <h3>Needs attention</h3>
+                  <h2 data-h="3">Needs attention</h2>
                   <span className={`lbl ${attention.length ? 'ylw' : 'grn'}`}>{attention.length}</span>
                 </div>
                 {attention.length === 0 ? (
@@ -989,7 +989,7 @@ const DeniedView: React.FC<{ route: HashRoute }> = ({ route }) => {
                 )}
               </section>
               <section className="card">
-                <h3>By reason</h3>
+                <h2 data-h="3">By reason</h2>
                 <div className="reason-bars">
                   {(
                     [
@@ -1110,7 +1110,7 @@ const ForensicsView: React.FC<{ route: HashRoute; grants: BreakGlassState | null
     <>
       <section className="card">
         <div className="card-head">
-          <h3>What did the agent know?</h3>
+          <h2 data-h="3">What did the agent know?</h2>
           {agent && (
             <a className="sm" href={buildHash('/audit', { tab: 'activity', q: agent })}>
               List sessions
@@ -1152,7 +1152,7 @@ const ForensicsView: React.FC<{ route: HashRoute; grants: BreakGlassState | null
         <div className="col-main" style={{ minWidth: 0 }}>
           <section className="card">
             <div className="card-head">
-              <h3>{agent ? `Memories served to ${agent} at ${hhmm(atIso, false)}` : 'Memories served'}</h3>
+              <h2 data-h="3">{agent ? `Memories served to ${agent} at ${hhmm(atIso, false)}` : 'Memories served'}</h2>
               {fx.data && (
                 <span className="sm muted">
                   {served} served · {written} written
@@ -1218,7 +1218,7 @@ const ForensicsView: React.FC<{ route: HashRoute; grants: BreakGlassState | null
 
           <section className="card">
             <div className="card-head">
-              <h3>Audit log</h3>
+              <h2 data-h="3">Audit log</h2>
               <span className="sm muted">Last 24 hours</span>
             </div>
             <div className="filters" style={{ margin: '10px 0' }}>
@@ -1278,7 +1278,7 @@ const ForensicsView: React.FC<{ route: HashRoute; grants: BreakGlassState | null
         <aside className="col-side" style={{ flex: '1 1 280px', maxWidth: 330 }}>
           <section className="card">
             <div className="card-head">
-              <h3>Retention</h3>
+              <h2 data-h="3">Retention</h2>
               <a className="sm" href={buildHash('/audit', { tab: 'retention' })}>
                 Edit
               </a>
@@ -1303,7 +1303,7 @@ const ForensicsView: React.FC<{ route: HashRoute; grants: BreakGlassState | null
           </section>
           <section className="card">
             <div className="card-head">
-              <h3>Incident grants on this tenant</h3>
+              <h2 data-h="3">Incident grants on this tenant</h2>
             </div>
             <span className="lbl g" style={{ marginTop: 8 }}>
               read-only
@@ -1337,7 +1337,7 @@ const ForensicsView: React.FC<{ route: HashRoute; grants: BreakGlassState | null
             </p>
           </section>
           <section className="card">
-            <h3>Security · 24 h</h3>
+            <h2 data-h="3">Security · 24 h</h2>
             {day.loading && !day.data ? (
               <SkLines lines={5} />
             ) : (
@@ -1496,7 +1496,7 @@ const GrantsView: React.FC<{
           {sel && (
             <section className="card">
               <div className="card-head">
-                <h3>{grantId(sel.id)} · use log</h3>
+                <h2 data-h="3">{grantId(sel.id)} · use log</h2>
                 <span className="sm muted">IDs and times only</span>
               </div>
               {incidentEvents.loading && !incidentEvents.data ? (
@@ -1540,7 +1540,7 @@ const GrantsView: React.FC<{
         </div>
         <aside className="col-side" style={{ flex: '1 1 280px', maxWidth: 330 }}>
           <section className="card">
-            <h3>Your role in incidents</h3>
+            <h2 data-h="3">Your role in incidents</h2>
             <ul className="role-list">
               {(
                 [
@@ -1566,7 +1566,7 @@ const GrantsView: React.FC<{
             <EscalationForm onClose={() => setEscalate(false)} />
           ) : (
             <section className="card">
-              <h3>Request escalation</h3>
+              <h2 data-h="3">Request escalation</h2>
               <p className="sm muted" style={{ margin: '8px 0 12px' }}>
                 Ask a Super Admin to inspect or remediate personal records. Say what you observed; never paste the content.
               </p>
@@ -1577,7 +1577,7 @@ const GrantsView: React.FC<{
           )}
           <section className="card">
             <div className="card-head">
-              <h3>Monthly report · {new Date().toLocaleDateString('en-US', { month: 'long' })}</h3>
+              <h2 data-h="3">Monthly report · {new Date().toLocaleDateString('en-US', { month: 'long' })}</h2>
             </div>
             <button
               type="button"
@@ -1642,7 +1642,7 @@ const EscalationForm: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   };
   return (
     <section className="card">
-      <h3>Request escalation</h3>
+      <h2 data-h="3">Request escalation</h2>
       <div className="f" style={{ marginTop: 12 }}>
         <label htmlFor="esc-t">Records or owner</label>
         <input id="esc-t" className="in mono" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="mem_4e21…b90 or a username" autoFocus />
@@ -1873,7 +1873,7 @@ const RetentionView: React.FC<{ onReady: (s: { ready: boolean; save: () => void 
       <div className="row-wrap">
         <section className="card" style={{ flex: '1 1 380px' }}>
           <div className="card-head">
-            <h3>Purge schedule</h3>
+            <h2 data-h="3">Purge schedule</h2>
             <span className={`lbl ${purge?.status === 'failed' ? 'red' : 'grn'}`}>{purge?.status === 'failed' ? 'Failing' : 'Healthy'}</span>
           </div>
           <dl className="detail-kv">
@@ -1896,7 +1896,7 @@ const RetentionView: React.FC<{ onReady: (s: { ready: boolean; save: () => void 
         </section>
         <section className="card" style={{ flex: '1 1 380px' }}>
           <div className="card-head">
-            <h3>Change summary</h3>
+            <h2 data-h="3">Change summary</h2>
             <span className={`lbl ${dirty ? 'ylw' : 'g'}`}>{dirty ? 'unsaved' : 'no changes'}</span>
           </div>
           {dirty ? (

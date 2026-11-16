@@ -266,7 +266,7 @@ const Curation: React.FC<{ route: HashRoute }> = ({ route }) => {
 
           <aside className="col-side" style={{ flex: '1 1 320px', maxWidth: 380 }}>
             <div className="card">
-              <h3 style={{ marginBottom: 6 }}>How rules are layered</h3>
+              <h2 data-h="3" style={{ marginBottom: 6 }}>How rules are layered</h2>
               <div className="layer">
                 <span className="num">1</span>
                 <div>
@@ -409,7 +409,7 @@ const RuleEditor: React.FC<{
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div>
-          <h3 style={{ fontSize: 18 }}>{d.id ? `Edit rule · ${rule?.name ?? d.name}` : 'Create rule'}</h3>
+          <h2 data-h="3" style={{ fontSize: 18 }}>{d.id ? `Edit rule · ${rule?.name ?? d.name}` : 'Create rule'}</h2>
           {rule && (
             <span className="sm muted">
               v{rule.version}
@@ -608,7 +608,7 @@ const PolicyCard: React.FC = () => {
   return (
     <section className="card">
       <div className="card-head">
-        <h3>Dreaming &amp; compaction policy</h3>
+        <h2 data-h="3">Dreaming &amp; compaction policy</h2>
         <button type="button" className="link-btn" style={{ textDecoration: 'none' }} onClick={() => setEditing(true)} disabled={!settings.data}>
           Edit
         </button>

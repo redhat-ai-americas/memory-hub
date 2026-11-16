@@ -132,7 +132,7 @@ const Operations: React.FC<{ days?: string; initialStatus?: string; description?
                     <th>Attempts</th>
                     <th>Correlation</th>
                     <th>Started</th>
-                    <th />
+                    <th><span className="vh">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>

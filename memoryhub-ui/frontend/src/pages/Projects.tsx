@@ -186,7 +186,7 @@ const Projects: React.FC<{ route: HashRoute }> = ({ route }) => {
                         <th>Memories</th>
                         <th>Campaigns</th>
                         <th>Last write</th>
-                        <th />
+                        <th><span className="vh">Actions</span></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -485,7 +485,7 @@ export const ProjectPanel: React.FC<{
         <div className="ch">
           <div>
             <span className="lbl s-project">Project</span>
-            <h3 style={{ fontSize: 20, marginTop: 8 }}>{data.name}</h3>
+            <h2 data-h="3" style={{ fontSize: 20, marginTop: 8 }}>{data.name}</h2>
           </div>
           {(data.can_manage !== false || data.can_delete) && (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -623,7 +623,7 @@ export const ProjectPanel: React.FC<{
 
       <div className="card">
         <div className="ch">
-          <h3>Session focus · last 30 days</h3>
+          <h2 data-h="3">Session focus · last 30 days</h2>
           <span className="sm muted">get_focus_history</span>
         </div>
         {!data.focus_available ? (
@@ -654,7 +654,7 @@ export const ProjectPanel: React.FC<{
 
       <div className="card">
         <div className="ch">
-          <h3>Agent loading policy</h3>
+          <h2 data-h="3">Agent loading policy</h2>
           <span className="mono muted">.memoryhub.yaml</span>
         </div>
         <pre>{data.loading_policy}</pre>
@@ -713,7 +713,7 @@ export const CampaignPanel: React.FC<{ campaign: CampaignRow; projects: ProjectR
       <div className="ch">
         <div>
           <span className="lbl s-campaign">Campaign</span>
-          <h3 style={{ fontSize: 20, marginTop: 8 }}>{campaign.name}</h3>
+          <h2 data-h="3" style={{ fontSize: 20, marginTop: 8 }}>{campaign.name}</h2>
         </div>
         <Dropdown
           align="right"

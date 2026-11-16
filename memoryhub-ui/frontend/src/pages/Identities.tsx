@@ -521,7 +521,7 @@ const AdminIdentities: React.FC<{ route: HashRoute }> = ({ route }) => {
             <div className="acc-cards two">
               <section className="card">
                 <div className="card-head">
-                  <h3>Roles</h3>
+                  <h2 data-h="3">Roles</h2>
                   <a className="sm" href={buildHash('/memories', { scope: 'role' })}>
                     Role memories
                   </a>
@@ -555,7 +555,7 @@ const AdminIdentities: React.FC<{ route: HashRoute }> = ({ route }) => {
               </section>
               <section className="card">
                 <div className="card-head">
-                  <h3>Credentials behind these identities</h3>
+                  <h2 data-h="3">Credentials behind these identities</h2>
                   <a className="sm" href={buildHash('/clients')}>
                     OAuth clients &amp; keys
                   </a>
@@ -631,7 +631,7 @@ const truncateId = (id: string) => (id.length > 10 ? `${id.slice(0, 7)}…` : id
 const RolesTable: React.FC<{ roles: { name: string; members: number }[]; loading: boolean; onAssign: () => void }> = ({ roles, loading, onAssign }) => (
   <>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px' }}>
-      <h3>Roles</h3>
+      <h2 data-h="3">Roles</h2>
       <button type="button" className="btn bl sm" onClick={onAssign}>
         + Assign role
       </button>
@@ -646,7 +646,7 @@ const RolesTable: React.FC<{ roles: { name: string; members: number }[]; loading
           <tr>
             <th>Role</th>
             <th>Holders</th>
-            <th />
+            <th><span className="vh">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -694,7 +694,7 @@ const IdentityPanel: React.FC<{ row: IdentityRow; canAssignOwner: boolean; self?
           {initials(row.name)}
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h3 style={{ fontSize: 18 }}>{row.name}</h3>
+          <h2 data-h="3" style={{ fontSize: 18 }}>{row.name}</h2>
           <div className="sm muted">{typeLabel}</div>
         </div>
         <button type="button" className="btn bl" aria-label="Close" onClick={onClose}>

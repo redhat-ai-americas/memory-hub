@@ -138,7 +138,7 @@ const GlobalAudit: React.FC<{ route: HashRoute }> = ({ route }) => {
         </section>
         <div className="acc-cards two">
           <section className="card">
-            <h3>Review oversight</h3>
+            <h2 data-h="3">Review oversight</h2>
             {!r ? (
               <SkLines lines={4} />
             ) : (
@@ -155,7 +155,7 @@ const GlobalAudit: React.FC<{ route: HashRoute }> = ({ route }) => {
             )}
           </section>
           <section className="card">
-            <h3>Retention</h3>
+            <h2 data-h="3">Retention</h2>
             <dl className="detail-kv nums">
               <dt>Administrative events</dt>
               <dd>400 days</dd>

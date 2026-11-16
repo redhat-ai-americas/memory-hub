@@ -218,7 +218,7 @@ const SearchRuns: React.FC<{
       <div className="row-wrap">
         <div className="col-main">
           <section className="card">
-            <h3>Stage time (median)</h3>
+            <h2 data-h="3">Stage time (median)</h2>
             {first ? (
               <SkLines lines={5} />
             ) : stages.length === 0 ? (
@@ -242,7 +242,7 @@ const SearchRuns: React.FC<{
 
           <section className="card">
             <div className="card-head">
-              <h3>Where matches are cut</h3>
+              <h2 data-h="3">Where matches are cut</h2>
               <span className="sm muted">Expected memory present but not delivered</span>
             </div>
             {first ? (
@@ -276,7 +276,7 @@ const SearchRuns: React.FC<{
 
         <aside className="col-side">
           <section className="card">
-            <h3>Sources &amp; reranker</h3>
+            <h2 data-h="3">Sources &amp; reranker</h2>
             {first ? (
               <SkLines lines={4} />
             ) : (
@@ -299,7 +299,7 @@ const SearchRuns: React.FC<{
             )}
           </section>
           <section className="card">
-            <h3>Search playground</h3>
+            <h2 data-h="3">Search playground</h2>
             <p className="sm" style={{ margin: '10px 0 14px' }}>
               Run any query as yourself or a service agent. Personal scope is removed before ranking, so admin results never include it.
             </p>
@@ -308,7 +308,7 @@ const SearchRuns: React.FC<{
             </button>
           </section>
           <section className="card">
-            <h3>Compare</h3>
+            <h2 data-h="3">Compare</h2>
             <p className="sm" style={{ margin: '10px 0 14px' }}>
               A/B two retrieval settings on the {checkCount ?? ''} org checks before changing tenant defaults.
             </p>
@@ -335,7 +335,7 @@ const JobsCard: React.FC<{ days: string; onView: (v: View) => void }> = ({ days,
   return (
     <section className="card">
       <div className="card-head">
-        <h3>Background jobs</h3>
+        <h2 data-h="3">Background jobs</h2>
         <span className="sm job-filter">
           {([
             ['', 'Any'],
@@ -425,7 +425,7 @@ const Indexing: React.FC<{ days: string }> = ({ days }) => {
       <div className="row-wrap">
         <div className="col-main">
           <section className="card">
-            <h3>Models</h3>
+            <h2 data-h="3">Models</h2>
             {settings.error && !settings.data ? (
               <ErrorState error={settings.error} onRetry={settings.reload} />
             ) : !models ? (
@@ -466,7 +466,7 @@ const Indexing: React.FC<{ days: string }> = ({ days }) => {
             )}
           </section>
           <section className="card">
-            <h3>Indexing jobs · {days === '1' ? '24 h' : `${days} d`}</h3>
+            <h2 data-h="3">Indexing jobs · {days === '1' ? '24 h' : `${days} d`}</h2>
             {jobs.loading && !jobs.data ? (
               <SkLines lines={3} />
             ) : idxKinds.length === 0 ? (
@@ -501,7 +501,7 @@ const Indexing: React.FC<{ days: string }> = ({ days }) => {
         </div>
         <aside className="col-side">
           <section className="card">
-            <h3>Index</h3>
+            <h2 data-h="3">Index</h2>
             <dl className="kv" style={{ marginTop: 14 }}>
               <dt>Indexing backlog</dt>
               <dd>{g?.indexing_backlog !== undefined ? `${fmtInt(g.indexing_backlog)}${g.indexing_failed ? ` · ${fmtInt(g.indexing_failed)} failed` : ''}` : health.data?.index_backlog !== undefined ? fmtInt(health.data.index_backlog) : '—'}</dd>
@@ -512,7 +512,7 @@ const Indexing: React.FC<{ days: string }> = ({ days }) => {
             </dl>
           </section>
           <section className="card">
-            <h3>Reranker settings</h3>
+            <h2 data-h="3">Reranker settings</h2>
             {!r ? (
               <SkLines lines={3} />
             ) : (

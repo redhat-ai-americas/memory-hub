@@ -200,7 +200,7 @@ const Overview: React.FC = () => {
           <div className="card span-2 ops">
             <div className="ops-head">
               <div>
-                <h3>Memory operations</h3>
+                <h2 data-h="3">Memory operations</h2>
                 <div className="ops-sub">{selectedActivityRange.title}</div>
               </div>
               <div className="ops-tools">
@@ -244,7 +244,7 @@ const Overview: React.FC = () => {
           ) : (
           <div className="card">
             <div className="ch">
-              <h3>Memories by scope</h3>
+              <h2 data-h="3">Memories by scope</h2>
             </div>
             {first ? (
               <SkLines lines={6} gap={22} />
@@ -284,7 +284,7 @@ const Overview: React.FC = () => {
         <div className="card">
           <div className="ch">
             <div>
-              <h3>Memory categories</h3>
+              <h2 data-h="3">Memory categories</h2>
               <p className="sm muted" style={{ margin: '4px 0 0' }}>
                 Category mix across all memories, by domain tag. A memory can have more than one category, so shares are of all assignments.
               </p>
@@ -320,7 +320,7 @@ const Overview: React.FC = () => {
           <div className="span-2 stack">
           <div className="card">
             <div className="ch">
-              <h3>Recent activity</h3>
+              <h2 data-h="3">Recent activity</h2>
               <a className="sm" href={buildHash('/audit', { tab: 'log' })}>
                 Open audit log
               </a>
@@ -383,7 +383,7 @@ const Overview: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="card">
               <div className="ch">
-                <h3>Component health</h3>
+                <h2 data-h="3">Component health</h2>
                 {data &&
                   (healthBad.length === 0 ? (
                     <span className="lbl s-org">All systems normal</span>
@@ -417,7 +417,7 @@ const Overview: React.FC = () => {
               )}
             </div>
             <div className="card">
-              <h3 style={{ marginBottom: 12 }}>Context assembly</h3>
+              <h2 data-h="3" style={{ marginBottom: 12 }}>Context assembly</h2>
               {first ? (
                 <SkLines lines={3} />
               ) : empty ? (
@@ -695,7 +695,7 @@ const QuotasGovernance: React.FC<{ data: OverviewData | null | undefined; loadin
   );
   return (
     <section className="card">
-      <h3 style={{ marginBottom: 12 }}>Quotas &amp; governance</h3>
+      <h2 data-h="3" style={{ marginBottom: 12 }}>Quotas &amp; governance</h2>
       {loading ? (
         <SkLines lines={6} />
       ) : (
@@ -733,7 +733,7 @@ const TenantUsage: React.FC<{ data: UsageSummary }> = ({ data }) => {
   return (
     <section className="card" aria-label="Agent usage">
       <div className="ch">
-        <h3>Do agents use what they get?</h3>
+        <h2 data-h="3">Do agents use what they get?</h2>
         <span className="sm muted">Last 30 days · tenant</span>
       </div>
       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -796,7 +796,7 @@ const GettingStarted: React.FC = () => {
     <section className="card" aria-label="Getting started">
       <div className="ch">
         <div>
-          <h3>Getting started</h3>
+          <h2 data-h="3">Getting started</h2>
           <p className="sm muted" style={{ margin: '4px 0 0' }}>
             {data.done} of {data.total} done. Each step takes a minute.
           </p>
@@ -837,7 +837,7 @@ const AgentUsage: React.FC<{ tenantWide?: boolean }> = ({ tenantWide }) => {
   return (
     <section className="card" aria-label="Agent usage">
       <div className="ch">
-        <h3>Do agents use what they get?</h3>
+        <h2 data-h="3">Do agents use what they get?</h2>
         <span className="sm muted">Last 30 days</span>
       </div>
       <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -895,7 +895,7 @@ const MyScopes: React.FC<OverviewCardProps> = ({ data, loading, empty }) => {
   return (
     <section className="card">
       <div className="ch">
-        <h3>My memories by scope</h3>
+        <h2 data-h="3">My memories by scope</h2>
         <a className="sm" href={buildHash('/memories')}>
           View all
         </a>
@@ -931,7 +931,7 @@ const MyScopes: React.FC<OverviewCardProps> = ({ data, loading, empty }) => {
 /** Categories as a compact list of tags with counts; each opens the browser filtered by it. */
 const CategoryChips: React.FC<OverviewCardProps> = ({ data, loading, empty }) => (
   <section className="card">
-    <h3 style={{ marginBottom: 12 }}>Memory categories</h3>
+    <h2 data-h="3" style={{ marginBottom: 12 }}>Memory categories</h2>
     {loading ? (
       <SkLines lines={2} />
     ) : empty || !data?.categories.length ? (
@@ -956,7 +956,7 @@ const MyContradictions: React.FC<OverviewCardProps> = ({ data, loading }) => {
   return (
     <section className="card">
       <div className="ch">
-        <h3>Contradictions</h3>
+        <h2 data-h="3">Contradictions</h2>
         <span className="lbl blue">Readable records only</span>
       </div>
       {loading ? (
@@ -995,7 +995,7 @@ const MyOpenRequests: React.FC = () => {
   return (
     <section className="card">
       <div className="ch">
-        <h3>My open requests</h3>
+        <h2 data-h="3">My open requests</h2>
         <a className="sm" href={buildHash('/review')}>
           My requests
         </a>
@@ -1029,7 +1029,7 @@ const MyOpenRequests: React.FC = () => {
 /** Cache hits and tokens per injection, for the agents the user connects. */
 const ContextAssembly: React.FC<OverviewCardProps> = ({ data, loading, empty }) => (
   <section className="card">
-    <h3 style={{ marginBottom: 12 }}>Context assembly</h3>
+    <h2 data-h="3" style={{ marginBottom: 12 }}>Context assembly</h2>
     {loading ? (
       <SkLines lines={3} />
     ) : empty || !data ? (

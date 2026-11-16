@@ -101,7 +101,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   }
 
   const m = data?.memory;
-  const unresolved = data?.contradictions.filter((c) => !c.resolved) ?? [];
+  const unresolved = (data?.contradictions ?? []).filter((c) => !c.resolved);
   const threshold = data?.contradiction_threshold ?? 5;
   const deleted = Boolean(m?.deleted_at);
   const canWrite = Boolean(m?.capabilities?.write);
@@ -185,8 +185,8 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                 </>
               )}
               {canDelete && !userView && (
-                <button type="button" className="btn bd outline" aria-label="Delete memory" onClick={() => setModal('delete')}>
-                  Delete
+                <button type="button" className="btn bd outline" onClick={() => setModal('delete')}>
+                  Delete memory
                 </button>
               )}
             </>
@@ -234,7 +234,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                 {(tab === 'details' || tab === 'versions') && (
                   <div className="card">
                     <div className="ch">
-                      <h3>Version history</h3>
+                      <h2 data-h="3">Version history</h2>
                       {byVersion.length > 1 && (
                         <button
                           type="button"
@@ -328,7 +328,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                 {(tab === 'details' || tab === 'branches') && (
                   <div className="card">
                     <div className="ch">
-                      <h3>Branches</h3>
+                      <h2 data-h="3">Branches</h2>
                       <span className="sm muted">Child nodes that explain or support this memory</span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -356,7 +356,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                 {tab === 'details' && (
                   <div className="card">
                     <div className="ch">
-                      <h3>Relationships</h3>
+                      <h2 data-h="3">Relationships</h2>
                       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                         {!deleted && canWrite && (
                           <button type="button" className="btn bl sm" onClick={() => setModal('relate')}>
@@ -405,7 +405,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                 <SourceCard id={m.id} />
                 <UsageCard id={m.id} />
                 <div className="card">
-                  <h3 style={{ marginBottom: 14 }}>Details</h3>
+                  <h2 data-h="3" style={{ marginBottom: 14 }}>Details</h2>
                   <dl className="dl">
                     <dt>ID</dt>
                     <dd className="mono">{m.id}</dd>
@@ -452,7 +452,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
 
                 <div className="card">
                   <div className="ch">
-                    <h3>Contradictions</h3>
+                    <h2 data-h="3">Contradictions</h2>
                     <a className="sm" href={buildHash('/review', { tab: 'contradictions' })}>
                       Review
                     </a>
@@ -485,7 +485,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                 </div>
 
                 <div className="card">
-                  <h3 style={{ marginBottom: 12 }}>Similar memories</h3>
+                  <h2 data-h="3" style={{ marginBottom: 12 }}>Similar memories</h2>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
                     {data.similar.length === 0 && <span className="sm muted">{m.embedding_dims ? 'No close neighbours.' : 'This memory has no embedding.'}</span>}
                     {data.similar.map((s) => (
@@ -557,7 +557,7 @@ const AccessLog: React.FC<{ id: string }> = ({ id }) => {
   return (
     <section className="card" style={{ padding: 0 }}>
       <div style={{ padding: '16px 20px' }}>
-        <h3>Access log</h3>
+        <h2 data-h="3">Access log</h2>
       </div>
       {error && !data ? (
         <ErrorState error={error} onRetry={reload} />
@@ -798,7 +798,7 @@ const UsageCard: React.FC<{ id: string }> = ({ id }) => {
   return (
     <div className="card">
       <div className="ch">
-        <h3>Agent usage</h3>
+        <h2 data-h="3">Agent usage</h2>
         <span className="sm muted">30 days</span>
       </div>
       {data.served === 0 ? (
@@ -844,7 +844,7 @@ const SourceCard: React.FC<{ id: string }> = ({ id }) => {
   return (
     <div className="card">
       <div className="ch">
-        <h3>Source</h3>
+        <h2 data-h="3">Source</h2>
         {data.status && data.status !== 'ok' && <span className={`lbl ${data.status === 'changed' ? 'ylw' : 'blue'}`}>{data.status === 'changed' ? 'source changed' : 'moved'}</span>}
       </div>
       {data.redacted ? (
@@ -900,7 +900,7 @@ const UserMemoryView: React.FC<{
   const { me } = useApp();
   const m = data.memory;
   const [compare, setCompare] = useState(false);
-  const unresolved = data.contradictions.filter((c) => !c.resolved);
+  const unresolved = (data.contradictions ?? []).filter((c) => !c.resolved);
   const you = (id: string | null | undefined) => (id && id === me?.username ? `${id} (you)` : id || '—');
   const owner = m.scope === 'user' ? `Personal · ${you(m.owner_id)}` : `${scopeMeta(m.scope).label} ${m.scope_id ?? m.owner_id}`;
   const latest = byVersion[byVersion.length - 1];
@@ -917,7 +917,7 @@ const UserMemoryView: React.FC<{
         )}
         <section className="card">
           <div className="ch">
-            <h3>Content</h3>
+            <h2 data-h="3">Content</h2>
             <span className="sm muted">
               {canWrite ? `You can edit this ${m.scope === 'user' ? 'personal' : scopeMeta(m.scope).label.toLowerCase()} memory` : 'Read only for you'}
             </span>
@@ -935,7 +935,7 @@ const UserMemoryView: React.FC<{
         </section>
 
         <section className="card">
-          <h3 style={{ marginBottom: 12 }}>Details</h3>
+          <h2 data-h="3" style={{ marginBottom: 12 }}>Details</h2>
           <dl className="kv wide">
             <dt>Owner (scope)</dt>
             <dd>{owner}</dd>
@@ -969,7 +969,7 @@ const UserMemoryView: React.FC<{
 
         <section className="card">
           <div className="ch">
-            <h3>Version history</h3>
+            <h2 data-h="3">Version history</h2>
             {previous && (
               <button type="button" className="btn bl sm" onClick={() => setCompare((c) => !c)}>
                 {compare ? 'Hide comparison' : 'Compare'}
@@ -1010,7 +1010,7 @@ const UserMemoryView: React.FC<{
       <aside className="col-side" style={{ flex: '1 1 300px' }}>
         <section className="card">
           <div className="ch">
-            <h3>Contradictions</h3>
+            <h2 data-h="3">Contradictions</h2>
             {unresolved.length > 0 && <span className="lbl ylw">{unresolved.length} open</span>}
           </div>
           {unresolved.length === 0 ? (
@@ -1031,7 +1031,7 @@ const UserMemoryView: React.FC<{
 
         <section className="card">
           <div className="ch">
-            <h3>Relationships</h3>
+            <h2 data-h="3">Relationships</h2>
             {!deleted && canWrite && (
               <button type="button" className="btn bl sm" onClick={onRelate}>
                 + Add
@@ -1055,7 +1055,7 @@ const UserMemoryView: React.FC<{
         </section>
 
         <section className="card">
-          <h3 style={{ marginBottom: 10 }}>Branches</h3>
+          <h2 data-h="3" style={{ marginBottom: 10 }}>Branches</h2>
           {data.branches.length === 0 && (
             <p className="sm muted" style={{ margin: 0 }}>
               No branches yet.
@@ -1070,7 +1070,7 @@ const UserMemoryView: React.FC<{
         </section>
 
         <section className="card">
-          <h3 style={{ marginBottom: 10 }}>Similar memories</h3>
+          <h2 data-h="3" style={{ marginBottom: 10 }}>Similar memories</h2>
           {data.similar.length === 0 && (
             <p className="sm muted" style={{ margin: 0 }}>
               {m.embedding_dims ? 'No close neighbours.' : 'This memory has no embedding.'}
@@ -1122,14 +1122,14 @@ const ReadersLog: React.FC<{ id: string }> = ({ id }) => {
   return (
     <section className="card">
       <div className="ch">
-        <h3>Access log</h3>
+        <h2 data-h="3">Access log</h2>
         <span className="sm muted">Who read this memory · 30 days</span>
       </div>
       {error && !data ? (
         <ErrorState error={error} onRetry={reload} compact />
       ) : loading && !data ? (
         <SkLines lines={4} />
-      ) : !data || data.items.length === 0 ? (
+      ) : !data?.items?.length ? (
         <p className="sm muted" style={{ margin: 0 }}>
           Nobody read this memory in the last 30 days.
         </p>
@@ -1174,7 +1174,7 @@ const UsageCompact: React.FC<{ id: string }> = ({ id }) => {
   const pct = data.use_rate === null ? null : Math.round(data.use_rate * 100);
   return (
     <section className="card">
-      <h3 style={{ marginBottom: 10 }}>Agent usage · 30 d</h3>
+      <h2 data-h="3" style={{ marginBottom: 10 }}>Agent usage · 30 d</h2>
       <dl className="kv">
         <dt>Served in search</dt>
         <dd>{data.served}</dd>

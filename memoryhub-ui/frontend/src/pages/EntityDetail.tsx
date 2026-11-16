@@ -128,7 +128,7 @@ const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
 
                 <section className="card" style={{ padding: 0 }}>
                   <div className="ch" style={{ padding: '18px 20px 0' }}>
-                    <h3>Memories</h3>
+                    <h2 data-h="3">Memories</h2>
                     <span style={{ display: 'flex', gap: 12 }}>
                       <a className="sm" href={buildHash('/memories', { ...filter, view: 'graph' })}>
                         Graph
@@ -171,7 +171,7 @@ const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
 
               <aside className="col-side">
                 <section className="card">
-                  <h3>When it comes up</h3>
+                  <h2 data-h="3">When it comes up</h2>
                   {e.months.length === 0 ? (
                     <p className="sm muted">No dates yet.</p>
                   ) : (
@@ -186,7 +186,7 @@ const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                   )}
                 </section>
                 <section className="card">
-                  <h3>Mentioned together with</h3>
+                  <h2 data-h="3">Mentioned together with</h2>
                   {e.co_mentions.length === 0 ? (
                     <p className="sm muted">No other entity appears in the same memories.</p>
                   ) : (
@@ -204,7 +204,7 @@ const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                   )}
                 </section>
                 <section className="card">
-                  <h3>Where</h3>
+                  <h2 data-h="3">Where</h2>
                   <dl className="dl" style={{ marginTop: 12 }}>
                     <dt>Scopes</dt>
                     <dd>

@@ -397,7 +397,7 @@ const SelectedProject: React.FC<{
     <div className="detail-grid">
       <section className="card" style={{ flex: '999 1 560px', minWidth: 0 }}>
         <div className="ch">
-          <h3>{data.name} · members</h3>
+          <h2 data-h="3">{data.name} · members</h2>
           {data.can_manage !== false && !data.archived && (
             <button type="button" className="btn bs sm" onClick={onAddMember}>
               <Icon.Plus />
@@ -472,7 +472,7 @@ const SelectedProject: React.FC<{
       <aside className="col-side" style={{ flex: '1 1 340px' }}>
         <section className="card">
           <div className="ch">
-            <h3>Agent loading policy</h3>
+            <h2 data-h="3">Agent loading policy</h2>
             <a className="sm" href={settings}>
               Edit
             </a>
@@ -491,7 +491,7 @@ const SelectedProject: React.FC<{
           )}
         </section>
         <section className="card">
-          <h3 style={{ marginBottom: 12 }}>Session focus · 30 d</h3>
+          <h2 data-h="3" style={{ marginBottom: 12 }}>Session focus · 30 d</h2>
           {!data.focus_available || !data.focus_history?.length ? (
             <p className="sm muted" style={{ margin: 0 }}>
               {data.focus_available ? 'No session focus declared in the last 30 days.' : 'Focus history is not available on this deployment.'}
@@ -513,7 +513,7 @@ const SelectedProject: React.FC<{
           </p>
         </section>
         <section className="card">
-          <h3 style={{ marginBottom: 12 }}>Lifecycle</h3>
+          <h2 data-h="3" style={{ marginBottom: 12 }}>Lifecycle</h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="btn bs sm" onClick={onEdit} disabled={data.archived}>
               Set quota

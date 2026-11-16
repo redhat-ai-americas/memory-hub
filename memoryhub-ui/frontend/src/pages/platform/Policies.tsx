@@ -84,7 +84,7 @@ const Policies: React.FC<{ route: HashRoute }> = ({ route }) => {
           <>
             <div className="pol-grid">
               <section className="card" id="pol-security" ref={sec('security')}>
-                <h3>Privileged access</h3>
+                <h2 data-h="3">Privileged access</h2>
                 <div className="set-check dis">
                   <span>Incident grants need an independent second Super Admin</span>
                   <span className="sm" style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
@@ -130,7 +130,7 @@ const Policies: React.FC<{ route: HashRoute }> = ({ route }) => {
               </section>
 
               <section className="card" id="pol-models" ref={sec('models')}>
-                <h3>Models</h3>
+                <h2 data-h="3">Models</h2>
                 <div className="f set-f">
                   <label htmlFor="pl-e">Embedding model</label>
                   <select id="pl-e" className="in" value={v.models.embedding} onChange={(e) => upd('models', { embedding: e.target.value })}>
@@ -160,7 +160,7 @@ const Policies: React.FC<{ route: HashRoute }> = ({ route }) => {
 
               <section className="card" id="pol-rules" ref={sec('rules')}>
                 <div className="card-head">
-                  <h3>System curation rules</h3>
+                  <h2 data-h="3">System curation rules</h2>
                   <button type="button" className="link-btn" style={{ textDecoration: 'none' }} onClick={() => setNewRule(true)}>
                     <Icon.Plus size={12} /> New
                   </button>
@@ -196,7 +196,7 @@ const Policies: React.FC<{ route: HashRoute }> = ({ route }) => {
               </section>
 
               <section className="card" id="pol-limits" ref={sec('limits')}>
-                <h3>Limits &amp; retention ceilings</h3>
+                <h2 data-h="3">Limits &amp; retention ceilings</h2>
                 <div className="set-two">
                   <div className="f set-f">
                     <label htmlFor="pl-rl">Rate limit per tenant · /min</label>

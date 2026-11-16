@@ -92,6 +92,10 @@ h1, h2, h3, h4 { color: inherit; }
 /* ---------- Cards & layout ---------- */
 .card { background: #fff; border: 1px solid var(--mh-border); border-radius: 16px; padding: 20px 24px; min-width: 0; }
 .card h3 { font-family: var(--mh-font-display); font-size: 16px; font-weight: 600; margin: 0; }
+/* Section titles are h2 in markup (a11y heading order) and keep the former h3 look. */
+h2[data-h="3"] { font-size: 1.17em; margin: 1em 0; }
+.modal h2[data-h="3"] { font-family: inherit; font-size: 1.17em; font-weight: 700; margin: 1em 0; }
+.card h2[data-h="3"] { font-family: var(--mh-font-display); font-size: 16px; font-weight: 600; margin: 0; }
 .ch { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .row-wrap { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
 .col-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
@@ -100,7 +104,7 @@ h1, h2, h3, h4 { color: inherit; }
 .grid-2-1 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
 .grid-2-1 > .span-2 { grid-column: span 2; }
 @media (max-width: 1100px) { .grid-2-1 > .span-2 { grid-column: auto; } }
-.scroll { overflow-x: auto; }
+.scroll { overflow-x: auto; position: relative; }
 .activity-chart-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
 .flex { display: flex; } .wrap { flex-wrap: wrap; } .ac { align-items: center; } .g6 { gap: 6px; } .g8 { gap: 8px; } .g10 { gap: 10px; } .g12 { gap: 12px; }
 
@@ -602,7 +606,7 @@ button.tag { cursor: pointer; border: 1px solid transparent; font: inherit; font
 .hosts th, .hosts td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--mh-line); vertical-align: top; }
 .hosts th { font-size: 12px; font-weight: 600; color: var(--mh-muted); text-transform: none; }
 .hosts td.cap { white-space: nowrap; }
-.tbl-scroll { overflow-x: auto; }
+.tbl-scroll { overflow-x: auto; position: relative; }
 .tplpick { display: flex; gap: 10px; flex-wrap: wrap; }
 .tplpick label { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--mh-border); border-radius: 10px; padding: 10px 12px; cursor: pointer; flex: 1 1 180px; font-size: 14px; }
 .tplpick label.on { border-color: #0066cc; background: #f2f8fd; }
@@ -807,7 +811,7 @@ a.btn.disabled { opacity: .5; pointer-events: none; }
 /* ---------- Tenant settings ---------- */
 .set-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 20px; align-items: stretch; }
 .set-grid > .card { scroll-margin-top: 140px; display: flex; flex-direction: column; }
-.set-grid h3 { margin-bottom: 6px; }
+.set-grid h3, .set-grid h2[data-h="3"] { margin-bottom: 6px; }
 .set-f { margin-top: 14px; }
 .set-lock { display: inline-flex; gap: 5px; align-items: center; }
 .set-two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }

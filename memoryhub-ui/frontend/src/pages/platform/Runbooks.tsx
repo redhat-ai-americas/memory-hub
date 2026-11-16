@@ -125,7 +125,7 @@ const Runbooks: React.FC<{ route: HashRoute }> = ({ route }) => {
         </section>
         <div className="acc-cards two">
           <section className="card">
-            <h3>How this differs from memory</h3>
+            <h2 data-h="3">How this differs from memory</h2>
             <ul className="rule-list">
               <li>Not personal memory of an admin, and not an “admin memory” collecting what admins saw.</li>
               <li>Every item has an owner, a version, a reviewer and an audience.</li>
@@ -133,7 +133,7 @@ const Runbooks: React.FC<{ route: HashRoute }> = ({ route }) => {
             </ul>
           </section>
           <section className="card">
-            <h3>Where other knowledge lives</h3>
+            <h2 data-h="3">Where other knowledge lives</h2>
             <dl className="detail-kv nums">
               <dt>Admin’s own notes &amp; preferences</dt>
               <dd>My workspace</dd>

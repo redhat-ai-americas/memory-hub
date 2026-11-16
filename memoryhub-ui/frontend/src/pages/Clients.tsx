@@ -284,7 +284,7 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
           <div className="acc-cards two">
             <section className="card">
               <div className="card-head">
-                <h3>Trusted token issuers</h3>
+                <h2 data-h="3">Trusted token issuers</h2>
                 <button
                   type="button"
                   className="btn bs sm-btn"
@@ -393,7 +393,7 @@ const ClientPolicy: React.FC = () => {
   return (
     <section className="card">
       <div className="card-head">
-        <h3>Client policy</h3>
+        <h2 data-h="3">Client policy</h2>
         <span className="sm muted">within global limits</span>
       </div>
       {!data ? (
@@ -437,7 +437,7 @@ const IssuerCards: React.FC<{ issuers: { name: string; kind?: string; descriptio
 const IssuerList: React.FC<{ issuers: { name: string; kind?: string; description?: string; status?: string }[]; issuer: string | null }> = ({ issuers, issuer }) => (
   <div style={{ padding: '20px 24px' }}>
     <div className="ch">
-      <h3>Trusted token issuers</h3>
+      <h2 data-h="3">Trusted token issuers</h2>
       {issuer && <span className="mono muted">MemoryHub issuer: {issuer}</span>}
     </div>
     <IssuerCards issuers={issuers} />
@@ -460,7 +460,7 @@ const RevealCard: React.FC<{ revealed: Revealed; onDismiss: () => void }> = ({ r
       <div className="ch">
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <span style={{ width: 28, height: 28, borderRadius: 99, background: '#3d7317', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700 }}>✓</span>
-          <h3>{revealed.title}</h3>
+          <h2 data-h="3">{revealed.title}</h2>
         </div>
         <button type="button" className="btn bl" aria-label="Dismiss" onClick={onDismiss}>
           ✕

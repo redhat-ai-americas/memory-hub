@@ -122,7 +122,7 @@ const Checks: React.FC = () => {
         <>
           <section className="card">
             <div className="ch">
-              <h3>Last run {last ? `· ${fmtRelative(last.started_at).toLowerCase()}` : ''}</h3>
+              <h2 data-h="3">Last run {last ? `· ${fmtRelative(last.started_at).toLowerCase()}` : ''}</h2>
               <button type="button" className="btn bp" disabled={busy} onClick={() => run()}>
                 {busy ? 'Running…' : data.checks.length === 1 ? 'Run the check' : `Run all ${data.checks.length} checks`}
               </button>
@@ -150,7 +150,7 @@ const Checks: React.FC = () => {
                     <th>Recall</th>
                     <th>First hit</th>
                     <th>Why missing</th>
-                    <th />
+                    <th><span className="vh">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -212,7 +212,7 @@ const Checks: React.FC = () => {
       )}
       {data.queries.length > 0 && (
         <section className="card">
-          <h3>Saved queries without expectations</h3>
+          <h2 data-h="3">Saved queries without expectations</h2>
           <p className="sm muted" style={{ margin: '4px 0 10px' }}>
             Open one in the playground and mark the memories it should return to turn it into a check.
           </p>
@@ -290,13 +290,13 @@ const Runs: React.FC = () => {
     <div className="row-wrap">
       <section className="card col-main" style={{ padding: 0 }}>
         <div className="ch" style={{ padding: '18px 20px 0' }}>
-          <h3>Runs</h3>
+          <h2 data-h="3">Runs</h2>
           <span className="sm muted">Pick two to compare</span>
         </div>
         <table className="tbl mid">
           <thead>
             <tr>
-              <th />
+              <th><span className="vh">Actions</span></th>
               <th>When</th>
               <th>Trigger</th>
               <th>Checks</th>
@@ -325,7 +325,7 @@ const Runs: React.FC = () => {
         </table>
       </section>
       <aside className="card col-side">
-        <h3>Compare</h3>
+        <h2 data-h="3">Compare</h2>
         {rows.length === 0 ? (
           <p className="sm muted">Tick two runs to see which checks got better or worse.</p>
         ) : (
@@ -407,7 +407,7 @@ const Health: React.FC = () => {
               </div>
             </section>
             <section className="card">
-              <h3>Where matches are cut</h3>
+              <h2 data-h="3">Where matches are cut</h2>
               <p className="sm muted" style={{ margin: '4px 0 12px' }}>
                 Share of all matched memories that each stage dropped.
               </p>
@@ -428,7 +428,7 @@ const Health: React.FC = () => {
           </div>
           <aside className="col-side">
             <section className="card">
-              <h3>Stage time (median)</h3>
+              <h2 data-h="3">Stage time (median)</h2>
               <dl className="dl" style={{ marginTop: 12 }}>
                 {(data.stages ?? []).map((s) => (
                   <React.Fragment key={s.name}>
@@ -439,7 +439,7 @@ const Health: React.FC = () => {
               </dl>
             </section>
             <section className="card">
-              <h3>Sources &amp; reranker</h3>
+              <h2 data-h="3">Sources &amp; reranker</h2>
               <dl className="dl" style={{ marginTop: 12 }}>
                 {Object.entries(data.sources ?? {}).map(([k, v]) => (
                   <React.Fragment key={k}>

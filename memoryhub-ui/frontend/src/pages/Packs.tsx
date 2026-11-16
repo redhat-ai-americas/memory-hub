@@ -67,7 +67,7 @@ const PackList: React.FC = () => {
                   <span className={`lbl ${p.visibility === 'project' ? 's-project' : 's-user'}`}>{p.visibility === 'project' ? `Project ${p.project}` : 'Only you'}</span>
                   {p.read_only && !p.mine && <span className="lbl g">read-only</span>}
                 </div>
-                <h3 style={{ margin: '12px 0 4px' }}>{p.name}</h3>
+                <h2 data-h="3" style={{ margin: '12px 0 4px' }}>{p.name}</h2>
                 <p className="sm muted" style={{ margin: 0 }}>
                   {p.pinned.length} pinned · {p.queries.length} {p.queries.length === 1 ? 'search' : 'searches'} · budget {fmtInt(p.token_budget)} tokens
                 </p>
@@ -173,7 +173,7 @@ const PackPage: React.FC<{ id: string }> = ({ id }) => {
         <div className="row-wrap">
           <div className="col-main">
             <section className="card">
-              <h3>Basics</h3>
+              <h2 data-h="3">Basics</h2>
               <div className="fg">
                 <div className="f">
                   <label htmlFor="pn">Name</label>
@@ -192,7 +192,7 @@ const PackPage: React.FC<{ id: string }> = ({ id }) => {
 
             <section className="card">
               <div className="ch">
-                <h3>Pinned memories</h3>
+                <h2 data-h="3">Pinned memories</h2>
                 {edit && (
                   <button type="button" className="btn bl sm" onClick={() => setPicker(true)}>
                     Pin a memory
@@ -230,7 +230,7 @@ const PackPage: React.FC<{ id: string }> = ({ id }) => {
 
             <section className="card">
               <div className="ch">
-                <h3>Searches</h3>
+                <h2 data-h="3">Searches</h2>
                 {edit && draft.queries.length < 10 && (
                   <button type="button" className="btn bl sm" onClick={() => set('queries', [...draft.queries, { query: '', max_results: 5, weight_threshold: 0 }])}>
                     Add search
@@ -256,7 +256,7 @@ const PackPage: React.FC<{ id: string }> = ({ id }) => {
 
             {owner && (
               <section className="card">
-                <h3>Sharing &amp; agents</h3>
+                <h2 data-h="3">Sharing &amp; agents</h2>
                 <div className="fg" style={{ marginTop: 10 }}>
                   <div className="f">
                     <label htmlFor="ps">Share with</label>
@@ -317,7 +317,7 @@ const PackPage: React.FC<{ id: string }> = ({ id }) => {
           <aside className="col-side" style={{ flex: '1 1 360px' }}>
             <section className="card">
               <div className="ch">
-                <h3>Preview</h3>
+                <h2 data-h="3">Preview</h2>
                 <span className="sm muted">as {r.as}</span>
               </div>
               <div className="bar" style={{ margin: '6px 0 4px' }} aria-label={`${r.tokens} of ${r.budget} tokens`}>

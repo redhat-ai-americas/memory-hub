@@ -159,7 +159,10 @@ const safe = async <T,>(p: Promise<T>): Promise<T | null> => {
 };
 async function platformGet<T>(path: string, fallback: () => Promise<T>): Promise<T> {
   try {
-    return await req<T>('GET', path);
+    const res = await req<T>('GET', path);
+    // A platform response always says where it came from; anything else is not the platform API.
+    if (!res || typeof res !== 'object' || !('source' in (res as object))) return fallback();
+    return res;
   } catch (e) {
     if (isMissing(e) || !(e instanceof ApiError)) return fallback();
     throw e;
@@ -200,23 +203,23 @@ const toGlobal = (e: AuditEvent, tenant: string): GlobalEvent => {
 const thisTenant = async (): Promise<TenantSummary> => {
   const [ov, acc, ids, bg, settings] = await Promise.all([safe(api.overview('1d')), safe(api.accounts()), safe(api.identities()), safe(api.breakGlass()), safe(api.settings())]);
   const g = ov?.governance;
-  const unhealthy = ov?.health.find((h) => h.status === 'degraded' || h.status === 'down');
+  const unhealthy = (ov?.health ?? []).find((h) => h.status === 'degraded' || h.status === 'down');
   const quota = g?.storage_quota_pct ?? null;
   return {
-    id: ov?.tenant_id ?? settings?.tenant.tenant_id ?? 'this tenant',
+    id: ov?.tenant_id ?? settings?.tenant?.tenant_id ?? 'this tenant',
     status: 'active',
     platform_admins: (acc?.items ?? []).filter((a) => a.role === 'admin').map((a) => a.display_name),
-    users: acc ? acc.items.filter((a) => a.status === 'active').length : null,
-    agents: ov?.agents.total ?? (ids ? ids.counts.user_agents + ids.counts.service_agents : null),
-    ops_24h: ov ? ov.searches.last_24h + ov.activity.reduce((a, b) => a + b.writes, 0) : null,
+    users: acc?.items ? acc.items.filter((a) => a.status === 'active').length : null,
+    agents: ov?.agents?.total ?? (ids?.counts ? ids.counts.user_agents + ids.counts.service_agents : null),
+    ops_24h: ov?.searches && ov.activity ? ov.searches.last_24h + ov.activity.reduce((a, b) => a + b.writes, 0) : null,
     search_success: null,
     storage_pct: quota,
-    memory_quota: g?.storage_quota_limit ?? settings?.values.quotas?.tenant_memory_quota ?? null,
-    memories: ov?.memories.current ?? null,
+    memory_quota: g?.storage_quota_limit ?? settings?.values?.quotas?.tenant_memory_quota ?? null,
+    memories: ov?.memories?.current ?? null,
     rate_limit: null,
     health: unhealthy ? 'degraded' : quota !== null && quota >= 85 ? 'quota' : ov ? 'healthy' : null,
     health_label: unhealthy ? unhealthy.name : quota !== null && quota >= 85 ? `Quota ${quota}%` : null,
-    incident_grants: bg ? bg.grants.filter((x) => x.active).length : null,
+    incident_grants: bg?.grants ? bg.grants.filter((x) => x.active).length : null,
     current: true,
   };
 };
@@ -232,7 +235,7 @@ export const platform = {
         safe(api.accounts()),
         safe(api.audit({ hours: 24, decision: 'denied', per_page: 1 })),
       ]);
-      const unhealthy = ov?.health.find((h) => h.status === 'degraded' || h.status === 'down');
+      const unhealthy = (ov?.health ?? []).find((h) => h.status === 'degraded' || h.status === 'down');
       return {
         source: 'single-tenant',
         tenants: [t],

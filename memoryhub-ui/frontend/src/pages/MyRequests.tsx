@@ -47,9 +47,9 @@ const MyRequests: React.FC<{ route: HashRoute }> = ({ route }) => {
             value={tab}
             onChange={setTab}
             tabs={[
-              { value: 'open', label: 'Open', count: data ? data.counts.open : null },
-              { value: 'decided', label: 'Decided', count: data ? data.counts.decided : null },
-              { value: 'withdrawn', label: 'Withdrawn', count: data ? data.counts.withdrawn : null },
+              { value: 'open', label: 'Open', count: data?.counts?.open ?? null },
+              { value: 'decided', label: 'Decided', count: data?.counts?.decided ?? null },
+              { value: 'withdrawn', label: 'Withdrawn', count: data?.counts?.withdrawn ?? null },
             ]}
           />
         }
@@ -75,7 +75,7 @@ const MyRequests: React.FC<{ route: HashRoute }> = ({ route }) => {
           <>
             <section className="card">
               <div className="ch">
-                <h3>Open</h3>
+                <h2 data-h="3">Open</h2>
                 <span className="sm muted">
                   {open.length} request{open.length === 1 ? '' : 's'}
                 </span>
@@ -139,7 +139,7 @@ const MyRequests: React.FC<{ route: HashRoute }> = ({ route }) => {
             <div className="row-wrap">
               <section className="card" style={{ flex: '999 1 560px', minWidth: 0 }}>
                 <div className="ch">
-                  <h3>Recently decided</h3>
+                  <h2 data-h="3">Recently decided</h2>
                   <a className="sm" href={buildHash('/review', { tab: 'decided' })}>
                     All decided
                   </a>
@@ -152,7 +152,7 @@ const MyRequests: React.FC<{ route: HashRoute }> = ({ route }) => {
         ) : tab === 'decided' ? (
           <section className="card">
             <div className="ch">
-              <h3>Decided</h3>
+              <h2 data-h="3">Decided</h2>
               <span className="sm muted">{decided.length} requests</span>
             </div>
             <DecidedTable rows={decided} />
@@ -160,7 +160,7 @@ const MyRequests: React.FC<{ route: HashRoute }> = ({ route }) => {
         ) : (
           <section className="card">
             <div className="ch">
-              <h3>Withdrawn</h3>
+              <h2 data-h="3">Withdrawn</h2>
               <span className="sm muted">{withdrawn.length} requests</span>
             </div>
             {withdrawn.length === 0 ? (
@@ -272,7 +272,7 @@ const DecidedTable: React.FC<{ rows: MyRequest[] }> = ({ rows }) =>
 
 const HowRequestsMove: React.FC = () => (
   <aside className="card" style={{ flex: '1 1 300px' }}>
-    <h3 style={{ marginBottom: 14 }}>How a request moves</h3>
+    <h2 data-h="3" style={{ marginBottom: 14 }}>How a request moves</h2>
     <ol className="steps">
       <li className="done">
         <span className="n">1</span>You submit

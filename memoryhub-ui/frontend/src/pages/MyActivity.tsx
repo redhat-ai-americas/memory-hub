@@ -26,7 +26,7 @@ const MyActivity: React.FC<{ route: HashRoute }> = ({ route }) => {
   // Old links (#/audit?tab=denied, ?view=denied) open the log filtered to denied operations.
   const legacyDenied = route.params.get('tab') === 'denied' || route.params.get('view') === 'denied';
   const hubRoute = legacyDenied ? { ...route, params: new URLSearchParams({ decision: 'denied' }) } : route;
-  const incidents = reads.data ? reads.data.summary?.incident_grants ?? reads.data.events.filter((e) => e.break_glass).length : null;
+  const incidents = reads.data ? reads.data.summary?.incident_grants ?? (reads.data.events ?? []).filter((e) => e.break_glass).length : null;
 
   const exportMine = async () => {
     try {
@@ -79,7 +79,7 @@ const IncidentNotices: React.FC<{ data: MyReads | null; error: Error | null; rel
     <div className="body">
       <section className="card">
         <div className="ch">
-          <h3>Incident notices</h3>
+          <h2 data-h="3">Incident notices</h2>
           <span className="sm muted">Last 90 days</span>
         </div>
         {error && !data ? (
@@ -364,7 +364,7 @@ const ActivityLog: React.FC<{ route: HashRoute }> = ({ route }) => {
 
             <aside className="col-side" style={{ flex: '1 1 320px' }}>
               <section className="card">
-                <h3 style={{ marginBottom: 14 }}>By actor · {period.short}</h3>
+                <h2 data-h="3" style={{ marginBottom: 14 }}>By actor · {period.short}</h2>
                 {actors.length === 0 && <p className="sm muted">No changes in this period.</p>}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {actors.map(([name, n]) => (
@@ -385,7 +385,7 @@ const ActivityLog: React.FC<{ route: HashRoute }> = ({ route }) => {
               </section>
               <section className="card">
                 <div className="ch">
-                  <h3>Blocked writes</h3>
+                  <h2 data-h="3">Blocked writes</h2>
                   <span className="lbl red">{blocked.length}</span>
                 </div>
                 <p className="sm" style={{ margin: '0 0 6px' }}>

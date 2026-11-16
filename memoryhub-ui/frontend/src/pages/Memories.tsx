@@ -332,7 +332,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
         <div className="row-wrap">
           <aside className="card" style={{ flex: '1 1 230px', maxWidth: '100%', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 20 }} aria-label="Filters">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3>Filters</h3>
+              <h2 data-h="3">Filters</h2>
               <button
                 type="button"
                 className="btn bl sm"
@@ -694,7 +694,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                         {columns.includes('branches') && <th>Branches</th>}
                         {columns.includes('relevant') && <th>Relevant until</th>}
                         {columns.includes('updated') && <th>Updated</th>}
-                        <th style={{ width: 40 }} />
+                        <th style={{ width: 40 }}><span className="vh">Actions</span></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1186,7 +1186,7 @@ const ScopeBar: React.FC<{ project: string; onProject: (v: string) => void; tena
 const TenantContextCards: React.FC<{ tenant: string; grant: { id: string; incident_ref: string; expires_at: string } | null }> = ({ tenant, grant }) => (
   <div className="acc-cards two">
     <section className="card">
-      <h3>What changes in tenant context</h3>
+      <h2 data-h="3">What changes in tenant context</h2>
       <ul className="role-list">
         {(
           [
@@ -1205,7 +1205,7 @@ const TenantContextCards: React.FC<{ tenant: string; grant: { id: string; incide
       </ul>
     </section>
     <section className="card">
-      <h3>Need this record?</h3>
+      <h2 data-h="3">Need this record?</h2>
       <p className="sm" style={{ margin: '10px 0 14px', lineHeight: 1.55 }}>
         {grant
           ? `Your grant ${grant.id} (${grant.incident_ref}, until ${new Date(grant.expires_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}) covers its named records. Open them under the grant, or request a remediate grant to restore or delete one.`

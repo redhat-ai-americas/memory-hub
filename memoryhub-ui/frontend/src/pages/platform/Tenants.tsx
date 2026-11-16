@@ -155,7 +155,7 @@ const Tenants: React.FC<{ route: HashRoute }> = ({ route }) => {
             {sel && (
               <section className="card">
                 <div className="card-head">
-                  <h3>{sel.id}</h3>
+                  <h2 data-h="3">{sel.id}</h2>
                   <span className={`lbl ${sel.status === 'active' ? 'grn' : sel.status === 'onboarding' ? 'blue' : 'g'}`}>{sel.status[0].toUpperCase() + sel.status.slice(1)}</span>
                 </div>
                 <dl className="detail-kv">
@@ -271,7 +271,7 @@ const EnterTenantCard: React.FC<{ tenant: TenantSummary; onCancel: () => void }>
   return (
     <section className="card">
       <div className="card-head">
-        <h3>Open tenant console?</h3>
+        <h2 data-h="3">Open tenant console?</h2>
         <span className="lbl ylw">confirmation</span>
       </div>
       <EnterText tenant={tenant} />

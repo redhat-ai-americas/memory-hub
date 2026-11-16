@@ -55,7 +55,7 @@ const PlatformHealth: React.FC = () => {
             <div className="row-wrap">
               <div className="col-main" style={{ minWidth: 0 }}>
                 <section className="card">
-                  <h3>Services</h3>
+                  <h2 data-h="3">Services</h2>
                   {first ? (
                     <SkTable rows={5} cols={4} />
                   ) : (
@@ -86,7 +86,7 @@ const PlatformHealth: React.FC = () => {
                   )}
                 </section>
                 <section className="card">
-                  <h3>Deployments</h3>
+                  <h2 data-h="3">Deployments</h2>
                   {first ? (
                     <SkLines lines={4} />
                   ) : d!.deployments.length === 0 ? (
@@ -121,7 +121,7 @@ const PlatformHealth: React.FC = () => {
               </div>
               <aside className="col-side" style={{ flex: '1 1 300px', maxWidth: 400 }}>
                 <section className="card">
-                  <h3>Release</h3>
+                  <h2 data-h="3">Release</h2>
                   <dl className="detail-kv nums">
                     <dt>MCP</dt>
                     <dd className="mono">{d?.release.mcp ?? '—'}</dd>
@@ -132,7 +132,7 @@ const PlatformHealth: React.FC = () => {
                   </dl>
                 </section>
                 <section className="card">
-                  <h3>Background jobs · 7 d</h3>
+                  <h2 data-h="3">Background jobs · 7 d</h2>
                   {first ? (
                     <SkLines lines={4} />
                   ) : d!.jobs.length === 0 ? (

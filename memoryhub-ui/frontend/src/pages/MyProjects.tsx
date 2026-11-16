@@ -225,7 +225,7 @@ const ProjectView: React.FC<{ row: ProjectRow; onLeft: () => void }> = ({ row, o
       <div className="grid-eq">
         <section className="card">
           <div className="ch">
-            <h3>Members</h3>
+            <h2 data-h="3">Members</h2>
             <span className="sm muted">Read only</span>
           </div>
           <div>
@@ -247,7 +247,7 @@ const ProjectView: React.FC<{ row: ProjectRow; onLeft: () => void }> = ({ row, o
         </section>
         <section className="card">
           <div className="ch">
-            <h3>Agent loading policy</h3>
+            <h2 data-h="3">Agent loading policy</h2>
             <span className="sm muted">Set by the Project Manager</span>
           </div>
           {data.loading ? (
@@ -267,7 +267,7 @@ const ProjectView: React.FC<{ row: ProjectRow; onLeft: () => void }> = ({ row, o
 
       <section className="card">
         <div className="ch">
-          <h3>Session focus · last 30 days</h3>
+          <h2 data-h="3">Session focus · last 30 days</h2>
           <span className="sm muted">Topics your agents worked on in this project</span>
         </div>
         {!data.focus_available || !data.focus_history?.length ? (
@@ -296,7 +296,7 @@ const ProjectView: React.FC<{ row: ProjectRow; onLeft: () => void }> = ({ row, o
 
       <section className="card">
         <div className="ch">
-          <h3>Project management</h3>
+          <h2 data-h="3">Project management</h2>
           <span className="lbl g lg">
             Membership: {isMember ? 'member' : 'none'}
             {myRole ? ` · Project role: ${ROLE_LABEL[myRole]}` : ''}
@@ -365,7 +365,7 @@ const TeamView: React.FC<{ team: TeamRow; self?: string }> = ({ team, self }) =>
     <div className="grid-eq">
       <section className="card">
         <div className="ch">
-          <h3>People</h3>
+          <h2 data-h="3">People</h2>
           <span className="sm muted">Read only</span>
         </div>
         {team.members.map((m) => (
@@ -380,7 +380,7 @@ const TeamView: React.FC<{ team: TeamRow; self?: string }> = ({ team, self }) =>
       </section>
       <section className="card">
         <div className="ch">
-          <h3>Projects this team works on</h3>
+          <h2 data-h="3">Projects this team works on</h2>
         </div>
         {team.projects.length === 0 && <p className="sm muted">None yet.</p>}
         {team.projects.map((p) => (
@@ -416,7 +416,7 @@ const CampaignView: React.FC<{ campaign: CampaignRow; mine: Set<string> }> = ({ 
     </section>
     <section className="card">
       <div className="ch">
-        <h3>Enrolled projects</h3>
+        <h2 data-h="3">Enrolled projects</h2>
         <span className="sm muted">Read only</span>
       </div>
       {campaign.projects.map((p) => (

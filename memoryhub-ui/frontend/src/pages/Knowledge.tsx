@@ -68,7 +68,7 @@ const Index: React.FC = () => {
                   <span className={`lbl ${k.kind === 'me' ? 's-user' : 's-project'}`}>{k.kind === 'me' ? 'You' : 'Project'}</span>
                   <span className={`lbl ${k.fresh ? 'grn' : 'g'}`}>{k.generated_at ? (k.fresh ? 'Up to date' : 'Updates on open') : 'Not built yet'}</span>
                 </div>
-                <h3 style={{ margin: '12px 0 4px' }}>{k.title}</h3>
+                <h2 data-h="3" style={{ margin: '12px 0 4px' }}>{k.title}</h2>
                 <p className="sm muted" style={{ margin: 0 }}>
                   {fmtInt(k.source_count)} source {k.source_count === 1 ? 'memory' : 'memories'}
                   {k.summary ? ` · ${k.summary.facts} facts · ${k.summary.entities} entities` : ''}
@@ -201,7 +201,7 @@ const Page: React.FC<{ kind: 'me' | 'project'; id: string }> = ({ kind, id }) =>
                 <div className="col-main">
                   {k.highlights.length > 0 && (
                     <section className="card khigh">
-                      <h3>In short</h3>
+                      <h2 data-h="3">In short</h2>
                       <ul className="kfacts">
                         {k.highlights.map((f) => (
                           <Fact key={f.memory_id} f={f} compact />
@@ -212,7 +212,7 @@ const Page: React.FC<{ kind: 'me' | 'project'; id: string }> = ({ kind, id }) =>
                   {k.sections.map((s) => (
                     <section className="card" key={s.title}>
                       <div className="ch">
-                        <h3>{s.title.charAt(0).toUpperCase() + s.title.slice(1)}</h3>
+                        <h2 data-h="3">{s.title.charAt(0).toUpperCase() + s.title.slice(1)}</h2>
                         <span className="sm muted">{s.facts.length} facts</span>
                       </div>
                       <ul className="kfacts">
@@ -225,7 +225,7 @@ const Page: React.FC<{ kind: 'me' | 'project'; id: string }> = ({ kind, id }) =>
                 </div>
                 <aside className="col-side">
                   <section className="card">
-                    <h3>At a glance</h3>
+                    <h2 data-h="3">At a glance</h2>
                     <div className="stats4" style={{ marginTop: 12 }}>
                       <div>
                         <div className="statv">{k.summary.facts}</div>
@@ -250,7 +250,7 @@ const Page: React.FC<{ kind: 'me' | 'project'; id: string }> = ({ kind, id }) =>
                   </section>
                   {k.entities.length > 0 && (
                     <section className="card">
-                      <h3>People &amp; things</h3>
+                      <h2 data-h="3">People &amp; things</h2>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
                         {k.entities.map((e) => (
                           <a key={e.id} className="ent link-plain" href={buildHash(`/entity/${e.id}`)} title={`${e.count} memories`}>
@@ -262,7 +262,7 @@ const Page: React.FC<{ kind: 'me' | 'project'; id: string }> = ({ kind, id }) =>
                   )}
                   {k.questions.length > 0 && (
                     <section className="card">
-                      <h3>Open questions</h3>
+                      <h2 data-h="3">Open questions</h2>
                       <ul className="kfacts">
                         {k.questions.map((q) => (
                           <li key={q.memory_id} className="kfact">
@@ -277,7 +277,7 @@ const Page: React.FC<{ kind: 'me' | 'project'; id: string }> = ({ kind, id }) =>
                   )}
                   {k.recent.length > 0 && (
                     <section className="card">
-                      <h3>Recently changed</h3>
+                      <h2 data-h="3">Recently changed</h2>
                       <ul className="kfacts">
                         {k.recent.map((r) => (
                           <li key={r.memory_id} className="kfact">
@@ -293,7 +293,7 @@ const Page: React.FC<{ kind: 'me' | 'project'; id: string }> = ({ kind, id }) =>
                   )}
                   {changes && (changes.added.length > 0 || changes.removed.length > 0) && (
                     <section className="card">
-                      <h3>Since the previous version</h3>
+                      <h2 data-h="3">Since the previous version</h2>
                       <ul className="kfacts">
                         {changes.added.map((c) => (
                           <li key={`a${c.memory_id}`} className="kfact">
@@ -314,7 +314,7 @@ const Page: React.FC<{ kind: 'me' | 'project'; id: string }> = ({ kind, id }) =>
                   )}
                   {k.stale.length > 0 && (
                     <section className="card">
-                      <h3>Going stale</h3>
+                      <h2 data-h="3">Going stale</h2>
                       <p className="hint" style={{ margin: '4px 0 8px' }}>
                         Not changed for a while. Dreaming can suggest fading them.
                       </p>
@@ -470,7 +470,7 @@ const SharedKnowledge: React.FC<{ route: HashRoute }> = ({ route }) => {
         <div className="grid-3">
           <section className="card">
             <div className="ch">
-              <h3>Pages</h3>
+              <h2 data-h="3">Pages</h2>
               <a className="sm" href={buildHash('/knowledge')}>
                 All pages
               </a>
@@ -489,7 +489,7 @@ const SharedKnowledge: React.FC<{ route: HashRoute }> = ({ route }) => {
           </section>
           <section className="card">
             <div className="ch">
-              <h3>Documents</h3>
+              <h2 data-h="3">Documents</h2>
               <a className="sm" href={buildHash('/knowledge/documents')}>
                 All documents
               </a>
@@ -506,7 +506,7 @@ const SharedKnowledge: React.FC<{ route: HashRoute }> = ({ route }) => {
           </section>
           <section className="card">
             <div className="ch">
-              <h3>Context packs</h3>
+              <h2 data-h="3">Context packs</h2>
               <a className="sm" href={buildHash('/knowledge/packs')}>
                 All packs
               </a>

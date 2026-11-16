@@ -76,7 +76,7 @@ const GlobalOverview: React.FC = () => {
               <div className="col-main" style={{ minWidth: 0 }}>
                 <section className="card">
                   <div className="card-head">
-                    <h3>Tenants</h3>
+                    <h2 data-h="3">Tenants</h2>
                     <a href={buildHash('/tenants')}>All tenants</a>
                   </div>
                   {first ? (
@@ -144,7 +144,7 @@ const GlobalOverview: React.FC = () => {
 
                 <section className="card">
                   <div className="card-head">
-                    <h3>Memories by scope · all tenants</h3>
+                    <h2 data-h="3">Memories by scope · all tenants</h2>
                     <span className="sm muted">counts only</span>
                   </div>
                   {first ? (
@@ -163,7 +163,7 @@ const GlobalOverview: React.FC = () => {
 
                 <section className="card">
                   <div className="card-head">
-                    <h3>Global administrative events</h3>
+                    <h2 data-h="3">Global administrative events</h2>
                     <a href={buildHash('/global-audit')}>Global audit</a>
                   </div>
                   {first ? (
@@ -193,7 +193,7 @@ const GlobalOverview: React.FC = () => {
               <aside className="col-side" style={{ flex: '1 1 300px', maxWidth: 400 }}>
                 <section className="card">
                   <div className="card-head">
-                    <h3>Security</h3>
+                    <h2 data-h="3">Security</h2>
                     <a href={buildHash('/security')}>Security center</a>
                   </div>
                   {first ? (
@@ -224,7 +224,7 @@ const GlobalOverview: React.FC = () => {
                 </section>
                 <section className="card">
                   <div className="card-head">
-                    <h3>Administrators</h3>
+                    <h2 data-h="3">Administrators</h2>
                     <a href={buildHash('/admins')}>Manage</a>
                   </div>
                   {first ? (
@@ -246,7 +246,7 @@ const GlobalOverview: React.FC = () => {
                 </section>
                 <section className="card">
                   <div className="card-head">
-                    <h3>Release</h3>
+                    <h2 data-h="3">Release</h2>
                     <a className="sm" href={buildHash('/platform-health')}>
                       Deployments
                     </a>

@@ -423,7 +423,7 @@ const MemoryGraph: React.FC<{
       {/* ---------------- Settings ---------------- */}
       <aside className="card gset" aria-label="Graph settings">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3>Graph settings</h3>
+          <h2 data-h="3">Graph settings</h2>
           <button
             type="button"
             className="btn bl sm"
@@ -910,7 +910,7 @@ const SidePanel: React.FC<{
           </p>
         </div>
       ) : (
-        <h3 style={{ fontSize: 18, lineHeight: 1.35 }}>{content ?? node.stub}</h3>
+        <h2 data-h="3" style={{ fontSize: 18, lineHeight: 1.35 }}>{content ?? node.stub}</h2>
       )}
       <dl className="dl">
         <dt>Owner</dt>

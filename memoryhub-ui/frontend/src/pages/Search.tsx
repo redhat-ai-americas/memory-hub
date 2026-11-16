@@ -400,7 +400,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
               void run();
             }}
           >
-            <h3>Query</h3>
+            <h2 data-h="3">Query</h2>
             <div className="f">
               <label htmlFor="q">Query</label>
               <textarea id="q" className="in" required value={form.query} onChange={(e) => set('query', e.target.value)} placeholder="how should I run containers locally for this repo?" />
@@ -519,7 +519,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
                 <>
                   <div className="card">
                     <div className="ch">
-                      <h3>Pipeline · {Math.round(result.total_ms)} ms</h3>
+                      <h2 data-h="3">Pipeline · {Math.round(result.total_ms)} ms</h2>
                       <span className="sm muted">
                         {result.returned} returned · {result.full_count} full · {result.stub_count} stubs · <Tokens n={result.tokens} /> ·{' '}
                         {result.omitted_count} filtered by RBAC
@@ -722,7 +722,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
 
                   <div className="card">
                     <div className="ch">
-                      <h3>Equivalent SDK call</h3>
+                      <h2 data-h="3">Equivalent SDK call</h2>
                       <button type="button" className="btn bl sm" onClick={copySdk}>
                         Copy
                       </button>
@@ -774,7 +774,7 @@ const Funnel: React.FC<{ result: SearchResponse; onStage: (k: FunnelKey) => void
   return (
     <div className="card">
       <div className="ch">
-        <h3>Why these results</h3>
+        <h2 data-h="3">Why these results</h2>
         <span className="sm muted">
           {f[0]?.count ?? 0} matched → {result.returned} returned
         </span>
@@ -878,7 +878,7 @@ const WhyNot: React.FC<{ items: ExplainResult[]; open: boolean; setOpen: (o: boo
 }) => (
   <div className="card">
     <div className="ch">
-      <h3>Why didn’t it come back?</h3>
+      <h2 data-h="3">Why didn’t it come back?</h2>
       <span style={{ display: 'flex', gap: 8 }}>
         {items.length > 0 && (
           <button type="button" className="btn bl sm" onClick={onClear}>
@@ -970,7 +970,7 @@ const CompareCard: React.FC<{
   return (
     <div className="card">
       <div className="ch">
-        <h3>Compare settings</h3>
+        <h2 data-h="3">Compare settings</h2>
         <span style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="btn bp sm" disabled={running} onClick={onRun}>
             {running ? 'Running…' : 'Run A and B'}

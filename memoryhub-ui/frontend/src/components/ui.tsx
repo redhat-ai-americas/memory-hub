@@ -69,7 +69,7 @@ export const Sk: React.FC<{ w?: number | string; h?: number; r?: number; style?:
 );
 
 export const SkLines: React.FC<{ lines?: number; gap?: number }> = ({ lines = 4, gap = 12 }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap }} aria-busy="true" aria-label="Loading">
+  <div style={{ display: 'flex', flexDirection: 'column', gap }} role="status" aria-busy="true" aria-label="Loading">
     {Array.from({ length: lines }, (_, i) => (
       <Sk key={i} w={`${92 - ((i * 17) % 40)}%`} />
     ))}
@@ -77,7 +77,7 @@ export const SkLines: React.FC<{ lines?: number; gap?: number }> = ({ lines = 4,
 );
 
 export const SkTable: React.FC<{ rows?: number; cols?: number }> = ({ rows = 6, cols = 5 }) => (
-  <div style={{ padding: '8px 20px 20px' }} aria-busy="true" aria-label="Loading">
+  <div style={{ padding: '8px 20px 20px' }} role="status" aria-busy="true" aria-label="Loading">
     {Array.from({ length: rows }, (_, r) => (
       <div key={r} style={{ display: 'flex', gap: 16, padding: '14px 0', borderBottom: '1px solid #eee' }}>
         {Array.from({ length: cols }, (_, c) => (

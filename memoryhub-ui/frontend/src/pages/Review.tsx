@@ -476,7 +476,7 @@ const QuarantineCard: React.FC<{ count: number }> = ({ count }) => {
   return (
     <section className="card">
       <div className="card-head">
-        <h3>Quarantine follow-up</h3>
+        <h2 data-h="3">Quarantine follow-up</h2>
         <span className="lbl ylw">{count}</span>
       </div>
       {first ? (
@@ -513,7 +513,7 @@ const HardDeleteCard: React.FC<{ count: number; viewer: string }> = ({ count, vi
   return (
     <section className="card">
       <div className="card-head">
-        <h3>Hard delete · two people</h3>
+        <h2 data-h="3">Hard delete · two people</h2>
         <span className="lbl ylw">{count} pending</span>
       </div>
       {first ? (
@@ -552,7 +552,7 @@ const RecentDecisions: React.FC = () => {
   return (
     <section className="card">
       <div className="card-head">
-        <h3>History</h3>
+        <h2 data-h="3">History</h2>
         <a className="sm" href={buildHash('/review', { tab: 'history' })}>
           All decisions
         </a>

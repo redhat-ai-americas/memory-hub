@@ -58,7 +58,7 @@ const Preferences: React.FC = () => {
             <div className="row-wrap">
               <div className="col-main">
                 <section className="card">
-                  <h3>Writing memories</h3>
+                  <h2 data-h="3">Writing memories</h2>
                   <p className="sm muted" style={{ margin: '6px 0 14px' }}>
                     Used when you write a memory in the dashboard. Agents choose their own scope and weight.
                   </p>
@@ -88,7 +88,7 @@ const Preferences: React.FC = () => {
                 </section>
 
                 <section className="card">
-                  <h3>Privacy</h3>
+                  <h2 data-h="3">Privacy</h2>
                   <div className="row">
                     <span>
                       <b className="sm">Let others propose promoting my memories</b>
@@ -129,7 +129,7 @@ const Preferences: React.FC = () => {
 
                 {me?.labs && (
                 <section className="card">
-                  <h3>Dreaming</h3>
+                  <h2 data-h="3">Dreaming</h2>
                   <div className="f" style={{ marginTop: 12, maxWidth: 320 }}>
                     <label htmlFor="fd">Suggest fading a memory after</label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -153,7 +153,7 @@ const Preferences: React.FC = () => {
                 )}
 
                 <section className="card">
-                  <h3>Your data</h3>
+                  <h2 data-h="3">Your data</h2>
                   <p className="sm muted" style={{ margin: '6px 0 14px' }}>
                     {fmtInt(a.own_memories)} user memories belong to you and your agents.
                   </p>
@@ -170,7 +170,7 @@ const Preferences: React.FC = () => {
 
               <aside className="col-side">
                 <section className="card">
-                  <h3>Account</h3>
+                  <h2 data-h="3">Account</h2>
                   <dl className="dl" style={{ marginTop: 14 }}>
                     <dt>Username</dt>
                     <dd className="mono">{a.username}</dd>
@@ -187,7 +187,7 @@ const Preferences: React.FC = () => {
                   </dl>
                 </section>
                 <section className="card">
-                  <h3>What you can read</h3>
+                  <h2 data-h="3">What you can read</h2>
                   <dl className="dl" style={{ marginTop: 14 }}>
                     <dt>Agents</dt>
                     <dd>{a.agents.length ? a.agents.join(', ') : <a href={buildHash('/identities')}>Link an agent</a>}</dd>
@@ -271,7 +271,7 @@ const BehaviorSection: React.FC<{
   return (
     <section className="card" aria-labelledby="mb-h">
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <h3 id="mb-h">What agents remember</h3>
+        <h2 data-h="3" id="mb-h">What agents remember</h2>
         <span className="hint">
           Profile revision {saved.revision}
           {saved.updated_at ? ` · ${new Date(saved.updated_at).toLocaleDateString()}` : ' · default'}

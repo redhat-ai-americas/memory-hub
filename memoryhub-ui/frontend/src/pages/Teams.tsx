@@ -117,7 +117,7 @@ export const TeamPanel: React.FC<{ team: TeamRow; projects: ProjectRow[]; onChan
         <div className="ch">
           <div>
             <span className="lbl pur">Team</span>
-            <h3 style={{ fontSize: 20, marginTop: 8 }}>{team.name}</h3>
+            <h2 data-h="3" style={{ fontSize: 20, marginTop: 8 }}>{team.name}</h2>
           </div>
           {canManage && (
             <button type="button" className="btn bg" onClick={() => setModal('edit')}>
