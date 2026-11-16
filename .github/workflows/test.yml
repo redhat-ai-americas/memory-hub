@@ -227,10 +227,83 @@ jobs:
           MEMORYHUB_VALKEY_URL: redis://localhost:6379/0
         run: pytest tests/integration/ -v --tb=short
 
+  integration-plugin-plan:
+    name: Integration Plugin Test Plan
+    runs-on: ubuntu-latest
+    outputs:
+      # On non-PR events (pushes/tags to main) there is no base to diff
+      # against, so the plugin tests always run — same convention as the
+      # other path-gated jobs' step conditions.
+      changed: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.integration-plugins }}
+      packages: ${{ steps.packages.outputs.packages }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for integration plugin changes
+        if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            integration-plugins:
+              - 'integrations/**'
+
+      - name: List integration packages
+        id: packages
+        run: |
+          # Matrix over every directory under integrations/ that ships a
+          # package.json, so a new host is picked up without editing the
+          # workflow. integrations/common is shared source with no manifest;
+          # its tests run through both adapters' vitest includes.
+          packages=$(find integrations -mindepth 2 -maxdepth 2 -name package.json -printf '%h\n' \
+            | sed 's|^integrations/||' | sort | jq -R . | jq -sc .)
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+  integration-plugin-tests:
+    name: Integration Plugin Tests (${{ matrix.package }})
+    needs: integration-plugin-plan
+    if: needs.integration-plugin-plan.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.integration-plugin-plan.outputs.packages) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: integrations/${{ matrix.package }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: integrations/${{ matrix.package }}
+        run: npm ci
+
+      # vitest does not typecheck; the adapters publish type declarations,
+      # so tsc catches breakage the test runner never sees.
+      - name: Type check
+        working-directory: integrations/${{ matrix.package }}
+        run: npm run typecheck --if-present
+
+      - name: Run tests
+        working-directory: integrations/${{ matrix.package }}
+        run: npm test
+
+      # tsup bundling is exercised nowhere else in CI — e.g. the .md?raw
+      # loader the shared protocol module depends on only runs at build time.
+      - name: Build
+        working-directory: integrations/${{ matrix.package }}
+        run: npm run build --if-present
+
   status:
     name: Tests Status
     runs-on: ubuntu-latest
-    needs: [sdk-tests, mcp-tests, auth-tests, cli-tests, integration-tests]
+    needs: [sdk-tests, mcp-tests, auth-tests, cli-tests, integration-tests, integration-plugin-plan, integration-plugin-tests]
     if: always()
 
     steps:
@@ -238,6 +311,20 @@ jobs:
         run: |
           if [ "${{ needs.sdk-tests.result }}" == "failure" ] || [ "${{ needs.mcp-tests.result }}" == "failure" ] || [ "${{ needs.auth-tests.result }}" == "failure" ] || [ "${{ needs.cli-tests.result }}" == "failure" ] || [ "${{ needs.integration-tests.result }}" == "failure" ]; then
             echo "One or more test jobs failed"
+            exit 1
+          fi
+          # The planner is the source of truth for whether plugin tests
+          # should run. If it fails, do not let the aggregate appear green.
+          if [ "${{ needs.integration-plugin-plan.result }}" != "success" ]; then
+            echo "Integration plugin test planning failed (result: ${{ needs.integration-plugin-plan.result }})"
+            exit 1
+          fi
+          # A path-gated job reports success even when every step was skipped
+          # (#603 trap). When the filter says integrations/ changed, the
+          # plugin tests must actually have run and passed — anything other
+          # than success (failure, cancelled, wrongfully skipped) is red.
+          if [ "${{ needs.integration-plugin-plan.outputs.changed }}" == "true" ] && [ "${{ needs.integration-plugin-tests.result }}" != "success" ]; then
+            echo "Integration plugin tests did not run and pass (result: ${{ needs.integration-plugin-tests.result }})"
             exit 1
           fi
           echo "All tests passed successfully"
