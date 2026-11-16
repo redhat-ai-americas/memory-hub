@@ -3001,7 +3001,8 @@ def _print_doctor_cluster_table(
     if report.get("endpoint"):
         console.print(f"  Server URL: {report['endpoint']}", markup=False)  # noqa: T201
     checks = report["checks"]
-    assert isinstance(checks, dict)
+    if not isinstance(checks, dict):
+        raise TypeError(f"expected dict for checks, got {type(checks).__name__}")
     labels = {
         "endpoint_reachable": "Endpoint",
         "authenticated": "Authentication",
@@ -3013,7 +3014,7 @@ def _print_doctor_cluster_table(
     for name, label in labels.items():
         check = checks[name]
         status = check["status"]
-        color = {"passed": "green", "failed": "red", "skipped": "yellow"}[status]
+        color = {"passed": "green", "failed": "red", "skipped": "yellow"}.get(status, "white")
         console.print(
             f"  {label + ':':<16} [{color}]{status}[/{color}]  {check['detail']}"
         )  # noqa: T201
