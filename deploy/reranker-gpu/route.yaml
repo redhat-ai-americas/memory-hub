@@ -8,6 +8,6 @@ spec:
     kind: Service
     name: granite-reranker
   port:
-    targetPort: 8080
+    targetPort: http
   tls:
     termination: edge

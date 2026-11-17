@@ -1,0 +1,21 @@
+{{- if and .Values.minio.enabled (not .Values.minio.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memoryhub-minio-data
+  namespace: {{ .Values.namespaces.storage }}
+  {{- if .Values.minio.retainPvcOnUninstall }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-minio") | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.minio.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.minio.storage | quote }}
+{{- end }}

@@ -1,0 +1,19 @@
+{{- if .Values.ui.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: memoryhub-ui
+  namespace: {{ .Values.namespaces.ui }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-ui") | nindent 4 }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ .Values.ui.secrets.tls | quote }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: memoryhub-ui
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  ports:
+    - { name: proxy, port: 8443, targetPort: proxy, protocol: TCP }
+    - { name: app, port: 8080, targetPort: app, protocol: TCP }
+{{- end }}

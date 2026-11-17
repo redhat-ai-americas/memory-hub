@@ -1,0 +1,32 @@
+{{- if and .Values.models.enabled .Values.models.reranker.ingress.enabled .Values.ingress.enabled }}
+{{- $name := ternary "ms-marco-minilm-l12-v2" "granite-reranker" (eq .Values.models.variant "cpu") -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespaces.rerankerModel }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" $name) | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ required "models.reranker.ingress.host must be set when its Ingress is enabled" .Values.models.reranker.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port: { number: 80 }
+{{- end }}

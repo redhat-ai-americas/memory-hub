@@ -24,8 +24,11 @@ cp "$PROJECT_ROOT/.dockerignore" "$BUILD_DIR/" 2>/dev/null || true
 
 # Copy frontend source
 mkdir -p "$BUILD_DIR/frontend/src"
-cp "$PROJECT_ROOT/frontend/package.json" "$BUILD_DIR/frontend/"
-cp "$PROJECT_ROOT/frontend/package-lock.json" "$BUILD_DIR/frontend/" 2>/dev/null || true
+# Stage the lockfiles at the context root too, where the Containerfile's npm
+# layer consumes them. Keeping the copy explicit makes a missing lockfile fail
+# during context preparation instead of silently choosing a different install.
+cp "$PROJECT_ROOT/frontend/package.json" "$BUILD_DIR/package.json"
+cp "$PROJECT_ROOT/frontend/package-lock.json" "$BUILD_DIR/package-lock.json"
 cp "$PROJECT_ROOT/frontend/tsconfig.json" "$BUILD_DIR/frontend/"
 cp "$PROJECT_ROOT/frontend/tsconfig.node.json" "$BUILD_DIR/frontend/" 2>/dev/null || true
 cp "$PROJECT_ROOT/frontend/vite.config.ts" "$BUILD_DIR/frontend/"

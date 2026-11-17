@@ -1,0 +1,16 @@
+{{- if .Values.auth.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-server
+  namespace: {{ .Values.namespaces.auth }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "auth-server") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: auth-server
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  ports:
+    - { name: http, port: 8081, targetPort: http, protocol: TCP }
+{{- end }}

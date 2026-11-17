@@ -18,7 +18,8 @@ oc apply --context "$CONTEXT" -f "$SCRIPT_DIR/buildconfig.yaml" -n "$PROJECT"
 
 BUILD_DIR=$(mktemp -d)
 trap 'rm -rf "$BUILD_DIR"' EXIT
-cp "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR/requirements.txt" "$BUILD_DIR/"
+cp "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR/requirements.txt" "$SCRIPT_DIR/alembic.ini" "$BUILD_DIR/"
+cp -R "$SCRIPT_DIR/alembic" "$BUILD_DIR/"
 cp "$SCRIPT_DIR/conftest.py" "$BUILD_DIR/" 2>/dev/null || true
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
     --exclude='.mypy_cache' "$SCRIPT_DIR/src/" "$BUILD_DIR/src/"

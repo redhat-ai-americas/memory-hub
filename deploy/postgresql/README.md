@@ -19,11 +19,13 @@ future task for production readiness.
 ## Prerequisites
 
 The official postgres image runs as uid 999. OpenShift's default `restricted`
-SCC assigns a random UID, which breaks the image. Grant the `anyuid` SCC to the
-default service account in the namespace:
+SCC assigns a random UID, which breaks the image. The StatefulSet uses the
+dedicated `memoryhub-postgresql` service account; grant the `anyuid` SCC only
+to that account:
 
 ```bash
-oc adm policy add-scc-to-user anyuid -z default -n memoryhub-db
+oc adm policy add-scc-to-user anyuid -z memoryhub-postgresql \
+  --context mcp-rhoai -n memoryhub-db
 ```
 
 You need cluster-admin (or equivalent) privileges to run this command.
@@ -31,19 +33,22 @@ You need cluster-admin (or equivalent) privileges to run this command.
 ## Deploy
 
 ```bash
-oc apply -k deploy/postgresql/
+oc apply -k deploy/postgresql/ --context mcp-rhoai
 ```
 
-Then grant the SCC (if not already done) and wait for the pod:
+The Kustomize resources create the dedicated service account and configure the
+StatefulSet to use it. Grant the SCC (if not already done), then wait for the pod:
 
 ```bash
-oc adm policy add-scc-to-user anyuid -z default -n memoryhub-db
+oc adm policy add-scc-to-user anyuid -z memoryhub-postgresql \
+  --context mcp-rhoai -n memoryhub-db
 
 # Restart the pod if it was already created before the SCC grant
-oc delete pod -l app.kubernetes.io/name=memoryhub-pg -n memoryhub-db
+oc delete pod -l app.kubernetes.io/name=memoryhub-pg \
+  --context mcp-rhoai -n memoryhub-db
 
 oc wait --for=condition=ready pod -l app.kubernetes.io/name=memoryhub-pg \
-  -n memoryhub-db --timeout=120s
+  --context mcp-rhoai -n memoryhub-db --timeout=120s
 ```
 
 ## Connect From Within the Cluster
@@ -54,7 +59,7 @@ Other pods in the cluster can connect using:
 host:     memoryhub-pg.memoryhub-db.svc.cluster.local
 port:     5432
 user:     memoryhub
-password: <the POSTGRES_PASSWORD you set in deploy/postgresql/secret.yaml>
+password: <the POSTGRES_PASSWORD in memoryhub-pg-credentials>
 database: memoryhub
 ```
 
@@ -66,10 +71,10 @@ postgresql://memoryhub:<your-password>@memoryhub-pg.memoryhub-db.svc.cluster.loc
 
 ## Verify pgvector Works
 
-Quick check via oc exec:
+Quick check via `oc exec`:
 
 ```bash
-oc exec -n memoryhub-db statefulset/memoryhub-pg -- \
+oc exec --context mcp-rhoai -n memoryhub-db statefulset/memoryhub-pg -- \
   psql -U memoryhub -d memoryhub -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
 ```
 
@@ -80,6 +85,13 @@ search, then cleans up):
 ./scripts/validate-postgresql.sh
 ```
 
+The normal `scripts/deploy-full.sh` flow creates the
+`memoryhub-pg-credentials` Secret with a generated password on first install
+and preserves it on later runs. The checked-in `secret.yaml` is a reference
+schema only and is not applied by Kustomize. If deploying this component
+directly with Kustomize, create that Secret through your approved secret
+management process before starting PostgreSQL.
+
 ## Credentials Warning
 
 The credentials in `secret.yaml` are **demo-only defaults**. For any
@@ -89,7 +101,7 @@ secrets managed through OpenShift Secrets or HashiCorp Vault.
 ## Tear Down
 
 ```bash
-oc delete -k deploy/postgresql/
+oc delete -k deploy/postgresql/ --context mcp-rhoai
 ```
 
 Note: deleting the namespace removes all resources, but the PV reclaim policy

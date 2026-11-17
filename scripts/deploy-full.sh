@@ -258,9 +258,19 @@ deploy_postgresql() {
     info "Applying kustomize manifests..."
     oc apply --context "$CONTEXT" -k "$REPO_ROOT/deploy/postgresql/"
 
-    info "Granting anyuid SCC to default service account..."
-    # idempotent — oc adm policy --context "$CONTEXT" exits 0 whether or not the grant was new
-    oc adm policy --context "$CONTEXT" add-scc-to-user anyuid -z default -n "$DB_NAMESPACE"
+    info "Granting anyuid SCC to the PostgreSQL service account..."
+    # Keep the grant scoped to PostgreSQL instead of every pod using default.
+    oc adm policy --context "$CONTEXT" add-scc-to-user anyuid -z memoryhub-postgresql -n "$DB_NAMESPACE"
+
+    # Older versions granted anyuid to the namespace's default ServiceAccount.
+    # Remove only that subject from the SCC RoleBinding during upgrade.
+    local has_legacy_default_scc
+    has_legacy_default_scc=$(oc get rolebindings --context "$CONTEXT" -n "$DB_NAMESPACE" -o json | \
+        python3 -c 'import json,sys; items=json.load(sys.stdin).get("items", []); print(str(any(rb.get("roleRef", {}).get("name") == "system:openshift:scc:anyuid" and any(s.get("kind") == "ServiceAccount" and s.get("name") == "default" for s in rb.get("subjects", [])) for rb in items)).lower())')
+    if [ "$has_legacy_default_scc" = "true" ]; then
+        info "Removing the legacy anyuid SCC grant from the default service account..."
+        oc adm policy --context "$CONTEXT" remove-scc-from-user anyuid -z default -n "$DB_NAMESPACE"
+    fi
 
     # If the pod already existed before the SCC grant, it may be stuck.
     # Check if the pod is in a bad state and delete it so it restarts with the SCC.

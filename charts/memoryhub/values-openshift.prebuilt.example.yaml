@@ -1,0 +1,19 @@
+# Use with make helm-install ARGS="--prebuilt-images --values <this-file>".
+# Replace every example image with a published image the cluster can pull.
+# For a private registry, create this pull Secret in each workload namespace.
+imagePullSecrets: []
+
+mcp:
+  image:
+    repository: registry.example.com/team/memory-hub-mcp
+    tag: replace-with-published-tag
+
+auth:
+  image:
+    repository: registry.example.com/team/memoryhub-auth
+    tag: replace-with-published-tag
+
+ui:
+  image:
+    repository: registry.example.com/team/memoryhub-ui
+    tag: replace-with-published-tag
