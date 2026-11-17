@@ -16,6 +16,9 @@ Published to PyPI as [`memoryhub`](https://pypi.org/project/memoryhub/). Lives i
 
 ### [Unreleased]
 
+- **Actionable MCP errors (#655)**: MCP tool failures include structured
+  `error` and `next_action` fields. SDK exceptions expose the recovery hint
+  through `next_action`.
 - **Procedural graph content type (#552)**: `content_type` accepts `"procedural"` for directed-graph runbooks (procedure root + `procedure_step` children). `create_relationship()` accepts three new topology edge types: `precedes`, `requires`, `alternative_to`. Docstrings for `search()`/`list()`/`write()` corrected from the stale `"declarative"` label to the actual `"knowledge"` value.
 - **Localized procedural guidance (#553)**: `search()` accepts `current_step_id` and `max_hops`. When the step id is set, the server skips ranking and `SearchResult.query_ignored` is true. `get_guidance()` calls `memory(action="guidance")`.
 - **Fixed (#553)**: `get_injection_block()` rendered a `result_type="guidance"` result as an empty string, silently dropping localized guidance from the SDK's prompt-injection path. It now injects `guidance_text`; the neighborhood that produced it is not injected.
@@ -78,6 +81,9 @@ Published to PyPI as [`memoryhub-cli`](https://pypi.org/project/memoryhub-cli/).
 
 ### [Unreleased]
 
+- **SessionStart diagnostics (#655)**: Generated hooks explain why MemoryHub
+  memories could not be loaded and recommend a recovery action while allowing
+  the session to start.
 - **Procedural content type (#552)**: `--content-type` on `search`, `list`, and `write` now documents `procedural` alongside `experiential`/`knowledge`/`behavioral`. `memoryhub graph relate` lists the three new edge types (`precedes`, `requires`, `alternative_to`) in its help text.
 - **Localized procedural guidance (#553)**: `search --current-step-id` requests localized guidance and prints it instead of a ranked table. `memoryhub graph guidance` prints the generated text and hop count.
 
@@ -108,6 +114,8 @@ OpenShift; not published as a package.
 
 ### [Unreleased]
 
+- **Actionable tool errors (#655)**: MCP tool failures include structured
+  `error` and `next_action` fields, plus readable error text for agents.
 - **Project membership authorization (#514)**: `list_memory` and `search_memory` verify membership in the resolved tenant before serving an explicit `project_id`, regardless of the project-isolation setting. For requests without an explicit project, when isolation is enabled and membership claims are empty, both tools use tenant-scoped database memberships for retrieval and authorization filters.
 
 - **Procedural graph content type, Phase 1 (#552)**: `write`/`list`/`search` accept `content_type="procedural"`; `relate` accepts `precedes`/`requires`/`alternative_to` edge types (`mentions` remains system-managed). `reconstruct` is unchanged and still scoped to `behavioral` only — procedural graphs are not returned by it. Retrieval/traversal support is #553, not this change.

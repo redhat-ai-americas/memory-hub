@@ -4,6 +4,9 @@ All notable changes to the `memoryhub-cli` package.
 
 ## [Unreleased]
 
+- Generated SessionStart hooks report missing credentials, URL, CLI, or
+  connection/search failures with a recovery action while keeping the session
+  available.
 - **Fix**: `memoryhub config regenerate` now emits compact-profile-consistent
   instructions. All tool references in generated `.claude/rules/memoryhub-loading.md`
   use the `memory(action=...)` dispatcher (#672):

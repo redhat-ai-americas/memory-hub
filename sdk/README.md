@@ -158,6 +158,24 @@ client = MemoryHubClient(
 results = client.search_sync("deployment patterns")
 ```
 
+## Handling errors
+
+MCP tool errors include a readable message and, when available, a recovery
+hint. The SDK exposes that hint as `next_action` on the raised exception:
+
+```python
+from memoryhub import MemoryHubClient, MemoryHubError
+
+client = MemoryHubClient.from_env()
+try:
+    async with client:
+        await client.search("deployment patterns")
+except MemoryHubError as exc:
+    print(str(exc))
+    if exc.next_action:
+        print(f"Next action: {exc.next_action}")
+```
+
 ## API reference
 
 ### Core operations

@@ -4,6 +4,10 @@
 class MemoryHubError(Exception):
     """Base exception for all MemoryHub SDK errors."""
 
+    def __init__(self, message: str, *, next_action: str | None = None):
+        self.next_action = next_action
+        super().__init__(message)
+
 
 class AuthenticationError(MemoryHubError):
     """Failed to authenticate with the MemoryHub auth service.
@@ -16,9 +20,18 @@ class AuthenticationError(MemoryHubError):
 class NotFoundError(MemoryHubError):
     """The requested memory or resource was not found (404 equivalent)."""
 
-    def __init__(self, memory_id: str, message: str | None = None):
+    def __init__(
+        self,
+        memory_id: str,
+        message: str | None = None,
+        *,
+        next_action: str | None = None,
+    ):
         self.memory_id = memory_id
-        super().__init__(message or f"Memory not found: {memory_id}")
+        super().__init__(
+            message or f"Memory not found: {memory_id}",
+            next_action=next_action,
+        )
 
 
 class ToolError(MemoryHubError):
@@ -29,10 +42,10 @@ class ToolError(MemoryHubError):
         detail: The error detail from the server.
     """
 
-    def __init__(self, tool_name: str, detail: str):
+    def __init__(self, tool_name: str, detail: str, *, next_action: str | None = None):
         self.tool_name = tool_name
         self.detail = detail
-        super().__init__(f"{tool_name}: {detail}")
+        super().__init__(f"{tool_name}: {detail}", next_action=next_action)
 
 
 class PermissionDeniedError(ToolError):
