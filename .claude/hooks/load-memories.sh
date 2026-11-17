@@ -1,10 +1,18 @@
 #!/bin/bash
 # Inject MemoryHub memories at Claude Code session start.
 # Stdout is added to the conversation context before the first prompt.
-# Exits 0 silently on any failure -- the session starts normally and
-# the MCP server remains available as a fallback.
+# Reports failures in the injected context and exits 0 so the session starts
+# normally and the MCP server remains available as a fallback.
 
 set -euo pipefail
+
+emit_unavailable_warning() {
+  local reason="$1"
+  local action="${2:-Run 'memoryhub doctor' to diagnose.}"
+  printf '<memoryhub-context>\n⚠️ MemoryHub unavailable: %s\n%s\n</memoryhub-context>\n' \
+    "$reason" "$action"
+  exit 0
+}
 
 # --- Credential resolution ---
 # 1. MEMORYHUB_API_KEY env var (already set)
@@ -35,7 +43,8 @@ if [ -z "${MEMORYHUB_API_KEY:-}" ]; then
     MEMORYHUB_API_KEY=$(grep -v '^#' "$API_KEY_FILE" | tr -d '\n')
   fi
 fi
-[ -n "${MEMORYHUB_API_KEY:-}" ] || exit 0
+[ -n "${MEMORYHUB_API_KEY:-}" ] || \
+  emit_unavailable_warning "No API key found."
 export MEMORYHUB_API_KEY
 
 # --- URL resolution ---
@@ -73,7 +82,8 @@ if [ -z "${MEMORYHUB_URL:-}" ]; then
     fi
   fi
 fi
-[ -n "${MEMORYHUB_URL:-}" ] || exit 0
+[ -n "${MEMORYHUB_URL:-}" ] || \
+  emit_unavailable_warning "No MemoryHub URL found."
 export MEMORYHUB_URL
 
 PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
@@ -85,12 +95,25 @@ if [ -z "$MEMORYHUB_BIN" ]; then
     [ -x "$candidate" ] && MEMORYHUB_BIN="$candidate" && break
   done
 fi
-[ -n "$MEMORYHUB_BIN" ] || exit 0
+[ -n "$MEMORYHUB_BIN" ] || \
+  emit_unavailable_warning \
+    "MemoryHub CLI not found." \
+    "Install memoryhub-cli, then run 'memoryhub doctor' to diagnose."
 
 PROJECT_ID=$(basename "$PROJECT_ROOT")
 
-"$MEMORYHUB_BIN" search \
+if MEMORY_OUTPUT=$("$MEMORYHUB_BIN" search \
   "project context architecture preferences decisions workflow" \
   --project-id "$PROJECT_ID" \
   --output compact \
-  --max 20 2>/dev/null || exit 0
+  --max 20 2>/dev/null); then
+  if [ -n "$MEMORY_OUTPUT" ]; then
+    printf '%s\n' "$MEMORY_OUTPUT"
+  fi
+else
+  SEARCH_STATUS=$?
+  if [ "$SEARCH_STATUS" -eq 3 ]; then
+    emit_unavailable_warning "Authentication failed."
+  fi
+  emit_unavailable_warning "Could not connect to MemoryHub or load memories."
+fi

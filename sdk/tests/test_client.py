@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from memoryhub.client import MemoryHubClient
@@ -895,6 +896,48 @@ async def test_authentication_error_from_invalid_api_key(client):
     )
     with pytest.raises(AuthenticationError, match="Invalid API key"):
         await c.search("anything")
+
+
+async def test_structured_next_action_is_preserved_on_sdk_error(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.return_value = FakeCallToolResult(
+        is_error=True,
+        content=[FakeContent("Authentication failed.\nNext action: run doctor")],
+        structured_content={
+            "error": "Authentication failed.",
+            "next_action": "Run 'memoryhub doctor' to verify connection.",
+        },
+    )
+
+    with pytest.raises(AuthenticationError) as exc_info:
+        await c.search("anything")
+
+    assert exc_info.value.next_action == "Run 'memoryhub doctor' to verify connection."
+
+
+async def test_initial_connection_failure_raises_connection_failed_error():
+    """__aenter__ wraps httpx.RequestError in ConnectionFailedError."""
+    c = _make_client()
+    with patch("memoryhub.client.Client") as MockClient:  # noqa: N806
+        instance = AsyncMock()
+        instance.__aenter__ = AsyncMock(side_effect=httpx.ConnectError("refused"))
+        MockClient.return_value = instance
+        with pytest.raises(ConnectionFailedError) as exc_info:
+            async with c:
+                pass
+    assert "memoryhub doctor" in exc_info.value.next_action
+    # Client must be cleared so the instance is not left in a half-open state.
+    assert c._mcp is None
+
+
+async def test_transport_failure_includes_recovery_action(client):
+    c, mock_mcp = client
+    mock_mcp.call_tool.side_effect = httpx.ConnectError("server offline")
+
+    with pytest.raises(ConnectionFailedError) as exc_info:
+        await c.search("anything")
+
+    assert "memoryhub doctor" in exc_info.value.next_action
 
 
 async def test_authentication_error_from_no_session(client):

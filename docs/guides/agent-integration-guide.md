@@ -94,7 +94,7 @@ The output uses a tagged format that the rule file references:
 
 No memory IDs, no timestamps, no weights. Just the content the agent needs. This is deliberate: structural metadata in the context window activates model reasoning about memory management instead of the user's task. The compact format keeps the agent focused on doing work, not managing its own memory infrastructure.
 
-The hook completes in under a second (~0.3s, well within the 5s timeout) and exits silently on any error (missing CLI, unreachable server, expired key). A failed hook never blocks a session from starting. The rule file includes a fallback path: if no `<memoryhub-context>` block is present, the agent falls back to manual tool calls.
+The hook completes in under a second (~0.3s, well within the 5s timeout). On failure (missing credentials or CLI, unreachable server, expired key), it injects a `<memoryhub-context>` warning with the reason and a `memoryhub doctor` suggestion, then exits successfully so the session can start. The generated rule tells the agent that this warning means no memories were loaded and to use the manual tool flow when memory is needed.
 
 #### 3. The MCP tools: mid-session operations
 

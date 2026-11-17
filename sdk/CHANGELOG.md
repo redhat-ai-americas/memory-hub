@@ -2,6 +2,11 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [Unreleased]
+
+- Expose MCP tool error recovery guidance through the `next_action` attribute
+  on SDK exceptions.
+
 ## [0.16.0] -- 2026-10-13
 
 - `search(current_step_id=...)` requests localized procedural guidance and skips ranking. Omitting it leaves search unchanged, including `content_type="procedural"`.

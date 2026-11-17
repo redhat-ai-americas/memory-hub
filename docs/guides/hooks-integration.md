@@ -73,16 +73,24 @@ Create `.claude/hooks/load-memories.sh` in your project:
 #!/bin/bash
 # Inject MemoryHub memories at Claude Code session start.
 # Stdout is added to the conversation context before the first prompt.
-# Exits 0 silently on any failure -- the session starts normally and
-# the MCP server remains available as a fallback.
+# Emits an actionable warning on failure, exits 0, and lets the session
+# start normally. The MCP server remains available as a fallback.
 
 set -euo pipefail
 
+emit_unavailable_warning() {
+  local reason="$1"
+  local action="${2:-Run 'memoryhub doctor' to diagnose.}"
+  printf '<memoryhub-context>\n⚠️ MemoryHub unavailable: %s\n%s\n</memoryhub-context>\n' \
+    "$reason" "$action"
+  exit 0
+}
+
 API_KEY_FILE="$HOME/.config/memoryhub/api-key"
-[ -f "$API_KEY_FILE" ] || exit 0
+[ -f "$API_KEY_FILE" ] || emit_unavailable_warning "No API key found."
 
 API_KEY=$(tr -d '\n' < "$API_KEY_FILE")
-[ -n "$API_KEY" ] || exit 0
+[ -n "$API_KEY" ] || emit_unavailable_warning "No API key found."
 export MEMORYHUB_API_KEY="$API_KEY"
 
 # Resolve server URL from env var or config file
@@ -92,22 +100,34 @@ if [ -z "${MEMORYHUB_URL:-}" ]; then
     MEMORYHUB_URL=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('url',''))" "$CONFIG_FILE" 2>/dev/null) || true
   fi
 fi
-[ -n "${MEMORYHUB_URL:-}" ] || exit 0
+[ -n "${MEMORYHUB_URL:-}" ] || emit_unavailable_warning "No MemoryHub URL found."
 export MEMORYHUB_URL
 
 # Find memoryhub CLI: project venv, then system PATH
 MEMORYHUB_BIN="${CLAUDE_PROJECT_DIR:-$PWD}/.venv/bin/memoryhub"
 if ! [ -x "$MEMORYHUB_BIN" ]; then
-  MEMORYHUB_BIN=$(command -v memoryhub 2>/dev/null) || exit 0
+  MEMORYHUB_BIN=$(command -v memoryhub 2>/dev/null) || \
+    emit_unavailable_warning "MemoryHub CLI not found." \
+      "Install memoryhub-cli, then run 'memoryhub doctor' to diagnose."
 fi
 
 PROJECT_ID=$(basename "${CLAUDE_PROJECT_DIR:-$PWD}")
 
-"$MEMORYHUB_BIN" search \
+if MEMORY_OUTPUT=$("$MEMORYHUB_BIN" search \
   "project context architecture preferences decisions workflow" \
   --project-id "$PROJECT_ID" \
   --output compact \
-  --max 20 2>/dev/null || exit 0
+  --max 20 2>/dev/null); then
+  if [ -n "$MEMORY_OUTPUT" ]; then
+    printf '%s\n' "$MEMORY_OUTPUT"
+  fi
+else
+  SEARCH_STATUS=$?
+  if [ "$SEARCH_STATUS" -eq 3 ]; then
+    emit_unavailable_warning "Authentication failed."
+  fi
+  emit_unavailable_warning "Could not connect to MemoryHub or load memories."
+fi
 ```
 
 Make it executable:
@@ -146,7 +166,7 @@ Add the hook to your project's `.claude/settings.json`:
 Key choices:
 
 - **`matcher: "startup"`**: Only runs on new sessions, not on resume or context compaction. This avoids re-injecting memories that are already in the transcript.
-- **`timeout: 5`**: Five seconds is generous. A typical search completes in under 2 seconds. If the server is unreachable, the script fails silently within the timeout.
+- **`timeout: 5`**: Five seconds is generous. A typical search completes in under 2 seconds. If the server is unreachable, the hook injects a warning within the timeout.
 
 ### 5. Update the generated rule file
 
@@ -157,13 +177,15 @@ Replace the existing session-start block with:
 ```markdown
 ## At session start
 
-Check for a `<memoryhub-context>` block in your conversation context.
-If present, the SessionStart hook has pre-loaded project and user
-memories -- use them as your working set. Do NOT call `register_session`
-or `search_memory` yet.
+Check for a successful `<memoryhub-context>` block in your conversation
+context. If its first content line does not say
+`⚠️ MemoryHub unavailable:`, the SessionStart hook has pre-loaded project
+and user memories -- use them as your working set. Do NOT call
+`register_session` or `search_memory` yet.
 
-If no `<memoryhub-context>` block is present (hook not configured or
-failed silently), fall back to the manual flow: read your API key from
+If no `<memoryhub-context>` block is present, or its first content line is
+`⚠️ MemoryHub unavailable:` (hook reported a failure), fall back to the
+manual flow when memory is needed: read your API key from
 `~/.config/memoryhub/credentials` (INI file, section matching
 `MEMORYHUB_CONTEXT` or `[default]`), call
 `register_session(api_key="<key>")`, then after the first user turn
@@ -184,7 +206,7 @@ If nothing appears, check:
    memoryhub search "project context" --project-id my-project --output compact --max 5
    ```
 3. **Is the hook configured?** Check `.claude/settings.json` has the `SessionStart` block.
-4. **Are there any memories?** If the project has no memories yet, the hook produces no output. Write a few memories first via the MCP server, then restart the session.
+4. **Are there any memories?** If the project has no memories yet, a successful hook produces no output. A `<memoryhub-context>` block beginning with `⚠️ MemoryHub unavailable:` means the hook could not load memories; follow its suggested action.
 
 ## What to commit
 
@@ -206,7 +228,7 @@ Do NOT commit:
 
 **Why content-only output?** Structural metadata (weights, scopes, timestamps) in the context window activates model reasoning about memory management instead of the user's task. Smaller models are especially sensitive to this. The compact format strips everything except the content.
 
-**Why graceful degradation?** The hook exits 0 on every failure path. A missing CLI, unreachable server, or expired API key should never block a session from starting. The MCP server remains available as a fallback.
+**Why graceful degradation?** The hook exits 0 on every failure path and injects a reason plus a `memoryhub doctor` suggestion. A missing CLI, unreachable server, or expired API key should never block a session from starting. The MCP server remains available as a fallback.
 
 **Why `startup` matcher only?** On `resume`, the previous memories are already in the transcript. Re-injecting would waste context. On `clear` or `compact`, the user is explicitly managing context and injecting memories would interfere.
 
@@ -227,7 +249,7 @@ The agent should defer `register_session` until the first time it needs to searc
 
 ## Troubleshooting
 
-**Hook produces no output**: Run the search command manually (see step 6). Check that the project has memories and the API key / server URL are correct.
+**Hook produces no output**: A successful search with no matching memories produces no output. If there is a `<memoryhub-context>` warning, follow its suggested action. Otherwise run the search command manually (see step 6) and check that the project has memories and the API key / server URL are correct.
 
 **Hook times out**: The default timeout is 5 seconds. If your server is slow, increase the timeout in `.claude/settings.json`. If Python startup is the bottleneck (~0.5s on cold start), ensure the CLI is installed in a venv local to the project rather than a global install.
 

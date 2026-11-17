@@ -129,6 +129,13 @@ The SDK classifies these messages by prefix into typed exceptions:
 `NotFoundError`, `PermissionDeniedError`, `ValidationError`,
 `AuthenticationError`, `ConflictError`, and `CurationVetoError`.
 
+Error responses include structured `error` and `next_action` fields. The SDK
+preserves the suggested recovery step on `.next_action` for each typed error.
+Connection failures are reported as `ConnectionFailedError` with guidance to
+run `memoryhub doctor` and verify the configured URL and network access.
+Authentication errors are recognized when the message contains
+`"authentication"`, `"invalid api key"`, or `"no authenticated session"`.
+
 See [`planning/tool-error-standardization.md`](https://github.com/redhat-ai-americas/memory-hub-scratchpad/blob/main/planning/archive/tool-error-standardization.md) for the full design note.
 
 Generic `except Exception` handlers in tools log at ERROR and scrub internal

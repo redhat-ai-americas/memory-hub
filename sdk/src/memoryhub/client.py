@@ -9,6 +9,7 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
+import httpx
 import mcp.types as mt
 from fastmcp import Client
 from fastmcp.client.messages import MessageHandler
@@ -48,6 +49,9 @@ from memoryhub.models import (
 )
 
 logger = logging.getLogger(__name__)
+_CONNECTION_NEXT_ACTION = (
+    "Check MEMORYHUB_URL and server availability, then run 'memoryhub doctor'."
+)
 
 
 # Type alias for memory-update callbacks. Receives the URI string of the
@@ -319,7 +323,15 @@ class MemoryHubClient:
             kwargs["auth"] = self._auth
 
         self._mcp = Client(self._url, message_handler=message_handler, **kwargs)
-        await self._mcp.__aenter__()
+        try:
+            await self._mcp.__aenter__()
+        except httpx.RequestError as exc:
+            self._mcp = None
+            self._message_handler = None
+            raise ConnectionFailedError(
+                "Could not connect to the MemoryHub MCP server.",
+                next_action=_CONNECTION_NEXT_ACTION,
+            ) from exc
 
         # API key mode: authenticate via register_session after connecting
         if self._api_key is not None:
@@ -409,39 +421,72 @@ class MemoryHubClient:
         """
         if self._mcp is None:
             raise ConnectionFailedError(
-                "Client is not connected. Use 'async with client:' context manager."
+                "Client is not connected. Use 'async with client:' context manager.",
+                next_action="Open the client with 'async with client:' before calling methods.",
             )
 
         # Strip None values — MCP tools don't expect explicit nulls
         args = {k: v for k, v in arguments.items() if v is not None}
 
-        result = await self._mcp.call_tool(tool_name, args, raise_on_error=False)
+        try:
+            result = await self._mcp.call_tool(tool_name, args, raise_on_error=False)
+        except httpx.RequestError as exc:
+            raise ConnectionFailedError(
+                "The connection to the MemoryHub MCP server was interrupted.",
+                next_action=_CONNECTION_NEXT_ACTION,
+            ) from exc
 
         if result.is_error:
             msg = ""
             if result.content:
                 item = result.content[0]
                 msg = item.text if hasattr(item, "text") else str(item)
+
+            error_data = result.structured_content
+            if not isinstance(error_data, dict):
+                error_data = {}
+            structured_message = error_data.get("error")
+            if isinstance(structured_message, str) and structured_message:
+                msg = structured_message
+            structured_action = error_data.get("next_action")
+            next_action = structured_action if isinstance(structured_action, str) else None
+
             msg_lower = msg.lower()
             # Classify by message prefix — order matters (most specific first)
-            if "invalid api key" in msg_lower or "no authenticated session" in msg_lower:
-                raise AuthenticationError(msg)
+            if any(
+                marker in msg_lower
+                for marker in (
+                    "authentication",
+                    "authentication failed",
+                    "invalid api key",
+                    "no authenticated session",
+                )
+            ):
+                raise AuthenticationError(msg, next_action=next_action)
             if msg_lower.startswith("curation rule blocked"):
-                raise CurationVetoError(tool_name, msg)
+                raise CurationVetoError(tool_name, msg, next_action=next_action)
             if "not found" in msg_lower:
                 memory_id = args.get("memory_id", "unknown")
-                raise NotFoundError(memory_id, msg)
-            if "not authorized" in msg_lower or msg_lower.startswith("access denied:"):
-                raise PermissionDeniedError(tool_name, msg)
+                raise NotFoundError(memory_id, msg, next_action=next_action)
+            if (
+                "not authorized" in msg_lower
+                or "permission denied" in msg_lower
+                or msg_lower.startswith("access denied:")
+            ):
+                raise PermissionDeniedError(tool_name, msg, next_action=next_action)
             if "already exists" in msg_lower or "already deleted" in msg_lower:
-                raise ConflictError(tool_name, msg)
+                raise ConflictError(tool_name, msg, next_action=next_action)
             if (
                 msg_lower.startswith("invalid ")
                 or " must be " in msg_lower
                 or "cannot be empty" in msg_lower
             ):
-                raise ValidationError(tool_name, msg)
-            raise ToolError(tool_name, msg or "Unknown error (empty response)")
+                raise ValidationError(tool_name, msg, next_action=next_action)
+            raise ToolError(
+                tool_name,
+                msg or "Unknown error (empty response)",
+                next_action=next_action,
+            )
 
         # Prefer structured_content (parsed JSON dict)
         if result.structured_content is not None:
