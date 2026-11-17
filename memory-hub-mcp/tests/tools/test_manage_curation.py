@@ -249,6 +249,9 @@ async def test_resolve_contradiction_valid_actions(resolution_action):
     mock_gen = AsyncMock()
 
     with (
+        patch(f"{_MOD}.get_claims_from_context", return_value={
+            "sub": "test-user", "tenant_id": "default", "scopes": ["memory:admin"],
+        }),
         patch(f"{_MOD}.get_db_session", return_value=(mock_session, mock_gen)),
         patch(f"{_MOD}.release_db_session", new_callable=AsyncMock),
         patch(
@@ -268,6 +271,7 @@ async def test_resolve_contradiction_valid_actions(resolution_action):
         mock_session,
         resolution_action=resolution_action,
         actor_id="test-user",
+        tenant_id="default",
     )
     assert result["resolved"] is True
     assert result["contradiction_id"] == CONTRADICTION_UUID
@@ -289,6 +293,9 @@ async def test_resolve_contradiction_includes_note_in_message():
     mock_gen = AsyncMock()
 
     with (
+        patch(f"{_MOD}.get_claims_from_context", return_value={
+            "sub": "test-user", "tenant_id": "default", "scopes": ["memory:admin"],
+        }),
         patch(f"{_MOD}.get_db_session", return_value=(mock_session, mock_gen)),
         patch(f"{_MOD}.release_db_session", new_callable=AsyncMock),
         patch(
@@ -316,6 +323,9 @@ async def test_resolve_contradiction_not_found_raises_tool_error():
     mock_gen = AsyncMock()
 
     with (
+        patch(f"{_MOD}.get_claims_from_context", return_value={
+            "sub": "test-user", "tenant_id": "default", "scopes": ["memory:admin"],
+        }),
         patch(f"{_MOD}.get_db_session", return_value=(mock_session, mock_gen)),
         patch(f"{_MOD}.release_db_session", new_callable=AsyncMock),
         patch(

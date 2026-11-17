@@ -26,18 +26,23 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 8080
+            port: 8443
+            scheme: HTTPS
           initialDelaySeconds: 10
           periodSeconds: 30
         readinessProbe:
           httpGet:
             path: /healthz
-            port: 8080
+            port: 8443
+            scheme: HTTPS
           initialDelaySeconds: 5
           periodSeconds: 10
         envFrom:
         - secretRef:
             name: memoryhub-db-credentials
+        - secretRef:
+            name: memoryhub-ui-human-access
+            optional: true
         env:
         - name: MEMORYHUB_MCP_SERVER_URL
           value: "http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/"
@@ -58,6 +63,9 @@ spec:
             secretKeyRef:
               name: memoryhub-ui-admin-key
               key: MEMORYHUB_ADMIN_KEY
+        # Configure MEMORYHUB_UI_ALLOWED_USERS and MEMORYHUB_UI_ADMIN_USERS
+        # with tenant-authorized OpenShift usernames before rollout. Empty
+        # lists deny all dashboard API access.
         resources:
           limits:
             memory: "512Mi"
@@ -72,8 +80,11 @@ spec:
         - containerPort: 8443
           name: proxy
           protocol: TCP
+        - containerPort: 4180
+          name: proxy-http
+          protocol: TCP
         args:
-        - --http-address=127.0.0.1:4180
+        - --http-address=:4180
         - --https-address=:8443
         - --provider=openshift
         - --openshift-service-account=memoryhub-ui
@@ -120,9 +131,9 @@ spec:
     port: 8443
     targetPort: 8443
     protocol: TCP
-  - name: app
-    port: 8080
-    targetPort: 8080
+  - name: proxy-http
+    port: 4180
+    targetPort: 4180
     protocol: TCP
 ---
 apiVersion: route.openshift.io/v1

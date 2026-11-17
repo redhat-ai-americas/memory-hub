@@ -175,6 +175,7 @@ async def test_set_session_focus_content_too_large_raises_tool_error():
                 "src.tools.manage_session.get_embedding_service",
                 return_value=embedding_svc,
             ),
+            patch("src.tools.manage_session._require_project_member", new_callable=AsyncMock),
             pytest.raises(ToolError) as exc_info,
         ):
             await manage_session(action="set_focus", focus="test focus", project="test-proj")

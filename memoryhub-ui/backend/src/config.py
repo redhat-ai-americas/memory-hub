@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # the authenticated user. Default is "default" to match the Phase 1
     # server_default on memory_nodes.tenant_id.
     ui_tenant_id: str = "default"
+    # Human role assignments are deployment-owned. OAuth proxy authenticates
+    # the username; a request header cannot assign an admin role.
+    ui_admin_users: str = ""
+    ui_allowed_users: str = ""
+    ui_admin_moderation_scopes: str = "project,campaign,role,organizational"
 
     @property
     def database_url(self) -> str:

@@ -2106,6 +2106,7 @@ async def resolve_contradiction(
     *,
     resolution_action: str | None = None,
     actor_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> ContradictionReport:
     """Mark a contradiction report as resolved with an optional disposition.
 
@@ -2127,6 +2128,11 @@ async def resolve_contradiction(
         )
 
     stmt = select(ContradictionReport).where(ContradictionReport.id == contradiction_id)
+    if tenant_id is not None:
+        stmt = stmt.join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id).where(
+            ContradictionReport.tenant_id == tenant_id,
+            MemoryNode.tenant_id == tenant_id,
+        )
     result = await session.execute(stmt)
     report = result.scalar_one_or_none()
 
@@ -2135,6 +2141,8 @@ async def resolve_contradiction(
 
     if report.resolved:
         raise ValueError(f"Contradiction {contradiction_id} is already resolved")
+    if actor_id is not None and report.reporter == actor_id:
+        raise ValueError("Cannot resolve one's own contradiction report")
 
     report.resolved = True
     report.resolved_at = datetime.now(UTC)

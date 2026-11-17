@@ -656,6 +656,8 @@ async def _dispatch_promote(memory_id, project_id, opts, ctx):
     _opt_require("promote", "target_scope", opts)
 
     claims = get_claims_from_context()
+    if "memory:admin" not in claims.get("scopes", []):
+        raise ToolError("Direct promotion requires a technical memory:admin scope")
     tenant_id = get_tenant_filter(claims)
     promoted_by = claims["sub"]
 
@@ -758,6 +760,8 @@ async def _dispatch_list_entities(opts, ctx):
     claims = get_claims_from_context()
     tenant_id = get_tenant_filter(claims)
     owner_id = opts.get("owner_id") or claims["sub"]
+    if owner_id != claims["sub"]:
+        raise ToolError("Cannot list another identity's entities")
 
     kwargs = {}
     if "entity_type" in opts:
