@@ -1,5 +1,7 @@
 """Tests for admin content moderation service operations (issue #45)."""
 
+import json
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -13,7 +15,6 @@ from memoryhub_core.services.admin import (
     search_memory_admin,
 )
 from memoryhub_core.services.exceptions import MemoryNotFoundError
-
 
 TENANT = "test-tenant"
 ACTOR = "admin-agent-01"
@@ -49,6 +50,28 @@ def _make_memory(
 
 
 class TestQuarantineMemory:
+    @pytest.mark.asyncio
+    async def test_deferred_commit_can_rollback_human_moderation(self, async_session, caplog):
+        node = _make_memory(scope="project")
+        async_session.add(node)
+        await async_session.commit()
+
+        with caplog.at_level(logging.INFO, logger="memoryhub.audit"):
+            await quarantine_memory(
+                async_session,
+                memory_id=node.id,
+                tenant_id=TENANT,
+                actor_id="alice",
+                actor_type="user",
+                reason="review",
+                commit=False,
+            )
+        assert node.status == "quarantined"
+        assert not any(json.loads(record.message).get("operation") == "quarantine" for record in caplog.records)
+        await async_session.rollback()
+        await async_session.refresh(node)
+        assert node.status == "active"
+
     @pytest.mark.asyncio
     async def test_quarantine_sets_status(self, async_session):
         node = _make_memory()

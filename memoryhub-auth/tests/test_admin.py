@@ -5,6 +5,8 @@ import os
 os.environ.setdefault("AUTH_ADMIN_KEY", "test-admin-key")
 
 import pytest  # noqa: E402
+from sqlalchemy import select  # noqa: E402
+from src.models import AgentOwnerBinding, OAuthClient  # noqa: E402
 
 ADMIN_HEADERS = {"X-Admin-Key": "test-admin-key"}
 
@@ -40,6 +42,80 @@ class TestListClients:
 
 @pytest.mark.asyncio
 class TestCreateClient:
+    async def test_owner_binding_is_committed_with_client(self, client, db_session):
+        resp = await client.post(
+            "/admin/clients",
+            json={"client_id": "owned-agent", "client_name": "Owned Agent", "tenant_id": "tenant-1", "owner": "alice"},
+            headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 201, resp.text
+        binding = (await db_session.execute(select(AgentOwnerBinding).where(
+            AgentOwnerBinding.client_id == "owned-agent",
+        ))).scalar_one()
+        assert (binding.tenant_id, binding.owner) == ("tenant-1", "alice")
+
+    async def test_owner_binding_conflict_rolls_back_client(self, client, db_session):
+        db_session.add(AgentOwnerBinding(tenant_id="tenant-1", client_id="orphan-id", owner="bob"))
+        await db_session.commit()
+        resp = await client.post(
+            "/admin/clients",
+            json={
+                "client_id": "orphan-id", "client_name": "Should Roll Back",
+                "tenant_id": "tenant-1", "owner": "alice",
+            },
+            headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 409, resp.text
+        client_row = (await db_session.execute(select(OAuthClient).where(
+            OAuthClient.client_id == "orphan-id",
+        ))).scalar_one_or_none()
+        assert client_row is None
+
+    async def test_owner_filter_applies_to_each_client_operation(self, client):
+        created = await client.post(
+            "/admin/clients",
+            json={"client_id": "alice-agent", "client_name": "Alice", "tenant_id": "tenant-1", "owner": "alice"},
+            headers=ADMIN_HEADERS,
+        )
+        assert created.status_code == 201, created.text
+
+        alice_list = await client.get(
+            "/admin/clients", params={"tenant_id": "tenant-1", "owner": "alice"}, headers=ADMIN_HEADERS,
+        )
+        bob_list = await client.get(
+            "/admin/clients", params={"tenant_id": "tenant-1", "owner": "bob"}, headers=ADMIN_HEADERS,
+        )
+        assert [row["client_id"] for row in alice_list.json()] == ["alice-agent"]
+        assert bob_list.json() == []
+
+        for method, path, body in (
+            ("GET", "/admin/clients/alice-agent", None),
+            ("PATCH", "/admin/clients/alice-agent", {"active": False}),
+            ("POST", "/admin/clients/alice-agent/rotate-secret", None),
+            ("POST", "/admin/clients/alice-agent/rotate-api-key", None),
+        ):
+            denied = await client.request(
+                method, path, params={"tenant_id": "tenant-1", "owner": "bob"},
+                json=body, headers=ADMIN_HEADERS,
+            )
+            assert denied.status_code == 404, (method, path, denied.text)
+
+        wrong_tenant = await client.get(
+            "/admin/clients/alice-agent",
+            params={"tenant_id": "tenant-2", "owner": "alice"}, headers=ADMIN_HEADERS,
+        )
+        no_key = await client.patch(
+            "/admin/clients/alice-agent", params={"tenant_id": "tenant-1", "owner": "alice"},
+            json={"active": False},
+        )
+        still_active = await client.get(
+            "/admin/clients/alice-agent", params={"tenant_id": "tenant-1", "owner": "alice"},
+            headers=ADMIN_HEADERS,
+        )
+        assert wrong_tenant.status_code == 404
+        assert no_key.status_code == 401
+        assert still_active.status_code == 200 and still_active.json()["active"] is True
+
     async def test_create_success(self, client):
         body = {
             "client_id": "new-agent",

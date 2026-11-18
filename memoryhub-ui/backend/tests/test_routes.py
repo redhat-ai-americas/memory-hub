@@ -10,9 +10,11 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
+from src.authorization import Access, Principal, get_access
 from src.config import Settings, get_settings
 from src.database import get_db
 from src.main import app
@@ -29,7 +31,10 @@ def _make_node(**kwargs) -> MagicMock:
         "id": node_id,
         "content": "Test memory content",
         "stub": "Test stub",
-        "scope": "user",
+        "scope": "project",
+        "scope_id": "demo-project",
+        "status": "active",
+        "tenant_id": "default",
         "weight": 0.8,
         "branch_type": None,
         "owner_id": "test-user",
@@ -56,6 +61,12 @@ def _scalar_result(value):
     r.scalar_one_or_none.return_value = value
     r.scalars.return_value.all.return_value = []
     r.fetchall.return_value = []
+    return r
+
+
+def _review_result(report, memory=None):
+    r = MagicMock()
+    r.one_or_none.return_value = (report, memory) if report is not None else None
     return r
 
 
@@ -141,12 +152,33 @@ def _make_settings(tenant_id: str = "default") -> Settings:
         embedding_url="",
         mcp_server_url="http://mcp-server:8080/mcp/",
         ui_tenant_id=tenant_id,
+        admin_key="test-technical-key",
     )
 
 
 @pytest.fixture
 def test_settings():
     return _make_settings(tenant_id="default")
+
+
+@pytest.fixture(autouse=True)
+def authenticated_admin():
+    """Legacy route contracts run as an authenticated Admin on shared data."""
+    def override_access():
+        settings = app.dependency_overrides.get(get_settings, get_settings)()
+        return Access(
+            principal=Principal("test-user", "admin", settings.ui_tenant_id),
+            agents={"test-client"},
+            projects={"demo-project"},
+            project_admins={"demo-project"},
+            human_projects={"demo-project"},
+            human_project_admins={"demo-project"},
+            moderation_scopes={"project", "campaign", "role", "organizational"},
+        )
+
+    app.dependency_overrides[get_access] = override_access
+    yield
+    app.dependency_overrides.pop(get_access, None)
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +423,9 @@ class TestMemoryHistoryEndpoint:
             stub="v1 stub",
             content="v1 content",
             created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            tenant_id="default",
+            scope="project",
+            deleted_at=None,
         )
         v2 = MagicMock(
             id=v2_id,
@@ -399,6 +434,9 @@ class TestMemoryHistoryEndpoint:
             stub="v2 stub",
             content="v2 content",
             created_at=datetime(2026, 1, 2, tzinfo=UTC),
+            tenant_id="default",
+            scope="project",
+            deleted_at=None,
         )
         v3 = MagicMock(
             id=v3_id,
@@ -407,6 +445,9 @@ class TestMemoryHistoryEndpoint:
             stub="v3 stub",
             content="v3 content",
             created_at=datetime(2026, 1, 3, tzinfo=UTC),
+            tenant_id="default",
+            scope="project",
+            deleted_at=None,
         )
         service_result = {
             "versions": [v3, v2, v1],  # newest-first
@@ -415,7 +456,9 @@ class TestMemoryHistoryEndpoint:
             "offset": 0,
         }
 
-        db_session = _make_db_session([])
+        db_session = _make_db_session([
+            _scalar_result(_make_node(id=memory_id)), _scalars_result([v1, v2, v3]),
+        ])
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: test_settings
 
@@ -456,7 +499,7 @@ class TestMemoryHistoryEndpoint:
 
         missing_id = uuid.uuid4()
 
-        db_session = _make_db_session([])
+        db_session = _make_db_session([_scalar_result(_make_node(id=missing_id))])
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: test_settings
 
@@ -535,6 +578,7 @@ def _make_rule(**kwargs) -> MagicMock:
         "scope_filter": None,
         "layer": "user",
         "owner_id": "test-user",
+        "tenant_id": "default",
         "override": False,
         "enabled": True,
         "priority": 100,
@@ -743,7 +787,7 @@ _SAMPLE_CLIENT = {
     "client_id": "test-client",
     "client_name": "Test Client",
     "identity_type": "user",
-    "tenant_id": "test-tenant",
+    "tenant_id": "default",
     "default_scopes": ["memory:read"],
     "active": True,
     "created_at": "2026-01-01T00:00:00Z",
@@ -814,11 +858,16 @@ class TestClientEndpoints:
                 app.dependency_overrides.clear()
 
     async def test_create_client_returns_201(self, test_settings):
-        created = {**_SAMPLE_CLIENT, "client_secret": "supersecret"}
+        created = {
+            **_SAMPLE_CLIENT, "identity_type": "service",
+            "default_scopes": ["memory:read:project"],
+            "client_secret": "supersecret", "api_key": "mh-dev-test",
+        }
         upstream = _mock_httpx_response(201, created)
         patcher, _ = _patch_admin_httpx(upstream)
 
         app.dependency_overrides[get_settings] = lambda: test_settings
+        app.dependency_overrides[get_db] = lambda: _make_db_session([_scalar_result(False)])
         with patcher:
             try:
                 async with AsyncClient(
@@ -829,9 +878,9 @@ class TestClientEndpoints:
                         json={
                             "client_id": "test-client",
                             "client_name": "Test Client",
-                            "identity_type": "user",
-                            "tenant_id": "test-tenant",
-                            "default_scopes": ["memory:read"],
+                            "identity_type": "service",
+                            "tenant_id": test_settings.ui_tenant_id,
+                            "default_scopes": ["memory:read:project"],
                         },
                     )
 
@@ -865,7 +914,11 @@ class TestClientEndpoints:
 
     async def test_rotate_secret_returns_new_secret(self, test_settings):
         upstream = _mock_httpx_response(
-            200, {"client_id": "test-client", "client_secret": "rotated-secret"}
+            200, {
+                **_SAMPLE_CLIENT, "identity_type": "service",
+                "default_scopes": ["memory:read:project"],
+                "client_secret": "rotated-secret", "api_key": "mh-dev-new",
+            }
         )
         patcher, _ = _patch_admin_httpx(upstream)
 
@@ -916,11 +969,16 @@ class TestClientTenantForwarding:
                 app.dependency_overrides.clear()
 
     async def test_create_client_forwards_tenant_id(self, test_settings):
-        created = {**_SAMPLE_CLIENT, "client_secret": "s", "api_key": "mh-dev-abc"}
+        created = {
+            **_SAMPLE_CLIENT, "identity_type": "service",
+            "default_scopes": ["memory:read:project"],
+            "client_secret": "s", "api_key": "mh-dev-abc",
+        }
         upstream = _mock_httpx_response(201, created)
         patcher, mock_http = _patch_admin_httpx(upstream)
 
         app.dependency_overrides[get_settings] = lambda: test_settings
+        app.dependency_overrides[get_db] = lambda: _make_db_session([_scalar_result(False)])
         with patcher:
             try:
                 async with AsyncClient(
@@ -931,7 +989,9 @@ class TestClientTenantForwarding:
                         json={
                             "client_id": "x",
                             "client_name": "X",
-                            "tenant_id": "t",
+                            "tenant_id": test_settings.ui_tenant_id,
+                            "identity_type": "service",
+                            "default_scopes": ["memory:read:project"],
                         },
                     )
 
@@ -1358,7 +1418,10 @@ class TestCurationRulesEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.get(f"/api/rules/{v2_id}/history")
+                response = await ac.get(
+                    f"/api/rules/{v2_id}/history",
+                    headers={"x-admin-key": test_settings.admin_key},
+                )
 
             assert response.status_code == 200
             body = response.json()
@@ -1380,7 +1443,10 @@ class TestCurationRulesEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.get(f"/api/rules/{uuid.uuid4()}/history")
+                response = await ac.get(
+                    f"/api/rules/{uuid.uuid4()}/history",
+                    headers={"x-admin-key": test_settings.admin_key},
+                )
 
             assert response.status_code == 404
         finally:
@@ -1393,7 +1459,10 @@ class TestCurationRulesEndpoints:
 
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.get("/api/rules/not-a-uuid/history")
+                response = await ac.get(
+                    "/api/rules/not-a-uuid/history",
+                    headers={"x-admin-key": test_settings.admin_key},
+                )
 
             assert response.status_code == 422
         finally:
@@ -1481,9 +1550,10 @@ class TestContradictionsEndpoints:
 
     async def test_resolve_contradiction_sets_resolved(self, test_settings):
         report = _make_contradiction(resolved=False, resolved_at=None)
+        memory = _make_node(owner_id="other", actor_id="other", driver_id="other")
 
         db_session = AsyncMock()
-        db_session.execute = AsyncMock(return_value=_scalar_result(report))
+        db_session.execute = AsyncMock(return_value=_review_result(report, memory))
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -1507,9 +1577,10 @@ class TestContradictionsEndpoints:
         report = _make_contradiction(
             resolved=True, resolved_at=datetime(2026, 1, 1, tzinfo=UTC)
         )
+        memory = _make_node(owner_id="other", actor_id="other", driver_id="other")
 
         db_session = AsyncMock()
-        db_session.execute = AsyncMock(return_value=_scalar_result(report))
+        db_session.execute = AsyncMock(return_value=_review_result(report, memory))
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -1530,7 +1601,7 @@ class TestContradictionsEndpoints:
 
     async def test_update_contradiction_returns_404_for_missing(self, test_settings):
         db_session = AsyncMock()
-        db_session.execute = AsyncMock(return_value=_scalar_result(None))
+        db_session.execute = AsyncMock(return_value=_review_result(None))
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -1658,7 +1729,7 @@ class TestTenantFiltering:
             "has_more": False,
             "offset": 0,
         }
-        db_session = _make_db_session([])
+        db_session = _make_db_session([_scalar_result(_make_node(id=memory_id))])
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: test_settings
 
@@ -1686,7 +1757,7 @@ class TestTenantFiltering:
 
         settings = _make_settings(tenant_id="tenant_b")
         memory_id = uuid.uuid4()
-        db_session = _make_db_session([])
+        db_session = _make_db_session([_scalar_result(None)])
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: settings
 
@@ -1701,11 +1772,9 @@ class TestTenantFiltering:
                     response = await ac.get(f"/api/memory/{memory_id}/history")
 
                 assert response.status_code == 404
-                # Most important assertion: the service was called with
-                # tenant_b so the service-layer filter has something to
-                # bite on. This is the line that would catch a regression
-                # where the BFF forgot to forward the tenant.
-                assert mock_service.await_args.kwargs["tenant_id"] == "tenant_b"
+                # The object-level guard rejects the foreign row before
+                # calling the history service at all.
+                mock_service.assert_not_awaited()
             finally:
                 app.dependency_overrides.clear()
 
@@ -1768,7 +1837,7 @@ class TestTenantFiltering:
         then inspect both captured statements.
         """
         settings = _make_settings(tenant_id="tenant_b")
-        node = _make_node()
+        node = _make_node(tenant_id="tenant_b")
         db_session = _make_db_session(
             [
                 _scalars_result([node]),  # MemoryNode select
@@ -1821,12 +1890,7 @@ class TestTenantFiltering:
             app.dependency_overrides.clear()
 
     async def test_graph_search_vector_path_passes_tenant_bind(self):
-        """The raw-SQL pgvector branch binds tenant_id as a parameter.
-
-        text() statements don't render literal bind params by default, so
-        we assert at the execute() call level by capturing the kwargs the
-        route passed to db.execute().
-        """
+        """Vector search keeps tenant and role predicates in the SQL query."""
         settings = _make_settings(tenant_id="tenant_b")
 
         # Custom session mock that captures both statement and params.
@@ -1856,10 +1920,8 @@ class TestTenantFiltering:
                 assert response.status_code == 200
                 assert len(session.captured_calls) == 1
                 stmt, params = session.captured_calls[0]
-                # tenant_id must appear in the raw SQL AND as a bind param.
-                assert "tenant_id" in str(stmt)
-                assert params is not None
-                assert params.get("tenant_id") == "tenant_b"
+                assert _statement_mentions_tenant_filter(stmt, "tenant_b")
+                assert "scope" in str(stmt)
             finally:
                 app.dependency_overrides.clear()
 
@@ -2101,7 +2163,7 @@ class TestTenantFiltering:
 
     async def test_update_contradiction_cross_tenant_returns_404(self):
         settings = _make_settings(tenant_id="tenant_b")
-        db_session = _make_db_session([_scalar_result(None)])
+        db_session = _make_db_session([_review_result(None)])
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -2140,10 +2202,10 @@ class TestTenantFiltering:
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: settings
 
-        # Make the auth proxy call raise so we exercise the DB-only fallback.
+        # An unavailable Auth service must not produce a partial roster.
         with patch(
             "src.routes._admin_request",
-            new=AsyncMock(side_effect=RuntimeError("auth down")),
+            new=AsyncMock(side_effect=HTTPException(status_code=503, detail="auth down")),
         ):
             try:
                 async with AsyncClient(
@@ -2151,8 +2213,7 @@ class TestTenantFiltering:
                 ) as ac:
                     response = await ac.get("/api/users")
 
-                assert response.status_code == 200
-                assert response.json() == []
+                assert response.status_code == 503
                 assert _statement_mentions_tenant_filter(
                     db_session.executed_statements[0], "tenant_b"
                 )

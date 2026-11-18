@@ -28,6 +28,7 @@ from src.tools._deps import (
     release_db_session,
     resolve_driver_id,
 )
+from src.tools._object_access import memory_object_access
 from src.tools._push_helpers import broadcast_after_write
 from src.tools.auth import get_current_user
 
@@ -42,6 +43,7 @@ from memoryhub_core.services.exceptions import (
     ProjectInviteOnlyError,
 )
 from memoryhub_core.services.memory import create_fact_children, create_memory
+from memoryhub_core.services.memory import read_memory as read_memory_service
 from memoryhub_core.services.project import ensure_project_membership
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
@@ -392,6 +394,30 @@ async def write_memory(
     actor_id = claims["sub"]
     resolved_driver = resolve_driver_id(driver_id, claims)
 
+    # A branch inherits the parent object's security boundary. Check it
+    # before project auto-enrollment or any other write-side effect.
+    if parent_id is not None and branch_type is not None:
+        try:
+            parent_uuid = uuid.UUID(parent_id)
+        except ValueError:
+            raise ToolError(f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID.") from None
+        parent_session, parent_gen = await get_db_session()
+        try:
+            try:
+                parent = await read_memory_service(parent_uuid, parent_session, tenant_id=write_tenant_id)
+            except MemoryNotFoundError:
+                raise ToolError("Parent memory not found or inaccessible.") from None
+            can_read, can_write = await memory_object_access(parent_session, claims, parent, project_id)
+            parent_scope = parent.scope.value if hasattr(parent.scope, "value") else parent.scope
+            requested_scope_id = project_id if scope == "project" else None
+            if not (can_read and can_write) or (
+                parent_scope != scope or parent.owner_id != owner_id
+                or parent.scope_id != requested_scope_id
+            ):
+                raise ToolError("Not authorized to create a branch under this parent memory or scope.")
+        finally:
+            await release_db_session(parent_gen)
+
     # Resolve campaign membership when writing to campaign scope.
     campaign_ids: set[str] | None = None
     if scope == "campaign":
@@ -543,6 +569,28 @@ async def write_memory(
                 raise ToolError(
                     f"Invalid parent_id format: '{parent_id}'. Must be a valid UUID."
                 ) from None
+
+            # Recheck under a row lock in the same transaction as creation.
+            from sqlalchemy import select
+
+            from memoryhub_core.models.memory import MemoryNode
+
+            locked_parent = (await session.execute(
+                select(MemoryNode).where(
+                    MemoryNode.id == parsed_parent_id,
+                    MemoryNode.tenant_id == write_tenant_id,
+                    MemoryNode.deleted_at.is_(None),
+                ).with_for_update()
+            )).scalar_one_or_none()
+            if locked_parent is None:
+                raise ToolError("Parent memory not found or inaccessible.")
+            can_read, can_write = await memory_object_access(session, claims, locked_parent, project_id)
+            locked_scope = locked_parent.scope.value if hasattr(locked_parent.scope, "value") else locked_parent.scope
+            if not (can_read and can_write) or (
+                locked_scope != scope or locked_parent.owner_id != owner_id
+                or locked_parent.scope_id != scope_id_value
+            ):
+                raise ToolError("Not authorized to create a branch under this parent memory or scope.")
 
         # Parse relevant_until string to datetime if provided.
         parsed_relevant_until = None

@@ -14,6 +14,16 @@ from fastmcp.exceptions import ToolError
 from src.tools.memory import memory
 
 
+@pytest.fixture(autouse=True)
+def authorized_source_for_dispatch_tests():
+    """These existing tests exercise dispatcher forwarding after source auth."""
+    with (
+        patch("memoryhub_core.services.memory.read_memory", new_callable=AsyncMock),
+        patch("src.tools._object_access.memory_object_access", new_callable=AsyncMock, return_value=(True, True)),
+    ):
+        yield
+
+
 class FakeMemoryNode:
     """Mock memory node for testing."""
 

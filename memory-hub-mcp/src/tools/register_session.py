@@ -21,17 +21,6 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
-from memoryhub_core.config import AppSettings
-from memoryhub_core.services.project import get_projects_for_user, list_projects_for_tenant
-from memoryhub_core.services.push_subscriber import (
-    ensure_memoryhub_subscriber_running,
-    stop_memoryhub_subscriber,
-)
-from memoryhub_core.services.valkey_client import (
-    ValkeyUnavailableError,
-    get_valkey_client,
-)
 from src.core.app import mcp
 from src.core.audit import record_event
 from src.core.authz import get_tenant_filter
@@ -45,6 +34,17 @@ from src.tools.auth import (
     set_default_driver_id,
     set_session,
     set_session_id,
+)
+
+from memoryhub_core.config import AppSettings
+from memoryhub_core.services.project import get_projects_for_user, list_projects_for_tenant
+from memoryhub_core.services.push_subscriber import (
+    ensure_memoryhub_subscriber_running,
+    stop_memoryhub_subscriber,
+)
+from memoryhub_core.services.valkey_client import (
+    ValkeyUnavailableError,
+    get_valkey_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -327,7 +327,7 @@ async def register_session(
             "session_id": session_id,
             "user_id": user_id,
             "name": jwt_claims.get("name", user_id),
-            "scopes": list(token.scopes),
+            "scopes": list(jwt_claims.get("scopes", token.scopes)),
             "project_memberships": project_memberships,
             "auth_method": "jwt",
             "default_driver_id": default_driver_id,

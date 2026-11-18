@@ -265,20 +265,20 @@ async def test_compile_persona_explicit_user_and_project(mock_claims, mock_db_se
         patch("src.tools.compile_persona.release_db_session", new_callable=AsyncMock),
         patch("src.tools.compile_persona.compile_persona_synopsis", new_callable=AsyncMock,
               return_value={
-                  "synopsis_id": str(uuid.uuid4()), "user_id": "carol", "project_id": "proj-x",
+                      "synopsis_id": str(uuid.uuid4()), "user_id": "alice", "project_id": "proj-x",
                   "source_fact_count": 3, "pin_count": 0, "version": 1,
                   "previous_synopsis_id": None, "content": "## Preferences\n- Fast.\n",
                   "compiled_at": "2026-10-07T10:00:00+00:00", "is_stale": False,
               }) as mock_compile,
     ):
-        await compile_persona(user_id="carol", project_id="proj-x")
+        await compile_persona(user_id="alice", project_id="proj-x")
 
     call_kwargs = mock_compile.call_args.kwargs
     assert call_kwargs["project_id"] == "proj-x"
     assert "embedding_service" in call_kwargs
     mock_compile.assert_awaited_once()
     args = mock_compile.call_args.args
-    assert args[0] == "carol"
+    assert args[0] == "alice"
     assert args[1] == "default"
 
 

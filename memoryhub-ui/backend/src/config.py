@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     db_user: str = "memoryhub"
     db_password: str = ""
     embedding_url: str = ""
+    valkey_url: str = ""
     mcp_server_url: str = "http://memory-hub-mcp:8080/mcp/"
     auth_service_url: str = "http://auth-server.memoryhub-auth.svc:8081"
     admin_key: str = ""
@@ -44,6 +45,14 @@ class Settings(BaseSettings):
     # the authenticated user. Default is "default" to match the Phase 1
     # server_default on memory_nodes.tenant_id.
     ui_tenant_id: str = "default"
+    # Human role assignments are deployment-owned. OAuth proxy authenticates
+    # the username; a request header cannot assign an admin role.
+    ui_admin_users: str = ""
+    ui_allowed_users: str = ""
+    ui_admin_moderation_scopes: str = "project,campaign,role,organizational"
+    # Explicit grant for human Admin writes outside a project-admin membership.
+    # An Admin role alone is not a write capability.
+    ui_admin_write_scopes: str = ""
 
     @property
     def database_url(self) -> str:

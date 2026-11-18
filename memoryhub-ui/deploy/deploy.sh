@@ -186,9 +186,9 @@ metadata:
   namespace: $RHOAI_NS
 spec:
   ports:
-  - port: 8080
+  - port: 4180
     protocol: TCP
-    targetPort: 8080
+    targetPort: 4180
 ---
 apiVersion: v1
 kind: Endpoints
@@ -199,12 +199,12 @@ subsets:
 - addresses:
   - ip: $UI_CLUSTER_IP
   ports:
-  - port: 8080
+  - port: 4180
     protocol: TCP
 PROXY_EOF
-        # Create the Route only if it doesn't exist (idempotent).
-        if ! oc get route memoryhub-ui --context "$CONTEXT" -n "$RHOAI_NS" &>/dev/null; then
-            cat <<ROUTE_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
+        # Always update the Route: old edge routes pointed directly at the
+        # unauthenticated BFF port and must pass through the OAuth proxy.
+        cat <<ROUTE_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -215,12 +215,11 @@ spec:
     kind: Service
     name: memoryhub-ui
   port:
-    targetPort: 8080
+    targetPort: 4180
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
 ROUTE_EOF
-        fi
         echo "  Proxy route synced."
     fi
 
