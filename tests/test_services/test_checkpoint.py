@@ -64,6 +64,26 @@ async def test_read_checkpoint(async_session, embedding_service):
 
 
 @pytest.mark.asyncio
+async def test_project_checkpoints_do_not_cross_scope_ids(async_session, embedding_service):
+    """The same owner and workflow in two projects keeps separate state."""
+    first, _ = await upsert_checkpoint(
+        workflow_name="run", state={"project": "a"}, session=async_session,
+        embedding_service=embedding_service, tenant_id="tenant-a", owner_id="alice",
+        scope="project", scope_id="project-a",
+    )
+    second, _ = await upsert_checkpoint(
+        workflow_name="run", state={"project": "b"}, session=async_session,
+        embedding_service=embedding_service, tenant_id="tenant-a", owner_id="alice",
+        scope="project", scope_id="project-b",
+    )
+    assert first.id != second.id
+    assert await read_checkpoint(
+        "run", async_session, tenant_id="tenant-a", owner_id="alice",
+        scope="project", scope_id="project-a",
+    ) == {"project": "a"}
+
+
+@pytest.mark.asyncio
 async def test_read_nonexistent_checkpoint(async_session):
     """Reading a nonexistent checkpoint returns None."""
     tenant_id = "test-tenant"

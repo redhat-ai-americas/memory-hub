@@ -586,27 +586,12 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access
         raise HTTPException(status_code=409, detail=f"Memory {memory_id!r} is already deleted")
     access.require_delete(node)
 
-    # Traverse versions in both directions and descendants to any depth.
-    # Authorize the complete closure before the single bulk mutation.
-    found = {node.id: node}
-    frontier = {node.id}
-    while frontier:
-        neighbors = (await db.execute(
-            select(MemoryNode).where(
-                MemoryNode.tenant_id == tenant_id,
-                or_(
-                    MemoryNode.id.in_({found[i].previous_version_id for i in frontier if found[i].previous_version_id}),
-                    MemoryNode.previous_version_id.in_(frontier),
-                    MemoryNode.parent_id.in_(frontier),
-                ),
-            ).with_for_update()
-        )).scalars().all()
-        frontier = set()
-        for related in neighbors:
-            if related.id not in found:
-                access.require_delete(related)
-                found[related.id] = related
-                frontier.add(related.id)
+    # Use the same closure as the Core delete path, then authorize every row.
+    from memoryhub_core.services.memory import collect_delete_nodes
+
+    found = await collect_delete_nodes(node, db, tenant_id, seed_locked=True)
+    for related in found.values():
+        access.require_delete(related)
 
     now = datetime.now(UTC)
     all_ids = set(found)

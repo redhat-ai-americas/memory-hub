@@ -283,13 +283,13 @@ async def test_delete_checks_entire_closure_before_bulk_update():
     root = node()
     child = node(owner="bob", parent_id=root.id)
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[result(scalar=root), result(items=[child])])
+    db.execute = AsyncMock(side_effect=[result(scalar=root), result(items=[child]), result(items=[])])
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_access] = lambda: access()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.delete(f"/api/memory/{root.id}")
     assert response.status_code == 403
-    assert db.execute.await_count == 2
+    assert db.execute.await_count == 3
     db.commit.assert_not_awaited()
 
 

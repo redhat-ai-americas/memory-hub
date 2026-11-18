@@ -390,6 +390,16 @@ async def test_create_relationship_campaign_with_project_id():
             new_callable=AsyncMock,
             return_value=fake_rel,
         ),
+        patch(
+            "src.tools._object_access.get_projects_for_user_in_tenant",
+            new_callable=AsyncMock,
+            return_value={"my-project"},
+        ),
+        patch(
+            "src.tools._object_access.get_campaigns_for_project",
+            new_callable=AsyncMock,
+            return_value={CAMPAIGN_UUID},
+        ),
     ):
         result = await manage_graph(
             action="create_relationship",
@@ -477,6 +487,21 @@ async def test_delete_memory_campaign_with_project_id():
                 "branches_deleted": 0,
                 "total_deleted": 1,
             },
+        ),
+        patch(
+            "src.tools.delete_memory.collect_delete_nodes",
+            new_callable=AsyncMock,
+            return_value={fake_node.id: fake_node},
+        ),
+        patch(
+            "src.tools._object_access.get_projects_for_user_in_tenant",
+            new_callable=AsyncMock,
+            return_value={"my-project"},
+        ),
+        patch(
+            "src.tools._object_access.get_campaigns_for_project",
+            new_callable=AsyncMock,
+            return_value={CAMPAIGN_UUID},
         ),
         patch("src.tools.delete_memory.broadcast_after_write", new_callable=AsyncMock),
     ):

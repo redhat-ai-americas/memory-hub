@@ -21,6 +21,9 @@ from unittest.mock import patch
 import fakeredis.aioredis
 import pytest
 from fastmcp.exceptions import ToolError
+from src.core.authz import get_claims_from_context
+from src.tools import auth as auth_module
+from src.tools.register_session import register_session
 
 from memoryhub_core.config import ValkeySettings
 from memoryhub_core.services.push_subscriber import (
@@ -32,9 +35,6 @@ from memoryhub_core.services.valkey_client import (
     ValkeyClient,
     set_valkey_client,
 )
-from src.core.authz import get_claims_from_context
-from src.tools import auth as auth_module
-from src.tools.register_session import register_session
 
 # FastMCP's @mcp.tool decorator returns the original function in this codebase
 # (verified by the existing set_session_focus tests), so we don't need .fn here.
@@ -197,9 +197,9 @@ class TestJwtSessionMetadata:
         self, fake_valkey
     ):
         token = SimpleNamespace(
-            claims={"sub": "jwt-user", "tenant_id": "tenant-a"},
+            claims={"sub": "jwt-user", "tenant_id": "tenant-a", "scopes": ["memory:read:user"]},
             client_id="jwt-client",
-            scopes=["memory:read:user"],
+            scopes=[],  # FastMCP 3.4.2 does not extract memoryhub-auth's "scopes" claim
         )
         ctx = fake_context(session_id="jwt-mcp-session")
         with (
@@ -221,6 +221,7 @@ class TestJwtSessionMetadata:
             )
 
             assert result["session_id"] == auth_module.get_session_id(ctx)
+            assert result["scopes"] == ["memory:read:user"]
             assert auth_module.get_default_driver_id(ctx) == "human-driver"
             state = auth_module._sessions_by_mcp_session["jwt-mcp-session"]
             assert state.ttl_seconds == 1200

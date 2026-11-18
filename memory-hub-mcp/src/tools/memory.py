@@ -12,7 +12,6 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
 from src.core.app import mcp
 
 logger = logging.getLogger(__name__)
@@ -594,9 +593,14 @@ async def _dispatch_remove_member(project_id, opts, ctx):
 
 async def _dispatch_checkpoint(opts, ctx):
     """Dispatch checkpoint action (read or upsert)."""
-    from memoryhub_core.services.checkpoint import read_checkpoint, upsert_checkpoint
-    from src.core.authz import get_claims_from_context, get_tenant_filter
+    from types import SimpleNamespace
+
+    from src.core.authz import authorize_read, authorize_write, get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.checkpoint import read_checkpoint, upsert_checkpoint
+    from memoryhub_core.services.project import get_projects_for_user_in_tenant
+    from memoryhub_core.services.role import get_roles_for_user
 
     _opt_require("checkpoint", "workflow_name", opts)
     workflow_name = opts["workflow_name"]
@@ -610,7 +614,29 @@ async def _dispatch_checkpoint(opts, ctx):
 
     session, gen = await get_db_session()
     try:
+        if scope not in {"user", "project", "campaign", "role", "organizational", "enterprise"}:
+            raise ToolError("Invalid checkpoint scope.")
+        if scope in {"project", "role"} and not scope_id:
+            raise ToolError("scope_id is required for project or role checkpoints.")
+        if scope == "user" and scope_id is not None:
+            raise ToolError("User checkpoints cannot specify scope_id.")
+        project_ids = (
+            await get_projects_for_user_in_tenant(session, owner_id, tenant_id)
+            if scope == "project" else None
+        )
+        role_names = (
+            await get_roles_for_user(session, owner_id, tenant_id, claims=claims)
+            if scope == "role" else None
+        )
+        target = SimpleNamespace(
+            scope=scope, scope_id=scope_id, owner_id=owner_id, tenant_id=tenant_id,
+        )
         if state is not None:
+            if not authorize_write(
+                claims, scope, owner_id, tenant_id,
+                scope_id=scope_id, project_ids=project_ids, role_names=role_names,
+            ):
+                raise ToolError("Not authorized to write a checkpoint in this scope.")
             embedding_service = get_embedding_service()
             memory, created = await upsert_checkpoint(
                 workflow_name=workflow_name,
@@ -629,12 +655,17 @@ async def _dispatch_checkpoint(opts, ctx):
                 "memory_id": str(memory.id),
             }
 
+        if not authorize_read(
+            claims, target, project_ids=project_ids, role_names=role_names,
+        ):
+            raise ToolError("Not authorized to read a checkpoint in this scope.")
         checkpoint_state = await read_checkpoint(
             workflow_name=workflow_name,
             session=session,
             tenant_id=tenant_id,
             owner_id=owner_id,
             scope=scope,
+            scope_id=scope_id,
         )
         return {
             "workflow_name": workflow_name,
@@ -648,9 +679,10 @@ async def _dispatch_promote(memory_id, project_id, opts, ctx):
     """Dispatch promote action to service layer."""
     import uuid as uuid_module
 
-    from memoryhub_core.services.promotion import promote_memory
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.promotion import promote_memory
 
     _require("promote", "memory_id", memory_id)
     _opt_require("promote", "target_scope", opts)
@@ -698,9 +730,13 @@ async def _dispatch_graduate(memory_id, project_id, opts, ctx):
     """Dispatch graduate action to service layer."""
     import uuid as uuid_module
 
-    from memoryhub_core.services.graduation import graduate_memory
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+    from src.tools._object_access import memory_object_access
+
+    from memoryhub_core.services.exceptions import MemoryNotFoundError
+    from memoryhub_core.services.graduation import graduate_memory
+    from memoryhub_core.services.memory import read_memory as read_memory_service
 
     _require("graduate", "memory_id", memory_id)
 
@@ -710,6 +746,13 @@ async def _dispatch_graduate(memory_id, project_id, opts, ctx):
 
     session, gen = await get_db_session()
     try:
+        try:
+            source = await read_memory_service(uuid_module.UUID(memory_id), session, tenant_id=tenant_id)
+        except (MemoryNotFoundError, ValueError):
+            raise ToolError("Source memory not found or inaccessible.") from None
+        can_read, can_write = await memory_object_access(session, claims, source, project_id)
+        if not (can_read and can_write):
+            raise ToolError("Not authorized to graduate this source memory into its scope.")
         embedding_service = get_embedding_service()
         graduated = await graduate_memory(
             memory_id=uuid_module.UUID(memory_id),
@@ -753,9 +796,10 @@ async def _dispatch_backfill_entities(opts, ctx):
 
 async def _dispatch_list_entities(opts, ctx):
     """Dispatch list_entities action."""
-    from memoryhub_core.services.entity import list_entities
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, release_db_session
+
+    from memoryhub_core.services.entity import list_entities
 
     claims = get_claims_from_context()
     tenant_id = get_tenant_filter(claims)
@@ -787,9 +831,10 @@ async def _dispatch_merge_entities(opts, ctx):
     """Dispatch merge_entities action."""
     import uuid as uuid_module
 
-    from memoryhub_core.services.entity import merge_entities
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.entity import merge_entities
 
     _opt_require("merge_entities", "source_id", opts)
     _opt_require("merge_entities", "target_id", opts)
@@ -817,9 +862,10 @@ async def _dispatch_rename_entity(memory_id, opts, ctx):
     """Dispatch rename_entity action."""
     import uuid as uuid_module
 
-    from memoryhub_core.services.entity import rename_entity
     from src.core.authz import get_claims_from_context, get_tenant_filter
     from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+    from memoryhub_core.services.entity import rename_entity
 
     _require("rename_entity", "memory_id", memory_id)
     _opt_require("rename_entity", "new_name", opts)

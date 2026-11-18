@@ -50,34 +50,23 @@ def _normalize_session_scopes(access_tiers: list[str]) -> list[str]:
     return scopes
 
 
-def _extract_jwt_from_headers() -> dict | None:
-    """Extract and decode JWT from the HTTP Authorization header.
-
-    Returns decoded claims dict, or None if no JWT is available.
-    Decodes without signature verification — the transport layer
-    (JWTVerifier) already validated the token.
-    """
-    try:
-        from fastmcp.server.dependencies import get_http_request
-
-        request = get_http_request()
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.lower().startswith("bearer "):
-            return None
-        token = auth_header.split(" ", 1)[1].strip()
-        import jwt as pyjwt
-
-        return pyjwt.decode(token, options={"verify_signature": False})
-    except Exception:
-        return None
-
-
 def get_claims_from_context() -> dict:
     """Resolve caller identity from JWT or session fallback.
 
     Returns a normalized claims dict with sub, identity_type, tenant_id,
     and scopes.
     """
+    # HTTP requests must carry their Bearer token on each request. A stale
+    # SDK auth context from a previous request cannot authenticate a new one.
+    request = None
+    try:
+        from fastmcp.server.dependencies import get_http_request
+
+        request = get_http_request()
+        http_authorization = request.headers.get("authorization")
+    except RuntimeError:
+        http_authorization = None
+
     # 1. Try FastMCP JWT path (get_access_token populated by auth middleware)
     try:
         from fastmcp.server.dependencies import get_access_token
@@ -86,39 +75,26 @@ def get_claims_from_context() -> dict:
     except Exception:
         token = None
 
+    if request is not None and not http_authorization:
+        token = None
+    if http_authorization and token is None:
+        raise AuthenticationError("Bearer token was not verified")
+
     if token is not None:
         refresh_session_metadata()
+        signed_scopes = token.claims.get("scopes", token.scopes)
         claims = {
-            "sub": token.claims.get("sub", token.client_id),
+            "sub": token.claims["sub"],
             "identity_type": token.claims.get("identity_type", "user"),
-            "tenant_id": token.claims.get("tenant_id", DEFAULT_TENANT_ID),
-            "scopes": list(token.scopes),
+            "tenant_id": token.claims["tenant_id"],
+            "scopes": list(signed_scopes),
             "project_memberships": token.claims.get("project_memberships", []),
         }
         log.debug("Resolved JWT identity via get_access_token: sub=%s", claims["sub"])
         return claims
 
-    # 2. Try extracting JWT directly from HTTP Authorization header.
-    #    JWTVerifier validates tokens at transport level but may not populate
-    #    get_access_token() in all transport modes. Decode without verification
-    #    since the transport already validated the signature.
-    jwt_claims = _extract_jwt_from_headers()
-    if jwt_claims is not None:
-        refresh_session_metadata()
-        scopes = jwt_claims.get("scopes", [])
-        if isinstance(scopes, str):
-            scopes = scopes.split()
-        claims = {
-            "sub": jwt_claims.get("sub", "unknown"),
-            "identity_type": jwt_claims.get("identity_type", "user"),
-            "tenant_id": jwt_claims.get("tenant_id", DEFAULT_TENANT_ID),
-            "scopes": scopes,
-            "project_memberships": jwt_claims.get("project_memberships", []),
-        }
-        log.debug("Resolved JWT identity via Authorization header: sub=%s", claims["sub"])
-        return claims
-
-    # 3. Fall back to session
+    # 2. Fall back to a registered API-key session. HTTP Bearer requests have
+    # already been rejected or verified by VerifiedJWTMiddleware.
     user = get_current_user()
     if user is not None:
         raw_scopes = user.get("scopes", [])
@@ -139,7 +115,7 @@ def get_claims_from_context() -> dict:
         log.debug("Resolved session identity: sub=%s", claims["sub"])
         return claims
 
-    # 4. No identity
+    # 3. No identity
     log.warning("No JWT or session identity available")
     raise AuthenticationError("Authentication required. Provide a JWT or call register_session.")
 

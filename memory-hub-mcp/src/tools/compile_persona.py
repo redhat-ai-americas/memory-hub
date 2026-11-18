@@ -20,10 +20,10 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
-from memoryhub_core.services.persona import compile_persona_synopsis
 from src.core.authz import AuthenticationError, get_claims_from_context
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session
+
+from memoryhub_core.services.persona import compile_persona_synopsis
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,8 @@ async def compile_persona(
     resolved_user_id = user_id or claims.get("sub")
     if not resolved_user_id:
         raise ToolError("Could not resolve user_id from session. Pass user_id explicitly.")
+    if resolved_user_id != claims["sub"]:
+        raise ToolError("Not authorized to access another user's persona.")
 
     tenant_id = claims.get("tenant_id", "default")
     embedding_service = get_embedding_service()
