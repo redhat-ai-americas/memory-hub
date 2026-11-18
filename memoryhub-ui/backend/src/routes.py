@@ -334,6 +334,7 @@ async def get_graph(
         node_id_list = list(node_ids)
         rel_stmt = select(MemoryRelationship).where(
             MemoryRelationship.tenant_id == tenant_id,
+            MemoryRelationship.valid_until.is_(None),
             MemoryRelationship.source_id.in_(node_id_list),
             MemoryRelationship.target_id.in_(node_id_list),
         )
@@ -535,6 +536,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: A
         .join(target, target.id == MemoryRelationship.target_id)
         .where(
             MemoryRelationship.tenant_id == tenant_id,
+            MemoryRelationship.valid_until.is_(None),
             access.clause(source),
             access.clause(target),
             source.deleted_at.is_(None),
@@ -634,9 +636,11 @@ async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep, a
         version_rows = (await db.execute(select(MemoryNode).where(
             MemoryNode.id.in_([version.id for version in versions]),
             MemoryNode.tenant_id == access.principal.tenant_id,
+            MemoryNode.deleted_at.is_(None),
             access.clause(),
         ))).scalars().all()
-        visible_rows = {row.id: row for row in version_rows if access.can_read(row)}
+        visible_rows = {row.id: row for row in version_rows
+                        if row.deleted_at is None and access.can_read(row)}
 
     return [
         VersionEntry(

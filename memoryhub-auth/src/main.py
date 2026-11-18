@@ -50,6 +50,24 @@ app.include_router(health.router)
 app.include_router(admin.router)
 app.include_router(internal.router)
 
+# The public Route must never reach the technical admin/internal routers, even
+# when a caller knows a service key. It targets a separate listener and app.
+public_app = FastAPI(
+    title="MemoryHub Auth",
+    description="Public OAuth 2.1 Authorization Server for MemoryHub",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+public_app.add_exception_handler(OAuthError, oauth_error_handler)
+for public_router in (
+    token.router,
+    authorize.router,
+    openshift_callback.router,
+    well_known.router,
+    health.router,
+):
+    public_app.include_router(public_router)
+
 
 def main():
     uvicorn.run(

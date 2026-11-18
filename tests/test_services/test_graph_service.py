@@ -8,7 +8,9 @@ are patched out so that SQLite can create the schema.
 import uuid
 
 import pytest
+from sqlalchemy import select
 
+from memoryhub_core.models.memory import MemoryRelationship
 from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryScope,
@@ -107,6 +109,25 @@ async def test_create_relationship(async_session, embedding_service):
     assert result.created_by == "agent-test"
     assert result.id is not None
     assert result.created_at is not None
+
+
+@pytest.mark.asyncio
+async def test_create_relationship_can_join_caller_transaction(async_session, embedding_service):
+    source = await _create_node(async_session, embedding_service, content="source node")
+    target = await _create_node(async_session, embedding_service, content="target node")
+    data = _make_relationship_data(source_id=source.id, target_id=target.id)
+
+    result = await create_relationship(data, async_session, commit=False)
+    staged = (await async_session.execute(select(MemoryRelationship).where(
+        MemoryRelationship.id == result.id,
+    ))).scalar_one_or_none()
+    assert staged is not None
+
+    await async_session.rollback()
+    persisted = (await async_session.execute(select(MemoryRelationship).where(
+        MemoryRelationship.id == result.id,
+    ))).scalar_one_or_none()
+    assert persisted is None
 
 
 @pytest.mark.asyncio

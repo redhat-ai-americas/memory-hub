@@ -24,6 +24,7 @@ from memoryhub_core.services.admin import quarantine_memory, record_moderation_a
 from memoryhub_core.services.embeddings import HttpEmbeddingService
 from memoryhub_core.services.entity import merge_entities, rename_entity
 from memoryhub_core.services.exceptions import (
+    CrossTenantRelationshipError,
     LastAdminError,
     MembershipNotFoundError,
     MemoryNotCurrentError,
@@ -32,6 +33,9 @@ from memoryhub_core.services.exceptions import (
     ProjectNotFoundError,
 )
 from memoryhub_core.services.graph import create_relationship
+from memoryhub_core.services.memory import (
+    collect_delete_nodes,
+)
 from memoryhub_core.services.memory import (
     create_memory as core_create_memory,
 )
@@ -52,6 +56,7 @@ from memoryhub_core.services.project import (
 from memoryhub_core.services.valkey_client import ValkeyClient, ValkeyUnavailableError
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -112,10 +117,12 @@ class ReportBody(StrictBody):
     confidence: float = Field(ge=0, le=1)
 
 
-class ModerationBulkBody(StrictBody):
-    action: Literal["quarantine", "restore"]
+class BulkBody(StrictBody):
+    action: Literal["quarantine", "restore", "delete", "relate"]
     ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
     reason: str | None = Field(default=None, max_length=500)
+    target_id: uuid.UUID | None = None
+    relationship_type: Literal["related_to", "derived_from", "supersedes", "conflicts_with"] | None = None
 
 
 class EntityUpdateBody(StrictBody):
@@ -535,12 +542,22 @@ async def report(memory_id: uuid.UUID, body: ReportBody, db: DbDep, access: Acce
 
 
 @router.post("/api/memories/bulk")
-async def moderate_bulk(body: ModerationBulkBody, db: DbDep, access: AccessDep):
-    """Apply an existing Core moderation transition after full-set preflight."""
-    if access.principal.role != "admin":
-        raise HTTPException(status_code=403, detail="Moderation forbidden")
+async def moderate_bulk(body: BulkBody, db: DbDep, access: AccessDep):
+    """Apply existing Core transitions only after full-set preflight."""
     if len(set(body.ids)) != len(body.ids):
         raise HTTPException(status_code=422, detail="Duplicate memory IDs")
+    if body.action == "delete":
+        if body.target_id or body.relationship_type:
+            raise HTTPException(status_code=422, detail="Unexpected relationship options")
+        return await _bulk_delete(body.ids, db, access)
+    if body.action == "relate":
+        if body.target_id is None or body.relationship_type is None:
+            raise HTTPException(status_code=422, detail="Target and relationship type required")
+        return await _bulk_relate(body.ids, body.target_id, body.relationship_type, db, access)
+    if access.principal.role != "admin":
+        raise HTTPException(status_code=403, detail="Moderation forbidden")
+    if body.target_id or body.relationship_type:
+        raise HTTPException(status_code=422, detail="Unexpected relationship options")
     nodes = []
     for memory_id in sorted(body.ids):
         node = await _node(db, access, memory_id, lock=True)
@@ -572,9 +589,100 @@ async def moderate_bulk(body: ModerationBulkBody, db: DbDep, access: AccessDep):
     return {"done": [str(node.id) for node in nodes], "errors": []}
 
 
+async def _bulk_delete(ids: list[uuid.UUID], db: AsyncSession, access: AccessDep) -> dict:
+    """Use the Core delete closure; update all rows in one transaction."""
+    tenant = access.principal.tenant_id
+    roots = []
+    closure: dict[uuid.UUID, MemoryNode] = {}
+    for memory_id in sorted(ids):
+        node = await _node(db, access, memory_id, lock=True)
+        access.require_delete(node)
+        if node.deleted_at is not None:
+            raise HTTPException(status_code=409, detail="Memory is already deleted")
+        roots.append(node)
+        try:
+            related = await collect_delete_nodes(node, db, tenant, seed_locked=True)
+        except MemoryNotFoundError:
+            raise HTTPException(status_code=404, detail="Memory not found") from None
+        for member in related.values():
+            access.require_delete(member)
+            if member.deleted_at is not None:
+                raise HTTPException(status_code=409, detail="Memory is already deleted")
+            closure[member.id] = member
+    # Soft-delete does not mutate unrelated edge endpoints. A corrupt
+    # cross-tenant edge is nevertheless a boundary failure, not a reason to
+    # proceed with a partially visible graph.
+    edges = (await db.execute(select(MemoryRelationship).where(
+        MemoryRelationship.valid_until.is_(None),
+        or_(MemoryRelationship.source_id.in_(closure),
+            MemoryRelationship.target_id.in_(closure)),
+    ).with_for_update())).scalars().all()
+    if any(edge.tenant_id != tenant for edge in edges):
+        raise HTTPException(status_code=409, detail="Memory relationship boundary invalid")
+    now = datetime.now(UTC)
+    for node in roots:
+        _record_human_audit(db, access, "memory.delete", node.scope, node.owner_id, node.id,
+                            {"deleted_rows": len(closure), "bulk": True})
+    try:
+        await db.execute(sa_update(MemoryNode).where(
+            MemoryNode.tenant_id == tenant, MemoryNode.id.in_(closure),
+        ).values(deleted_at=now, is_current=False))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return {"done": [str(node.id) for node in roots], "errors": []}
+
+
+async def _bulk_relate(ids: list[uuid.UUID], target_id: uuid.UUID,
+                       relationship_type: str, db: AsyncSession, access: AccessDep) -> dict:
+    """Preflight every source and target before creating any edge."""
+    if target_id in ids:
+        raise HTTPException(status_code=422, detail="A relationship requires two memories")
+    target = await _node(db, access, target_id, lock=True)
+    await _require_write(db, access, target)
+    sources = []
+    for memory_id in sorted(ids):
+        source = await _node(db, access, memory_id, lock=True)
+        await _require_write(db, access, source)
+        if (source.scope != target.scope or source.scope_id != target.scope_id
+                or (source.scope == "user" and source.owner_id != target.owner_id)):
+            raise HTTPException(status_code=403, detail="Relationship scope forbidden")
+        sources.append(source)
+    existing = (await db.execute(select(MemoryRelationship.source_id).where(
+        MemoryRelationship.tenant_id == access.principal.tenant_id,
+        MemoryRelationship.source_id.in_(ids),
+        MemoryRelationship.target_id == target_id,
+        MemoryRelationship.relationship_type == relationship_type,
+        MemoryRelationship.valid_until.is_(None),
+    ).with_for_update())).scalars().all()
+    if existing:
+        raise HTTPException(status_code=409, detail="Relationship already exists")
+    try:
+        for source in sources:
+            data = RelationshipCreate(
+                source_id=source.id, target_id=target.id,
+                relationship_type=RelationshipType(relationship_type),
+                created_by=access.principal.username,
+            )
+            _record_human_audit(db, access, "memory.relationship_created", source.scope,
+                                source.owner_id, source.id,
+                                {"target_id": str(target.id), "relationship_type": relationship_type})
+            await create_relationship(data, db, commit=False)
+        await db.commit()
+    except (MemoryNotFoundError, CrossTenantRelationshipError, ValueError):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Relationship cannot be created") from None
+    except Exception:
+        await db.rollback()
+        raise
+    return {"done": [str(node.id) for node in sources], "errors": []}
+
+
 def _human_content_clause(access: AccessDep, model=MemoryNode):
     """Content access from direct human grants, never an agent membership."""
-    tenant = model.tenant_id == access.principal.tenant_id
+    tenant = and_(model.tenant_id == access.principal.tenant_id,
+                  model.deleted_at.is_(None))
     if access.principal.role == "user":
         return and_(tenant, model.status == "active", or_(
             and_(model.scope == "user", model.owner_id.in_(access.identities)),
@@ -596,7 +704,7 @@ def _human_content_clause(access: AccessDep, model=MemoryNode):
 
 
 def _human_can_see_content(access: AccessDep, memory: MemoryNode) -> bool:
-    if memory.tenant_id != access.principal.tenant_id:
+    if memory.tenant_id != access.principal.tenant_id or memory.deleted_at is not None:
         return False
     if access.principal.role == "user":
         return memory.status == "active" and memory.deleted_at is None and (
@@ -682,6 +790,7 @@ async def browse_memories(
         filters.append(select(child.id).where(
             child.parent_id == MemoryNode.id, child.tenant_id == tenant,
             child.branch_type == branch_type, child.deleted_at.is_(None),
+            access.clause(child),
         ).exists())
     if flag:
         if "contradicted" in flag:
@@ -695,6 +804,7 @@ async def browse_memories(
             filters.append(select(child.id).where(
                 child.parent_id == MemoryNode.id, child.tenant_id == tenant,
                 child.deleted_at.is_(None),
+                access.clause(child),
             ).exists())
     if entity:
         filters.extend((_human_content_clause(access), select(MemoryRelationship.id).where(
@@ -735,11 +845,12 @@ async def browse_memories(
     ids = [memory.id for memory in memories]
     branch_counts: dict[uuid.UUID, Counter] = {}
     report_counts: dict[uuid.UUID, int] = {}
+    entities_by_memory: dict[uuid.UUID, list[dict]] = {}
     if ids:
         children = (await db.execute(select(MemoryNode.parent_id, MemoryNode.branch_type).where(
             MemoryNode.parent_id.in_(ids), MemoryNode.tenant_id == tenant,
             MemoryNode.deleted_at.is_(None),
-            *([_human_content_clause(access)] if access.principal.role == "user" else []),
+            access.clause(),
         ))).all()
         for parent_id, branch in children:
             branch_counts.setdefault(parent_id, Counter())[branch or "other"] += 1
@@ -748,6 +859,30 @@ async def browse_memories(
             ContradictionReport.resolved.is_(False),
         ).group_by(ContradictionReport.memory_id))).all()
         report_counts = dict(reports)
+        # Entity names are content. The selected source memory is already
+        # authorized, and a redacted Admin row gets no linked entity names.
+        content_ids = [memory.id for memory in memories if _human_can_see_content(access, memory)]
+        if content_ids:
+            entity_node = aliased(MemoryNode)
+            entity_rows = (await db.execute(select(
+                MemoryRelationship.source_id, entity_node.id,
+                entity_node.content, entity_node.branch_type,
+            ).join(entity_node, entity_node.id == MemoryRelationship.target_id).where(
+                MemoryRelationship.source_id.in_(content_ids),
+                MemoryRelationship.tenant_id == tenant,
+                MemoryRelationship.relationship_type == "mentions",
+                MemoryRelationship.valid_until.is_(None),
+                entity_node.tenant_id == tenant,
+                entity_node.scope == "entity",
+                entity_node.status == "active",
+                entity_node.is_current.is_(True),
+                entity_node.deleted_at.is_(None),
+            ))).all()
+            for source_id, entity_id, name, kind in entity_rows:
+                entities_by_memory.setdefault(source_id, []).append({
+                    "id": str(entity_id), "name": name,
+                    "type": (kind or "").removeprefix("entity:"),
+                })
     items = []
     for memory in memories:
         hidden = not _human_can_see_content(access, memory)
@@ -775,7 +910,9 @@ async def browse_memories(
             "near_duplicate": None, "created_at": memory.created_at,
             "updated_at": memory.updated_at, "deleted_at": memory.deleted_at,
             "relevant_until": memory.relevant_until, "score": None,
-            "entities": [], "redacted": hidden,
+            "entities": [] if hidden else entities_by_memory.get(memory.id, []),
+            "entity_count": 0 if hidden else len(entities_by_memory.get(memory.id, [])),
+            "redacted": hidden,
             "capabilities": {"write": writable, "moderate": moderatable},
             "can_delete": access.can_delete(memory) and (
                 memory.scope != "project" or memory.scope_id in access.human_projects
@@ -805,7 +942,32 @@ async def browse_memories(
         ).group_by(column))).all()
         facets[name] = [{"value": value, "count": count} for value, count in rows if value is not None]
     facets["domains"] = []
-    facets["flags"] = {"contradicted": None, "has_branches": None, "near_duplicate": None}
+    # These counts describe only authorized memories. Domain values are
+    # content metadata and must exclude Admin's redacted personal rows.
+    domain_rows = select(func.unnest(MemoryNode.domains).label("value")).where(
+        *base, MemoryNode.deleted_at.is_(None), _human_content_clause(access),
+    ).subquery()
+    domains = (await db.execute(select(domain_rows.c.value, func.count()).select_from(
+        domain_rows).group_by(domain_rows.c.value))).all()
+    facets["domains"] = [{"value": value, "count": count} for value, count in domains if value]
+    contradicted = (await db.execute(select(func.count()).select_from(MemoryNode).where(
+        *base, MemoryNode.deleted_at.is_(None),
+        select(ContradictionReport.id).where(
+            ContradictionReport.memory_id == MemoryNode.id,
+            ContradictionReport.tenant_id == tenant,
+            ContradictionReport.resolved.is_(False),
+        ).exists(),
+    ))).scalar_one()
+    branch = aliased(MemoryNode)
+    has_branches = (await db.execute(select(func.count()).select_from(MemoryNode).where(
+        *base, MemoryNode.deleted_at.is_(None),
+        select(branch.id).where(
+            branch.parent_id == MemoryNode.id, branch.tenant_id == tenant,
+            branch.deleted_at.is_(None), access.clause(branch),
+        ).exists(),
+    ))).scalar_one()
+    facets["flags"] = {"contradicted": contradicted, "has_branches": has_branches,
+                       "near_duplicate": None}
     return {"items": items, "total": total, "page": page, "per_page": per_page,
             "search_mode": search_mode, "metadata_only": access.principal.role == "admin",
             "hidden_scopes": ["user", "enterprise"] if access.principal.role == "admin" else [],
@@ -821,7 +983,7 @@ def _aliases(node: MemoryNode) -> list[str]:
     return value if isinstance(value, list) else []
 
 
-async def _entity_sources(db: AsyncSession, access: AccessDep, entity_id: uuid.UUID) -> tuple[list[MemoryNode], int]:
+async def _entity_sources(db: AsyncSession, access: AccessDep, entity_id: uuid.UUID) -> list[MemoryNode]:
     rels = (await db.execute(select(MemoryRelationship).where(
         MemoryRelationship.target_id == entity_id,
         MemoryRelationship.tenant_id == access.principal.tenant_id,
@@ -830,16 +992,17 @@ async def _entity_sources(db: AsyncSession, access: AccessDep, entity_id: uuid.U
     ))).scalars().all()
     source_ids = {rel.source_id for rel in rels}
     if not source_ids:
-        return [], 0
-    sources = (await db.execute(select(MemoryNode).where(MemoryNode.id.in_(source_ids)))).scalars().all()
-    tenant_sources = [source for source in sources if source.tenant_id == access.principal.tenant_id]
+        return []
+    sources = (await db.execute(select(MemoryNode).where(
+        MemoryNode.id.in_(source_ids), _human_content_clause(access),
+    ))).scalars().all()
     visible = [
         source for source in sources
         if source.tenant_id == access.principal.tenant_id
         and source.deleted_at is None and source.is_current and _human_can_see_content(access, source)
         and all(rel.tenant_id == access.principal.tenant_id for rel in rels if rel.source_id == source.id)
     ]
-    return visible, len(tenant_sources) - len(visible)
+    return visible
 
 
 async def _entity(db: AsyncSession, access: AccessDep, entity_id: uuid.UUID, *, lock: bool = False) -> MemoryNode:
@@ -980,7 +1143,7 @@ async def list_entities(
 @router.get("/api/entities/{entity_id}")
 async def entity_detail(entity_id: uuid.UUID, db: DbDep, access: AccessDep):
     entity = await _entity(db, access, entity_id)
-    sources, hidden = await _entity_sources(db, access, entity_id)
+    sources = await _entity_sources(db, access, entity_id)
     if not sources and entity.owner_id != access.principal.username:
         raise HTTPException(status_code=404, detail="Entity not found")
     scope_counts = Counter(source.scope for source in sources)
@@ -1014,7 +1177,8 @@ async def entity_detail(entity_id: uuid.UUID, db: DbDep, access: AccessDep):
     return {
         "id": str(entity.id), "name": entity.content, "entity_type": _entity_type(entity),
         "aliases": _aliases(entity), "created_at": entity.created_at,
-        "memory_count": len(sources), "hidden_mentions": hidden,
+        # Keep the UI response shape without revealing inaccessible sources.
+        "memory_count": len(sources), "hidden_mentions": 0,
         "first_seen": min((s.created_at for s in sources), default=None),
         "last_seen": max((s.updated_at for s in sources), default=None),
         "scopes": dict(scope_counts),

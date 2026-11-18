@@ -10,8 +10,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
+from src.export_adapter import router as export_router
+from src.graph_adapters import router as graph_router
 from src.human_adapters import router as human_router
+from src.memory_context import router as context_router
 from src.routes import router
+from src.search_adapter import router as search_router
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,10 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
     app.include_router(human_router)
+    app.include_router(context_router)
+    app.include_router(graph_router)
+    app.include_router(search_router)
+    app.include_router(export_router)
 
     # Serve the compiled frontend if dist/ exists (single-container deployment)
     if FRONTEND_DIST.is_dir():

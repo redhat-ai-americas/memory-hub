@@ -29,6 +29,7 @@ dev = [
     "httpx>=0.27",
     "ruff",
     "aiosqlite",
+    "pyyaml",
 ]
 
 [build-system]

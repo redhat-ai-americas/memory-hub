@@ -425,6 +425,7 @@ class TestMemoryHistoryEndpoint:
             created_at=datetime(2026, 1, 1, tzinfo=UTC),
             tenant_id="default",
             scope="project",
+            deleted_at=None,
         )
         v2 = MagicMock(
             id=v2_id,
@@ -435,6 +436,7 @@ class TestMemoryHistoryEndpoint:
             created_at=datetime(2026, 1, 2, tzinfo=UTC),
             tenant_id="default",
             scope="project",
+            deleted_at=None,
         )
         v3 = MagicMock(
             id=v3_id,
@@ -445,6 +447,7 @@ class TestMemoryHistoryEndpoint:
             created_at=datetime(2026, 1, 3, tzinfo=UTC),
             tenant_id="default",
             scope="project",
+            deleted_at=None,
         )
         service_result = {
             "versions": [v3, v2, v1],  # newest-first

@@ -197,11 +197,11 @@ async def test_history_filters_each_version_and_redacts_unjoined_admin_project()
     seed_id, foreign_id = uuid.uuid4(), uuid.uuid4()
     seed = SimpleNamespace(
         id=seed_id, tenant_id="tenant-a", status="active", scope="user",
-        scope_id=None, owner_id="alice",
+        scope_id=None, owner_id="alice", deleted_at=None,
     )
     foreign = SimpleNamespace(
         id=foreign_id, tenant_id="tenant-a", status="active", scope="user",
-        scope_id=None, owner_id="bob",
+        scope_id=None, owner_id="bob", deleted_at=None,
     )
     versions = [
         SimpleNamespace(id=seed_id, version=2, is_current=True, stub="own", content="own text",
@@ -221,7 +221,7 @@ async def test_history_filters_each_version_and_redacts_unjoined_admin_project()
 
     project = SimpleNamespace(
         id=seed_id, tenant_id="tenant-a", status="active", scope="project",
-        scope_id="foreign-project", owner_id="bob",
+        scope_id="foreign-project", owner_id="bob", deleted_at=None,
     )
     db.execute = AsyncMock(side_effect=[_db_result(scalar=project), _db_result(items=[project])])
     app.dependency_overrides[get_access] = lambda: _access("admin")

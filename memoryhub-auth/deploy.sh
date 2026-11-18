@@ -233,16 +233,20 @@ oc rollout status --context "$CONTEXT" deployment/auth-server -n "$PROJECT" --ti
 echo "→ Verifying running digest matches imagestream :latest..."
 RUNNING=$(oc get deploy --context "$CONTEXT" auth-server -n "$PROJECT" \
     -o jsonpath='{.spec.template.spec.containers[?(@.name=="auth-server")].image}' 2>/dev/null || echo "")
+RUNNING_PUBLIC=$(oc get deploy --context "$CONTEXT" auth-server -n "$PROJECT" \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="auth-public")].image}' 2>/dev/null || echo "")
 LATEST_DIGEST=$(oc get is --context "$CONTEXT" auth-server -n "$PROJECT" \
     -o jsonpath='{.status.tags[?(@.tag=="latest")].items[0].image}' 2>/dev/null || echo "")
 echo "  Running: $RUNNING"
+echo "  Public:  $RUNNING_PUBLIC"
 echo "  Latest:  $LATEST_DIGEST"
-if [ -z "$RUNNING" ] || [ -z "$LATEST_DIGEST" ]; then
+if [ -z "$RUNNING" ] || [ -z "$RUNNING_PUBLIC" ] || [ -z "$LATEST_DIGEST" ]; then
     echo "ERROR: could not resolve running image or imagestream :latest digest"
     exit 1
 fi
 RUNNING_DIGEST="${RUNNING##*@}"
-if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ]; then
+PUBLIC_DIGEST="${RUNNING_PUBLIC##*@}"
+if [ "$RUNNING_DIGEST" != "$LATEST_DIGEST" ] || [ "$PUBLIC_DIGEST" != "$LATEST_DIGEST" ]; then
     echo "ERROR: running digest does not match imagestream :latest"
     echo "  This is the #88 failure family -- the build pushed but the"
     echo "  Deployment is on an older digest. Investigate before retrying."

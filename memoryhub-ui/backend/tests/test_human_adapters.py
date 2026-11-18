@@ -448,8 +448,11 @@ def test_entities_list_is_user_only_and_filters_at_sql_level(client):
     assert response.status_code == 200
     assert response.json()["items"][0]["name"] == "Entity"
     assert response.json()["counts"]["person"] == 1
-    sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
-    assert "tenant-a" in sql and "memory_nodes" in sql
+    for call in db.execute.await_args_list:
+        sql = str(call.args[0].compile(compile_kwargs={"literal_binds": True}))
+        assert "tenant-a" in sql and "memory_nodes" in sql
+        assert "owner_id IN" in sql and "scope_id IN" in sql
+        assert "mentions" in sql
     set_access(access("admin"))
     assert http.get("/api/entities").status_code == 403
 
@@ -467,8 +470,69 @@ def test_entity_detail_hides_foreign_mentions(client):
     response = http.get(f"/api/entities/{entity.id}")
     assert response.status_code == 200
     assert response.json()["memory_count"] == 1
-    assert response.json()["hidden_mentions"] == 1
+    assert response.json()["hidden_mentions"] == 0
     assert [item["id"] for item in response.json()["memories"]] == [str(own.id)]
+    sql = str(db.execute.await_args_list[2].args[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "tenant-a" in sql and "owner_id IN" in sql and "scope_id IN" in sql
+
+
+@pytest.mark.parametrize("inaccessible", [
+    {"owner_id": "bob"},
+    {"scope": "project", "scope_id": "other-project"},
+    {"tenant_id": "tenant-b"},
+])
+def test_entity_detail_aggregate_unchanged_by_inaccessible_source(client, inaccessible):
+    http, db, _ = client
+    entity = node(scope="entity", branch_type="entity:person")
+    own = node()
+    foreign = node(**inaccessible)
+
+    db.execute.side_effect = [result(entity), result(items=[
+        SimpleNamespace(source_id=own.id, tenant_id="tenant-a"),
+    ]), result(items=[own]), result(rows=[])]
+    baseline = http.get(f"/api/entities/{entity.id}")
+    assert baseline.status_code == 200
+
+    db.execute.side_effect = [result(entity), result(items=[
+        SimpleNamespace(source_id=own.id, tenant_id="tenant-a"),
+        SimpleNamespace(source_id=foreign.id, tenant_id=foreign.tenant_id),
+    ]), result(items=[own, foreign]), result(rows=[])]
+    with_hidden = http.get(f"/api/entities/{entity.id}")
+    assert with_hidden.status_code == 200
+    assert with_hidden.json() == baseline.json()
+    assert with_hidden.json()["hidden_mentions"] == 0
+
+
+def test_entity_detail_only_accessible_sources(client):
+    http, db, _ = client
+    entity = node(scope="entity", branch_type="entity:person")
+    own = node()
+    project = node(scope="project", scope_id="p", owner_id="bob")
+    db.execute.side_effect = [result(entity), result(items=[
+        SimpleNamespace(source_id=own.id, tenant_id="tenant-a"),
+        SimpleNamespace(source_id=project.id, tenant_id="tenant-a"),
+    ]), result(items=[own, project]), result(rows=[])]
+    response = http.get(f"/api/entities/{entity.id}")
+    assert response.status_code == 200
+    assert response.json()["memory_count"] == 2
+    assert response.json()["hidden_mentions"] == 0
+    assert {item["id"] for item in response.json()["memories"]} == {str(own.id), str(project.id)}
+
+
+def test_entity_detail_never_reports_hidden_only_sources(client):
+    http, db, _ = client
+    entity = node(scope="entity", branch_type="entity:person")
+    foreign = node(owner_id="bob")
+    rel = SimpleNamespace(source_id=foreign.id, tenant_id="tenant-a")
+    db.execute.side_effect = [result(entity), result(items=[rel]), result(items=[foreign])]
+    owned_detail = http.get(f"/api/entities/{entity.id}")
+    assert owned_detail.status_code == 200
+    assert owned_detail.json()["memory_count"] == owned_detail.json()["hidden_mentions"] == 0
+    assert owned_detail.json()["memories"] == []
+
+    entity.owner_id = "bob"
+    db.execute.side_effect = [result(entity), result(items=[rel]), result(items=[foreign])]
+    assert http.get(f"/api/entities/{entity.id}").status_code == 404
 
 
 def test_entity_rename_rechecks_linked_memories_and_rejects_unsupported_changes(client):
@@ -514,6 +578,29 @@ def test_entity_merge_previews_then_uses_existing_core_operation(client):
         assert merge.await_args.kwargs["tenant_id"] == "tenant-a"
 
 
+@pytest.mark.parametrize("inaccessible", [
+    {"owner_id": "bob"},
+    {"scope": "project", "scope_id": "other-project"},
+    {"tenant_id": "tenant-b"},
+])
+def test_entity_merge_rejects_inaccessible_linked_source(client, inaccessible):
+    http, db, _ = client
+    source = node(scope="entity", branch_type="entity:person")
+    target = node(scope="entity", branch_type="entity:person", content="Target")
+    foreign = node(**inaccessible)
+    rel = SimpleNamespace(source_id=foreign.id, tenant_id=foreign.tenant_id)
+    ordered = sorted([source, target], key=lambda item: item.id)
+    db.execute.side_effect = [result(item) for item in ordered] + [
+        result(items=[rel]), result(items=[foreign]),
+    ]
+    with patch("src.human_adapters.merge_entities", new_callable=AsyncMock) as merge:
+        response = http.post(
+            f"/api/entities/{source.id}/merge", json={"into": str(target.id), "dry_run": False},
+        )
+        assert response.status_code in (404, 409)
+        merge.assert_not_awaited()
+
+
 def test_browse_redacts_admin_personal_content_and_capabilities(client):
     http, db, set_access = client
     set_access(access("admin"))
@@ -522,6 +609,7 @@ def test_browse_redacts_admin_personal_content_and_capabilities(client):
         result(1), result(items=[personal]), result(rows=[]), result(rows=[]),
         result(1), result(1), result(0), result(0),
         result(rows=[("user", 1)]), result(rows=[("bob", 1)]), result(rows=[]),
+        result(rows=[]), result(0), result(0),
     ]
     response = http.get("/api/memories/browse?q=bob&mode=semantic")
     assert response.status_code == 200
@@ -531,6 +619,8 @@ def test_browse_redacts_admin_personal_content_and_capabilities(client):
     assert body["items"][0]["content_preview"] == ""
     assert body["items"][0]["stub"] == "Content hidden"
     assert body["items"][0]["capabilities"] == {"write": False, "moderate": False}
+    assert body["facets"]["flags"] == {"contradicted": 0, "has_branches": 0,
+                                      "near_duplicate": None}
     sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
     assert "tenant-a" in sql and "bob" in sql
 
@@ -542,6 +632,7 @@ def test_browse_user_cannot_request_quarantine_or_see_foreign_row(client):
     db.execute.side_effect = [
         result(1), result(items=[foreign]), result(1), result(1),
         result(rows=[]), result(rows=[]), result(rows=[]),
+        result(rows=[]), result(0), result(0),
     ]
     response = http.get("/api/memories/browse")
     assert response.status_code == 200
@@ -556,6 +647,7 @@ def test_browse_rejects_unsupported_flag_and_role_spoof_is_inert(client):
     db.execute.side_effect = [
         result(0), result(items=[]), result(0), result(0),
         result(rows=[]), result(rows=[]), result(rows=[]),
+        result(rows=[]), result(0), result(0),
     ]
     response = http.get("/api/memories/browse?role=admin&tenant_id=tenant-b")
     assert response.status_code == 200

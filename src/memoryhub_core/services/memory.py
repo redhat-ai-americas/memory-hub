@@ -948,7 +948,15 @@ def _build_search_filters(
                 # If role_names is empty/None, skip — no role
                 # memories are visible to this caller.
                 continue
-            if required_owner is not None:
+            if isinstance(required_owner, (list, set, tuple)):
+                # A human may own several OAuth clients. Keep the existing
+                # tenant/scope filter while admitting only those bound IDs.
+                if required_owner:
+                    scope_conditions.append(and_(
+                        MemoryNode.scope == scope_name,
+                        MemoryNode.owner_id.in_(required_owner),
+                    ))
+            elif required_owner is not None:
                 scope_conditions.append(
                     and_(
                         MemoryNode.scope == scope_name,
