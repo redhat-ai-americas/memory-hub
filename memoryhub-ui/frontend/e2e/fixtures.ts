@@ -1,0 +1,393 @@
+import type { Page, Route } from '@playwright/test';
+
+/**
+ * Mocks the dashboard BFF (memoryhub-ui/backend: routes.py + human_adapters.py)
+ * with responses shaped like its schemas. Every route the BFF serves is listed
+ * in BFF_ROUTES; a request to anything else is recorded in `unknown` and
+ * answered 404, so tests can assert the UI never calls an endpoint the
+ * backend does not have.
+ */
+export const BFF_ROUTES: [string, RegExp][] = [
+  ['POST', /^\/api\/auth\/logout$/],
+  ['GET', /^\/api\/auth\/status$/],
+  ['GET', /^\/api\/clients$/],
+  ['POST', /^\/api\/clients$/],
+  ['PATCH', /^\/api\/clients\/[^/]+$/],
+  ['POST', /^\/api\/clients\/[^/]+\/rotate-api-key$/],
+  ['POST', /^\/api\/clients\/[^/]+\/rotate-secret$/],
+  ['GET', /^\/api\/contradictions$/],
+  ['GET', /^\/api\/contradictions\/stats$/],
+  ['PATCH', /^\/api\/contradictions\/[^/]+$/],
+  ['GET', /^\/api\/entities$/],
+  ['GET', /^\/api\/entities\/[^/]+$/],
+  ['PATCH', /^\/api\/entities\/[^/]+$/],
+  ['POST', /^\/api\/entities\/[^/]+\/merge$/],
+  ['GET', /^\/api\/graph$/],
+  ['GET', /^\/api\/graph\/search$/],
+  ['GET', /^\/api\/me$/],
+  ['POST', /^\/api\/memories$/],
+  ['GET', /^\/api\/memories\/browse$/],
+  ['POST', /^\/api\/memories\/bulk$/],
+  ['DELETE', /^\/api\/memory\/[^/]+$/],
+  ['GET', /^\/api\/memory\/[^/]+$/],
+  ['POST', /^\/api\/memory\/[^/]+\/branches$/],
+  ['POST', /^\/api\/memory\/[^/]+\/contradictions$/],
+  ['GET', /^\/api\/memory\/[^/]+\/history$/],
+  ['POST', /^\/api\/memory\/[^/]+\/versions$/],
+  ['GET', /^\/api\/nav-counts$/],
+  ['GET', /^\/api\/nav-features$/],
+  ['GET', /^\/api\/projects$/],
+  ['POST', /^\/api\/projects$/],
+  ['GET', /^\/api\/projects\/[^/]+$/],
+  ['POST', /^\/api\/projects\/[^/]+\/members$/],
+  ['DELETE', /^\/api\/projects\/[^/]+\/members\/[^/]+$/],
+  ['GET', /^\/api\/public-config$/],
+  ['POST', /^\/api\/relationships$/],
+  ['GET', /^\/api\/rules$/],
+  ['POST', /^\/api\/rules$/],
+  ['DELETE', /^\/api\/rules\/[^/]+$/],
+  ['GET', /^\/api\/rules\/[^/]+$/],
+  ['PATCH', /^\/api\/rules\/[^/]+$/],
+  ['GET', /^\/api\/rules\/[^/]+\/history$/],
+  ['GET', /^\/api\/stats$/],
+  ['GET', /^\/api\/users$/],
+];
+
+const now = '2026-11-18T12:00:00.000Z';
+export const memoryId = '11111111-1111-4111-8111-111111111111';
+export const otherMemoryId = '22222222-2222-4222-8222-222222222222';
+export const branchId = '44444444-4444-4444-8444-444444444444';
+export const entityId = '33333333-3333-4333-8333-333333333333';
+export const reportId = '55555555-5555-4555-8555-555555555555';
+
+export type Role = 'user' | 'admin';
+
+const me = (role: Role) => ({
+  username: role === 'admin' ? 'dosei' : 'mchen',
+  name: role === 'admin' ? 'dosei' : 'mchen',
+  email: null,
+  initials: role === 'admin' ? 'DO' : 'MC',
+  source: 'oauth-proxy',
+  role,
+  tenant_id: 'lumen-eng',
+  write:
+    role === 'admin'
+      ? { scopes: ['project', 'organizational'], project_ids: ['atlas-planner'], campaign_ids: [], owner_id: 'dosei' }
+      : { scopes: ['user', 'project'], project_ids: ['atlas-planner'], campaign_ids: [], owner_id: 'mchen' },
+  access: role === 'admin' ? { hidden_scopes: ['enterprise', 'user'], break_glass: null } : null,
+  labs: false,
+});
+
+const record = (id: string, stub: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  content: `${stub}. Full text.`,
+  stub,
+  scope: 'project',
+  weight: 0.8,
+  branch_type: null,
+  owner_id: 'atlas-planner',
+  version: 2,
+  is_current: true,
+  parent_id: null,
+  metadata: null,
+  created_at: now,
+  updated_at: now,
+  expires_at: null,
+  children_count: 1,
+  relationships: [{ id: 'rel-1', source: memoryId, target: otherMemoryId, type: 'related_to' }],
+  ...extra,
+});
+
+const row = (id: string, stub: string) => ({
+  id,
+  stub,
+  content_preview: `${stub}. Full text.`,
+  scope: 'project',
+  scope_id: 'atlas-planner',
+  owner_id: 'atlas-planner',
+  actor_id: 'claude-code-mchen',
+  driver_id: 'mchen',
+  domains: ['robotics'],
+  weight: 0.8,
+  version: 2,
+  is_current: true,
+  status: 'active',
+  content_type: 'text',
+  branch_count: 1,
+  branch_summary: [{ type: 'rationale', count: 1 }],
+  open_contradictions: id === memoryId ? 1 : 0,
+  near_duplicate: null,
+  created_at: now,
+  updated_at: now,
+  deleted_at: null,
+  relevant_until: '2027-02-16T12:00:00.000Z',
+  score: null,
+  entities: [],
+  redacted: false,
+  capabilities: { write: true, moderate: true },
+  can_delete: true,
+});
+
+const graphNode = (id: string, stub: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  content: `${stub}. Full text.`,
+  stub,
+  scope: 'project',
+  weight: 0.8,
+  branch_type: null,
+  owner_id: 'atlas-planner',
+  version: 2,
+  created_at: now,
+  updated_at: now,
+  metadata: null,
+  parent_id: null,
+  ...extra,
+});
+
+const client = (id: string, type: 'user' | 'service', active = true) => ({
+  client_id: id,
+  client_name: id,
+  identity_type: type,
+  tenant_id: 'lumen-eng',
+  default_scopes: type === 'user' ? ['memory:read', 'memory:write:user'] : ['memory:read:project'],
+  active,
+  created_at: now,
+  updated_at: now,
+});
+
+const rule = (id: string, layer: string, owner: string | null) => ({
+  id,
+  name: `${layer} rule`,
+  description: 'Blocks API tokens',
+  trigger: 'on_write',
+  tier: 'regex',
+  config: { pattern: 'ghp_[A-Za-z0-9]{20,}' },
+  action: 'quarantine',
+  scope_filter: null,
+  layer,
+  owner_id: owner,
+  override: false,
+  enabled: true,
+  priority: 10,
+  version: 2,
+  is_current: true,
+  previous_version_id: null,
+  edited_by: owner ?? 'dosei',
+  created_at: now,
+  updated_at: now,
+});
+
+const projectRow = {
+  name: 'atlas-planner',
+  description: 'Motion planning for the Atlas arm',
+  invite_only: true,
+  created_at: now,
+  created_by: 'dosei',
+  memories: 640,
+  last_write: now,
+  members: 3,
+  campaigns: [],
+  my_role: 'admin',
+  owner: 'dosei',
+};
+
+function respond(role: Role, method: string, path: string, url: URL, body: unknown): unknown {
+  const user = role === 'user';
+  if (path === '/api/me') return me(role);
+  if (path === '/api/auth/status')
+    return { mode: 'oauth-proxy', authenticated: true, api_key_login: false, local_accounts: false, user: me(role).username, role, cluster_domain: null, setup_required: false };
+  if (path === '/api/auth/logout') return { ok: true, redirect: '/oauth/sign_out', method: 'GET' };
+  if (path === '/api/nav-counts') return { memories: 40, review_queue: user ? 0 : 1 };
+  if (path === '/api/nav-features') return {};
+  if (path === '/api/public-config') return { mcp_url: 'https://mcp.test/mcp/', auth_url: 'https://auth.test' };
+  if (path === '/api/stats')
+    return {
+      total_memories: 40,
+      scope_counts: [{ scope: 'project', count: 28 }, { scope: 'organizational', count: 5 }, ...(user ? [{ scope: 'user', count: 7 }] : [])],
+      recent_activity: [{ id: memoryId, stub: 'Gripper torque limit is 11.5 N·m', scope: 'project', owner_id: 'atlas-planner', updated_at: now, action: 'updated' }],
+      mcp_health: true,
+    };
+  if (path === '/api/contradictions/stats') return { total: 2, unresolved: 1, high_confidence: 1, medium_confidence: 1, low_confidence: 0 };
+  if (path === '/api/contradictions')
+    return [
+      {
+        id: reportId,
+        memory_id: memoryId,
+        observed_behavior: 'Torque limit is now 12 N·m',
+        confidence: 0.9,
+        reporter: 'curator-agent',
+        created_at: now,
+        resolved: url.searchParams.get('resolved') === 'true',
+        resolved_at: null,
+      },
+    ];
+  if (path.startsWith('/api/contradictions/'))
+    return { id: reportId, memory_id: memoryId, observed_behavior: 'Torque limit is now 12 N·m', confidence: 0.9, reporter: 'curator-agent', created_at: now, resolved: true, resolved_at: now };
+  if (path === '/api/memories/browse')
+    return {
+      items: [row(memoryId, 'Gripper torque limit is 11.5 N·m'), row(otherMemoryId, 'Path planner budget is 40 ms')],
+      total: 2,
+      page: 1,
+      per_page: 20,
+      search_mode: url.searchParams.get('q') ? 'text' : 'none',
+      metadata_only: !user,
+      hidden_scopes: user ? [] : ['user', 'enterprise'],
+      tab_counts: { current: 2, all: 3, quarantined: user ? 0 : 1, deleted: 0 },
+      facets: {
+        scopes: [{ value: 'project', count: 2 }],
+        writers: [{ value: 'atlas-planner', count: 2 }],
+        projects: [{ value: 'atlas-planner', count: 2 }],
+        domains: [],
+        flags: { contradicted: null, has_branches: null, near_duplicate: null },
+      },
+    };
+  if (path === '/api/memories' && method === 'POST') return { id: memoryId };
+  if (path === '/api/memories/bulk') return { done: (body as { ids: string[] }).ids, errors: [] };
+  if (path === '/api/relationships') return { id: 'rel-2' };
+  if (/\/api\/memory\/[^/]+\/history$/.test(path))
+    return [
+      { id: memoryId, version: 2, is_current: true, stub: 'Gripper torque limit is 11.5 N·m', content: 'Gripper torque limit is 11.5 N·m. Full text.', created_at: now },
+      { id: 'v1', version: 1, is_current: false, stub: 'Gripper torque limit is 10 N·m', content: 'Gripper torque limit is 10 N·m.', created_at: now },
+    ];
+  if (/\/api\/memory\/[^/]+\/versions$/.test(path)) return { id: memoryId, version: 3 };
+  if (/\/api\/memory\/[^/]+\/branches$/.test(path)) return { id: branchId };
+  if (/\/api\/memory\/[^/]+\/contradictions$/.test(path)) return { unresolved: 2 };
+  if (path.startsWith('/api/memory/')) {
+    if (method === 'DELETE') return null;
+    const id = path.split('/')[3];
+    return id === otherMemoryId ? record(otherMemoryId, 'Path planner budget is 40 ms', { relationships: [] }) : record(memoryId, 'Gripper torque limit is 11.5 N·m');
+  }
+  if (path === '/api/graph')
+    return {
+      nodes: [
+        graphNode(memoryId, 'Gripper torque limit is 11.5 N·m'),
+        graphNode(otherMemoryId, 'Path planner budget is 40 ms'),
+        graphNode(branchId, 'Measured in the soak test', { branch_type: 'rationale', parent_id: memoryId }),
+      ],
+      edges: [
+        { id: 'rel-1', source: memoryId, target: otherMemoryId, type: 'related_to' },
+        { id: `pc-${memoryId}-${branchId}`, source: memoryId, target: branchId, type: 'parent_child' },
+      ],
+    };
+  if (path === '/api/graph/search') return [{ id: memoryId, score: 0.82 }, { id: otherMemoryId, score: 0.61 }];
+  if (path === '/api/entities')
+    return {
+      items: [{ id: entityId, name: 'Atlas gripper', entity_type: 'object', aliases: ['Atlas end effector'], memory_count: 2, projects: ['atlas-planner'], created_at: now, last_seen: now }],
+      total: 1,
+      page: 1,
+      per_page: 20,
+      has_more: false,
+      counts: { all: 1, person: 0, organization: 0, location: 0, object: 1, event: 0 },
+    };
+  if (path.endsWith('/merge'))
+    return {
+      source: { id: entityId, name: 'Atlas gripper', entity_type: 'object', aliases: [] },
+      target: { id: 'e2', name: 'Gripper', entity_type: 'object', aliases: [] },
+      moving: 1,
+      both: 0,
+      staying: 0,
+      aliases_after: [],
+      source_removed: false,
+      memories: [],
+      dry_run: true,
+    };
+  if (path.startsWith('/api/entities/')) {
+    if (method === 'PATCH') return { id: entityId, name: 'Atlas gripper v2', entity_type: 'object', aliases: [] };
+    return {
+      id: entityId,
+      name: 'Atlas gripper',
+      entity_type: 'object',
+      aliases: ['Atlas end effector'],
+      created_at: now,
+      memory_count: 1,
+      hidden_mentions: 0,
+      first_seen: now,
+      last_seen: now,
+      scopes: { project: 1 },
+      writers: [{ value: 'atlas-planner', count: 1 }],
+      projects: [{ value: 'atlas-planner', count: 1 }],
+      months: [{ month: '2026-11', count: 1 }],
+      co_mentions: [],
+      memories: [{ id: memoryId, stub: 'Gripper torque limit is 11.5 N·m', scope: 'project', scope_id: 'atlas-planner', owner_id: 'atlas-planner', weight: 0.8, version: 2, created_at: now, updated_at: now }],
+    };
+  }
+  if (path === '/api/projects' && method === 'GET') return { items: [projectRow], total: 1, viewer: me(role).username, can_create: !user, can_delete: false };
+  if (path === '/api/projects' && method === 'POST') return { name: (body as { name: string }).name };
+  if (/\/api\/projects\/[^/]+\/members/.test(path)) return method === 'DELETE' ? null : { ok: true };
+  if (path.startsWith('/api/projects/'))
+    return {
+      ...projectRow,
+      my_role: user ? 'member' : 'admin',
+      can_manage: !user,
+      can_delete: false,
+      members_list: [
+        { user_id: 'dosei', role: 'admin', joined_at: now },
+        { user_id: 'mchen', role: 'member', joined_at: now },
+        { user_id: 'claude-code-mchen', role: 'member', joined_at: now },
+      ],
+      focus_history: [{ focus: 'release', count: 3 }],
+      focus_available: true,
+    };
+  if (path === '/api/users')
+    return [
+      { name: 'claude-code (Maya)', owner_id: 'claude-code-mchen', identity_type: 'user', memory_count: 12, last_active: now },
+      ...(user ? [] : [{ name: 'curator-agent', owner_id: 'curator-agent', identity_type: 'service', memory_count: 88, last_active: now }]),
+      { name: 'mchen', owner_id: 'mchen', identity_type: 'unknown', memory_count: 7, last_active: now },
+    ];
+  if (path === '/api/clients' && method === 'GET')
+    return user ? [client('claude-code-mchen', 'user')] : [client('claude-code-mchen', 'user'), client('curator-agent', 'service'), client('old-bot', 'service', false)];
+  if (path === '/api/clients' && method === 'POST')
+    return { ...client((body as { client_id: string }).client_id, user ? 'user' : 'service'), client_secret: 'sec_123', api_key: 'mh_123' };
+  if (path.endsWith('/rotate-secret')) return { client_id: 'claude-code-mchen', client_secret: 'sec_456', api_key: 'mh_456' };
+  if (path.endsWith('/rotate-api-key')) return { client_id: 'claude-code-mchen', api_key: 'mh_789' };
+  if (path.startsWith('/api/clients/')) return client(path.split('/')[3], 'user', (body as { active?: boolean } | undefined)?.active ?? true);
+  if (path === '/api/rules' && method === 'GET') return [rule('rule-sys', 'system', null), rule('rule-org', 'organizational', null), rule('rule-mine', 'user', 'mchen')];
+  if (/\/api\/rules\/[^/]+\/history$/.test(path))
+    return [
+      { id: 'rv2', version: 2, is_current: true, name: 'organizational rule', edited_by: 'dosei', created_at: now },
+      { id: 'rv1', version: 1, is_current: false, name: 'organizational rule', edited_by: null, created_at: now },
+    ];
+  if (path.startsWith('/api/rules')) return method === 'DELETE' ? null : rule('rule-new', 'user', 'mchen');
+  return {};
+}
+
+export interface MockedBff {
+  /** "METHOD /path" for every call to an endpoint the BFF does not serve. */
+  unknown: string[];
+  /** "METHOD /path" for every call. */
+  calls: string[];
+}
+
+export async function mockBff(page: Page, role: Role): Promise<MockedBff> {
+  const state: MockedBff = { unknown: [], calls: [] };
+  await page.route('**/api/**', async (route: Route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    // Source modules such as /src/api/client.ts match the glob too: only the BFF lives under /api/.
+    if (!url.pathname.startsWith('/api/')) {
+      await route.continue();
+      return;
+    }
+    const method = request.method();
+    const key = `${method} ${url.pathname}`;
+    state.calls.push(key);
+    if (!BFF_ROUTES.some(([m, re]) => m === method && re.test(url.pathname))) {
+      state.unknown.push(key);
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not Found' }) });
+      return;
+    }
+    let body: unknown;
+    try {
+      body = request.postDataJSON();
+    } catch {
+      body = undefined;
+    }
+    const payload = respond(role, method, url.pathname, url, body);
+    if (payload === null) {
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
+  });
+  return state;
+}

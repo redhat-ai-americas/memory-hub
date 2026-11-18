@@ -11,6 +11,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // Local development against the dashboard BFF (memoryhub-ui/backend).
     proxy: {
       '/api': 'http://localhost:8080',
     },
