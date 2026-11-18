@@ -80,11 +80,8 @@ spec:
         - containerPort: 8443
           name: proxy
           protocol: TCP
-        - containerPort: 4180
-          name: proxy-http
-          protocol: TCP
         args:
-        - --http-address=:4180
+        - --http-address=127.0.0.1:4180
         - --https-address=:8443
         - --provider=openshift
         - --openshift-service-account=memoryhub-ui
@@ -93,7 +90,8 @@ spec:
         - --tls-key=/etc/tls/private/tls.key
         - --cookie-secret-file=/etc/proxy/secrets/session-secret
         - --pass-basic-auth=false
-        - --pass-access-token=true
+        - --pass-user-headers=true
+        - --pass-access-token=false
         - --skip-auth-regex=^/healthz$
         volumeMounts:
         - name: proxy-tls
@@ -130,10 +128,6 @@ spec:
   - name: proxy
     port: 8443
     targetPort: 8443
-    protocol: TCP
-  - name: proxy-http
-    port: 4180
-    targetPort: 4180
     protocol: TCP
 ---
 apiVersion: route.openshift.io/v1

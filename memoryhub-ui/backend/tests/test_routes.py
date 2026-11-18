@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
@@ -60,6 +61,12 @@ def _scalar_result(value):
     r.scalar_one_or_none.return_value = value
     r.scalars.return_value.all.return_value = []
     r.fetchall.return_value = []
+    return r
+
+
+def _review_result(report, memory=None):
+    r = MagicMock()
+    r.one_or_none.return_value = (report, memory) if report is not None else None
     return r
 
 
@@ -161,6 +168,11 @@ def authenticated_admin():
         settings = app.dependency_overrides.get(get_settings, get_settings)()
         return Access(
             principal=Principal("test-user", "admin", settings.ui_tenant_id),
+            agents={"test-client"},
+            projects={"demo-project"},
+            project_admins={"demo-project"},
+            human_projects={"demo-project"},
+            human_project_admins={"demo-project"},
             moderation_scopes={"project", "campaign", "role", "organizational"},
         )
 
@@ -441,7 +453,9 @@ class TestMemoryHistoryEndpoint:
             "offset": 0,
         }
 
-        db_session = _make_db_session([_scalar_result(_make_node(id=memory_id))])
+        db_session = _make_db_session([
+            _scalar_result(_make_node(id=memory_id)), _scalars_result([v1, v2, v3]),
+        ])
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: test_settings
 
@@ -841,11 +855,16 @@ class TestClientEndpoints:
                 app.dependency_overrides.clear()
 
     async def test_create_client_returns_201(self, test_settings):
-        created = {**_SAMPLE_CLIENT, "client_secret": "supersecret", "api_key": "mh-dev-test"}
+        created = {
+            **_SAMPLE_CLIENT, "identity_type": "service",
+            "default_scopes": ["memory:read:project"],
+            "client_secret": "supersecret", "api_key": "mh-dev-test",
+        }
         upstream = _mock_httpx_response(201, created)
         patcher, _ = _patch_admin_httpx(upstream)
 
         app.dependency_overrides[get_settings] = lambda: test_settings
+        app.dependency_overrides[get_db] = lambda: _make_db_session([_scalar_result(False)])
         with patcher:
             try:
                 async with AsyncClient(
@@ -856,9 +875,9 @@ class TestClientEndpoints:
                         json={
                             "client_id": "test-client",
                             "client_name": "Test Client",
-                            "identity_type": "user",
+                            "identity_type": "service",
                             "tenant_id": test_settings.ui_tenant_id,
-                            "default_scopes": ["memory:read"],
+                            "default_scopes": ["memory:read:project"],
                         },
                     )
 
@@ -892,7 +911,11 @@ class TestClientEndpoints:
 
     async def test_rotate_secret_returns_new_secret(self, test_settings):
         upstream = _mock_httpx_response(
-            200, {**_SAMPLE_CLIENT, "client_secret": "rotated-secret", "api_key": "mh-dev-new"}
+            200, {
+                **_SAMPLE_CLIENT, "identity_type": "service",
+                "default_scopes": ["memory:read:project"],
+                "client_secret": "rotated-secret", "api_key": "mh-dev-new",
+            }
         )
         patcher, _ = _patch_admin_httpx(upstream)
 
@@ -943,11 +966,16 @@ class TestClientTenantForwarding:
                 app.dependency_overrides.clear()
 
     async def test_create_client_forwards_tenant_id(self, test_settings):
-        created = {**_SAMPLE_CLIENT, "client_secret": "s", "api_key": "mh-dev-abc"}
+        created = {
+            **_SAMPLE_CLIENT, "identity_type": "service",
+            "default_scopes": ["memory:read:project"],
+            "client_secret": "s", "api_key": "mh-dev-abc",
+        }
         upstream = _mock_httpx_response(201, created)
         patcher, mock_http = _patch_admin_httpx(upstream)
 
         app.dependency_overrides[get_settings] = lambda: test_settings
+        app.dependency_overrides[get_db] = lambda: _make_db_session([_scalar_result(False)])
         with patcher:
             try:
                 async with AsyncClient(
@@ -959,6 +987,8 @@ class TestClientTenantForwarding:
                             "client_id": "x",
                             "client_name": "X",
                             "tenant_id": test_settings.ui_tenant_id,
+                            "identity_type": "service",
+                            "default_scopes": ["memory:read:project"],
                         },
                     )
 
@@ -1517,9 +1547,10 @@ class TestContradictionsEndpoints:
 
     async def test_resolve_contradiction_sets_resolved(self, test_settings):
         report = _make_contradiction(resolved=False, resolved_at=None)
+        memory = _make_node(owner_id="other", actor_id="other", driver_id="other")
 
         db_session = AsyncMock()
-        db_session.execute = AsyncMock(return_value=_scalar_result(report))
+        db_session.execute = AsyncMock(return_value=_review_result(report, memory))
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -1543,9 +1574,10 @@ class TestContradictionsEndpoints:
         report = _make_contradiction(
             resolved=True, resolved_at=datetime(2026, 1, 1, tzinfo=UTC)
         )
+        memory = _make_node(owner_id="other", actor_id="other", driver_id="other")
 
         db_session = AsyncMock()
-        db_session.execute = AsyncMock(return_value=_scalar_result(report))
+        db_session.execute = AsyncMock(return_value=_review_result(report, memory))
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -1566,7 +1598,7 @@ class TestContradictionsEndpoints:
 
     async def test_update_contradiction_returns_404_for_missing(self, test_settings):
         db_session = AsyncMock()
-        db_session.execute = AsyncMock(return_value=_scalar_result(None))
+        db_session.execute = AsyncMock(return_value=_review_result(None))
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -2128,7 +2160,7 @@ class TestTenantFiltering:
 
     async def test_update_contradiction_cross_tenant_returns_404(self):
         settings = _make_settings(tenant_id="tenant_b")
-        db_session = _make_db_session([_scalar_result(None)])
+        db_session = _make_db_session([_review_result(None)])
         db_session.commit = AsyncMock()
         db_session.refresh = AsyncMock()
 
@@ -2167,10 +2199,10 @@ class TestTenantFiltering:
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: settings
 
-        # Make the auth proxy call raise so we exercise the DB-only fallback.
+        # An unavailable Auth service must not produce a partial roster.
         with patch(
             "src.routes._admin_request",
-            new=AsyncMock(side_effect=RuntimeError("auth down")),
+            new=AsyncMock(side_effect=HTTPException(status_code=503, detail="auth down")),
         ):
             try:
                 async with AsyncClient(
@@ -2178,8 +2210,7 @@ class TestTenantFiltering:
                 ) as ac:
                     response = await ac.get("/api/users")
 
-                assert response.status_code == 200
-                assert response.json() == []
+                assert response.status_code == 503
                 assert _statement_mentions_tenant_filter(
                     db_session.executed_statements[0], "tenant_b"
                 )

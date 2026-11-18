@@ -53,7 +53,12 @@ def get_principal(request: Request, settings: Annotated[Settings, Depends(get_se
         local = False
     if not local:
         raise HTTPException(status_code=401, detail="OAuth proxy required")
-    username = request.headers.get("x-forwarded-user", "").strip()
+    if not settings.ui_tenant_id.strip():
+        raise HTTPException(status_code=503, detail="Dashboard tenant is not configured")
+    users = request.headers.getlist("x-forwarded-user")
+    if len(users) != 1:
+        raise HTTPException(status_code=401, detail="Authenticated user required")
+    username = users[0].strip()
     if not username or len(username) > 255 or any(c in username for c in "\r\n\x00"):
         raise HTTPException(status_code=401, detail="Authenticated user required")
     admins = {item.strip() for item in settings.ui_admin_users.split(",") if item.strip()}
@@ -68,14 +73,21 @@ class Access:
     principal: Principal
     agents: set[str] = field(default_factory=set)
     projects: set[str] = field(default_factory=set)
+    project_admins: set[str] = field(default_factory=set)
+    human_projects: set[str] = field(default_factory=set)
+    human_project_admins: set[str] = field(default_factory=set)
     roles: set[str] = field(default_factory=set)
     campaigns: set[str] = field(default_factory=set)
+    human_roles: set[str] = field(default_factory=set)
+    human_campaigns: set[str] = field(default_factory=set)
     moderation_scopes: set[str] = field(default_factory=set)
+    admin_write_scopes: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         if self.principal.role not in ("user", "admin"):
             raise ValueError("Unsupported dashboard role")
         self.moderation_scopes.intersection_update(ADMIN_MODERATION_SCOPES)
+        self.admin_write_scopes.intersection_update(ADMIN_MODERATION_SCOPES)
 
     @property
     def identities(self) -> set[str]:
@@ -91,9 +103,26 @@ class Access:
             or_(
                 and_(node.scope == "user", node.owner_id.in_(self.identities)),
                 node.scope.in_(("organizational", "enterprise")),
-                and_(node.scope == "project", node.scope_id.in_(self.projects)),
-                and_(node.scope == "role", node.scope_id.in_(self.roles)),
-                and_(node.scope == "campaign", node.owner_id.in_(self.campaigns)),
+                and_(node.scope == "project", node.scope_id.in_(self.human_projects)),
+                and_(node.scope == "role", node.scope_id.in_(self.human_roles)),
+                and_(node.scope == "campaign", node.owner_id.in_(self.human_campaigns)),
+            ),
+        )
+
+    def content_clause(self, node=MemoryNode):
+        """SQL visibility for operations that inspect memory content."""
+        if self.principal.role == "user":
+            return self.clause(node)
+        return and_(
+            node.tenant_id == self.principal.tenant_id,
+            or_(
+                and_(node.scope == "organizational", "organizational" in self.moderation_scopes),
+                and_(node.scope == "project", "project" in self.moderation_scopes,
+                     node.scope_id.in_(self.human_projects)),
+                and_(node.scope == "role", "role" in self.moderation_scopes,
+                     node.scope_id.in_(self.human_roles)),
+                and_(node.scope == "campaign", "campaign" in self.moderation_scopes,
+                     node.owner_id.in_(self.human_campaigns)),
             ),
         )
 
@@ -107,25 +136,79 @@ class Access:
         return (
             (node.scope == "user" and node.owner_id in self.identities)
             or node.scope in ("organizational", "enterprise")
-            or (node.scope == "project" and node.scope_id in self.projects)
-            or (node.scope == "role" and node.scope_id in self.roles)
-            or (node.scope == "campaign" and node.owner_id in self.campaigns)
+            or (node.scope == "project" and node.scope_id in self.human_projects)
+            or (node.scope == "role" and node.scope_id in self.human_roles)
+            or (node.scope == "campaign" and node.owner_id in self.human_campaigns)
         )
 
     def can_delete(self, node: MemoryNode) -> bool:
         if node.tenant_id != self.principal.tenant_id:
             return False
+        if node.status != "active":
+            return False
+        authored = node.owner_id in self.identities or getattr(node, "actor_id", None) in self.identities
+        project_admin = node.scope == "project" and node.scope_id in self.human_project_admins
         if self.principal.role == "admin":
-            return node.scope in ADMIN_MODERATION_SCOPES and node.scope in self.moderation_scopes
+            if node.scope not in self.moderation_scopes:
+                return False
+            if node.scope == "project":
+                return node.scope_id in self.human_projects and (authored or project_admin)
+            if node.scope == "campaign":
+                return node.owner_id in self.human_campaigns and authored
+            if node.scope == "role":
+                return node.scope_id in self.human_roles and authored
+            return node.scope == "organizational" and authored
         return (
-            node.status == "active" and (
-                (node.scope == "user" and node.owner_id in self.identities)
-                or (node.scope == "project" and node.scope_id in self.projects)
-            )
+            (node.scope == "user" and node.owner_id in self.identities)
+            or (node.scope == "project" and node.scope_id in self.human_projects and (authored or project_admin))
         )
 
+    def can_review(self, node: MemoryNode) -> bool:
+        """Only an existing project admin grant permits a human review decision."""
+        return (
+            self.principal.role == "admin"
+            and node.tenant_id == self.principal.tenant_id
+            and node.scope == "project"
+            and node.scope in self.moderation_scopes
+            and node.scope_id in self.human_project_admins
+        )
+
+    def can_write(self, node: MemoryNode) -> bool:
+        """A human write grant is independent of the MCP token scopes."""
+        if (node.tenant_id != self.principal.tenant_id or node.status != "active"
+                or node.deleted_at is not None or not node.is_current):
+            return False
+        if self.principal.role == "user":
+            return (
+                (node.scope == "user" and node.owner_id in self.identities)
+                or (node.scope == "project" and node.scope_id in self.human_projects)
+            )
+        return (
+            (node.scope == "project" and node.scope_id in self.human_project_admins)
+            or (node.scope == "organizational" and node.scope in self.admin_write_scopes)
+        )
+
+    def can_moderate(self, node: MemoryNode) -> bool:
+        """Moderation requires an explicit category grant and object authority."""
+        if (self.principal.role != "admin" or node.tenant_id != self.principal.tenant_id
+                or node.deleted_at is not None or node.scope not in self.moderation_scopes):
+            return False
+        if node.scope == "project":
+            return node.scope_id in self.human_project_admins
+        return node.scope == "organizational" and node.owner_id in self.identities
+
     def hides_content(self, node: MemoryNode) -> bool:
-        return self.principal.role == "admin" and node.scope == "user"
+        if self.principal.role != "admin":
+            return False
+        return not (
+            (node.scope == "organizational" and "organizational" in self.moderation_scopes)
+            or (node.scope == "project" and "project" in self.moderation_scopes
+                and node.scope_id in self.human_projects)
+            or (node.scope == "role" and "role" in self.moderation_scopes
+                and node.scope_id in self.human_roles)
+            or (node.scope == "campaign" and "campaign" in self.moderation_scopes
+                and node.owner_id in self.human_campaigns)
+        )
 
     def require_read(self, node: MemoryNode) -> None:
         if not self.can_read(node):
@@ -141,11 +224,16 @@ async def get_access(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> Access:
+    if principal.role not in ("user", "admin"):
+        raise HTTPException(status_code=403, detail="Unsupported dashboard role")
     scopes = {s.strip() for s in settings.ui_admin_moderation_scopes.split(",") if s.strip()}
     scopes &= ADMIN_MODERATION_SCOPES
-    access = Access(principal=principal, moderation_scopes=scopes)
-    if principal.role == "admin":
-        return access
+    write_scopes = {s.strip() for s in settings.ui_admin_write_scopes.split(",") if s.strip()}
+    access = Access(
+        principal=principal,
+        moderation_scopes=scopes,
+        admin_write_scopes=write_scopes,
+    )
     tenant = principal.tenant_id
     # Explicit owner bindings are the only proof that an OAuth client belongs
     # to a person. Existing unbound clients remain admin-managed until linked.
@@ -153,16 +241,35 @@ async def get_access(
         AgentOwner.tenant_id == tenant, AgentOwner.owner == principal.username,
     ))).scalars().all())
     identities = access.identities
-    access.projects = set((await db.execute(select(ProjectMembership.project_id).join(
+    memberships = (await db.execute(select(
+        ProjectMembership.project_id, ProjectMembership.role, ProjectMembership.user_id,
+    ).join(
         Project, Project.name == ProjectMembership.project_id,
-    ).where(Project.tenant_id == tenant, ProjectMembership.user_id.in_(identities)))).scalars().all())
-    access.roles = set((await db.execute(select(RoleAssignment.role_name).where(
+    ).where(Project.tenant_id == tenant, ProjectMembership.user_id.in_(identities)))).all()
+    access.projects = {project_id for project_id, _role, _user_id in memberships}
+    access.project_admins = {project_id for project_id, role, _user_id in memberships if role == "admin"}
+    access.human_projects = {
+        project_id for project_id, _role, user_id in memberships if user_id == principal.username
+    }
+    access.human_project_admins = {
+        project_id for project_id, role, user_id in memberships
+        if user_id == principal.username and role == "admin"
+    }
+    role_rows = (await db.execute(select(RoleAssignment.role_name, RoleAssignment.user_id).where(
         RoleAssignment.tenant_id == tenant, RoleAssignment.user_id.in_(identities),
-    ))).scalars().all())
+    ))).all()
+    access.roles = {role_name for role_name, _user_id in role_rows}
+    access.human_roles = {role_name for role_name, user_id in role_rows if user_id == principal.username}
     if access.projects:
-        access.campaigns = {str(c) for c in (await db.execute(select(CampaignMembership.campaign_id).join(
+        campaign_rows = (await db.execute(select(
+            CampaignMembership.campaign_id, CampaignMembership.project_id,
+        ).join(
             Campaign, Campaign.id == CampaignMembership.campaign_id,
-        ).where(Campaign.tenant_id == tenant, CampaignMembership.project_id.in_(access.projects)))).scalars().all()}
+        ).where(Campaign.tenant_id == tenant, CampaignMembership.project_id.in_(access.projects)))).all()
+        access.campaigns = {str(campaign_id) for campaign_id, _project_id in campaign_rows}
+        access.human_campaigns = {
+            str(campaign_id) for campaign_id, project_id in campaign_rows if project_id in access.human_projects
+        }
     return access
 
 

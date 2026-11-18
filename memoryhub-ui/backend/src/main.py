@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
+from src.human_adapters import router as human_router
 from src.routes import router
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="MemoryHub UI BFF",
-        description="Read-only BFF API for the MemoryHub dashboard",
+        description="BFF API for the MemoryHub dashboard",
         version="0.1.0",
     )
 
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(router)
+    app.include_router(human_router)
 
     # Serve the compiled frontend if dist/ exists (single-container deployment)
     if FRONTEND_DIST.is_dir():

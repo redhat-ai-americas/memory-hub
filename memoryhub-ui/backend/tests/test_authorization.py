@@ -30,6 +30,7 @@ def result(*, scalar=None, items=None):
     r.scalar_one_or_none.return_value = scalar
     r.scalar_one.return_value = scalar
     r.scalars.return_value.all.return_value = items or []
+    r.all.return_value = items or []
     r.fetchall.return_value = []
     return r
 
@@ -93,12 +94,13 @@ def test_independent_memory_capabilities_and_tenant_boundary():
     other = node(owner="bob")
     shared = node(scope="project", owner="bob", scope_id="p1")
     foreign = node(tenant="tenant-b")
-    user = access(projects={"p1"})
-    admin = access(role="admin")
+    user = access(projects={"p1"}, human_projects={"p1"})
+    admin = access(role="admin", projects={"p1"}, project_admins={"p1"},
+                   human_projects={"p1"}, human_project_admins={"p1"})
 
     assert user.can_read(own) and user.can_delete(own)
     assert not user.can_read(other) and not user.can_delete(other)
-    assert user.can_read(shared) and user.can_delete(shared)
+    assert user.can_read(shared) and not user.can_delete(shared)
     assert not user.can_read(foreign) and not admin.can_read(foreign)
     assert admin.can_read(other) and admin.hides_content(other)
     assert not admin.can_delete(other)  # Admin does not inherit User's personal writes
@@ -111,20 +113,60 @@ def test_independent_memory_capabilities_and_tenant_boundary():
     assert not admin.can_delete(node(scope="user", owner="admin"))
 
 
+def test_agent_membership_is_not_human_project_or_role_authority():
+    project = node(scope="project", owner="agent-a", scope_id="p1")
+    role_memory = node(scope="role", owner="agent-a", scope_id="reviewer")
+    user = access(agents={"agent-a"}, projects={"p1"}, project_admins={"p1"}, roles={"reviewer"})
+    admin = access(role="admin", agents={"agent-a"}, projects={"p1"}, project_admins={"p1"},
+                   roles={"reviewer"})
+    assert not user.can_read(project)
+    assert not user.can_write(project)
+    assert not user.can_delete(project)
+    assert not user.can_read(role_memory)
+    assert not admin.can_write(project)
+    assert not admin.can_delete(project)
+    assert not admin.can_review(project)
+    assert not admin.can_moderate(project)
+    assert admin.hides_content(project)
+    assert "p1" not in str(user.clause().compile(compile_kwargs={"literal_binds": True}))
+
+
+@pytest.mark.asyncio
+async def test_agent_only_project_grant_cannot_use_existing_human_memory_routes():
+    project = node(scope="project", owner="agent-a", scope_id="p1")
+    db = AsyncMock()
+    db.execute.return_value = result(scalar=project)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_access] = lambda: access(
+        agents={"agent-a"}, projects={"p1"}, project_admins={"p1"},
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        detail = await client.get(f"/api/memory/{project.id}")
+        deleted = await client.delete(f"/api/memory/{project.id}")
+    assert detail.status_code == 404
+    assert deleted.status_code == 403
+    db.commit.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_grants_are_loaded_from_tenant_bound_owner_and_membership_rows():
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[
-        result(items=["agent-a"]), result(items=["project-a"]),
-        result(items=["reviewer"]), result(items=[uuid.UUID(int=1)]),
+        result(items=["agent-a"]), result(items=[("project-a", "admin", "alice")]),
+        result(items=[("reviewer", "alice")]),
+        result(items=[(uuid.UUID(int=1), "project-a")]),
     ])
     grants = await get_access(
         Principal("alice", "user", "tenant-a"), db, Settings(ui_tenant_id="tenant-a"),
     )
     assert grants.identities == {"alice", "agent-a"}
     assert grants.projects == {"project-a"}
+    assert grants.project_admins == {"project-a"}
+    assert grants.human_project_admins == {"project-a"}
     assert grants.roles == {"reviewer"}
+    assert grants.human_roles == {"reviewer"}
     assert grants.campaigns == {str(uuid.UUID(int=1))}
+    assert grants.human_campaigns == {str(uuid.UUID(int=1))}
     assert grants.can_read(node(owner="agent-a"))
     assert grants.can_read(node(scope="project", scope_id="project-a"))
     assert grants.can_read(node(scope="role", scope_id="reviewer"))
@@ -144,7 +186,9 @@ async def test_admin_search_excludes_personal_content_in_sql():
         response = await client.get("/api/graph/search", params={"q": "private"})
     assert response.status_code == 200
     sql = str(db.execute.await_args.args[0].compile(compile_kwargs={"literal_binds": True}))
-    assert "scope != 'user'" in sql
+    assert "memory_nodes.scope = 'project'" in sql
+    assert "memory_nodes.scope = 'organizational'" in sql
+    assert "memory_nodes.scope = 'enterprise'" not in sql
 
 
 @pytest.mark.asyncio
@@ -207,6 +251,7 @@ async def test_user_client_list_is_owner_and_tenant_filtered():
 async def test_user_client_creation_records_proven_owner():
     db = AsyncMock()
     db.add = MagicMock()
+    db.execute.return_value = result(scalar=False)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_access] = lambda: access()
     created = {
@@ -217,16 +262,17 @@ async def test_user_client_creation_records_proven_owner():
     }
     upstream_response = MagicMock()
     upstream_response.json.return_value = created
-    with patch("src.routes._admin_request", new=AsyncMock(return_value=upstream_response)):
+    with patch("src.routes._admin_request", new=AsyncMock(return_value=upstream_response)) as upstream:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/clients", json={
                 "client_id": "new-agent", "client_name": "New agent", "tenant_id": "tenant-a",
                 "default_scopes": ["memory:read:user"],
             })
     assert response.status_code == 201
-    owner = db.add.call_args.args[0]
-    assert (owner.client_id, owner.owner, owner.tenant_id) == ("new-agent", "alice", "tenant-a")
-    db.commit.assert_awaited_once()
+    assert upstream.await_args.kwargs["json_body"]["owner"] == "alice"
+    assert upstream.await_args.kwargs["json_body"]["tenant_id"] == "tenant-a"
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

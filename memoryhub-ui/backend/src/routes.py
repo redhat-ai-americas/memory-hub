@@ -7,23 +7,28 @@ from typing import Annotated
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from memoryhub_core.models.contradiction import ContradictionReport
+from memoryhub_core.models.conversation import ConversationThread
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
+from memoryhub_core.models.project import Project, ProjectMembership
+from memoryhub_core.models.role import RoleAssignment
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import (
     get_memory_history as get_memory_history_service,
 )
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, any_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from src.authorization import AccessDep, AgentOwner
+from src.authorization import AccessDep, Principal, get_principal
 from src.config import Settings, get_settings
 from src.database import get_db
+from src.human_adapters import _record_human_audit
 from src.schemas import (
     ApiKeyRotatedResponse,
+    AuthStatusResponse,
     ClientCreatedResponse,
     ClientResponse,
     ContradictionResponse,
@@ -35,6 +40,8 @@ from src.schemas import (
     GraphNode,
     GraphResponse,
     MemoryDetail,
+    MeResponse,
+    NavCountsResponse,
     PublicConfigResponse,
     RecentActivity,
     RuleVersionEntry,
@@ -94,6 +101,7 @@ async def _admin_request(
     path: str,
     json_body: dict | None = None,
     tenant_id: str | None = None,
+    owner: str | None = None,
 ) -> httpx.Response:
     """Make an authenticated request to the auth service admin API."""
     if not settings.auth_service_url:
@@ -106,6 +114,8 @@ async def _admin_request(
     params: dict[str, str] = {}
     if tenant_id is not None:
         params["tenant_id"] = tenant_id
+    if owner is not None:
+        params["owner"] = owner
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.request(
@@ -155,6 +165,90 @@ async def _get_embedding(text_query: str, embedding_url: str) -> list[float] | N
 @router.get("/healthz")
 async def healthz():
     return {"status": "ok"}
+
+
+@router.get("/api/me", response_model=MeResponse)
+async def get_me(access: AccessDep, response: Response):
+    """Expose only the verified OAuth-proxy principal needed by the UI Shell."""
+    response.headers["Cache-Control"] = "no-store"
+    principal = access.principal
+    if principal.role == "user":
+        write_scopes = ["user"] + (["project"] if access.human_projects else [])
+        project_ids = sorted(access.human_projects)
+    else:
+        write_scopes = (["project"] if access.human_project_admins else [])
+        if "organizational" in access.admin_write_scopes:
+            write_scopes.append("organizational")
+        project_ids = sorted(access.human_project_admins)
+    return MeResponse(
+        username=principal.username,
+        name=principal.username,
+        email=None,
+        initials=principal.username[:2].upper(),
+        source="oauth-proxy",
+        role=principal.role,
+        tenant_id=principal.tenant_id,
+        write={"scopes": write_scopes, "project_ids": project_ids,
+               "campaign_ids": [], "owner_id": principal.username},
+        access={
+            "hidden_scopes": sorted({
+                "user", "project", "campaign", "role", "organizational", "enterprise",
+            } - access.moderation_scopes),
+            "break_glass": None,
+        } if principal.role == "admin" else None,
+    )
+
+
+@router.get("/api/auth/status", response_model=AuthStatusResponse)
+async def auth_status(principal: Annotated[Principal, Depends(get_principal)], response: Response):
+    """Describe the existing OAuth-proxy login mode for a valid session."""
+    response.headers["Cache-Control"] = "no-store"
+    return AuthStatusResponse(
+        mode="oauth-proxy", authenticated=True, api_key_login=False,
+        local_accounts=False, user=principal.username, role=principal.role,
+        cluster_domain=None, setup_required=False,
+    )
+
+
+@router.post("/api/auth/logout")
+async def auth_logout(_principal: Annotated[Principal, Depends(get_principal)]):
+    """Direct the browser to the proxy's existing cookie-clearing endpoint."""
+    return {"ok": True, "redirect": "/oauth/sign_out", "method": "GET"}
+
+
+@router.get("/api/nav-counts", response_model=NavCountsResponse)
+async def nav_counts(db: DbDep, access: AccessDep):
+    """Count only memories and review items visible to this human principal."""
+    tenant = access.principal.tenant_id
+    memories = (await db.execute(select(func.count()).select_from(MemoryNode).where(
+        MemoryNode.tenant_id == tenant,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
+        access.clause(),
+    ))).scalar_one()
+    review_queue = 0
+    if access.principal.role == "admin" and access.human_project_admins and "project" in access.moderation_scopes:
+        review_queue = (await db.execute(select(func.count()).select_from(ContradictionReport).join(
+            MemoryNode, ContradictionReport.memory_id == MemoryNode.id,
+        ).where(
+            ContradictionReport.tenant_id == tenant,
+            ContradictionReport.resolved.is_(False),
+            MemoryNode.tenant_id == tenant,
+            MemoryNode.deleted_at.is_(None),
+            MemoryNode.scope == "project",
+            MemoryNode.scope_id.in_(access.human_project_admins),
+            ~ContradictionReport.reporter.in_(access.identities),
+            ~MemoryNode.owner_id.in_(access.identities),
+            or_(MemoryNode.actor_id.is_(None), ~MemoryNode.actor_id.in_(access.identities)),
+            or_(MemoryNode.driver_id.is_(None), ~MemoryNode.driver_id.in_(access.identities)),
+        ))).scalar_one()
+    return NavCountsResponse(memories=memories, review_queue=review_queue)
+
+
+@router.get("/api/nav-features")
+async def nav_features(_access: AccessDep):
+    """No content-backed Labs modules are implemented by this BFF."""
+    return {}
 
 
 @router.get("/api/public-config", response_model=PublicConfigResponse)
@@ -277,13 +371,11 @@ async def search_graph(
                 MemoryNode.tenant_id == tenant_id,
                 MemoryNode.is_current.is_(True),
                 MemoryNode.deleted_at.is_(None),
-                access.clause(),
+                access.content_clause(),
             )
             .order_by(distance)
             .limit(20)
         )
-        if access.principal.role == "admin":
-            stmt = stmt.where(MemoryNode.scope != "user")
         result = await db.execute(stmt)
         rows = result.fetchall()
         return [SearchMatch(id=row[0], score=float(row[1])) for row in rows]
@@ -296,13 +388,11 @@ async def search_graph(
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
-            access.clause(),
+            access.content_clause(),
             (MemoryNode.content.ilike(pattern) | MemoryNode.stub.ilike(pattern)),
         )
         .limit(20)
     )
-    if access.principal.role == "admin":
-        stmt = stmt.where(MemoryNode.scope != "user")
     result = await db.execute(stmt)
     nodes = [n for n in result.scalars().all() if access.can_read(n)]
     return [SearchMatch(id=str(n.id), score=1.0) for n in nodes]
@@ -535,16 +625,29 @@ async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep, a
     except MemoryNotFoundError:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found") from None
 
+    # Core's public history entries intentionally omit owner/scope fields.
+    # Re-read the underlying rows with the human policy before returning any
+    # version content; checking only the seed would expose changed ownership.
+    versions = result["versions"]
+    visible_rows = {}
+    if versions:
+        version_rows = (await db.execute(select(MemoryNode).where(
+            MemoryNode.id.in_([version.id for version in versions]),
+            MemoryNode.tenant_id == access.principal.tenant_id,
+            access.clause(),
+        ))).scalars().all()
+        visible_rows = {row.id: row for row in version_rows if access.can_read(row)}
+
     return [
         VersionEntry(
             id=str(v.id),
             version=v.version,
             is_current=v.is_current,
-            stub="Content hidden" if access.hides_content(v) else v.stub,
-            content="" if access.hides_content(v) else v.content,
+            stub="Content hidden" if access.hides_content(visible_rows[v.id]) else v.stub,
+            content="" if access.hides_content(visible_rows[v.id]) else v.content,
             created_at=v.created_at,
         )
-        for v in result["versions"] if access.can_read(v)
+        for v in versions if v.id in visible_rows
     ]
 
 
@@ -595,6 +698,10 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access
 
     now = datetime.now(UTC)
     all_ids = set(found)
+    _record_human_audit(
+        db, access, "memory.delete", node.scope, node.owner_id, node.id,
+        {"deleted_rows": len(all_ids)},
+    )
 
     # Bulk soft-delete
     await db.execute(
@@ -612,46 +719,88 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access
 # Client management (proxy to auth service admin API)
 # ---------------------------------------------------------------------------
 
-SELF_SERVICE_SCOPES = frozenset({
+READ_CLIENT_SCOPES = frozenset({
     "memory:read", "memory:read:user", "memory:read:project",
     "memory:read:campaign", "memory:read:role", "memory:read:organizational",
-    "memory:read:enterprise", "memory:write:user", "memory:write:project",
-    "memory:write:campaign",
+    "memory:read:enterprise",
 })
+ASSIGNABLE_CLIENT_SCOPES = READ_CLIENT_SCOPES | {"memory:write:user"}
 
 
 def _client_scopes_allowed(access: AccessDep, scopes: list[str], identity_type: str) -> None:
-    # memory:admin permits direct MCP hard delete and other operations without
-    # the dashboard review flow. Human dashboard roles cannot grant it.
-    if any(scope.startswith("memory:admin") for scope in scopes):
-        raise HTTPException(status_code=403, detail="Administrative MCP scopes are not assignable here")
-    if identity_type == "service" and set(scopes) & {"memory:write", "memory:write:user"}:
-        raise HTTPException(status_code=403, detail="Service client personal write scopes are not assignable here")
-    if access.principal.role == "user" and set(scopes) - SELF_SERVICE_SCOPES:
+    # Human role alone cannot grant project/organizational/service-wide writes:
+    # the current client model has no per-client project or object grant.
+    if not scopes or len(scopes) != len(set(scopes)) or set(scopes) - ASSIGNABLE_CLIENT_SCOPES:
         raise HTTPException(status_code=403, detail="Client scope forbidden")
+    if identity_type == "service" and "memory:write:user" in scopes:
+        raise HTTPException(status_code=403, detail="Service client personal write forbidden")
+    if access.principal.role == "user" and identity_type != "user":
+        raise HTTPException(status_code=403, detail="Only user agents can be created")
+    if access.principal.role == "admin":
+        allowed_admin_reads = {f"memory:read:{scope}" for scope in access.moderation_scopes}
+        if identity_type != "service" or set(scopes) - allowed_admin_reads:
+            raise HTTPException(status_code=403, detail="Admin client scope or type forbidden")
 
 
 async def _authorize_client(
-    settings: Settings, access: AccessDep, client_id: str, *, allow_privileged_revoke: bool = False,
+    settings: Settings, access: AccessDep, client_id: str,
 ) -> dict:
     if access.principal.role == "user" and client_id not in access.agents:
         raise HTTPException(status_code=404, detail="Client not found")
     response = await _admin_request(
         settings, "GET", f"/admin/clients/{quote(client_id, safe='')}",
         tenant_id=access.principal.tenant_id,
+        owner=access.principal.username if access.principal.role == "user" else None,
     )
     client = response.json()
     if client.get("tenant_id") != access.principal.tenant_id:
         raise HTTPException(status_code=404, detail="Client not found")
-    if not allow_privileged_revoke:
-        _client_scopes_allowed(access, client.get("default_scopes", []), client.get("identity_type", "user"))
     return client
+
+
+async def _reject_existing_identity_claim(
+    db: AsyncSession, settings: Settings, client_id: str, tenant_id: str,
+) -> None:
+    """Do not let a new OAuth sub inherit an existing person's object grants."""
+    human_names = {
+        name.strip() for names in (settings.ui_allowed_users, settings.ui_admin_users)
+        for name in names.split(",") if name.strip()
+    }
+    if not client_id or client_id in human_names:
+        raise HTTPException(status_code=409, detail="Client ID is reserved by an existing identity")
+    occupied = or_(
+        select(MemoryNode.id).where(
+            MemoryNode.tenant_id == tenant_id,
+            or_(MemoryNode.owner_id == client_id, MemoryNode.actor_id == client_id,
+                MemoryNode.driver_id == client_id),
+        ).exists(),
+        select(ProjectMembership.id).join(Project, Project.name == ProjectMembership.project_id).where(
+            Project.tenant_id == tenant_id, ProjectMembership.user_id == client_id,
+        ).exists(),
+        select(RoleAssignment.id).where(
+            RoleAssignment.tenant_id == tenant_id, RoleAssignment.user_id == client_id,
+        ).exists(),
+        select(CuratorRule.id).where(
+            CuratorRule.tenant_id == tenant_id, CuratorRule.layer == "user",
+            CuratorRule.owner_id == client_id,
+        ).exists(),
+        select(ConversationThread.id).where(
+            ConversationThread.tenant_id == tenant_id,
+            or_(ConversationThread.owner_id == client_id,
+                ConversationThread.actor_id == client_id,
+                ConversationThread.driver_id == client_id,
+                client_id == any_(ConversationThread.participant_ids)),
+        ).exists(),
+    )
+    if (await db.execute(select(occupied))).scalar_one():
+        raise HTTPException(status_code=409, detail="Client ID is reserved by an existing identity")
 
 
 @router.get("/api/clients", response_model=list[ClientResponse])
 async def list_clients(settings: SettingsDep, access: AccessDep):
     resp = await _admin_request(
-        settings, "GET", "/admin/clients", tenant_id=access.principal.tenant_id
+        settings, "GET", "/admin/clients", tenant_id=access.principal.tenant_id,
+        owner=access.principal.username if access.principal.role == "user" else None,
     )
     clients = [c for c in resp.json() if c.get("tenant_id") == access.principal.tenant_id]
     if access.principal.role == "user":
@@ -660,32 +809,35 @@ async def list_clients(settings: SettingsDep, access: AccessDep):
 
 
 @router.post("/api/clients", response_model=ClientCreatedResponse, status_code=201)
-async def create_client(body: CreateClientRequest, settings: SettingsDep, access: AccessDep, db: DbDep):
+async def create_client(body: CreateClientRequest, db: DbDep, settings: SettingsDep, access: AccessDep):
     if body.tenant_id != access.principal.tenant_id:
         raise HTTPException(status_code=403, detail="Tenant override forbidden")
     if access.principal.role == "user" and body.identity_type != "user":
         raise HTTPException(status_code=403, detail="Only user agents can be created")
     _client_scopes_allowed(access, body.default_scopes, body.identity_type)
+    await _reject_existing_identity_claim(db, settings, body.client_id, access.principal.tenant_id)
     payload = body.model_dump()
     payload["tenant_id"] = access.principal.tenant_id
+    # Every dashboard-created technical identity has a verified human owner.
+    # Admin-created clients are service-only until the product has a trusted
+    # way to assign a user-type client to the intended person.
+    payload["owner"] = access.principal.username
     resp = await _admin_request(
         settings, "POST", "/admin/clients",
         json_body=payload, tenant_id=access.principal.tenant_id,
     )
-    if access.principal.role == "user":
-        db.add(AgentOwner(tenant_id=access.principal.tenant_id,
-                          client_id=body.client_id, owner=access.principal.username))
-        await db.commit()
     return resp.json()
 
 
 @router.patch("/api/clients/{client_id}", response_model=ClientResponse)
 async def update_client(client_id: str, body: UpdateClientRequest, settings: SettingsDep, access: AccessDep):
     payload = body.model_dump(exclude_none=True)
-    client = await _authorize_client(
-        settings, access, client_id,
-        allow_privileged_revoke=access.principal.role == "admin" and payload == {"active": False},
-    )
+    client = await _authorize_client(settings, access, client_id)
+    if (access.principal.role == "admin" and body.default_scopes is not None
+            and client_id not in access.agents
+            and (client["identity_type"] == "user"
+                 or set(body.default_scopes) - set(client["default_scopes"]))):
+        raise HTTPException(status_code=403, detail="Foreign agent scope expansion is forbidden")
     if body.default_scopes is not None:
         _client_scopes_allowed(access, body.default_scopes, client["identity_type"])
         if access.principal.role == "user" and set(body.default_scopes) - set(client["default_scopes"]):
@@ -695,26 +847,35 @@ async def update_client(client_id: str, body: UpdateClientRequest, settings: Set
     resp = await _admin_request(
         settings, "PATCH", f"/admin/clients/{quote(client_id, safe='')}",
         json_body=payload, tenant_id=access.principal.tenant_id,
+        owner=access.principal.username if client_id in access.agents else None,
     )
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-secret", response_model=SecretRotatedResponse)
 async def rotate_client_secret(client_id: str, settings: SettingsDep, access: AccessDep):
-    await _authorize_client(settings, access, client_id)
+    client = await _authorize_client(settings, access, client_id)
+    _client_scopes_allowed(access, client["default_scopes"], client["identity_type"])
+    if access.principal.role == "admin" and client_id not in access.agents:
+        raise HTTPException(status_code=403, detail="Another agent's credentials are protected")
     resp = await _admin_request(
         settings, "POST", f"/admin/clients/{quote(client_id, safe='')}/rotate-secret",
         tenant_id=access.principal.tenant_id,
+        owner=access.principal.username,
     )
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-api-key", response_model=ApiKeyRotatedResponse)
 async def rotate_api_key(client_id: str, settings: SettingsDep, access: AccessDep):
-    await _authorize_client(settings, access, client_id)
+    client = await _authorize_client(settings, access, client_id)
+    _client_scopes_allowed(access, client["default_scopes"], client["identity_type"])
+    if access.principal.role == "admin" and client_id not in access.agents:
+        raise HTTPException(status_code=403, detail="Another agent's credentials are protected")
     resp = await _admin_request(
         settings, "POST", f"/admin/clients/{quote(client_id, safe='')}/rotate-api-key",
         tenant_id=access.principal.tenant_id,
+        owner=access.principal.username,
     )
     return resp.json()
 
@@ -757,17 +918,14 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
         for row in result.fetchall()
     }
 
-    # Try to get client list from auth service
-    clients = []
-    try:
-        resp = await _admin_request(
-            settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id
-        )
-        clients = [c for c in resp.json() if c.get("tenant_id") == tenant_id]
-        if access.principal.role == "user":
-            clients = [c for c in clients if c.get("client_id") in access.agents]
-    except Exception:
-        logger.warning("Could not fetch clients from auth service, using DB owner_ids only")
+    # The roster must not masquerade as complete when Auth is unavailable.
+    resp = await _admin_request(
+        settings, "GET", "/admin/clients", tenant_id=tenant_id,
+        owner=access.principal.username if access.principal.role == "user" else None,
+    )
+    clients = [c for c in resp.json() if c.get("tenant_id") == tenant_id]
+    if access.principal.role == "user":
+        clients = [c for c in clients if c.get("client_id") in access.agents]
 
     if clients:
         # Merge: auth clients enriched with memory stats
@@ -841,8 +999,10 @@ def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
 def _can_read_rule(access: AccessDep, rule: CuratorRule) -> bool:
     if rule.tenant_id != access.principal.tenant_id:
         return False
-    return rule.layer in ("system", "organizational") or (
-        rule.layer == "user" and rule.owner_id == access.principal.username
+    if rule.layer in ("system", "organizational"):
+        return True
+    return rule.layer == "user" and (
+        access.principal.role == "admin" or rule.owner_id == access.principal.username
     )
 
 
@@ -870,12 +1030,16 @@ async def list_rules(
     tenant at the service layer.
     """
     tenant_id = access.principal.tenant_id
+    visible_user_rules = (
+        CuratorRule.layer == "user" if access.principal.role == "admin"
+        else and_(CuratorRule.layer == "user", CuratorRule.owner_id == access.principal.username)
+    )
     stmt = (
         select(CuratorRule)
         .where(CuratorRule.tenant_id == tenant_id, CuratorRule.is_current.is_(True))
         .where(or_(
             CuratorRule.layer.in_(("system", "organizational")),
-            and_(CuratorRule.layer == "user", CuratorRule.owner_id == access.principal.username),
+            visible_user_rules,
         ))
         .order_by(CuratorRule.priority)
     )
@@ -1171,7 +1335,7 @@ def _live_contradictions(tenant_id: str, access: AccessDep):
             ContradictionReport.tenant_id == tenant_id,
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
-            access.clause(),
+            access.content_clause(),
         )
     )
     if access.principal.role == "admin":
@@ -1193,7 +1357,7 @@ def _live_contradiction_count(tenant_id: str, access: AccessDep):
             ContradictionReport.tenant_id == tenant_id,
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
-            access.clause(),
+            access.content_clause(),
         )
     )
     if access.principal.role == "admin":
@@ -1306,24 +1470,38 @@ async def update_contradiction(
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {report_id!r}") from None
     result = await db.execute(
-        select(ContradictionReport)
+        select(ContradictionReport, MemoryNode)
         .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
         .where(
             ContradictionReport.id == parsed_id,
             ContradictionReport.tenant_id == tenant_id,
             MemoryNode.tenant_id == tenant_id,
-            MemoryNode.scope.in_(access.moderation_scopes),
             MemoryNode.deleted_at.is_(None),
         )
+        .with_for_update()
     )
-    report = result.scalar_one_or_none()
-    if report is None:
+    row = result.one_or_none()
+    if row is None:
         raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
-    if report.reporter == access.principal.username:
+    report, memory = row
+    if not access.can_review(memory):
+        raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
+    if (
+        report.reporter in access.identities
+        or memory.owner_id in access.identities
+        or memory.actor_id in access.identities
+        or memory.driver_id in access.identities
+    ):
         raise HTTPException(status_code=403, detail="Self review forbidden")
     report.resolved = body.resolved
     report.resolved_at = datetime.now(UTC) if body.resolved else None
     report.resolved_by = access.principal.username if body.resolved else None
+    _record_human_audit(
+        db, access,
+        "memory.contradiction_resolved" if body.resolved else "memory.contradiction_reopened",
+        memory.scope, memory.owner_id, memory.id,
+        {"report_id": str(report.id), "resolved": body.resolved},
+    )
     await db.commit()
     await db.refresh(report)
     return _contradiction_to_response(report)
