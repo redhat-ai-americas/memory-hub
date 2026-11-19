@@ -20,7 +20,8 @@ export function browseParams(p: URLSearchParams): BrowseParams {
     branch_type: p.get('branch') || undefined,
     flag: list('flag'),
     entity: p.get('entity') || undefined,
-    sort: p.get('sort') || (q ? 'relevance' : 'updated'),
+    // Browse has no relevance ranking in the BFF; old 'relevance' links sort by last update.
+    sort: p.get('sort') && p.get('sort') !== 'relevance' ? p.get('sort')! : 'updated',
     order: 'desc',
     page: Number(p.get('page') || 1),
     per_page: Number(p.get('per') || 20),

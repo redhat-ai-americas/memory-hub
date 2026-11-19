@@ -203,12 +203,17 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
                             )
                           ) : (
                             <>
-                              <button type="button" className="link-btn" onClick={() => setConfirm({ kind: 'secret', row: c })}>
-                                Rotate secret
-                              </button>
-                              <button type="button" className="link-btn" onClick={() => setConfirm({ kind: 'key', row: c })}>
-                                Rotate API key
-                              </button>
+                              {/* The BFF rotates credentials only for clients this person owns. */}
+                              {(role === 'user' || c.owned) && (
+                                <>
+                                  <button type="button" className="link-btn" onClick={() => setConfirm({ kind: 'secret', row: c })}>
+                                    Rotate secret
+                                  </button>
+                                  <button type="button" className="link-btn" onClick={() => setConfirm({ kind: 'key', row: c })}>
+                                    Rotate API key
+                                  </button>
+                                </>
+                              )}
                               <button type="button" className="link-btn" onClick={() => setConfirm({ kind: 'revoke', row: c })}>
                                 Revoke
                               </button>

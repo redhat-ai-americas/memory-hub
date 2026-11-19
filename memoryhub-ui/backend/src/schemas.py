@@ -122,6 +122,9 @@ class ClientResponse(BaseModel):
     active: bool
     created_at: datetime
     updated_at: datetime
+    # True when this human is the bound owner (AgentOwner) of the client, which
+    # is what credential rotation requires. The owner's name is not exposed.
+    owned: bool = False
 
 
 class ClientCreatedResponse(ClientResponse):

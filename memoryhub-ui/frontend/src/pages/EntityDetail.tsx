@@ -73,12 +73,23 @@ const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
         actions={
           e && (
             <>
-              <button type="button" className="btn bg" onClick={() => setModal('edit')}>
-                Rename
-              </button>
-              <button type="button" className="btn bs" onClick={() => setModal('merge')}>
-                Merge into…
-              </button>
+              {e.can_edit ? (
+                <>
+                  <button type="button" className="btn bg" onClick={() => setModal('edit')}>
+                    Rename
+                  </button>
+                  <button type="button" className="btn bs" onClick={() => setModal('merge')}>
+                    Merge into…
+                  </button>
+                </>
+              ) : (
+                <span
+                  className="sm muted"
+                  title="Rename and merge work on entities you created yourself, when you can edit every memory that mentions them. Entities your agents extracted belong to the agent."
+                >
+                  Read only
+                </span>
+              )}
               <a className="btn bp" href={buildHash('/memories', filter)}>
                 Open in Memory browser
               </a>
@@ -221,7 +232,7 @@ const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           )
         )}
       </div>
-      {modal === 'edit' && e && (
+      {modal === 'edit' && e && e.can_edit && (
         <EditEntityModal
           entity={e}
           onClose={() => setModal(null)}
@@ -232,7 +243,7 @@ const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           }}
         />
       )}
-      {modal === 'merge' && e && (
+      {modal === 'merge' && e && e.can_edit && (
         <MergeModal
           entity={e}
           onClose={() => setModal(null)}

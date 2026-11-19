@@ -170,7 +170,7 @@ const ProjectView: React.FC<{ row: ProjectRow; onLeft: () => void }> = ({ row, o
             <span className="lbl g lg">You are a {data.my_role}</span>
           </div>
           <p className="sm muted" style={{ margin: 0 }}>
-            Members are added and removed by a platform admin who administers this project. Leaving removes the project from all your agents at once.
+            Members are added and removed by a platform admin who administers this project. Leaving removes only your own membership: agents that were added to the project separately stay members until an admin removes them.
           </p>
           <button type="button" className="btn bl" style={{ marginTop: 6, paddingLeft: 0 }} onClick={() => setLeaving(true)}>
             Leave project…
@@ -186,11 +186,11 @@ const ProjectView: React.FC<{ row: ProjectRow; onLeft: () => void }> = ({ row, o
           onClose={() => setLeaving(false)}
           onConfirm={async () => {
             await api.removeMember(data.name, me.username);
-            toast(`You left ${data.name}. Your agents no longer read or write its memories.`);
+            toast(`You left ${data.name}. You no longer read or write its memories from the dashboard.`);
             onLeft();
           }}
         >
-          You and all your agents lose read and write access to <b>{data.name}</b> project memories. Memories you wrote stay in the project. A platform admin can add you again.
+          You lose read and write access to <b>{data.name}</b> project memories. Agents that are members of the project in their own right keep theirs. Memories you wrote stay in the project. A platform admin can add you again.
         </ConfirmModal>
       )}
     </>

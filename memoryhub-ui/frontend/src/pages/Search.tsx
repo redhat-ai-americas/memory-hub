@@ -277,8 +277,8 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
               <span className="hint">Biases ranking toward this topic, weighted by the session focus weight below.</span>
             </div>
             <div className="f">
-              <label htmlFor="as">Run as identity</label>
-              <input id="as" className="in" list="identity-list" value={form.identity} onChange={(e) => set('identity', e.target.value)} placeholder={`Dashboard (${me?.username ?? 'admin'})`} />
+              <label htmlFor="as">Written by (owner)</label>
+              <input id="as" className="in" list="identity-list" value={form.identity} onChange={(e) => set('identity', e.target.value)} placeholder="Any owner" />
               <datalist id="identity-list">
                 {identities.map((i) => (
                   <option key={i.id} value={i.id}>
@@ -286,7 +286,9 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
                   </option>
                 ))}
               </datalist>
-              <span className="hint">Search runs as the selected identity and stays within your access permissions.</span>
+              <span className="hint">
+                Keeps only memories owned by this identity{role === 'user' ? ' (you or one of your agents)' : ''}. The search itself always runs as {me?.username ?? 'you'}, within your access.
+              </span>
             </div>
             <div className="f">
               <label htmlFor="pj">Project context</label>
@@ -381,8 +383,9 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
                     <div className="ch">
                       <h2 data-h="3">Pipeline · {Math.round(result.total_ms)} ms</h2>
                       <span className="sm muted">
-                        {result.returned} returned · {result.full_count} full · {result.stub_count} stubs · <Tokens n={result.tokens} /> ·{' '}
-                        {result.omitted_count} filtered by RBAC
+                        {result.returned} returned · {result.full_count} full · {result.stub_count} stubs · <Tokens n={result.tokens} />
+                        {/* The BFF applies access before retrieval, so it cannot count what access removed. */}
+                        {result.omitted_count > 0 && ` · ${result.omitted_count} filtered by access`}
                       </span>
                     </div>
                     <div className="pipe" role="img" aria-label={result.stages.map((s) => `${s.name} ${s.ms} ms`).join(', ')}>
@@ -466,9 +469,9 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
                     {tab === 'ranked' &&
                       (results.length === 0 ? (
                         <Empty compact title="No results">
-                          {result.omitted_count > 0
-                            ? `${result.omitted_count} candidate${result.omitted_count === 1 ? '' : 's'} matched but ${result.omitted_count === 1 ? 'is' : 'are'} outside this identity’s access.`
-                            : 'Nothing matched this query. Try fewer words or a lower weight threshold.'}
+                          {(form.identity ?? '').trim()
+                            ? `Nothing you may read matched this query among memories owned by ${(form.identity ?? '').trim()}. Clear the owner filter or try fewer words.`
+                            : 'Nothing matched this query among the memories you may read. Try fewer words or a lower weight threshold.'}
                         </Empty>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

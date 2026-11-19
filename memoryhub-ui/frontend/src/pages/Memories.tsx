@@ -57,7 +57,8 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
     page: Number(p.get('page') || 1),
     per: Number(p.get('per') || 20),
   };
-  const sort = state.sort || (state.q ? 'relevance' : 'updated');
+  // The BFF has no relevance ranking for browse (it would sort by last update), so it is not offered.
+  const sort = state.sort && state.sort !== 'relevance' ? state.sort : 'updated';
 
   const setParams = (changes: Record<string, string | number | string[] | undefined>, resetPage = true) => {
     const next = new URLSearchParams(p);
@@ -255,7 +256,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 </button>
               </span>
             ))}
-            <span className="sm muted">The graph shows current memories by scope and owner; other filters and search apply to the table only.</span>
+            <span className="sm muted">The graph uses the same filters and search as the table.</span>
             <button type="button" className="btn bl sm" onClick={() => setParams({ view: '' }, false)}>
               Edit filters
             </button>
@@ -439,7 +440,6 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 value={sort}
                 onChange={(v) => setParams({ sort: v })}
                 options={[
-                  ...(state.q ? [{ value: 'relevance', label: 'Relevance' }] : []),
                   { value: 'updated', label: 'Last updated' },
                   { value: 'created', label: 'Created' },
                   { value: 'weight', label: 'Weight' },

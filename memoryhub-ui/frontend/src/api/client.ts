@@ -25,7 +25,6 @@ import type {
   ProjectsResponse,
   PublicConfig,
   RulePayload,
-  RuleVersion,
   SearchRequest,
   SearchResponse,
   SecretRotatedResponse,
@@ -201,7 +200,6 @@ export const api = {
 
   // Curation rules
   rules: () => get<CurationRule[]>('/rules'),
-  ruleHistory: (id: string) => get<RuleVersion[]>(`/rules/${enc(id)}/history`),
   createRule: (payload: RulePayload) => post<CurationRule>('/rules', payload),
   updateRule: (id: string, payload: RulePayload) => patch<CurationRule>(`/rules/${enc(id)}`, payload),
   deleteRule: (id: string) => del<void>(`/rules/${enc(id)}`),

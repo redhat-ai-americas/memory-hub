@@ -61,7 +61,8 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   const { refreshCounts, role } = useApp();
   const userView = role === 'user';
   const { data, error, loading, reload } = useApi<MemoryContext>(() => api.memoryContext(id), [id]);
-  const [modal, setModal] = useState<null | 'contradiction' | 'branch' | 'edit' | 'delete' | 'relate'>(null);
+  const [modal, setModal] = useState<null | 'contradiction' | 'branch' | 'edit' | 'delete' | 'relate' | 'quarantine' | 'restore'>(null);
+  const [qReason, setQReason] = useState('');
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [compare, setCompare] = useState<{ from: string; to: string } | null>(null);
   const [showAllReports, setShowAllReports] = useState(false);
@@ -108,6 +109,10 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   const canWrite = Boolean(m?.capabilities?.write);
   /** #671: authors (and project admins) delete; moderation alone is not enough for shared memories. */
   const canDelete = Boolean(m?.can_delete);
+  /** Admin moderation (POST /api/memories/bulk with one id): quarantine an active memory, restore a quarantined one. */
+  const canModerate = !userView && Boolean(m?.capabilities?.moderate) && !deleted;
+  /** The BFF blanks what a personal memory says for admins; show that instead of an empty page. */
+  const hidden = Boolean(m?.redacted);
 
   return (
     <>
@@ -118,7 +123,19 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           { label: 'Memory browser', href: buildHash('/memories') },
           { label: <span className="mono">{shortId(id)}</span> },
         ]}
-        title={m ? m.content.length > 160 ? truncate(m.content, 160) : m.content : <Sk w={480} h={28} />}
+        title={
+          m ? (
+            hidden ? (
+              <span className="muted">{m.scope === 'user' ? 'Personal memory · content hidden' : 'Content hidden'}</span>
+            ) : m.content.length > 160 ? (
+              truncate(m.content, 160)
+            ) : (
+              m.content
+            )
+          ) : (
+            <Sk w={480} h={28} />
+          )
+        }
         below={
           m ? (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -161,6 +178,16 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                     Edit · new version
                   </button>
                 </>
+              )}
+              {canModerate && m.status === 'active' && (
+                <button type="button" className="btn bd outline" onClick={() => setModal('quarantine')}>
+                  Quarantine
+                </button>
+              )}
+              {canModerate && m.status === 'quarantined' && (
+                <button type="button" className="btn bs" onClick={() => setModal('restore')}>
+                  Restore
+                </button>
               )}
               {canDelete && !userView && (
                 <button type="button" className="btn bd outline" onClick={() => setModal('delete')}>
@@ -206,6 +233,12 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           (
             <div className="row-wrap">
               <div className="col-main">
+                {hidden && (
+                  <div className="alert" role="note">
+                    <b>{m.scope === 'user' ? 'Personal memory.' : 'Content hidden.'}</b> What it says is private to its owner, so versions and branches below show
+                    metadata only: who changed it, when and with what weight.
+                  </div>
+                )}
                 {(tab === 'details' || tab === 'versions') && (
                   <div className="card">
                     <div className="ch">
@@ -240,7 +273,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                                   <div className="sm muted">
                                     {fmtShortDateTime(v.created_at)} · {who(v.actor_id, v.driver_id, v.owner_id)}
                                   </div>
-                                  <div className="sm">{changeSummary(v, prev)}</div>
+                                  <div className="sm">{hidden ? (prev && prev.weight !== v.weight ? `weight ${fmtWeight(prev.weight)} → ${fmtWeight(v.weight)}` : <span className="muted">content hidden</span>) : changeSummary(v, prev)}</div>
                                 </div>
                               </button>
                             </div>
@@ -267,7 +300,11 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                             </select>
                           </div>
                         )}
-                        {diffPair ? (
+                        {hidden ? (
+                          <div className="diff">
+                            <div className="same">Content hidden</div>
+                          </div>
+                        ) : diffPair ? (
                           <>
                             {!compare && (
                               <div className="sm muted" style={{ marginBottom: 8 }}>
@@ -316,7 +353,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                               {b.actor_id} · {fmtMonthDay(b.created_at)}
                             </span>
                           </div>
-                          {b.content}
+                          {hidden || !b.content ? <span className="sm muted">Content hidden</span> : b.content}
                         </div>
                       ))}
                       {!deleted && canWrite && (
@@ -497,8 +534,44 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
             navigate('/memories');
           }}
         >
-          This soft-deletes <b>“{truncate(m.content, 80)}”</b>, all {versions.length} version{versions.length === 1 ? '' : 's'} and {data?.branches.length ?? 0}{' '}
+          This soft-deletes <b>{hidden ? shortId(id) : `“${truncate(m.content, 80)}”`}</b>, all {versions.length} version{versions.length === 1 ? '' : 's'} and {data?.branches.length ?? 0}{' '}
           branch{data?.branches.length === 1 ? '' : 'es'}. Agents stop receiving it immediately. The deletion is recorded in the audit log.
+        </ConfirmModal>
+      )}
+      {modal === 'quarantine' && m && canModerate && (
+        <ConfirmModal
+          title="Quarantine memory?"
+          confirmLabel="Quarantine"
+          danger
+          onClose={() => setModal(null)}
+          onConfirm={async () => {
+            await api.bulk({ action: 'quarantine', ids: [id], reason: qReason.trim() || undefined });
+            setQReason('');
+            toast('Memory quarantined — agents stop receiving it.');
+            refreshCounts();
+            reload();
+          }}
+        >
+          Agents stop receiving it at once. It waits in the Quarantined tab of Content moderation, where a moderator restores it. Audited.
+          <div className="f" style={{ marginTop: 12 }}>
+            <label htmlFor="mqr">Reason</label>
+            <input id="mqr" className="in" maxLength={500} value={qReason} onChange={(e) => setQReason(e.target.value)} placeholder="e.g. Contains a customer contract number" />
+          </div>
+        </ConfirmModal>
+      )}
+      {modal === 'restore' && m && canModerate && (
+        <ConfirmModal
+          title="Restore memory?"
+          confirmLabel="Restore"
+          onClose={() => setModal(null)}
+          onConfirm={async () => {
+            await api.bulk({ action: 'restore', ids: [id] });
+            toast('Memory restored — agents get it again.');
+            refreshCounts();
+            reload();
+          }}
+        >
+          It leaves quarantine and agents receive it again. Audited.
         </ConfirmModal>
       )}
     </>

@@ -746,6 +746,11 @@ def _client_scopes_allowed(access: AccessDep, scopes: list[str], identity_type: 
             raise HTTPException(status_code=403, detail="Admin client scope or type forbidden")
 
 
+def _with_ownership(client: dict, access: AccessDep, *, owned: bool | None = None) -> dict:
+    """Tell the UI whether this human owns the client (rotation needs ownership)."""
+    return {**client, "owned": client.get("client_id") in access.agents if owned is None else owned}
+
+
 async def _authorize_client(
     settings: Settings, access: AccessDep, client_id: str,
 ) -> dict:
@@ -809,7 +814,7 @@ async def list_clients(settings: SettingsDep, access: AccessDep):
     clients = [c for c in resp.json() if c.get("tenant_id") == access.principal.tenant_id]
     if access.principal.role == "user":
         clients = [c for c in clients if c.get("client_id") in access.agents]
-    return clients
+    return [_with_ownership(c, access) for c in clients]
 
 
 @router.post("/api/clients", response_model=ClientCreatedResponse, status_code=201)
@@ -830,7 +835,8 @@ async def create_client(body: CreateClientRequest, db: DbDep, settings: Settings
         settings, "POST", "/admin/clients",
         json_body=payload, tenant_id=access.principal.tenant_id,
     )
-    return resp.json()
+    # The owner binding is committed with the client, so the creator owns it.
+    return _with_ownership(resp.json(), access, owned=True)
 
 
 @router.patch("/api/clients/{client_id}", response_model=ClientResponse)
@@ -853,7 +859,7 @@ async def update_client(client_id: str, body: UpdateClientRequest, settings: Set
         json_body=payload, tenant_id=access.principal.tenant_id,
         owner=access.principal.username if client_id in access.agents else None,
     )
-    return resp.json()
+    return _with_ownership(resp.json(), access)
 
 
 @router.post("/api/clients/{client_id}/rotate-secret", response_model=SecretRotatedResponse)

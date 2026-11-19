@@ -53,7 +53,8 @@ export const BFF_ROUTES: [string, RegExp][] = [
   ['DELETE', /^\/api\/rules\/[^/]+$/],
   ['GET', /^\/api\/rules\/[^/]+$/],
   ['PATCH', /^\/api\/rules\/[^/]+$/],
-  ['GET', /^\/api\/rules\/[^/]+\/history$/],
+  // GET /api/rules/{id}/history exists but answers only a local technical caller
+  // with the service key (403 for every person), so the dashboard must not call it.
   ['GET', /^\/api\/stats$/],
   ['GET', /^\/api\/users$/],
 ];
@@ -149,7 +150,7 @@ const graphNode = (id: string, stub: string, extra: Record<string, unknown> = {}
   ...extra,
 });
 
-const client = (id: string, type: 'user' | 'service', active = true) => ({
+const client = (id: string, type: 'user' | 'service', active = true, owned = false) => ({
   client_id: id,
   client_name: id,
   identity_type: type,
@@ -158,6 +159,7 @@ const client = (id: string, type: 'user' | 'service', active = true) => ({
   active,
   created_at: now,
   updated_at: now,
+  owned,
 });
 
 const rule = (id: string, layer: string, owner: string | null) => ({
@@ -418,6 +420,7 @@ function respond(role: Role, method: string, path: string, url: URL, body: unkno
       projects: [{ value: 'atlas-planner', count: 1 }],
       months: [{ month: '2026-11', count: 1 }],
       co_mentions: [],
+      can_edit: true,
       memories: [{ id: memoryId, stub: 'Gripper torque limit is 11.5 N·m', scope: 'project', scope_id: 'atlas-planner', owner_id: 'atlas-planner', weight: 0.8, version: 2, created_at: now, updated_at: now }],
     };
   }
@@ -445,18 +448,16 @@ function respond(role: Role, method: string, path: string, url: URL, body: unkno
       { name: 'mchen', owner_id: 'mchen', identity_type: 'unknown', memory_count: 7, last_active: now },
     ];
   if (path === '/api/clients' && method === 'GET')
-    return user ? [client('claude-code-mchen', 'user')] : [client('claude-code-mchen', 'user'), client('curator-agent', 'service'), client('old-bot', 'service', false)];
+    // A user lists only their own agents; an admin every client, owning only curator-agent.
+    return user
+      ? [client('claude-code-mchen', 'user', true, true)]
+      : [client('claude-code-mchen', 'user'), client('curator-agent', 'service', true, true), client('other-svc', 'service'), client('old-bot', 'service', false)];
   if (path === '/api/clients' && method === 'POST')
-    return { ...client((body as { client_id: string }).client_id, user ? 'user' : 'service'), client_secret: 'sec_123', api_key: 'mh_123' };
+    return { ...client((body as { client_id: string }).client_id, user ? 'user' : 'service', true, true), client_secret: 'sec_123', api_key: 'mh_123' };
   if (path.endsWith('/rotate-secret')) return { client_id: 'claude-code-mchen', client_secret: 'sec_456', api_key: 'mh_456' };
   if (path.endsWith('/rotate-api-key')) return { client_id: 'claude-code-mchen', api_key: 'mh_789' };
   if (path.startsWith('/api/clients/')) return client(path.split('/')[3], 'user', (body as { active?: boolean } | undefined)?.active ?? true);
   if (path === '/api/rules' && method === 'GET') return [rule('rule-sys', 'system', null), rule('rule-org', 'organizational', null), rule('rule-mine', 'user', 'mchen')];
-  if (/\/api\/rules\/[^/]+\/history$/.test(path))
-    return [
-      { id: 'rv2', version: 2, is_current: true, name: 'organizational rule', edited_by: 'dosei', created_at: now },
-      { id: 'rv1', version: 1, is_current: false, name: 'organizational rule', edited_by: null, created_at: now },
-    ];
   if (path.startsWith('/api/rules')) return method === 'DELETE' ? null : rule('rule-new', 'user', 'mchen');
   return {};
 }
@@ -468,7 +469,10 @@ export interface MockedBff {
   calls: string[];
 }
 
-export async function mockBff(page: Page, role: Role): Promise<MockedBff> {
+/** Optional per-test change to a canned answer, keyed by "METHOD /path". */
+export type Tweak = (key: string, payload: unknown) => unknown;
+
+export async function mockBff(page: Page, role: Role, tweak?: Tweak): Promise<MockedBff> {
   const state: MockedBff = { unknown: [], calls: [] };
   await page.route('**/api/**', async (route: Route) => {
     const request = route.request();
@@ -492,7 +496,8 @@ export async function mockBff(page: Page, role: Role): Promise<MockedBff> {
     } catch {
       body = undefined;
     }
-    const payload = respond(role, method, url.pathname, url, body);
+    const answer = respond(role, method, url.pathname, url, body);
+    const payload = tweak ? tweak(key, answer) : answer;
     if (payload === null) {
       await route.fulfill({ status: 204 });
       return;

@@ -880,6 +880,8 @@ export interface ClientResponse {
   public?: boolean;
   created_at: string;
   updated_at: string;
+  /** This person owns the client (bound owner); only owners rotate credentials. */
+  owned?: boolean;
 }
 
 export interface CredentialRow extends ClientResponse {
@@ -1202,6 +1204,8 @@ export interface EntityMemory {
 }
 
 export interface EntityDetail {
+  /** Rename and merge would be allowed: you own the entity and can write every memory that mentions it. */
+  can_edit?: boolean;
   id: string;
   name: string;
   entity_type: string;

@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '@/api/client';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
-import { Empty, ErrorState, SkLines, SkTable, Switch, useToast } from '@/components/ui';
+import { Empty, ErrorState, SkTable, Switch, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { CurationRule, RuleVersion } from '@/types';
+import type { CurationRule } from '@/types';
 import { errorMessage, fmtRelative, SCOPE_ORDER, truncate } from '@/utils/format';
 import { ConfirmModal } from './common';
 import { LockIcon } from './MemoryGraph';
@@ -231,7 +231,6 @@ const Curation: React.FC<{ route: HashRoute }> = ({ route }) => {
                     select(saved.id);
                   }}
                 />
-                {draft.id && <RuleHistory id={draft.id} />}
               </section>
             ) : (
               rows.length > 0 && <p className="sm muted" style={{ margin: '-8px 0 0' }}>Click a rule to edit it below.</p>
@@ -354,6 +353,8 @@ const RuleEditor: React.FC<{
             <span className="sm muted">
               v{rule.version}
               {rule.edited_by ? ` · edited by ${rule.edited_by}` : ''} · {fmtRelative(rule.updated_at)}
+              {/* Earlier versions stay in the database for audit; the BFF serves no human history view. */}
+              {rule.version > 1 && ` · ${rule.version - 1} earlier version${rule.version === 2 ? '' : 's'} kept for audit`}
             </span>
           )}
         </div>
@@ -472,7 +473,7 @@ const RuleEditor: React.FC<{
       {err && <div className="alert err-a">{err}</div>}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <button type="button" className="btn bp" disabled={readOnly || busy || !d.name.trim() || (d.tier === 'regex' && !d.pattern && !d.pattern_set)} onClick={save}>
-          {busy ? 'Saving…' : 'Save · audited'}
+          {busy ? 'Saving…' : d.id ? 'Save new version' : 'Create rule'}
         </button>
         {rule && rule.layer !== 'system' && !readOnly && (
           <button type="button" className="link-btn" style={{ color: '#c9190b', textDecoration: 'none', marginLeft: 6 }} onClick={() => onDelete(rule)}>
@@ -487,33 +488,3 @@ const RuleEditor: React.FC<{
 export default Curation;
 
 
-/** GET /api/rules/{id}/history — every saved version of a rule. */
-const RuleHistory: React.FC<{ id: string }> = ({ id }) => {
-  const { data, loading } = useApi<RuleVersion[]>(() => api.ruleHistory(id), [id]);
-  return (
-    <div style={{ borderTop: '1px solid var(--line, #d2d2d2)', paddingTop: 14 }}>
-      <b className="sm">Version history</b>
-      {loading && !data ? (
-        <SkLines lines={2} />
-      ) : !data?.length ? (
-        <p className="sm muted" style={{ margin: '6px 0 0' }}>No earlier versions.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-          {data.map((v) => (
-            <div key={v.id} className="sm" style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-              <span className="lbl g">v{v.version}</span>
-              <span style={{ flex: 1 }}>
-                {v.name}
-                <span className="muted">
-                  {' · '}
-                  {v.edited_by ?? 'system'} · {fmtRelative(v.created_at)}
-                </span>
-              </span>
-              {v.is_current && <span className="lbl blue">current</span>}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};

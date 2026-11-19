@@ -235,7 +235,8 @@ const ProjectPanel: React.FC<{ name: string; onChanged?: () => void }> = ({ name
                 )}
               </span>
               <span className={`lbl ${m.role === 'admin' ? 'blue' : 'g'}`}>{m.role}</span>
-              {data.can_manage && (
+              {/* The BFF never lets an admin remove themselves (the last-admin guard stays with Core). */}
+              {data.can_manage && m.user_id !== me?.username && (
                 <button type="button" className="btn bl sm" aria-label={`Remove ${m.user_id}`} style={{ padding: '2px 6px' }} onClick={() => setRemoving(m.user_id)}>
                   ✕
                 </button>

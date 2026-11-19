@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { entityId, memoryId, mockBff, type MockedBff, type Role } from './fixtures';
+import { entityId, memoryId, mockBff, reportId, type MockedBff, type Role } from './fixtures';
 
 /** Every screen a role can open, its menu label and the page heading. */
 const SCREENS: Record<Role, [string, string, string][]> = {
@@ -83,13 +83,14 @@ for (const role of ['user', 'admin'] as const) {
       expectClean(bff, errors);
     });
 
-    test('curation rule shows its version history', async ({ page }) => {
+    test('curation rule shows its version without the technical history route', async ({ page }) => {
       const bff = await mockBff(page, role);
       const errors = watch(page);
       await page.goto('/#/curation?rule=rule-org');
-      await expect(page.getByText('Version history')).toBeVisible();
+      await expect(page.getByText(/earlier version kept for audit/)).toBeVisible();
+      await expect(page.getByText('Version history')).toHaveCount(0);
       await expect(page.getByText('Test on sample')).toHaveCount(0);
-      expect(bff.calls).toContain('GET /api/rules/rule-org/history');
+      expect(bff.calls.some((c) => c.endsWith('/history'))).toBe(false);
       expectClean(bff, errors);
     });
 
@@ -102,6 +103,9 @@ for (const role of ['user', 'admin'] as const) {
       await page.getByRole('button', { name: 'Create', exact: true }).click();
       await expect(page.getByText('Copy these credentials now')).toBeVisible();
       await page.keyboard.press('Escape');
+      // Rotation needs ownership: a user owns their one agent; the admin only curator-agent of the three active clients.
+      await expect(page.getByRole('button', { name: 'Rotate API key' })).toHaveCount(1);
+      await expect(page.getByRole('button', { name: 'Revoke' })).toHaveCount(role === 'user' ? 1 : 3);
       await page.getByRole('button', { name: 'Rotate API key' }).first().click();
       await page.getByRole('button', { name: 'Rotate', exact: true }).click();
       expect(bff.calls).toContain('POST /api/clients');
@@ -121,12 +125,78 @@ test('user: entity page renames only', async ({ page }) => {
   expectClean(bff, errors);
 });
 
+test('user: an entity the BFF would not let them change is read only', async ({ page }) => {
+  const bff = await mockBff(page, 'user', (key, payload) =>
+    key === `GET /api/entities/${entityId}` ? { ...(payload as object), can_edit: false } : payload,
+  );
+  const errors = watch(page);
+  await page.goto(`/#/entity/${entityId}`);
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Atlas gripper');
+  await expect(page.getByText('Read only', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rename', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Merge into…' })).toHaveCount(0);
+  expectClean(bff, errors);
+});
+
+test('admin: no resolve button on a report about their own memory', async ({ page }) => {
+  const bff = await mockBff(page, 'admin', (key, payload) => {
+    if (!key.endsWith('/context')) return payload;
+    const ctx = payload as { memory: Record<string, unknown> };
+    return { ...ctx, memory: { ...ctx.memory, actor_id: 'dosei' } };
+  });
+  const errors = watch(page);
+  await page.goto('/#/review');
+  await expect(page.getByText('You wrote this memory, so another project admin has to resolve its reports.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mark resolved' })).toHaveCount(0);
+  expect(bff.calls.some((c) => c.startsWith('PATCH /api/contradictions/'))).toBe(false);
+  expectClean(bff, errors);
+});
+
+test('admin: memory page quarantines, and hides what a personal memory says', async ({ page }) => {
+  let personal = false;
+  const bff = await mockBff(page, 'admin', (key, payload) => {
+    if (!personal || !key.endsWith('/context')) return payload;
+    const ctx = payload as { memory: Record<string, unknown>; versions: Record<string, unknown>[]; branches: Record<string, unknown>[] };
+    return {
+      ...ctx,
+      memory: { ...ctx.memory, scope: 'user', scope_id: null, owner_id: 'mchen', redacted: true, content: '', stub: 'Content hidden', capabilities: { write: false, moderate: false }, can_delete: false },
+      versions: ctx.versions.map((v) => ({ ...v, content: '' })),
+      branches: ctx.branches.map((b) => ({ ...b, content: '' })),
+      contradictions: [],
+      similar: [],
+    };
+  });
+  const errors = watch(page);
+  await page.goto(`/#/memory/${memoryId}`);
+  await page.getByRole('button', { name: 'Quarantine', exact: true }).click();
+  await page.getByLabel('Reason').fill('Wrong torque value');
+  await page.getByRole('dialog').getByRole('button', { name: 'Quarantine', exact: true }).click();
+  expect(bff.calls).toContain('POST /api/memories/bulk');
+
+  personal = true;
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Personal memory · content hidden');
+  await expect(page.getByText(/What it says is private to its owner/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Quarantine', exact: true })).toHaveCount(0);
+  expectClean(bff, errors);
+});
+
+test('admin: cannot remove themselves from a project', async ({ page }) => {
+  const bff = await mockBff(page, 'admin');
+  const errors = watch(page);
+  await page.goto('/#/project/atlas-planner');
+  await expect(page.getByRole('button', { name: 'Remove mchen' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove dosei' })).toHaveCount(0);
+  expectClean(bff, errors);
+});
+
 test('admin: resolves a contradiction and adds a project member', async ({ page }) => {
   const bff = await mockBff(page, 'admin');
   const errors = watch(page);
   await page.goto('/#/review');
   await page.getByRole('button', { name: 'Mark resolved', exact: true }).first().click();
-  expect(bff.calls).toContain(`PATCH /api/contradictions/55555555-5555-4555-8555-555555555555`);
+  expect(bff.calls).toContain(`PATCH /api/contradictions/${reportId}`);
+  expect(bff.calls).toContain(`GET /api/memory/${memoryId}/context`);
   await page.goto('/#/projects');
   await page.getByRole('button', { name: '+ Add member' }).click();
   await expect(page.getByRole('dialog')).toContainText('Add members to atlas-planner');

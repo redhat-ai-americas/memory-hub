@@ -1049,6 +1049,27 @@ async def _entity_mutation_sources(db: AsyncSession, access: AccessDep, entity: 
     return sources
 
 
+async def _entity_editable(db: AsyncSession, access: AccessDep, entity: MemoryNode) -> bool:
+    """Read-only preflight of _entity_mutation_sources, so the UI offers rename/merge
+    only when the mutation would be allowed. It takes no locks and changes no rule."""
+    if entity.owner_id != access.principal.username:
+        return False
+    rels = (await db.execute(select(MemoryRelationship).where(
+        MemoryRelationship.target_id == entity.id,
+        MemoryRelationship.relationship_type == "mentions",
+        MemoryRelationship.valid_until.is_(None),
+    ))).scalars().all()
+    if any(rel.tenant_id != access.principal.tenant_id for rel in rels):
+        return False
+    source_ids = {rel.source_id for rel in rels}
+    if not source_ids:
+        return True
+    sources = (await db.execute(select(MemoryNode).where(MemoryNode.id.in_(source_ids)))).scalars().all()
+    if len({source.id for source in sources}) != len(source_ids):
+        return False
+    return all(_human_can_see_content(access, source) and access.can_write(source) for source in sources)
+
+
 @router.get("/api/entities")
 async def list_entities(
     db: DbDep,
@@ -1186,6 +1207,7 @@ async def entity_detail(entity_id: uuid.UUID, db: DbDep, access: AccessDep):
         "projects": [{"value": key, "count": value} for key, value in project_counts.items()],
         "months": [{"month": key, "count": value} for key, value in sorted(month_counts.items())],
         "co_mentions": co_mentions, "memories": memories,
+        "can_edit": await _entity_editable(db, access, entity),
     }
 
 
