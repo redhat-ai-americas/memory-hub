@@ -55,9 +55,9 @@ for (const role of ['user', 'admin'] as const) {
       const errors = watch(page);
       await page.goto('/#/memories');
       await expect(page.getByRole('link', { name: /Gripper torque limit/ })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Timeline' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Timeline' })).toBeVisible();
       await expect(page.getByRole('link', { name: /Export/ })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Timeline' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Timeline' })).toBeVisible();
       await page.getByRole('button', { name: 'Graph', exact: true }).click();
       await expect(page).toHaveURL(/view=graph/);
       await expect(page.locator('svg circle').first()).toBeVisible();
@@ -201,5 +201,94 @@ test('admin: resolves a contradiction and adds a project member', async ({ page 
   await page.getByRole('button', { name: '+ Add member' }).click();
   await expect(page.getByRole('dialog')).toContainText('Add members to atlas-planner');
   await expect(page.getByText('Teams')).toHaveCount(0);
+  expectClean(bff, errors);
+});
+
+/* ---------------- Memory browser (user) ---------------- */
+
+const bodyOf = (bff: MockedBff, key: string) => bff.bodies.filter((b) => b.key === key).map((b) => b.body);
+
+test('user: semantic search ranks, shows similarity and near-duplicates, and says when it fell back to text', async ({ page }) => {
+  const bff = await mockBff(page, 'user');
+  const errors = watch(page);
+  await page.goto('/#/memories');
+  await expect(page.getByText('near-duplicate 0.94')).toBeVisible();
+  await expect(page.getByText('Near-duplicate (≥0.90)')).toBeVisible();
+  await expect(page.getByText(/agent\s+claude-code-mchen/)).toBeVisible();
+
+  await page.getByRole('textbox', { name: 'Search memories' }).fill('gripper torque');
+  await page.getByRole('textbox', { name: 'Search memories' }).press('Enter');
+  await expect(page.getByText('score 0.71')).toBeVisible();
+  const searched = bff.calls.length;
+  expect(bff.calls.filter((c) => c === 'GET /api/memories/browse').length).toBeGreaterThan(1);
+  await expect(page.getByText('Embedding service unavailable — showing text matches.')).toHaveCount(0);
+  // The URL carries semantic mode by default and relevance as the sort.
+  await expect(page.getByRole('button', { name: 'Sort', exact: true })).toHaveText('Sort: Relevance');
+
+  await page.getByRole('textbox', { name: 'Search memories' }).fill('torque?');
+  await page.getByRole('textbox', { name: 'Search memories' }).press('Enter');
+  await expect(page.getByText('Embedding service unavailable — showing text matches.')).toBeVisible();
+  expect(bff.calls.length).toBeGreaterThan(searched);
+  expectClean(bff, errors);
+});
+
+test('user: timeline view draws the same filters over time', async ({ page }) => {
+  const bff = await mockBff(page, 'user');
+  const errors = watch(page);
+  await page.goto('/#/memories?scope=project');
+  await page.getByRole('button', { name: 'Timeline' }).click();
+  await expect(page.getByRole('img', { name: 'Timeline of 2 memories' })).toBeVisible();
+  expect(bff.calls).toContain('GET /api/memories/timeline');
+  await page.getByRole('button', { name: '30 days' }).click();
+  await expect(page).toHaveURL(/tdays=30/);
+  await page.getByRole('button', { name: /Project memory: Gripper torque limit/ }).click();
+  await expect(page.getByRole('complementary', { name: 'Selected memory' }).getByRole('link', { name: 'Open' })).toBeVisible();
+  expectClean(bff, errors);
+});
+
+test('user: bulk weight and promotion send what the BFF expects', async ({ page }) => {
+  const bff = await mockBff(page, 'user', (key, payload) => {
+    if (key !== 'GET /api/memories/browse') return payload;
+    const b = payload as { items: Record<string, unknown>[] };
+    // Personal memories: the ones a user may promote into a project.
+    return { ...b, items: b.items.map((item) => ({ ...item, scope: 'user', scope_id: null, owner_id: 'mchen' })) };
+  });
+  const errors = watch(page);
+  await page.goto('/#/memories');
+  await page.getByRole('checkbox', { name: 'Select memory' }).first().check();
+  await page.getByRole('button', { name: 'Change weight' }).click();
+  await page.getByLabel(/Weight · /).fill('90');
+  await page.getByRole('button', { name: 'Create new versions' }).click();
+  await expect(page.getByText('Weight set to 0.90 — new versions created.')).toBeVisible();
+  expect(bodyOf(bff, 'POST /api/memories/bulk')).toContainEqual({ action: 'weight', ids: [memoryId], weight: 0.9 });
+
+  await page.getByRole('checkbox', { name: 'Select memory' }).first().check();
+  await page.getByRole('button', { name: 'Promote to project' }).click();
+  await expect(page.getByRole('dialog').getByLabel('Project')).toHaveValue('atlas-planner');
+  await page.getByRole('button', { name: 'Copy it' }).click();
+  await expect(page.getByText('1 copied to project atlas-planner.')).toBeVisible();
+  expect(bodyOf(bff, 'POST /api/memories/bulk')).toContainEqual({
+    action: 'promote', ids: [memoryId], target_scope: 'project', target_scope_id: 'atlas-planner',
+  });
+  expectClean(bff, errors);
+});
+
+test('user: delete reports what it forgot, and the Deleted tab restores it', async ({ page }) => {
+  const bff = await mockBff(page, 'user');
+  const errors = watch(page);
+  await page.goto('/#/memories');
+  await page.getByRole('checkbox', { name: 'Select memory' }).first().check();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByText(/Forgot 1 memory — 2 versions and 1 branch in project · atlas-planner/)).toBeVisible();
+
+  await page.getByRole('tab', { name: /Deleted/ }).click();
+  await expect(page).toHaveURL(/tab=deleted/);
+  // A deleted memory has no memory page to open.
+  await expect(page.getByRole('link', { name: /Gripper torque limit/ })).toHaveCount(0);
+  await page.getByRole('checkbox', { name: 'Select memory' }).first().check();
+  await page.getByRole('button', { name: 'Restore', exact: true }).click();
+  await expect(page.getByText(/Restored 1 memory — 2 versions and 1 branch/)).toBeVisible();
+  expect(bodyOf(bff, 'POST /api/memories/bulk')).toContainEqual({ action: 'restore', ids: [memoryId] });
   expectClean(bff, errors);
 });

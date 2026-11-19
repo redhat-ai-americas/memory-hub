@@ -3,6 +3,8 @@ import type {
   AuthStatus,
   BrowseParams,
   BrowseResponse,
+  BulkRequest,
+  BulkResult,
   ClientCreatedResponse,
   ClientResponse,
   ContradictionReport,
@@ -29,6 +31,7 @@ import type {
   SearchResponse,
   SecretRotatedResponse,
   StatsResponse,
+  TimelineResponse,
   UpdateClientPayload,
   UserRow,
 } from '@/types';
@@ -146,13 +149,10 @@ export const api = {
    * Several memories in one transaction: delete (authors, project admins), relate
    * (both ends writable), and for admins quarantine / restore from quarantine.
    */
-  bulk: (body: {
-    action: 'quarantine' | 'restore' | 'delete' | 'relate';
-    ids: string[];
-    reason?: string;
-    relationship_type?: 'related_to' | 'derived_from' | 'supersedes' | 'conflicts_with';
-    target_id?: string;
-  }) => post<{ done: string[]; errors: { id: string; detail: string }[] }>('/memories/bulk', body),
+  /** One request for many memories: delete, relate, restore, quarantine, weight or promote. */
+  bulk: (body: BulkRequest) => post<BulkResult>('/memories/bulk', body),
+  timeline: (params: BrowseParams & { days?: number; by?: 'created' | 'updated'; max_items?: number }) =>
+    get<TimelineResponse>(`/memories/timeline${qs(params as Record<string, unknown>)}`),
 
   // Graph & search
   graphAll: (

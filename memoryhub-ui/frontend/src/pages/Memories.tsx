@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '@/api/client';
 import { browseParams } from '@/utils/browse';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
-import { Dropdown, Empty, ErrorState, Icon, Pager, ScopeLabel, SelectMenu, SkTable, SkLines, Standby, useToast } from '@/components/ui';
+import { Dropdown, Empty, ErrorState, Icon, Modal, Pager, ScopeLabel, SelectMenu, SkTable, SkLines, Standby, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { BrowseResponse, MemoryRow } from '@/types';
+import type { BrowseResponse, BulkRequest, ClosureSummary, MemoryRow } from '@/types';
 import { errorMessage, fmtCompact, fmtInt, fmtRelative, fmtWeight, SCOPE_ORDER, scopeMeta, shortId } from '@/utils/format';
 import { ConfirmModal, memoryHref, RelationshipModal, WriteMemoryModal } from './common';
 import MemoryGraph, { LockIcon } from './MemoryGraph';
+import MemoryTimeline from './MemoryTimeline';
 
 const list = (v: string | null) => (v ? v.split(',').filter(Boolean) : []);
 const COLUMNS = ['scope', 'entities', 'owner', 'weight', 'version', 'branches', 'relevant', 'updated'] as const;
@@ -34,15 +35,16 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
   const { standby, refreshCounts, role, me } = useApp();
   const isAdmin = role === 'admin';
+  const openable = openableFor(role);
   const canWrite = (me?.write?.scopes ?? []).length > 0;
   const p = route.params;
-  const view: 'table' | 'graph' = p.get('view') === 'graph' ? 'graph' : 'table';
+  const view: 'table' | 'graph' | 'timeline' = p.get('view') === 'graph' ? 'graph' : p.get('view') === 'timeline' ? 'timeline' : 'table';
   const state = {
     entity: p.get('entity') || '',
     entityName: p.get('entityName') || '',
     tab: p.get('tab') || 'current',
     q: p.get('q') || '',
-    mode: p.get('mode') || 'text',
+    mode: p.get('mode') || 'semantic',
     scope: list(p.get('scope')),
     actor: list(p.get('actor')),
     project: p.get('project') || '',
@@ -57,8 +59,8 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
     page: Number(p.get('page') || 1),
     per: Number(p.get('per') || 20),
   };
-  // The BFF has no relevance ranking for browse (it would sort by last update), so it is not offered.
-  const sort = state.sort && state.sort !== 'relevance' ? state.sort : 'updated';
+  // Relevance needs a search; without one the table sorts by last update.
+  const sort = state.sort && (state.sort !== 'relevance' || state.q) ? state.sort : state.q ? 'relevance' : 'updated';
 
   const setParams = (changes: Record<string, string | number | string[] | undefined>, resetPage = true) => {
     const next = new URLSearchParams(p);
@@ -86,9 +88,14 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
   const [columns, setColumns] = useState<Column[]>(() => readCols(isAdmin));
   const [moreWriters, setMoreWriters] = useState(false);
   const [moreDomains, setMoreDomains] = useState(false);
-  const [modal, setModal] = useState<null | 'write' | 'relate' | 'delete' | 'quarantine'>(null);
+  const [modal, setModal] = useState<null | 'write' | 'weight' | 'relate' | 'promote' | 'delete' | 'quarantine'>(null);
   const [qReason, setQReason] = useState('');
   const [rowDelete, setRowDelete] = useState<MemoryRow | null>(null);
+  const [weightValue, setWeightValue] = useState(0.7);
+  // Promotion targets the person writes: a user's projects, an admin's organization (with a write grant).
+  const promoteProjects = isAdmin ? [] : me?.write?.project_ids ?? [];
+  const canPromoteOrg = isAdmin && (me?.write?.scopes ?? []).includes('organizational');
+  const [promoteProject, setPromoteProject] = useState('');
 
   const toggleColumn = (c: Column) => {
     const next = columns.includes(c) ? columns.filter((x) => x !== c) : COLUMNS.filter((x) => columns.includes(x) || x === c);
@@ -111,6 +118,11 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
   const selectionCanModerate = selectionKnown && selectedItems.every((item) => item.capabilities?.moderate);
   // #671: people delete what they or their agents wrote; project admins anything in their project.
   const selectionCanDelete = selectionKnown && selectedItems.every((item) => item.can_delete);
+  const selectionCanRestore = selectionKnown && selectedItems.every((item) => item.can_restore);
+  // Promotion copies personal memories into a project (users) or project memories into the organization (admins).
+  const selectionCanPromote =
+    selectionKnown && selectedItems.every((item) => !item.redacted && item.is_current && (isAdmin ? item.scope === 'project' && canPromoteOrg : item.scope === 'user'));
+  const promotable = isAdmin ? canPromoteOrg : promoteProjects.length > 0;
   const undeletable = items.filter((m) => selected.has(m.id) && m.can_delete === false).length;
 
   const chips = useMemo(() => {
@@ -132,15 +144,20 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
+  // The graph and the timeline draw live memories: leaving the Quarantined or Deleted tab goes back to Current.
+  const liveTab = state.tab === 'quarantined' || state.tab === 'deleted' ? { tab: '' } : {};
+
   const toggleIn = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
   /**
-   * POST /api/memories/bulk: one transaction for delete and relate (anyone with
-   * the right on every memory) and quarantine / restore (admins).
+   * POST /api/memories/bulk. Delete, relate and restore run in one transaction;
+   * weight and promote report per-memory failures.
    */
-  const runBulk = async (body: Parameters<typeof api.bulk>[0], done: string) => {
+  const runBulk = async (body: BulkRequest, done: string) => {
     const res = await api.bulk(body);
-    if (res.errors.length) toast(`${res.errors.length} failed: ${res.errors[0].detail}`, 'err');
+    if (res.errors.length) toast(`${res.errors.length} of ${body.ids.length} failed: ${res.errors[0].detail}`, 'err');
+    else if (res.forgotten?.length) toast(closureReport('Forgot', res.forgotten));
+    else if (res.restored?.length) toast(closureReport('Restored', res.restored));
     else if (res.done.length) toast(done);
     setSelected(new Set());
     reload();
@@ -173,7 +190,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
         description={
           isAdmin
             ? 'Search, quarantine, restore and delete memories in the scopes you moderate — as a table or a graph of how they connect. What a personal (user-scope) memory says stays private.'
-            : 'Every memory you are allowed to read — your own, and what your projects, campaigns, roles and organization share with you — as a table or a graph of how they connect.'
+            : 'Every memory you are allowed to read — your own, and what your projects, campaigns, roles and organization share with you — as a table, a graph of how they connect, or a timeline.'
         }
         actions={
           <>
@@ -200,10 +217,9 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 tabs={[
                   { value: 'current', label: 'Current', count: tabCounts?.current ?? null },
                   { value: 'all', label: 'All versions', count: tabCounts?.all ?? null },
-                  ...(isAdmin ? [
+                  // Users see their own quarantined writes and the deletes they may undo.
                   { value: 'quarantined', label: 'Quarantined', count: tabCounts?.quarantined ?? null },
                   { value: 'deleted', label: 'Deleted', count: tabCounts?.deleted ?? null },
-                  ] : []),
                 ]}
               />
             )}
@@ -217,7 +233,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                   </svg>
                   Table
                 </button>
-                <button type="button" className={view === 'graph' ? 'on' : ''} aria-pressed={view === 'graph'} onClick={() => setParams({ view: 'graph' }, false)}>
+                <button type="button" className={view === 'graph' ? 'on' : ''} aria-pressed={view === 'graph'} onClick={() => setParams({ view: 'graph', ...liveTab }, false)}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                     <circle cx="6" cy="6" r="2.5" />
                     <circle cx="18" cy="8" r="2.5" />
@@ -225,6 +241,12 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                     <path d="M8.3 7.1l7.4.6M7 8.3l2.2 7.3M16.5 10l-4.8 6.3" />
                   </svg>
                   Graph
+                </button>
+                <button type="button" className={view === 'timeline' ? 'on' : ''} aria-pressed={view === 'timeline'} onClick={() => setParams({ view: 'timeline', ...liveTab }, false)}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path d="M3 18h18M6 18V9M11 18V5M16 18v-7M21 18v-4" />
+                  </svg>
+                  Timeline
                 </button>
               </div>
             </div>
@@ -256,7 +278,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 </button>
               </span>
             ))}
-            <span className="sm muted">The graph uses the same filters and search as the table.</span>
+            <span className="sm muted">The {view} uses the same filters and search as the table.</span>
             <button type="button" className="btn bl sm" onClick={() => setParams({ view: '' }, false)}>
               Edit filters
             </button>
@@ -264,6 +286,8 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
         )}
         {view === 'graph' ? (
           <MemoryGraph route={route} setParams={setParams} />
+        ) : view === 'timeline' ? (
+          <MemoryTimeline route={route} setParams={setParams} />
         ) : (
         <div className="row-wrap">
           <aside className="card" style={{ flex: '1 1 230px', maxWidth: '100%', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 20 }} aria-label="Filters">
@@ -386,13 +410,16 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 <div>
                   <p className="fh">Flags</p>
                   <div className="fx">
-                    {(['contradicted', 'has_branches'] as const).map((f) => (
+                    {(['contradicted', 'has_branches', 'near_duplicate'] as const).map((f) => (
                       <label key={f}>
                         <span>
                           <input type="checkbox" disabled={filtersDisabled} checked={state.flag.includes(f)} onChange={() => setParams({ flag: toggleIn(state.flag, f) })} />{' '}
                           {FLAG_LABEL[f]}
                         </span>
-                        {facets.flags[f] !== null && <span className="muted sm">{fmtCompact(facets.flags[f] as number)}</span>}
+                        {/* near_duplicate is null when the tenant is too large to count every pair */}
+                        <span className="muted sm" title={facets.flags[f] === null ? 'Not counted for this many memories' : undefined}>
+                          {facets.flags[f] === null ? '—' : fmtCompact(facets.flags[f] as number)}
+                        </span>
                       </label>
                     ))}
                   </div>
@@ -422,14 +449,15 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                   disabled={standby}
                   onChange={(e) => setQuery(e.target.value)}
                   onBlur={() => query.trim() !== state.q && setParams({ q: query.trim(), sort: '' })}
-                  placeholder={isAdmin ? 'Search the scopes you moderate' : 'Filter by text'}
+                  placeholder={isAdmin ? 'Search the scopes you moderate' : state.mode === 'semantic' ? 'Search by meaning or by words' : 'Filter by text'}
                 />
               </div>
               {<SelectMenu
                 label="Search mode"
                 value={state.mode}
-                onChange={(v) => setParams({ mode: v === 'text' ? '' : v })}
+                onChange={(v) => setParams({ mode: v === 'semantic' ? '' : v })}
                 options={[
+                  { value: 'semantic', label: 'Semantic' },
                   { value: 'text', label: 'Text' },
                   { value: 'metadata', label: 'ID or owner' },
                 ]}
@@ -440,9 +468,11 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 value={sort}
                 onChange={(v) => setParams({ sort: v })}
                 options={[
+                  ...(state.q ? [{ value: 'relevance', label: 'Relevance' }] : []),
                   { value: 'updated', label: 'Last updated' },
                   { value: 'created', label: 'Created' },
                   { value: 'weight', label: 'Weight' },
+                  { value: 'version', label: 'Version' },
                 ]}
               />
               <Dropdown
@@ -465,7 +495,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 )}
               </Dropdown>
             </form>
-            {(chips.length > 0 || data?.search_mode === 'text') && (
+            {(chips.length > 0 || (state.q && state.mode === 'semantic' && data?.search_mode === 'text')) && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '0 20px 14px', alignItems: 'center' }}>
                 {chips.length > 0 && <span className="sm muted">Active:</span>}
                 {chips.map((c) => (
@@ -476,6 +506,9 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                     </button>
                   </span>
                 ))}
+                {state.q && state.mode === 'semantic' && data?.search_mode === 'text' && (
+                  <span className="sm warn">Embedding service unavailable — showing text matches.</span>
+                )}
               </div>
             )}
             {selected.size > 0 && (
@@ -501,8 +534,15 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                         <button type="button" className="btn bl danger" disabled={!selectionCanDelete} title={!selectionCanDelete ? 'Delete needs authorship, or project admin, for every selected memory.' : undefined} onClick={() => setModal('delete')}>
                           Delete
                         </button>
+                        {canPromoteOrg && (
+                          <button type="button" className="btn bl" disabled={!selectionCanPromote} title={!selectionCanPromote ? 'Only current project memories you can read are promoted.' : undefined} onClick={() => setModal('promote')}>
+                            Promote to organization
+                          </button>
+                        )}
                       </>
-                    ) : null}
+                    ) : (
+                      <RestoreDeleted can={selectionCanRestore} onRestore={() => runBulk({ action: 'restore', ids }, 'Restored.').catch((e) => toast(errorMessage(e), 'err'))} />
+                    )}
                     {state.tab !== 'deleted' && (
                       <button type="button" className="btn bl" onClick={() => setParams({ view: 'graph', gfocus: 'memory', focus: ids[0] }, false)}>
                         Show in graph
@@ -513,10 +553,23 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                     </span>
                   </>
                 ) : (
+                state.tab === 'deleted' ? (
+                  <RestoreDeleted can={selectionCanRestore} onRestore={() => runBulk({ action: 'restore', ids }, 'Restored.').catch((e) => toast(errorMessage(e), 'err'))} />
+                ) : state.tab === 'quarantined' ? (
+                  <span className="sm muted">A moderator reviews quarantined memories; you can read your own here but not restore them.</span>
+                ) : (
                 <>
+                <button type="button" className="btn bl" disabled={!selectionCanWrite} title={!selectionCanWrite ? 'Write access is required for every selected memory.' : undefined} onClick={() => setModal('weight')}>
+                  Change weight
+                </button>
                 <button type="button" className="btn bl" disabled={!selectionCanWrite} title={!selectionCanWrite ? 'Write access is required for every selected memory.' : undefined} onClick={() => setModal('relate')}>
                   Add relationship
                 </button>
+                {promotable && (
+                  <button type="button" className="btn bl" disabled={!selectionCanPromote} title={!selectionCanPromote ? 'Only your current personal memories can be promoted to a project.' : undefined} onClick={() => setModal('promote')}>
+                    Promote to project
+                  </button>
+                )}
                 <button type="button" className="btn bl danger" disabled={!selectionCanDelete} title={!selectionCanDelete ? 'Delete needs authorship, or project admin, for every selected memory.' : undefined} onClick={() => setModal('delete')}>
                   Delete
                 </button>
@@ -527,6 +580,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                   Soft delete · whole version chain · audited
                 </span>
                 </>
+                )
                 )}
               </div>
             )}
@@ -568,9 +622,13 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 {state.q || chips.length
                   ? 'Try a broader query or remove a filter.'
                   : state.tab === 'quarantined'
-                    ? 'Writes held by a quarantine rule will be listed here for review.'
+                    ? isAdmin
+                      ? 'Writes held by a quarantine rule will be listed here for review.'
+                      : 'When a moderator quarantines something you or your agents wrote, it is listed here. Agents stop receiving it until it is restored.'
                     : state.tab === 'deleted'
-                      ? 'Soft-deleted memories stay here, with their version chains, for forensics.'
+                      ? isAdmin
+                        ? 'Soft-deleted memories stay here, with their version chains, for forensics.'
+                        : 'Memories you delete stay here with their versions and branches. Select one and press Restore to bring it back.'
                       : 'Memories appear here as agents write them.'}
               </Empty>
             ) : (
@@ -621,10 +679,12 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                                 <Icon.EyeOff size={18} />
                                 {m.scope === 'user' ? 'Personal content hidden' : 'Content hidden'}
                               </a>
-                            ) : (
+                            ) : openable(m) ? (
                               <a href={memoryHref(m.id)} style={{ fontWeight: 500, textDecoration: 'none' }}>
                                 {m.content_preview}
                               </a>
+                            ) : (
+                              <span style={{ fontWeight: 500 }}>{m.content_preview}</span>
                             )}
                             <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                               <span className="mono muted">{shortId(m.id)}</span>
@@ -640,6 +700,11 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                               ))}
                               {!m.flags?.some((f) => f.kind === 'conflict') && m.open_contradictions > 0 && (
                                 <span className="lbl red">{m.open_contradictions === 1 ? 'open contradiction' : `${m.open_contradictions} open contradictions`}</span>
+                              )}
+                              {!m.flags?.some((f) => f.kind === 'duplicate') && m.near_duplicate !== null && (
+                                <span className="lbl ylw" title="Cosine similarity to another current memory you can read">
+                                  near-duplicate {m.near_duplicate.toFixed(2)}
+                                </span>
                               )}
                               {m.status === 'quarantined' && !m.flags?.length && <span className="lbl red">quarantined</span>}
                               {m.status !== 'active' && m.status !== 'quarantined' && <span className="lbl g">{m.status}</span>}
@@ -739,8 +804,27 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                             >
                               {(close) => (
                                 <>
-                                  <a href={memoryHref(m.id)}>Open</a>
-                                  <a href={buildHash('/memories', { ...Object.fromEntries(p), view: 'graph', gfocus: 'memory', focus: m.id, sel: m.id })}>Open in graph</a>
+                                  {openable(m) && (
+                                    <>
+                                      <a href={memoryHref(m.id)}>Open</a>
+                                      <a href={buildHash('/memories', { ...Object.fromEntries(p), view: 'graph', gfocus: 'memory', focus: m.id, sel: m.id })}>Open in graph</a>
+                                    </>
+                                  )}
+                                  <a href={buildHash('/memories', { ...Object.fromEntries(p), view: 'timeline', sel: m.id, tdays: '0' })}>Show on timeline</a>
+                                  {m.can_restore && (
+                                    <>
+                                      <hr />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          close();
+                                          runBulk({ action: 'restore', ids: [m.id] }, 'Memory restored.').catch((e) => toast(errorMessage(e), 'err'));
+                                        }}
+                                      >
+                                        Restore
+                                      </button>
+                                    </>
+                                  )}
                                   {isAdmin && m.capabilities?.moderate && state.tab !== 'deleted' && (
                                     <>
                                       <hr />
@@ -815,6 +899,88 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
         />
       )}
       {modal === 'relate' && <RelationshipModal sourceIds={ids} onClose={() => setModal(null)} onDone={reload} />}
+      {modal === 'weight' && (
+        <Modal
+          title={`Change weight of ${ids.length} ${ids.length === 1 ? 'memory' : 'memories'}`}
+          onClose={() => setModal(null)}
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn bp"
+                onClick={async () => {
+                  setModal(null);
+                  await runBulk({ action: 'weight', ids, weight: weightValue }, `Weight set to ${weightValue.toFixed(2)} — new versions created.`).catch((e) =>
+                    toast(errorMessage(e), 'err'),
+                  );
+                }}
+              >
+                Create new versions
+              </button>
+              <button type="button" className="btn bg" onClick={() => setModal(null)}>
+                Cancel
+              </button>
+            </>
+          }
+        >
+          <div className="f">
+            <label htmlFor="bw">Weight · {weightValue.toFixed(2)}</label>
+            <input id="bw" type="range" min={0} max={100} value={Math.round(weightValue * 100)} onChange={(e) => setWeightValue(Number(e.target.value) / 100)} />
+            <span className="hint">
+              Higher weight means agents get the full text sooner. Each memory gets a new version; older versions stay in All versions. Audited.
+            </span>
+          </div>
+        </Modal>
+      )}
+      {modal === 'promote' && (
+        <Modal
+          title={isAdmin ? 'Promote to organization' : 'Promote to project'}
+          onClose={() => setModal(null)}
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn bp"
+                disabled={!isAdmin && !(promoteProject || promoteProjects[0])}
+                onClick={async () => {
+                  setModal(null);
+                  const target = promoteProject || promoteProjects[0];
+                  await runBulk(
+                    isAdmin
+                      ? { action: 'promote', ids, target_scope: 'organizational' }
+                      : { action: 'promote', ids, target_scope: 'project', target_scope_id: target },
+                    `${fmtInt(ids.length)} copied to ${isAdmin ? 'the organization' : `project ${target}`}.`,
+                  ).catch((e) => toast(errorMessage(e), 'err'));
+                }}
+              >
+                Copy {ids.length === 1 ? 'it' : `${fmtInt(ids.length)} memories`}
+              </button>
+              <button type="button" className="btn bg" onClick={() => setModal(null)}>
+                Cancel
+              </button>
+            </>
+          }
+        >
+          <p className="sm muted" style={{ margin: 0 }}>
+            {isAdmin
+              ? 'Each selected project memory is copied into the organization scope, where every agent in the tenant can read it.'
+              : 'Each selected personal memory is copied into the project, where every member and their agents can read it.'}{' '}
+            The copy links back to the original with <span className="mono">derived_from</span>; the original stays as it is. Audited.
+          </p>
+          {!isAdmin && (
+            <div className="f">
+              <label htmlFor="pp">Project</label>
+              <select id="pp" className="in" value={promoteProject || promoteProjects[0] || ''} onChange={(e) => setPromoteProject(e.target.value)}>
+                {promoteProjects.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </Modal>
+      )}
       {modal === 'quarantine' && (
         <ConfirmModal
           title={`Quarantine ${ids.length} ${ids.length === 1 ? 'memory' : 'memories'}?`}
@@ -848,7 +1014,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
           }}
         >
           This soft-deletes {rowDelete ? <b>“{rowDelete.stub}”</b> : <b>{ids.length} memories</b>} together with every version and child branch. Agents stop
-          receiving {rowDelete ? 'it' : 'them'} immediately; the rows are kept for forensics. The action is recorded in the audit log.
+          receiving {rowDelete ? 'it' : 'them'} immediately. The rows stay in the Deleted tab, where you can restore them. The action is recorded in the audit log.
           {!rowDelete && undeletable > 0 && (
             <div className="alert warn-a" style={{ marginTop: 12 }}>
               {fmtInt(undeletable)} of them {undeletable === 1 ? 'was' : 'were'} written by someone else and will be skipped: only the author or a project admin can delete a shared memory.
@@ -880,7 +1046,41 @@ const EntityIcon: React.FC<{ type: string }> = ({ type }) => {
 const FLAG_LABEL: Record<string, string> = {
   contradicted: 'Has open contradiction',
   has_branches: 'Has branches',
+  near_duplicate: 'Near-duplicate (≥0.90)',
 };
+
+/** A deleted memory, or a user's quarantined one, has no memory page: the BFF answers 404. */
+const openableFor = (role: string) => (m: MemoryRow) => !m.deleted_at && !(role === 'user' && m.status !== 'active');
+
+/** What a delete or restore actually did, in the scope it did it. */
+const closureReport = (verb: 'Forgot' | 'Restored', rows: ClosureSummary[]) => {
+  const versions = rows.reduce((a, r) => a + r.versions, 0);
+  const branches = rows.reduce((a, r) => a + r.branches, 0);
+  const scopes = [...new Set(rows.map((r) => `${scopeMeta(r.scope).label.toLowerCase()} · ${r.scope_id ?? r.owner_id}`))];
+  const what = `${rows.length} ${rows.length === 1 ? 'memory' : 'memories'} — ${versions} ${versions === 1 ? 'version' : 'versions'}${
+    branches ? ` and ${branches} ${branches === 1 ? 'branch' : 'branches'}` : ''
+  } in ${scopes.join(', ')}`;
+  return verb === 'Forgot'
+    ? `Forgot ${what}. Agents no longer receive ${rows.length === 1 ? 'it' : 'them'}; restore from the Deleted tab.`
+    : `Restored ${what}. Agents receive ${rows.length === 1 ? 'it' : 'them'} again.`;
+};
+
+const RestoreDeleted: React.FC<{ can: boolean; onRestore: () => void }> = ({ can, onRestore }) => (
+  <>
+    <button
+      type="button"
+      className="btn bp"
+      disabled={!can}
+      title={!can ? 'Only who could delete a memory may restore it: its author, or a project admin.' : undefined}
+      onClick={onRestore}
+    >
+      Restore
+    </button>
+    <span style={{ marginLeft: 'auto' }} className="sm muted">
+      Brings back every version and branch deleted with it · audited
+    </span>
+  </>
+);
 
 const writtenBy = (m: MemoryRow) => {
   const actor = m.actor_id;
@@ -924,6 +1124,12 @@ const ScopeBar: React.FC<{ project: string; onProject: (v: string) => void; tena
     <div className="scopebar" role="region" aria-label="Active scope">
       <span>
         <span className="hint">Signed in as</span> <b className="mono">{me.username}</b>
+        {(me.agents ?? []).length > 0 && (
+          <span className="hint">
+            {' '}
+            + {me.agents!.length === 1 ? 'agent' : 'agents'} <span className="mono">{me.agents!.join(', ')}</span>
+          </span>
+        )}
       </span>
       <span>
         <span className="hint">Tenant</span> <b className="mono">{tenant || '—'}</b>

@@ -1,14 +1,14 @@
 import type { BrowseParams } from '@/types';
 
-/** GET /api/memories/browse parameters from the Memory browser URL (the graph view reuses scope, writer and weight). */
+/** One URL filter contract for the Memory browser: the table, graph, timeline and export send the same filters. */
 export function browseParams(p: URLSearchParams): BrowseParams {
   const list = (key: string) => (p.get(key) || '').split(',').filter(Boolean);
   const q = p.get('q') || undefined;
   return {
     tab: p.get('tab') || 'current',
     q,
-    // The BFF matches text (or ID / owner with mode=metadata); it has no semantic browse.
-    mode: p.get('mode') || 'text',
+    // Semantic by default; the BFF falls back to text (and says so) without an embedding service.
+    mode: p.get('mode') || 'semantic',
     scope: list('scope'),
     actor: list('actor'),
     project: p.get('project') || undefined,
@@ -20,8 +20,8 @@ export function browseParams(p: URLSearchParams): BrowseParams {
     branch_type: p.get('branch') || undefined,
     flag: list('flag'),
     entity: p.get('entity') || undefined,
-    // Browse has no relevance ranking in the BFF; old 'relevance' links sort by last update.
-    sort: p.get('sort') && p.get('sort') !== 'relevance' ? p.get('sort')! : 'updated',
+    // Relevance only means something with a search; without one it falls back to last update.
+    sort: p.get('sort') && (p.get('sort') !== 'relevance' || q) ? p.get('sort')! : q ? 'relevance' : 'updated',
     order: 'desc',
     page: Number(p.get('page') || 1),
     per_page: Number(p.get('per') || 20),

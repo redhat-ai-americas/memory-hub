@@ -190,6 +190,7 @@ async def get_me(access: AccessDep, response: Response):
         tenant_id=principal.tenant_id,
         write={"scopes": write_scopes, "project_ids": project_ids,
                "campaign_ids": [], "owner_id": principal.username},
+        agents=sorted(access.agents),
         access={
             "hidden_scopes": sorted({
                 "user", "project", "campaign", "role", "organizational", "enterprise",

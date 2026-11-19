@@ -4,113 +4,29 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import date, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
-from sqlalchemy import String, and_, cast, func, or_, select, union_all
+from sqlalchemy import func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from src.authorization import Access, AccessDep
+from src.authorization import AccessDep
+from src.browse_filters import (
+    BrowseQueryDep,
+    OptionalEmbeddingDep,
+    can_list,
+    can_see_content,
+    conditions,
+    plan_search,
+)
 from src.database import get_db
-from src.human_adapters import _human_can_see_content
 from src.memory_context import _brief
 
 router = APIRouter()
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 MAX_GRAPH_NODES = 1500
-
-
-def _conditions(
-    access: Access,
-    *,
-    tab: str, q: str | None, mode: str, scope: list[str] | None,
-    actor: list[str] | None, project: str | None, domain: list[str] | None,
-    min_weight: float | None, max_weight: float | None,
-    created_from: date | None, created_to: date | None,
-    branch_type: str | None, flag: list[str] | None, entity: uuid.UUID | None,
-) -> list:
-    """Apply browser filters after human visibility; filters only narrow scope."""
-    tenant = access.principal.tenant_id
-    if min_weight is not None and max_weight is not None and min_weight > max_weight:
-        raise HTTPException(status_code=422, detail="Invalid weight range")
-    if flag and any(value not in {"contradicted", "has_branches"} for value in flag):
-        raise HTTPException(status_code=422, detail="Unsupported graph flag")
-    if access.principal.role == "user" and tab in {"quarantined", "deleted"}:
-        raise HTTPException(status_code=403, detail="Memory state forbidden")
-    where = [MemoryNode.tenant_id == tenant, access.clause()]
-    if tab == "current":
-        where += [MemoryNode.deleted_at.is_(None), MemoryNode.status == "active",
-                  MemoryNode.is_current.is_(True)]
-    elif tab == "all":
-        where.append(MemoryNode.deleted_at.is_(None))
-    elif tab == "quarantined":
-        where += [MemoryNode.deleted_at.is_(None), MemoryNode.status == "quarantined"]
-    elif tab == "deleted":
-        where.append(MemoryNode.deleted_at.is_not(None))
-    else:
-        raise HTTPException(status_code=422, detail="Invalid graph tab")
-    if scope:
-        where.append(MemoryNode.scope.in_(scope))
-    if actor:
-        where.append(MemoryNode.actor_id.in_(actor))
-    if project:
-        where += [MemoryNode.scope == "project", MemoryNode.scope_id == project]
-    if domain:
-        # A domain filter must never test hidden content metadata.
-        where += [access.content_clause(), MemoryNode.domains.overlap(domain)]
-    if min_weight is not None:
-        where.append(MemoryNode.weight >= min_weight)
-    if max_weight is not None:
-        where.append(MemoryNode.weight <= max_weight)
-    if created_from:
-        where.append(MemoryNode.created_at >= created_from)
-    if created_to:
-        where.append(MemoryNode.created_at < created_to + timedelta(days=1))
-    if branch_type:
-        child = aliased(MemoryNode)
-        where.append(select(child.id).where(
-            child.parent_id == MemoryNode.id, child.tenant_id == tenant,
-            child.deleted_at.is_(None), child.branch_type == branch_type,
-            access.clause(child),
-        ).exists())
-    if flag:
-        if "contradicted" in flag:
-            where.append(select(ContradictionReport.id).where(
-                ContradictionReport.memory_id == MemoryNode.id,
-                ContradictionReport.tenant_id == tenant,
-                ContradictionReport.resolved.is_(False),
-                access.content_clause(),
-            ).exists())
-        if "has_branches" in flag:
-            child = aliased(MemoryNode)
-            where.append(select(child.id).where(
-                child.parent_id == MemoryNode.id, child.tenant_id == tenant,
-                child.deleted_at.is_(None), access.clause(child),
-            ).exists())
-    if entity:
-        where.append(select(MemoryRelationship.id).where(
-            MemoryRelationship.source_id == MemoryNode.id,
-            MemoryRelationship.target_id == entity,
-            MemoryRelationship.tenant_id == tenant,
-            MemoryRelationship.relationship_type == "mentions",
-            MemoryRelationship.valid_until.is_(None),
-            access.content_clause(),
-        ).exists())
-    if q:
-        pattern = f"%{q.strip()}%"
-        metadata = or_(cast(MemoryNode.id, String).ilike(pattern), MemoryNode.owner_id.ilike(pattern))
-        if mode == "metadata":
-            where.append(metadata)
-        elif mode in {"semantic", "text"}:
-            where.append(or_(metadata, and_(access.content_clause(),
-                or_(MemoryNode.content.ilike(pattern), MemoryNode.stub.ilike(pattern)))))
-        else:
-            raise HTTPException(status_code=422, detail="Invalid graph search mode")
-    return where
 
 
 def _edge(rel: MemoryRelationship) -> dict:
@@ -151,24 +67,14 @@ def _degree(edges: list[dict]) -> Counter:
 
 @router.get("/api/graph/all")
 async def graph_all(
-    db: DbDep, access: AccessDep,
-    tab: Literal["current", "all", "quarantined", "deleted"] = "current",
-    q: str | None = None, mode: Literal["semantic", "text", "metadata"] = "semantic",
-    scope: list[str] | None = Query(None), actor: list[str] | None = Query(None),
-    project: str | None = None, domain: list[str] | None = Query(None),
-    min_weight: float | None = Query(None, ge=0, le=1),
-    max_weight: float | None = Query(None, ge=0, le=1),
-    created_from: date | None = None, created_to: date | None = None,
-    branch_type: str | None = None, flag: list[str] | None = Query(None),
-    entity: uuid.UUID | None = None, types: list[str] | None = Query(None),
+    db: DbDep, access: AccessDep, query: BrowseQueryDep, embedding: OptionalEmbeddingDep,
+    types: list[str] | None = Query(None),
     max_nodes: int = Query(300, ge=1, le=MAX_GRAPH_NODES),
     prefer: Literal["connected", "recent", "weight"] = "connected",
 ):
+    """The browser's graph view: the same filters as the table, drawn as nodes and edges."""
     tenant = access.principal.tenant_id
-    where = _conditions(access, tab=tab, q=q, mode=mode, scope=scope, actor=actor,
-                        project=project, domain=domain, min_weight=min_weight,
-                        max_weight=max_weight, created_from=created_from, created_to=created_to,
-                        branch_type=branch_type, flag=flag, entity=entity)
+    where = conditions(access, query, await plan_search(query, embedding))
     total = (await db.execute(select(func.count()).select_from(MemoryNode).where(*where))).scalar_one()
     stmt = select(MemoryNode).where(*where)
     if prefer == "connected":
@@ -198,7 +104,7 @@ async def graph_all(
     else:
         stmt = stmt.order_by(MemoryNode.updated_at.desc(), MemoryNode.id)
     selected = (await db.execute(stmt.limit(max_nodes))).scalars().all()
-    nodes = {node.id: node for node in selected if node.tenant_id == tenant and access.can_read(node)}
+    nodes = {node.id: node for node in selected if node.tenant_id == tenant and can_list(access, node)}
     edges = await _edges(db, tenant, nodes, types)
     degree = _degree(edges)
     result_nodes = [{**_brief(node, access), "depth": 0, "degree": degree[str(node.id)]}
@@ -212,26 +118,15 @@ async def graph_all(
 
 @router.get("/api/graph/neighbourhood")
 async def graph_neighbourhood(
-    db: DbDep, access: AccessDep, focus: uuid.UUID,
+    db: DbDep, access: AccessDep, focus: uuid.UUID, query: BrowseQueryDep,
+    embedding: OptionalEmbeddingDep,
     depth: int = Query(1, ge=1, le=3), max_nodes: int = Query(300, ge=1, le=MAX_GRAPH_NODES),
     types: list[str] | None = Query(None),
-    tab: Literal["current", "all", "quarantined", "deleted"] = "current",
-    q: str | None = None, mode: Literal["semantic", "text", "metadata"] = "semantic",
-    scope: list[str] | None = Query(None), actor: list[str] | None = Query(None),
-    project: str | None = None, domain: list[str] | None = Query(None),
-    min_weight: float | None = Query(None, ge=0, le=1),
-    max_weight: float | None = Query(None, ge=0, le=1),
-    created_from: date | None = None, created_to: date | None = None,
-    branch_type: str | None = None, flag: list[str] | None = Query(None),
-    entity: uuid.UUID | None = None,
 ):
     tenant = access.principal.tenant_id
-    where = _conditions(access, tab=tab, q=q, mode=mode, scope=scope, actor=actor,
-                        project=project, domain=domain, min_weight=min_weight,
-                        max_weight=max_weight, created_from=created_from, created_to=created_to,
-                        branch_type=branch_type, flag=flag, entity=entity)
+    where = conditions(access, query, await plan_search(query, embedding))
     center = (await db.execute(select(MemoryNode).where(*where, MemoryNode.id == focus))).scalar_one_or_none()
-    if center is None or center.tenant_id != tenant or not access.can_read(center):
+    if center is None or center.tenant_id != tenant or not can_list(access, center):
         raise HTTPException(status_code=404, detail="Memory not found")
     nodes = {center.id: center}
     depths = {center.id: 0}
@@ -260,7 +155,7 @@ async def graph_neighbourhood(
             break
         visible = (await db.execute(select(MemoryNode).where(*where, MemoryNode.id.in_(candidates))
                     .order_by(MemoryNode.updated_at.desc(), MemoryNode.id))).scalars().all()
-        visible = [node for node in visible if node.tenant_id == tenant and access.can_read(node)]
+        visible = [node for node in visible if node.tenant_id == tenant and can_list(access, node)]
         available = max_nodes - len(nodes)
         cut_count += max(len(visible) - max(available, 0), 0)
         chosen = visible[:max(available, 0)]
@@ -278,7 +173,7 @@ async def graph_neighbourhood(
                     if edge["target"] == str(center.id)})
     return {
         "focus": {**_brief(center, access),
-                  "content": center.content if _human_can_see_content(access, center) else "",
+                  "content": center.content if can_see_content(access, center) else "",
                   "degree": degree[str(center.id)], "hidden_degree": 0},
         "nodes": [{**_brief(node, access), "depth": depths[node.id]} for node in nodes.values()],
         "edges": edges, "hidden_count": 0, "cut_count": cut_count,

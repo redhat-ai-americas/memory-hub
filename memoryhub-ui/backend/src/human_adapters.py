@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -53,6 +53,7 @@ from memoryhub_core.services.project import (
 from memoryhub_core.services.project import (
     create_project as core_create_project,
 )
+from memoryhub_core.services.promotion import promote_memory
 from memoryhub_core.services.valkey_client import ValkeyClient, ValkeyUnavailableError
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import String, and_, cast, func, or_, select
@@ -61,6 +62,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from src.authorization import AccessDep, AgentOwner
+from src.browse_filters import (
+    NEAR_DUPLICATE_FACET_LIMIT,
+    NEAR_DUPLICATE_SIMILARITY,
+    BrowseQueryDep,
+    OptionalEmbeddingDep,
+    SearchPlan,
+    cached_embedding_service,
+    can_list,
+    can_restore,
+    can_see_content,
+    content_clause,
+    near_duplicate_exists,
+    nearest_similarity,
+    plan_search,
+    relevance_order,
+    similarity_column,
+    state_clause,
+    tab_conditions,
+)
+from src.browse_filters import conditions as browse_conditions
 from src.config import Settings, get_settings
 from src.database import get_db
 
@@ -118,11 +139,22 @@ class ReportBody(StrictBody):
 
 
 class BulkBody(StrictBody):
-    action: Literal["quarantine", "restore", "delete", "relate"]
+    action: Literal["quarantine", "restore", "delete", "relate", "weight", "promote"]
     ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
     reason: str | None = Field(default=None, max_length=500)
     target_id: uuid.UUID | None = None
     relationship_type: Literal["related_to", "derived_from", "supersedes", "conflicts_with"] | None = None
+    weight: float | None = Field(default=None, ge=0, le=1)
+    target_scope: Literal["project", "organizational"] | None = None
+    target_scope_id: str | None = Field(default=None, min_length=1, max_length=255)
+
+    def extras(self, *allowed: str) -> None:
+        """Reject options that belong to another action, so a typo never goes unnoticed."""
+        options = {"target_id": self.target_id, "relationship_type": self.relationship_type,
+                   "weight": self.weight, "target_scope": self.target_scope,
+                   "target_scope_id": self.target_scope_id}
+        if any(value is not None for name, value in options.items() if name not in allowed):
+            raise HTTPException(status_code=422, detail="Unexpected options for this action")
 
 
 class EntityUpdateBody(StrictBody):
@@ -137,11 +169,6 @@ class EntityMergeBody(StrictBody):
 
 
 @lru_cache(maxsize=4)
-def _cached_embedding_service(url: str) -> HttpEmbeddingService:
-    return HttpEmbeddingService(url)
-
-
-@lru_cache(maxsize=4)
 def _cached_valkey_client(url: str) -> ValkeyClient:
     return ValkeyClient(ValkeySettings(url=url))
 
@@ -149,7 +176,7 @@ def _cached_valkey_client(url: str) -> ValkeyClient:
 def get_embedding_service(settings: SettingsDep) -> HttpEmbeddingService:
     if not settings.embedding_url:
         raise HTTPException(status_code=503, detail="Embedding service is not configured")
-    return _cached_embedding_service(settings.embedding_url)
+    return cached_embedding_service(settings.embedding_url)
 
 
 EmbeddingDep = Annotated[HttpEmbeddingService, Depends(get_embedding_service)]
@@ -542,22 +569,46 @@ async def report(memory_id: uuid.UUID, body: ReportBody, db: DbDep, access: Acce
 
 
 @router.post("/api/memories/bulk")
-async def moderate_bulk(body: BulkBody, db: DbDep, access: AccessDep):
-    """Apply existing Core transitions only after full-set preflight."""
+async def moderate_bulk(body: BulkBody, db: DbDep, access: AccessDep, embedding: OptionalEmbeddingDep):
+    """Apply existing Core transitions only after full-set preflight.
+
+    delete, relate and restore of deleted memories run in one transaction.
+    weight and promote go through Core versioning/promotion, which commits per
+    memory: every memory is checked first, and the answer lists per-item errors.
+    """
     if len(set(body.ids)) != len(body.ids):
         raise HTTPException(status_code=422, detail="Duplicate memory IDs")
     if body.action == "delete":
-        if body.target_id or body.relationship_type:
-            raise HTTPException(status_code=422, detail="Unexpected relationship options")
+        body.extras()
         return await _bulk_delete(body.ids, db, access)
     if body.action == "relate":
+        body.extras("target_id", "relationship_type")
         if body.target_id is None or body.relationship_type is None:
             raise HTTPException(status_code=422, detail="Target and relationship type required")
         return await _bulk_relate(body.ids, body.target_id, body.relationship_type, db, access)
+    if body.action == "weight":
+        body.extras("weight")
+        if body.weight is None:
+            raise HTTPException(status_code=422, detail="Weight required")
+        return await _bulk_weight(body.ids, body.weight, db, access, _require_embedding(embedding))
+    if body.action == "promote":
+        body.extras("target_scope", "target_scope_id")
+        if body.target_scope is None:
+            raise HTTPException(status_code=422, detail="Target scope required")
+        return await _bulk_promote(body.ids, body.target_scope, body.target_scope_id, db, access,
+                                   _require_embedding(embedding))
+    body.extras()
+    if body.action == "restore":
+        deleted = (await db.execute(select(MemoryNode.id).where(
+            MemoryNode.id.in_(body.ids), MemoryNode.tenant_id == access.principal.tenant_id,
+            MemoryNode.deleted_at.is_not(None),
+        ))).scalars().all()
+        if deleted and len(deleted) != len(body.ids):
+            raise HTTPException(status_code=422, detail="Restore deleted and quarantined memories separately")
+        if deleted:
+            return await _bulk_restore_deleted(body.ids, db, access)
     if access.principal.role != "admin":
         raise HTTPException(status_code=403, detail="Moderation forbidden")
-    if body.target_id or body.relationship_type:
-        raise HTTPException(status_code=422, detail="Unexpected relationship options")
     nodes = []
     for memory_id in sorted(body.ids):
         node = await _node(db, access, memory_id, lock=True)
@@ -594,6 +645,7 @@ async def _bulk_delete(ids: list[uuid.UUID], db: AsyncSession, access: AccessDep
     tenant = access.principal.tenant_id
     roots = []
     closure: dict[uuid.UUID, MemoryNode] = {}
+    forgotten = []
     for memory_id in sorted(ids):
         node = await _node(db, access, memory_id, lock=True)
         access.require_delete(node)
@@ -604,11 +656,13 @@ async def _bulk_delete(ids: list[uuid.UUID], db: AsyncSession, access: AccessDep
             related = await collect_delete_nodes(node, db, tenant, seed_locked=True)
         except MemoryNotFoundError:
             raise HTTPException(status_code=404, detail="Memory not found") from None
-        for member in related.values():
+        # A branch deleted earlier on its own stays as it is: it keeps its own
+        # deleted_at, so restoring this memory later does not bring it back.
+        fresh = {key: member for key, member in related.items() if member.deleted_at is None}
+        for member in fresh.values():
             access.require_delete(member)
-            if member.deleted_at is not None:
-                raise HTTPException(status_code=409, detail="Memory is already deleted")
             closure[member.id] = member
+        forgotten.append(_closure_summary(node, fresh))
     # Soft-delete does not mutate unrelated edge endpoints. A corrupt
     # cross-tenant edge is nevertheless a boundary failure, not a reason to
     # proceed with a partially visible graph.
@@ -631,7 +685,183 @@ async def _bulk_delete(ids: list[uuid.UUID], db: AsyncSession, access: AccessDep
     except Exception:
         await db.rollback()
         raise
-    return {"done": [str(node.id) for node in roots], "errors": []}
+    return {"done": [str(node.id) for node in roots], "errors": [], "forgotten": forgotten}
+
+
+def _closure_summary(root: MemoryNode, members: dict[uuid.UUID, MemoryNode]) -> dict:
+    """What one delete or restore touches: the version chain and the branches under it."""
+    chain = {root.id}
+    frontier = {root.id}
+    while frontier:
+        step = {m.id for m in members.values()
+                if m.id not in chain and (m.previous_version_id in frontier
+                                          or any(members[i].previous_version_id == m.id for i in frontier))}
+        chain |= step
+        frontier = step
+    return {"id": str(root.id), "scope": root.scope, "scope_id": root.scope_id,
+            "owner_id": root.owner_id, "versions": len(chain),
+            "branches": len(members) - len(chain), "rows": len(members)}
+
+
+def _require_embedding(embedding):
+    if embedding is None:
+        raise HTTPException(status_code=503, detail="Embedding service is not configured")
+    return embedding
+
+
+async def _bulk_restore_deleted(ids: list[uuid.UUID], db: AsyncSession, access: AccessDep) -> dict:
+    """Undo a soft delete: the rows deleted together come back as they were.
+
+    Only rows whose deleted_at equals the chosen memory's deleted_at return,
+    so a branch removed earlier on its own stays deleted. A row is current
+    again when no newer version exists and its parent (if any) is current.
+    Whoever may delete a memory may restore it.
+    """
+    tenant = access.principal.tenant_id
+    restored: dict[uuid.UUID, MemoryNode] = {}
+    summaries = []
+    for memory_id in sorted(ids):
+        node = await _node(db, access, memory_id, lock=True)
+        if node.deleted_at is None:
+            raise HTTPException(status_code=409, detail="Memory is not deleted")
+        if not can_restore(access, node):
+            raise HTTPException(status_code=404, detail="Memory not found")
+        authored = node.owner_id in access.identities or node.actor_id in access.identities
+        # Recheck the live membership: an author needs to be a member, anyone else a project admin.
+        if node.scope == "project" and not await _membership(db, access, node.scope_id, admin=not authored):
+            raise HTTPException(status_code=404, detail="Memory not found")
+        try:
+            related = await collect_delete_nodes(node, db, tenant, seed_locked=True)
+        except MemoryNotFoundError:
+            raise HTTPException(status_code=404, detail="Memory not found") from None
+        together = {key: member for key, member in related.items() if member.deleted_at == node.deleted_at}
+        for member in together.values():
+            if not can_restore(access, member):
+                raise HTTPException(status_code=403, detail="Memory restore forbidden")
+        summaries.append(_closure_summary(node, together))
+        restored.update(together)
+    successors = set((await db.execute(select(MemoryNode.previous_version_id).where(
+        MemoryNode.tenant_id == tenant, MemoryNode.previous_version_id.in_(restored),
+    ))).scalars().all())
+    parent_ids = {m.parent_id for m in restored.values() if m.parent_id and m.parent_id not in restored}
+    live_parents = {}
+    if parent_ids:
+        live_parents = {row.id: row for row in (await db.execute(select(MemoryNode).where(
+            MemoryNode.id.in_(parent_ids), MemoryNode.tenant_id == tenant,
+        ))).scalars().all()}
+
+    current: dict[uuid.UUID, bool] = {}
+
+    def is_current(member: MemoryNode) -> bool:
+        if member.id not in current:
+            parent_ok = True
+            if member.parent_id is not None:
+                parent = restored.get(member.parent_id)
+                if parent is not None:
+                    parent_ok = is_current(parent)
+                else:
+                    live = live_parents.get(member.parent_id)
+                    parent_ok = bool(live and live.deleted_at is None and live.is_current)
+            current[member.id] = member.id not in successors and parent_ok
+        return current[member.id]
+
+    for summary in summaries:
+        root = restored[uuid.UUID(summary["id"])]
+        _record_human_audit(db, access, "memory.restore", root.scope, root.owner_id, root.id,
+                            {"restored_rows": summary["rows"]})
+    try:
+        for member in restored.values():
+            member.is_current = is_current(member)
+            member.deleted_at = None
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return {"done": [summary["id"] for summary in summaries], "errors": [], "restored": summaries}
+
+
+async def _bulk_weight(ids: list[uuid.UUID], weight: float, db: AsyncSession, access: AccessDep,
+                       embedding) -> dict:
+    """A new version per memory with the new weight. Core versioning commits per memory."""
+    nodes = []
+    for memory_id in sorted(ids):
+        node = await _node(db, access, memory_id, lock=True)
+        await _require_write(db, access, node)
+        await _mutation_neighbors(db, access, node)
+        nodes.append(node)
+    targets = [(node.id, node.scope, node.owner_id, node.weight) for node in nodes]
+    await db.rollback()  # release preflight locks; Core takes its own per memory
+    done, errors = [], []
+    for memory_id, scope, owner_id, old_weight in targets:
+        if old_weight == weight:
+            done.append(str(memory_id))
+            continue
+        try:
+            node = await _node(db, access, memory_id, lock=True)
+            await _require_write(db, access, node)
+            _record_human_audit(db, access, "memory.update", scope, owner_id, memory_id,
+                                {"weight": weight, "bulk": True})
+            version = await core_update_memory(
+                memory_id, MemoryNodeUpdate(weight=weight), db, embedding,
+                actor_id=access.principal.username, driver_id=access.principal.username,
+            )
+            done.append(str(version.id))
+        except HTTPException as exc:
+            await db.rollback()
+            errors.append({"id": str(memory_id), "detail": exc.detail})
+        except (MemoryNotFoundError, MemoryNotCurrentError):
+            await db.rollback()
+            errors.append({"id": str(memory_id), "detail": "Memory changed before it was saved"})
+    return {"done": done, "errors": errors}
+
+
+async def _bulk_promote(ids: list[uuid.UUID], target_scope: str, target_scope_id: str | None,
+                        db: AsyncSession, access: AccessDep, embedding) -> dict:
+    """Copy memories to a broader scope this person writes, linked by derived_from.
+
+    A user promotes their personal memories into a project they belong to.
+    An admin with an organizational write grant promotes project memories
+    into the organization. Nothing is copied unless every memory qualifies.
+    """
+    user = access.principal.role == "user"
+    if user and target_scope != "project":
+        raise HTTPException(status_code=403, detail="Promotion target forbidden")
+    if not user and (target_scope != "organizational" or "organizational" not in access.admin_write_scopes):
+        raise HTTPException(status_code=403, detail="Promotion target forbidden")
+    if target_scope == "project":
+        if not target_scope_id:
+            raise HTTPException(status_code=422, detail="Project required")
+        await _project(db, access, target_scope_id, lock=True)
+        if not await _membership(db, access, target_scope_id, admin=False):
+            raise HTTPException(status_code=403, detail="Project write forbidden")
+    elif target_scope_id is not None:
+        raise HTTPException(status_code=422, detail="Organizational memories have no scope ID")
+    source_scope = "user" if user else "project"
+    for memory_id in sorted(ids):
+        node = await _node(db, access, memory_id)
+        if (node.scope != source_scope or node.deleted_at is not None or not node.is_current
+                or node.status != "active" or not can_see_content(access, node)
+                or (user and node.owner_id not in access.identities)):
+            raise HTTPException(status_code=404, detail="Memory not found")
+    await db.rollback()
+    done, errors = [], []
+    for memory_id in sorted(ids):
+        try:
+            node = await _node(db, access, memory_id)
+            _record_human_audit(db, access, "memory.promote", target_scope, access.principal.username,
+                                memory_id, {"from_scope": node.scope, "target_scope_id": target_scope_id})
+            promoted = await promote_memory(
+                memory_id, target_scope, db, embedding, tenant_id=access.principal.tenant_id,
+                promoted_by=access.principal.username, target_scope_id=target_scope_id,
+            )
+            done.append(str(promoted.id))
+        except HTTPException as exc:
+            await db.rollback()
+            errors.append({"id": str(memory_id), "detail": exc.detail})
+        except (MemoryNotFoundError, ValueError, RuntimeError) as exc:
+            await db.rollback()
+            errors.append({"id": str(memory_id), "detail": str(exc) or "Promotion failed"})
+    return {"done": done, "errors": errors}
 
 
 async def _bulk_relate(ids: list[uuid.UUID], target_id: uuid.UUID,
@@ -725,127 +955,59 @@ def _human_can_see_content(access: AccessDep, memory: MemoryNode) -> bool:
     )
 
 
+Sort = Literal["updated", "created", "weight", "version", "relevance"]
+
+
 @router.get("/api/memories/browse")
 async def browse_memories(
     db: DbDep,
     access: AccessDep,
-    tab: Literal["current", "all", "quarantined", "deleted"] = "current",
-    q: str | None = None,
-    mode: Literal["semantic", "text", "metadata"] = "semantic",
-    scope: list[str] | None = Query(None),
-    actor: list[str] | None = Query(None),
-    project: str | None = None,
-    domain: list[str] | None = Query(None),
-    min_weight: float | None = Query(None, ge=0, le=1),
-    max_weight: float | None = Query(None, ge=0, le=1),
-    created_from: date | None = None,
-    created_to: date | None = None,
-    branch_type: str | None = None,
-    flag: list[str] | None = Query(None),
-    entity: uuid.UUID | None = None,
-    sort: Literal["updated", "created", "weight", "relevance"] = "updated",
+    query: BrowseQueryDep,
+    embedding: OptionalEmbeddingDep,
+    sort: Sort = "updated",
     order: Literal["asc", "desc"] = "desc",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ):
-    """Read existing memories with the same human scope as other BFF reads."""
-    if min_weight is not None and max_weight is not None and min_weight > max_weight:
-        raise HTTPException(status_code=422, detail="Invalid weight range")
-    if flag and any(value not in ("contradicted", "has_branches") for value in flag):
-        raise HTTPException(status_code=422, detail="Unsupported flag filter")
-    if access.principal.role == "user" and tab in ("quarantined", "deleted"):
-        raise HTTPException(status_code=403, detail="Memory state forbidden")
+    """The Memory browser table: one page of rows plus tab counts and facets."""
+    plan = await plan_search(query, embedding)
+    return await browse_page(db, access, query, plan, sort=sort, order=order, page=page, per_page=per_page)
+
+
+async def browse_page(
+    db: AsyncSession, access: AccessDep, query, plan: SearchPlan, *,
+    sort: str = "updated", order: str = "desc", page: int = 1, per_page: int = 20,
+    summary: bool = True,
+) -> dict:
+    """One page of the browser. Shared by the table and export.
+
+    Filters come from browse_filters, shared with the graph and the timeline.
+    Content-derived values (preview, domains, entities, similarity,
+    near-duplicate score) appear only where the viewer may read the content.
+    """
     tenant = access.principal.tenant_id
-    base = [MemoryNode.tenant_id == tenant]
-    if access.principal.role == "user":
-        base.append(_human_content_clause(access))
-    filters = list(base)
-    if tab == "current":
-        filters.extend((MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
-                        MemoryNode.status == "active"))
-    elif tab == "all":
-        filters.append(MemoryNode.deleted_at.is_(None))
-    elif tab == "quarantined":
-        filters.extend((MemoryNode.deleted_at.is_(None), MemoryNode.status == "quarantined"))
-    else:
-        filters.append(MemoryNode.deleted_at.is_not(None))
-    if scope:
-        filters.append(MemoryNode.scope.in_(scope))
-    if actor:
-        filters.append(MemoryNode.actor_id.in_(actor))
-    if project:
-        filters.extend((MemoryNode.scope == "project", MemoryNode.scope_id == project))
-    if domain:
-        filters.extend((_human_content_clause(access), MemoryNode.domains.overlap(domain)))
-    if min_weight is not None:
-        filters.append(MemoryNode.weight >= min_weight)
-    if max_weight is not None:
-        filters.append(MemoryNode.weight <= max_weight)
-    if created_from:
-        filters.append(MemoryNode.created_at >= created_from)
-    if created_to:
-        filters.append(MemoryNode.created_at < created_to + timedelta(days=1))
-    if branch_type:
-        child = aliased(MemoryNode)
-        filters.append(select(child.id).where(
-            child.parent_id == MemoryNode.id, child.tenant_id == tenant,
-            child.branch_type == branch_type, child.deleted_at.is_(None),
-            access.clause(child),
-        ).exists())
-    if flag:
-        if "contradicted" in flag:
-            filters.append(select(ContradictionReport.id).where(
-                ContradictionReport.memory_id == MemoryNode.id,
-                ContradictionReport.tenant_id == tenant,
-                ContradictionReport.resolved.is_(False),
-            ).exists())
-        if "has_branches" in flag:
-            child = aliased(MemoryNode)
-            filters.append(select(child.id).where(
-                child.parent_id == MemoryNode.id, child.tenant_id == tenant,
-                child.deleted_at.is_(None),
-                access.clause(child),
-            ).exists())
-    if entity:
-        filters.extend((_human_content_clause(access), select(MemoryRelationship.id).where(
-            MemoryRelationship.source_id == MemoryNode.id,
-            MemoryRelationship.target_id == entity,
-            MemoryRelationship.tenant_id == tenant,
-            MemoryRelationship.relationship_type == "mentions",
-            MemoryRelationship.valid_until.is_(None),
-        ).exists()))
-    search_mode = "none"
-    if q:
-        pattern = f"%{q.strip()}%"
-        metadata_match = or_(
-            cast(MemoryNode.id, String).ilike(pattern), MemoryNode.owner_id.ilike(pattern),
-        )
-        if mode == "metadata":
-            filters.append(metadata_match)
-            search_mode = "metadata"
-        elif access.principal.role == "admin":
-            filters.append(or_(metadata_match, _human_content_clause(access) &
-                               or_(MemoryNode.content.ilike(pattern), MemoryNode.stub.ilike(pattern))))
-            search_mode = "text"
-        else:
-            filters.append(or_(metadata_match, MemoryNode.content.ilike(pattern), MemoryNode.stub.ilike(pattern)))
-            search_mode = "text"
+    filters = browse_conditions(access, query, plan)
     total = (await db.execute(select(func.count()).select_from(MemoryNode).where(*filters))).scalar_one()
-    sort_col = {"updated": MemoryNode.updated_at, "created": MemoryNode.created_at,
-                "weight": MemoryNode.weight, "relevance": MemoryNode.updated_at}[sort]
-    ordered = sort_col.asc() if order == "asc" else sort_col.desc()
-    memories = (await db.execute(select(MemoryNode).where(*filters).order_by(ordered, MemoryNode.id)
-                                 .offset((page - 1) * per_page).limit(per_page))).scalars().all()
-    memories = [
-        memory for memory in memories
-        if memory.tenant_id == tenant and (
-            access.principal.role == "admin" or _human_can_see_content(access, memory)
-        )
-    ]
+    if sort == "relevance":
+        ordering = relevance_order(plan)
+    else:
+        column = {"updated": MemoryNode.updated_at, "created": MemoryNode.created_at,
+                  "weight": MemoryNode.weight, "version": MemoryNode.version}[sort]
+        ordering = [column.asc() if order == "asc" else column.desc()]
+    rows = (await db.execute(
+        select(MemoryNode, similarity_column(plan, access, query.tab).label("score"))
+        .where(*filters).order_by(*ordering, MemoryNode.id)
+        .offset((page - 1) * per_page).limit(per_page)
+    )).all()
+    scores = {memory.id: score for memory, score in rows}
+    # SQL already applied visibility; check every row again before it leaves.
+    memories = [memory for memory, _ in rows if can_list(access, memory)]
+    visible = {memory.id for memory in memories if can_see_content(access, memory)}
     ids = [memory.id for memory in memories]
     branch_counts: dict[uuid.UUID, Counter] = {}
     report_counts: dict[uuid.UUID, int] = {}
     entities_by_memory: dict[uuid.UUID, list[dict]] = {}
+    near: dict[uuid.UUID, float] = {}
     if ids:
         children = (await db.execute(select(MemoryNode.parent_id, MemoryNode.branch_type).where(
             MemoryNode.parent_id.in_(ids), MemoryNode.tenant_id == tenant,
@@ -859,9 +1021,8 @@ async def browse_memories(
             ContradictionReport.resolved.is_(False),
         ).group_by(ContradictionReport.memory_id))).all()
         report_counts = dict(reports)
-        # Entity names are content. The selected source memory is already
-        # authorized, and a redacted Admin row gets no linked entity names.
-        content_ids = [memory.id for memory in memories if _human_can_see_content(access, memory)]
+        # Entity names are content: only rows whose content is readable get them.
+        content_ids = [memory_id for memory_id in ids if memory_id in visible]
         if content_ids:
             entity_node = aliased(MemoryNode)
             entity_rows = (await db.execute(select(
@@ -883,10 +1044,19 @@ async def browse_memories(
                     "id": str(entity_id), "name": name,
                     "type": (kind or "").removeprefix("entity:"),
                 })
+        # Near-duplicate scores are for the table; export does not carry them.
+        for memory in memories if summary else ():
+            if memory.id in visible and memory.embedding is not None:
+                score = (await db.execute(select(
+                    nearest_similarity(access, memory.id, memory.embedding),
+                ))).scalar_one_or_none()
+                if score is not None and score >= NEAR_DUPLICATE_SIMILARITY:
+                    near[memory.id] = round(float(score), 4)
     items = []
     for memory in memories:
-        hidden = not _human_can_see_content(access, memory)
-        writable = access.can_write(memory) and (
+        hidden = memory.id not in visible
+        deleted = memory.deleted_at is not None
+        writable = not deleted and access.can_write(memory) and (
             memory.scope != "project" or memory.scope_id in (
                 access.human_projects if access.principal.role == "user" else access.human_project_admins
             )
@@ -895,6 +1065,7 @@ async def browse_memories(
             memory.scope != "project" or memory.scope_id in access.human_project_admins
         )
         branches = branch_counts.get(memory.id, Counter())
+        score = scores.get(memory.id)
         items.append({
             "id": str(memory.id), "stub": "Content hidden" if hidden else memory.stub,
             "content_preview": "" if hidden else memory.content[:240],
@@ -907,51 +1078,48 @@ async def browse_memories(
             "branch_count": sum(branches.values()),
             "branch_summary": [{"type": kind, "count": count} for kind, count in branches.items()],
             "open_contradictions": report_counts.get(memory.id, 0),
-            "near_duplicate": None, "created_at": memory.created_at,
+            "near_duplicate": None if hidden else near.get(memory.id),
+            "created_at": memory.created_at,
             "updated_at": memory.updated_at, "deleted_at": memory.deleted_at,
-            "relevant_until": memory.relevant_until, "score": None,
+            "relevant_until": memory.relevant_until,
+            "score": None if hidden or score is None else round(float(score), 4),
             "entities": [] if hidden else entities_by_memory.get(memory.id, []),
             "entity_count": 0 if hidden else len(entities_by_memory.get(memory.id, [])),
             "redacted": hidden,
             "capabilities": {"write": writable, "moderate": moderatable},
-            "can_delete": access.can_delete(memory) and (
+            "can_delete": not deleted and access.can_delete(memory) and (
                 memory.scope != "project" or memory.scope_id in access.human_projects
             ),
+            "can_restore": can_restore(access, memory),
         })
+    if not summary:
+        return {"items": items, "total": total, "page": page, "per_page": per_page,
+                "search_mode": plan.mode}
     tabs = {}
-    for name, condition in (
-        ("current", (MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
-                     MemoryNode.status == "active")),
-        ("all", (MemoryNode.deleted_at.is_(None),)),
-        ("quarantined", (MemoryNode.deleted_at.is_(None), MemoryNode.status == "quarantined")),
-        ("deleted", (MemoryNode.deleted_at.is_not(None),)),
-    ):
-        if access.principal.role == "user" and name in ("quarantined", "deleted"):
-            tabs[name] = 0
-        else:
-            stmt = select(func.count()).select_from(MemoryNode).where(*base, *condition)
-            tabs[name] = (await db.execute(stmt)).scalar_one()
+    for name in ("current", "all", "quarantined", "deleted"):
+        stmt = select(func.count()).select_from(MemoryNode).where(
+            MemoryNode.tenant_id == tenant, state_clause(access, name), *tab_conditions(name),
+        )
+        tabs[name] = (await db.execute(stmt)).scalar_one()
+    # Facets describe the live memories this person may list (not the tab).
+    live = (MemoryNode.tenant_id == tenant, state_clause(access, "all"), MemoryNode.deleted_at.is_(None))
     facets = {}
     for name, column, extra in (
         ("scopes", MemoryNode.scope, ()),
         ("writers", MemoryNode.owner_id, ()),
         ("projects", MemoryNode.scope_id, (MemoryNode.scope == "project",)),
     ):
-        rows = (await db.execute(select(column, func.count()).select_from(MemoryNode).where(
-            *base, MemoryNode.deleted_at.is_(None), *extra,
+        facet_rows = (await db.execute(select(column, func.count()).select_from(MemoryNode).where(
+            *live, *extra,
         ).group_by(column))).all()
-        facets[name] = [{"value": value, "count": count} for value, count in rows if value is not None]
-    facets["domains"] = []
-    # These counts describe only authorized memories. Domain values are
-    # content metadata and must exclude Admin's redacted personal rows.
-    domain_rows = select(func.unnest(MemoryNode.domains).label("value")).where(
-        *base, MemoryNode.deleted_at.is_(None), _human_content_clause(access),
-    ).subquery()
+        facets[name] = [{"value": value, "count": count} for value, count in facet_rows if value is not None]
+    readable = (MemoryNode.tenant_id == tenant, content_clause(access, "all"), MemoryNode.deleted_at.is_(None))
+    domain_rows = select(func.unnest(MemoryNode.domains).label("value")).where(*readable).subquery()
     domains = (await db.execute(select(domain_rows.c.value, func.count()).select_from(
         domain_rows).group_by(domain_rows.c.value))).all()
     facets["domains"] = [{"value": value, "count": count} for value, count in domains if value]
     contradicted = (await db.execute(select(func.count()).select_from(MemoryNode).where(
-        *base, MemoryNode.deleted_at.is_(None),
+        *readable,
         select(ContradictionReport.id).where(
             ContradictionReport.memory_id == MemoryNode.id,
             ContradictionReport.tenant_id == tenant,
@@ -960,16 +1128,24 @@ async def browse_memories(
     ))).scalar_one()
     branch = aliased(MemoryNode)
     has_branches = (await db.execute(select(func.count()).select_from(MemoryNode).where(
-        *base, MemoryNode.deleted_at.is_(None),
+        *live,
         select(branch.id).where(
             branch.parent_id == MemoryNode.id, branch.tenant_id == tenant,
             branch.deleted_at.is_(None), access.clause(branch),
         ).exists(),
     ))).scalar_one()
+    embedded = (await db.execute(select(func.count()).select_from(MemoryNode).where(
+        *readable, *tab_conditions("current"), MemoryNode.embedding.is_not(None),
+    ))).scalar_one()
+    near_duplicates = None
+    if embedded <= NEAR_DUPLICATE_FACET_LIMIT:
+        near_duplicates = (await db.execute(select(func.count()).select_from(MemoryNode).where(
+            *readable, *tab_conditions("current"), near_duplicate_exists(access, "current"),
+        ))).scalar_one()
     facets["flags"] = {"contradicted": contradicted, "has_branches": has_branches,
-                       "near_duplicate": None}
+                       "near_duplicate": near_duplicates}
     return {"items": items, "total": total, "page": page, "per_page": per_page,
-            "search_mode": search_mode, "metadata_only": access.principal.role == "admin",
+            "search_mode": plan.mode, "metadata_only": access.principal.role == "admin",
             "hidden_scopes": ["user", "enterprise"] if access.principal.role == "admin" else [],
             "tab_counts": tabs, "facets": facets}
 

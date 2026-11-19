@@ -38,7 +38,7 @@ def node(**changes):
         "owner_id": "alice", "actor_id": "alice", "status": "active", "deleted_at": None,
         "is_current": True, "parent_id": None, "weight": 0.7,
         "content": "Entity", "stub": "Memory stub", "branch_type": None,
-        "metadata_": None, "version": 1,
+        "metadata_": None, "version": 1, "previous_version_id": None, "embedding": None,
         "driver_id": None, "domains": [], "content_type": "experiential",
         "relevant_until": None,
         "created_at": datetime(2026, 1, 1, tzinfo=UTC),
@@ -420,7 +420,8 @@ def test_bulk_restore_commits_before_human_audit(client):
     http, db, set_access = client
     set_access(access("admin"))
     quarantined = node(scope="organizational", status="quarantined")
-    db.execute.side_effect = [result(quarantined)]
+    # First: which of the ids are soft-deleted (none), then the locked row.
+    db.execute.side_effect = [result(items=[]), result(quarantined)]
     order = []
 
     async def commit():
@@ -616,59 +617,65 @@ def test_entity_merge_rejects_inaccessible_linked_source(client, inaccessible):
         merge.assert_not_awaited()
 
 
+def _browse_db(db, rows):
+    """A session that answers the browser's queries: the page rows, then empty facts.
+
+    The page query is the one selecting a "score" column; every count is 0 and
+    every other list is empty. The SQL each call received stays inspectable.
+    """
+    def answer(statement, *args, **kwargs):
+        if "AS score" in str(statement):
+            return result(rows=rows)
+        return result(0)
+    db.execute.side_effect = answer
+
+
 def test_browse_redacts_admin_personal_content_and_capabilities(client):
     http, db, set_access = client
     set_access(access("admin"))
     personal = node(owner_id="bob", content="private text", stub="private stub")
-    db.execute.side_effect = [
-        result(1), result(items=[personal]), result(rows=[]), result(rows=[]),
-        result(1), result(1), result(0), result(0),
-        result(rows=[("user", 1)]), result(rows=[("bob", 1)]), result(rows=[]),
-        result(rows=[]), result(0), result(0),
-    ]
-    response = http.get("/api/memories/browse?q=bob&mode=semantic")
+    _browse_db(db, [(personal, None)])
+    from memoryhub_core.services.embeddings import HttpEmbeddingService
+
+    with patch.object(HttpEmbeddingService, "embed", AsyncMock(side_effect=RuntimeError("down"))):
+        response = http.get("/api/memories/browse?q=bob&mode=semantic")
     assert response.status_code == 200
     body = response.json()
-    assert body["search_mode"] == "text"
-    assert body["items"][0]["redacted"] is True
-    assert body["items"][0]["content_preview"] == ""
-    assert body["items"][0]["stub"] == "Content hidden"
-    assert body["items"][0]["capabilities"] == {"write": False, "moderate": False}
-    assert body["facets"]["flags"] == {"contradicted": 0, "has_branches": 0,
-                                      "near_duplicate": None}
+    assert body["search_mode"] == "text"  # the embedding service failed: text fallback, said so
+    item = body["items"][0]
+    assert item["redacted"] is True
+    assert item["content_preview"] == "" and item["stub"] == "Content hidden"
+    assert item["near_duplicate"] is None and item["score"] is None and item["domains"] == []
+    assert item["capabilities"] == {"write": False, "moderate": False}
+    assert item["can_restore"] is False
     sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
     assert "tenant-a" in sql and "bob" in sql
 
 
-def test_browse_user_cannot_request_quarantine_or_see_foreign_row(client):
+def test_browse_user_quarantined_tab_lists_only_own_writes(client):
     http, db, _ = client
-    assert http.get("/api/memories/browse?tab=quarantined").status_code == 403
-    foreign = node(owner_id="bob")
-    db.execute.side_effect = [
-        result(1), result(items=[foreign]), result(1), result(1),
-        result(rows=[]), result(rows=[]), result(rows=[]),
-        result(rows=[]), result(0), result(0),
-    ]
-    response = http.get("/api/memories/browse")
+    foreign = node(owner_id="bob", actor_id="bob", scope="project", scope_id="p", status="quarantined")
+    own = node(status="quarantined", content="my quarantined text")
+    _browse_db(db, [(foreign, None), (own, None)])
+    response = http.get("/api/memories/browse?tab=quarantined")
     assert response.status_code == 200
-    assert response.json()["items"] == []
-    assert response.json()["tab_counts"]["quarantined"] == 0
-    assert response.json()["tab_counts"]["deleted"] == 0
+    # The SQL keeps only the person's own writes; a row that slips through is dropped.
+    assert [item["id"] for item in response.json()["items"]] == [str(own.id)]
+    assert response.json()["items"][0]["content_preview"] == "my quarantined text"
+    sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "'quarantined'" in sql and "'alice'" in sql
 
 
 def test_browse_rejects_unsupported_flag_and_role_spoof_is_inert(client):
     http, db, _ = client
-    assert http.get("/api/memories/browse?flag=near_duplicate").status_code == 422
-    db.execute.side_effect = [
-        result(0), result(items=[]), result(0), result(0),
-        result(rows=[]), result(rows=[]), result(rows=[]),
-        result(rows=[]), result(0), result(0),
-    ]
-    response = http.get("/api/memories/browse?role=admin&tenant_id=tenant-b")
+    assert http.get("/api/memories/browse?flag=bogus").status_code == 422
+    _browse_db(db, [])
+    response = http.get("/api/memories/browse?role=admin&tenant_id=tenant-b&flag=near_duplicate")
     assert response.status_code == 200
     assert response.json()["metadata_only"] is False
     sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
     assert "tenant-a" in sql and "tenant-b" not in sql
+    assert "<=>" in sql  # near-duplicate filter compares embeddings in SQL
 
 
 def test_entity_created_by_own_agent_is_not_editable_by_its_person(client):

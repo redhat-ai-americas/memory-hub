@@ -39,7 +39,7 @@ def node(**changes):
         "content_type": "experiential", "source": "agent",
         "upstream_trust_level": "trusted", "relevant_until": None,
         "created_at": stamp, "updated_at": stamp, "expires_at": None,
-        "embedding": None,
+        "embedding": None, "previous_version_id": None,
     }
     values.update(changes)
     return SimpleNamespace(**values)
@@ -305,7 +305,7 @@ def test_export_user_rehydrates_each_row_admin_gets_metadata_csv(client):
     own = node()
     foreign = node(owner_id="bob", content="foreign secret")
     items = [{"id": str(own.id)}, {"id": str(foreign.id)}]
-    with patch("src.export_adapter.browse_memories", new_callable=AsyncMock,
+    with patch("src.export_adapter.browse_page", new_callable=AsyncMock,
                return_value={"items": items, "total": 2}):
         db.execute.side_effect = [query_result(items=[own, foreign])]
         response = http.get("/api/memories/export?mine=true")
@@ -316,7 +316,7 @@ def test_export_user_rehydrates_each_row_admin_gets_metadata_csv(client):
     set_access(access("admin"))
     admin_item = {"id": str(foreign.id), "scope": "user", "scope_id": None,
                   "owner_id": "=CMD()", "status": "active", "redacted": True}
-    with patch("src.export_adapter.browse_memories", new_callable=AsyncMock,
+    with patch("src.export_adapter.browse_page", new_callable=AsyncMock,
                return_value={"items": [admin_item], "total": 1}):
         response = http.get("/api/memories/export")
     assert response.status_code == 200
@@ -324,9 +324,10 @@ def test_export_user_rehydrates_each_row_admin_gets_metadata_csv(client):
     assert "'=CMD()" in response.text and "foreign secret" not in response.text
 
 
-def test_export_rejects_forbidden_state_before_streaming(client):
+def test_export_rejects_personal_export_for_admin_before_streaming(client):
     http, db, _ = client
-    response = http.get("/api/memories/export?tab=deleted")
+    app.dependency_overrides[get_access] = lambda: access("admin")
+    response = http.get("/api/memories/export?mine=true")
     assert response.status_code == 403
     db.execute.assert_not_awaited()
 
@@ -478,12 +479,27 @@ async def test_bulk_relate_success_and_foreign_target_rejected():
     db.commit.assert_not_awaited()
 
 
-def test_bulk_weight_stays_unavailable_without_atomic_core_operation(client):
+def test_bulk_weight_validates_options_before_any_read(client):
     http, db, _ = client
-    response = http.post("/api/memories/bulk", json={
-        "action": "weight", "ids": [str(uuid.uuid4())], "weight": 0.9,
-    })
-    assert response.status_code == 422
+    uid = str(uuid.uuid4())
+    assert http.post("/api/memories/bulk", json={"action": "weight", "ids": [uid]}).status_code == 422
+    assert http.post("/api/memories/bulk", json={
+        "action": "weight", "ids": [uid], "weight": 0.9, "target_id": uid,
+    }).status_code == 422
+    assert http.post("/api/memories/bulk", json={"action": "weight", "ids": [uid], "weight": 1.5}).status_code == 422
+    db.execute.assert_not_awaited()
+
+
+def test_bulk_weight_and_promote_need_the_embedding_service(client):
+    http, db, _ = client
+    from src.config import get_settings
+
+    app.dependency_overrides[get_settings] = lambda: Settings(ui_tenant_id="tenant-a", embedding_url="")
+    uid = str(uuid.uuid4())
+    assert http.post("/api/memories/bulk", json={"action": "weight", "ids": [uid], "weight": 0.9}).status_code == 503
+    assert http.post("/api/memories/bulk", json={
+        "action": "promote", "ids": [uid], "target_scope": "project", "target_scope_id": "p",
+    }).status_code == 503
     db.execute.assert_not_awaited()
 
 

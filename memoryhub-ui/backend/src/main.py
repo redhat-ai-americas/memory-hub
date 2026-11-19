@@ -16,6 +16,7 @@ from src.human_adapters import router as human_router
 from src.memory_context import router as context_router
 from src.routes import router
 from src.search_adapter import router as search_router
+from src.timeline_adapter import router as timeline_router
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(graph_router)
     app.include_router(search_router)
     app.include_router(export_router)
+    app.include_router(timeline_router)
 
     # Serve the compiled frontend if dist/ exists (single-container deployment)
     if FRONTEND_DIST.is_dir():

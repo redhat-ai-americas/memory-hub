@@ -6,18 +6,18 @@ import csv
 import io
 import json
 import uuid
-from datetime import date
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from memoryhub_core.models.memory import MemoryNode
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import AccessDep
+from src.browse_filters import BrowseQueryDep, OptionalEmbeddingDep, plan_search
 from src.database import get_db
-from src.human_adapters import _human_can_see_content, browse_memories
+from src.human_adapters import Sort, _human_can_see_content, browse_page
 
 router = APIRouter()
 DbDep = Annotated[AsyncSession, Depends(get_db)]
@@ -33,43 +33,24 @@ def _csv_safe(value: object) -> object:
 
 @router.get("/api/memories/export")
 async def export_memories(
-    db: DbDep, access: AccessDep,
-    tab: Literal["current", "all", "quarantined", "deleted"] = "current",
-    q: str | None = None, mode: Literal["semantic", "text", "metadata"] = "semantic",
-    scope: list[str] | None = Query(None), actor: list[str] | None = Query(None),
-    project: str | None = None, domain: list[str] | None = Query(None),
-    min_weight: float | None = Query(None, ge=0, le=1),
-    max_weight: float | None = Query(None, ge=0, le=1),
-    created_from: date | None = None, created_to: date | None = None,
-    branch_type: str | None = None, flag: list[str] | None = Query(None),
-    entity: uuid.UUID | None = None,
-    sort: Literal["updated", "created", "weight", "relevance"] = "updated",
+    db: DbDep, access: AccessDep, query: BrowseQueryDep, embedding: OptionalEmbeddingDep,
+    sort: Sort = "updated",
     order: Literal["asc", "desc"] = "desc",
     mine: bool = False,
 ):
     if mine and access.principal.role != "user":
         raise HTTPException(status_code=403, detail="Personal export forbidden")
-    first = await browse_memories(
-        db=db, access=access, tab=tab, q=q, mode=mode, scope=scope,
-        actor=actor, project=project, domain=domain,
-        min_weight=min_weight, max_weight=max_weight,
-        created_from=created_from, created_to=created_to,
-        branch_type=branch_type, flag=flag, entity=entity,
-        sort=sort, order=order, page=1, per_page=EXPORT_PAGE_SIZE,
-    )
+    # Embed once: every page of the export ranks against the same query vector.
+    plan = await plan_search(query, embedding)
+    first = await browse_page(db, access, query, plan, sort=sort, order=order,
+                              page=1, per_page=EXPORT_PAGE_SIZE, summary=False)
 
     async def selected_pages():
         yield first["items"]
         page = 2
         while (page - 1) * EXPORT_PAGE_SIZE < first["total"]:
-            browsed = await browse_memories(
-                db=db, access=access, tab=tab, q=q, mode=mode, scope=scope,
-                actor=actor, project=project, domain=domain,
-                min_weight=min_weight, max_weight=max_weight,
-                created_from=created_from, created_to=created_to,
-                branch_type=branch_type, flag=flag, entity=entity,
-                sort=sort, order=order, page=page, per_page=EXPORT_PAGE_SIZE,
-            )
+            browsed = await browse_page(db, access, query, plan, sort=sort, order=order,
+                                        page=page, per_page=EXPORT_PAGE_SIZE, summary=False)
             yield browsed["items"]
             page += 1
 

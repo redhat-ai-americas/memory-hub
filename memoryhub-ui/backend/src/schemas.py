@@ -165,6 +165,8 @@ class MeResponse(BaseModel):
     access: dict | None = None
     write: dict | None = None
     labs: bool = False
+    # Agent clients bound to this person: their writes count as the person's own.
+    agents: list[str] = []
 
 
 class AuthStatusResponse(BaseModel):

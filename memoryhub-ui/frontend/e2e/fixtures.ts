@@ -33,6 +33,7 @@ export const BFF_ROUTES: [string, RegExp][] = [
   ['POST', /^\/api\/memories$/],
   ['GET', /^\/api\/memories\/browse$/],
   ['POST', /^\/api\/memories\/bulk$/],
+  ['GET', /^\/api\/memories\/timeline$/],
   ['DELETE', /^\/api\/memory\/[^/]+$/],
   ['GET', /^\/api\/memory\/[^/]+$/],
   ['POST', /^\/api\/memory\/[^/]+\/branches$/],
@@ -82,6 +83,7 @@ const me = (role: Role) => ({
       : { scopes: ['user', 'project'], project_ids: ['atlas-planner'], campaign_ids: [], owner_id: 'mchen' },
   access: role === 'admin' ? { hidden_scopes: ['enterprise', 'user'], break_glass: null } : null,
   labs: false,
+  agents: role === 'admin' ? ['curator-agent'] : ['claude-code-mchen'],
 });
 
 const record = (id: string, stub: string, extra: Record<string, unknown> = {}) => ({
@@ -132,6 +134,7 @@ const row = (id: string, stub: string) => ({
   redacted: false,
   capabilities: { write: true, moderate: true },
   can_delete: true,
+  can_restore: false,
 });
 
 const graphNode = (id: string, stub: string, extra: Record<string, unknown> = {}) => ({
@@ -321,26 +324,73 @@ function respond(role: Role, method: string, path: string, url: URL, body: unkno
     ];
   if (path.startsWith('/api/contradictions/'))
     return { id: reportId, memory_id: memoryId, observed_behavior: 'Torque limit is now 12 N·m', confidence: 0.9, reporter: 'curator-agent', created_at: now, resolved: true, resolved_at: now };
-  if (path === '/api/memories/browse')
+  if (path === '/api/memories/browse' && url.searchParams.get('tab') === 'deleted')
     return {
-      items: [row(memoryId, 'Gripper torque limit is 11.5 N·m'), row(otherMemoryId, 'Path planner budget is 40 ms')],
+      ...browse(user, url),
+      items: [{ ...row(memoryId, 'Gripper torque limit is 11.5 N·m'), deleted_at: now, is_current: false, can_delete: false, can_restore: true,
+        capabilities: { write: false, moderate: false } }],
+      total: 1,
+    };
+  if (path === '/api/memories/browse') return browse(user, url);
+  if (path === '/api/memories/timeline')
+    return {
+      items: [
+        { ...timelineItem(memoryId, 'Gripper torque limit is 11.5 N·m'), at: now },
+        { ...timelineItem(otherMemoryId, 'Path planner budget is 40 ms'), at: '2026-11-10T09:00:00.000Z' },
+      ],
+      total: 2,
+      truncated: false,
+      by: url.searchParams.get('by') ?? 'created',
+      days: Number(url.searchParams.get('days') ?? 0),
+      first: '2026-11-10T09:00:00.000Z',
+      now,
+      metadata_only: !user,
+    };
+  if (path === '/api/memories' && method === 'POST') return { id: memoryId };
+  if (path === '/api/memories/bulk') {
+    const b = body as { action: string; ids: string[] };
+    const summary = (id: string) => ({ id, scope: 'project', scope_id: 'atlas-planner', owner_id: 'atlas-planner', versions: 2, branches: 1, rows: 3 });
+    if (b.action === 'delete') return { done: b.ids, errors: [], forgotten: b.ids.map(summary) };
+    if (b.action === 'restore' && user) return { done: b.ids, errors: [], restored: b.ids.map(summary) };
+    return { done: b.ids, errors: [] };
+  }
+  return respondMore(role, method, path, url, body);
+}
+
+const timelineItem = (id: string, stub: string) => ({
+  id, stub, scope: 'project', scope_id: 'atlas-planner', owner_id: 'atlas-planner', weight: 0.8, version: 2,
+  domains: ['robotics'], created_at: now, updated_at: now, redacted: false,
+});
+
+/** GET /api/memories/browse: two project memories; search answers in the mode asked for. */
+const browse = (user: boolean, url: URL) => {
+  const q = url.searchParams.get('q');
+  const mode = url.searchParams.get('mode') ?? 'semantic';
+  return {
+      items: [
+        { ...row(memoryId, 'Gripper torque limit is 11.5 N·m'), near_duplicate: 0.94, score: q && mode === 'semantic' ? 0.71 : null },
+        row(otherMemoryId, 'Path planner budget is 40 ms'),
+      ],
       total: 2,
       page: 1,
       per_page: 20,
-      search_mode: url.searchParams.get('q') ? 'text' : 'none',
+      // A question mark in the query plays "the embedding service is down".
+      search_mode: !q ? 'none' : mode === 'semantic' && !q.includes('?') ? 'semantic' : mode === 'metadata' ? 'metadata' : 'text',
       metadata_only: !user,
       hidden_scopes: user ? [] : ['user', 'enterprise'],
-      tab_counts: { current: 2, all: 3, quarantined: user ? 0 : 1, deleted: 0 },
+      tab_counts: { current: 2, all: 3, quarantined: user ? 0 : 1, deleted: 1 },
       facets: {
         scopes: [{ value: 'project', count: 2 }],
         writers: [{ value: 'atlas-planner', count: 2 }],
         projects: [{ value: 'atlas-planner', count: 2 }],
         domains: [],
-        flags: { contradicted: null, has_branches: null, near_duplicate: null },
+        flags: { contradicted: 1, has_branches: 2, near_duplicate: 1 },
       },
     };
-  if (path === '/api/memories' && method === 'POST') return { id: memoryId };
-  if (path === '/api/memories/bulk') return { done: (body as { ids: string[] }).ids, errors: [] };
+};
+
+function respondMore(role: Role, method: string, path: string, url: URL, body: unknown): unknown {
+  const user = role === 'user';
   if (path === '/api/relationships') return { id: 'rel-2' };
   if (/\/api\/memory\/[^/]+\/history$/.test(path))
     return [
@@ -467,13 +517,15 @@ export interface MockedBff {
   unknown: string[];
   /** "METHOD /path" for every call. */
   calls: string[];
+  /** Every JSON body sent, with its "METHOD /path". */
+  bodies: { key: string; body: unknown }[];
 }
 
 /** Optional per-test change to a canned answer, keyed by "METHOD /path". */
 export type Tweak = (key: string, payload: unknown) => unknown;
 
 export async function mockBff(page: Page, role: Role, tweak?: Tweak): Promise<MockedBff> {
-  const state: MockedBff = { unknown: [], calls: [] };
+  const state: MockedBff = { unknown: [], calls: [], bodies: [] };
   await page.route('**/api/**', async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -496,6 +548,7 @@ export async function mockBff(page: Page, role: Role, tweak?: Tweak): Promise<Mo
     } catch {
       body = undefined;
     }
+    if (body !== undefined) state.bodies.push({ key, body });
     const answer = respond(role, method, url.pathname, url, body);
     const payload = tweak ? tweak(key, answer) : answer;
     if (payload === null) {

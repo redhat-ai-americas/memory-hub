@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import Access, AccessDep
+from src.browse_filters import can_see_content
 from src.database import get_db
 from src.human_adapters import _human_can_see_content
 
@@ -37,7 +38,7 @@ def _readable(access: Access, node: MemoryNode) -> bool:
 
 
 def _brief(node: MemoryNode, access: Access) -> dict:
-    hidden = not _human_can_see_content(access, node)
+    hidden = not can_see_content(access, node)
     return {
         "id": str(node.id), "stub": "Content hidden" if hidden else node.stub,
         "scope": node.scope, "scope_id": node.scope_id, "owner_id": node.owner_id,

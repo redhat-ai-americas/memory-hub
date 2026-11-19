@@ -21,6 +21,8 @@ export interface Me {
   access?: { hidden_scopes: string[]; break_glass: null } | null;
   /** Where this person may write from the dashboard. */
   write?: { scopes: string[]; project_ids: string[] | null; campaign_ids: string[] | null; owner_id: string } | null;
+  /** Agent clients bound to this person; their writes count as the person's own. */
+  agents?: string[];
 }
 
 export type SignupMode = 'open' | 'domain' | 'invite' | 'closed';
@@ -239,6 +241,8 @@ export interface MemoryRow {
   capabilities: { write: boolean; moderate: boolean };
   /** #671: authors (and project admins) may delete this row; moderation alone is not enough for shared memories. */
   can_delete?: boolean;
+  /** Deleted tab: whoever could delete the memory may bring it back. */
+  can_restore?: boolean;
   id: string;
   stub: string;
   content_preview: string;
@@ -1684,4 +1688,62 @@ export interface SharedKnowledgeRecord {
 export interface SharedKnowledgeResponse {
   items: SharedKnowledgeRecord[];
   total: number;
+}
+
+/* ---------------- Memory browser: timeline and bulk results ---------------- */
+
+export interface TimelineItem {
+  id: string;
+  stub: string;
+  scope: Scope;
+  scope_id: string | null;
+  owner_id: string;
+  weight: number;
+  version: number;
+  domains: string[];
+  created_at: string;
+  updated_at: string;
+  at: string;
+  redacted?: boolean;
+}
+
+export interface TimelineResponse {
+  items: TimelineItem[];
+  total: number;
+  truncated: boolean;
+  by: 'created' | 'updated';
+  days: number;
+  first: string | null;
+  now: string;
+  metadata_only: boolean;
+}
+
+/** What one delete or restore touched: the version chain and the branches under it. */
+export interface ClosureSummary {
+  id: string;
+  scope: Scope;
+  scope_id: string | null;
+  owner_id: string;
+  versions: number;
+  branches: number;
+  rows: number;
+}
+
+export interface BulkRequest {
+  action: 'quarantine' | 'restore' | 'delete' | 'relate' | 'weight' | 'promote';
+  ids: string[];
+  reason?: string;
+  relationship_type?: 'related_to' | 'derived_from' | 'supersedes' | 'conflicts_with';
+  target_id?: string;
+  weight?: number;
+  target_scope?: 'project' | 'organizational';
+  target_scope_id?: string;
+}
+
+export interface BulkResult {
+  /** For weight and promote: the IDs of the new versions or copies. */
+  done: string[];
+  errors: { id: string; detail: string }[];
+  forgotten?: ClosureSummary[];
+  restored?: ClosureSummary[];
 }
