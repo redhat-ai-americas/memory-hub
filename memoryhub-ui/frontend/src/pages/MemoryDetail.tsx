@@ -4,9 +4,9 @@ import { PageHeader, Tabs, useApp } from '@/components/Shell';
 import { Empty, ErrorState, Modal, ScopeLabel, Sk, SkLines, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { MemoryContext, NodeBrief } from '@/types';
+import type { MemoryContext } from '@/types';
 import { errorMessage, fmtDateTime, fmtMonthDay, fmtRelative, fmtShortDateTime, fmtWeight, scopeMeta, shortId, truncate } from '@/utils/format';
-import { ConfirmModal, MemoryLink, RelationshipModal } from './common';
+import { ConfirmModal, memoryHref, MemoryLink, RelationshipModal } from './common';
 
 type Version = MemoryContext['versions'][number];
 
@@ -53,108 +53,6 @@ const who = (actor: string | null, driver: string | null, owner: string) => {
   return a;
 };
 
-/**
- * The memory page from the BFF's own routes: the record (GET /api/memory/{id}),
- * its version chain (/history), its browse row for who wrote it and what you
- * may do (GET /api/memories/browse, metadata match on the ID), contradiction
- * reports (GET /api/contradictions) and its branches and linked memories
- * (GET /api/graph for the memory's scope).
- */
-async function loadContext(id: string): Promise<MemoryContext> {
-  const [rec, history, browse, reports] = await Promise.all([
-    api.memory(id),
-    api.memoryHistory(id).catch(() => []),
-    api.browse({ q: id, mode: 'metadata', tab: 'all', per_page: 5 }).catch(() => null),
-    api.contradictions().catch(() => []),
-  ]);
-  const row = browse?.items.find((r) => r.id === id);
-  const graph = await api.graph({ scope: rec.scope }).catch(() => ({ nodes: [], edges: [] }));
-  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
-  const brief = (n: { id: string; stub: string; scope: string; owner_id: string; weight: number; version: number; created_at: string; updated_at: string }): NodeBrief => ({
-    id: n.id,
-    stub: n.stub,
-    scope: n.scope,
-    scope_id: null,
-    owner_id: n.owner_id,
-    weight: n.weight,
-    version: n.version,
-    is_current: true,
-    status: 'active',
-    created_at: n.created_at,
-    updated_at: n.updated_at,
-  });
-  // Linked memories outside this scope are opened one by one.
-  const others = await Promise.all(
-    rec.relationships.map(async (e) => {
-      const otherId = e.source === id ? e.target : e.source;
-      const known = nodes.get(otherId);
-      if (known) return brief(known);
-      const other = await api.memory(otherId).catch(() => null);
-      return other ? { ...brief(other), is_current: other.is_current } : null;
-    }),
-  );
-  const relationships = rec.relationships
-    .map((e, i) => ({ e, other: others[i] }))
-    .filter((r): r is { e: (typeof rec.relationships)[number]; other: NodeBrief } => !!r.other)
-    .map(({ e, other }) => ({ id: e.id, type: e.type, direction: (e.source === id ? 'out' : 'in') as 'in' | 'out', created_by: '', created_at: '', other }));
-  const branches = graph.nodes
-    .filter((n) => n.parent_id === id)
-    .map((n) => ({ id: n.id, branch_type: n.branch_type, content: n.content, actor_id: n.owner_id, created_at: n.created_at }));
-  return {
-    memory: {
-      id: rec.id,
-      stub: rec.stub,
-      scope: rec.scope,
-      scope_id: row?.scope_id ?? null,
-      owner_id: rec.owner_id,
-      weight: rec.weight,
-      version: rec.version,
-      is_current: rec.is_current,
-      status: row?.status ?? 'active',
-      created_at: rec.created_at,
-      updated_at: rec.updated_at,
-      redacted: row?.redacted ?? false,
-      capabilities: row?.capabilities ?? { write: false, moderate: false },
-      can_delete: row?.can_delete ?? false,
-      content: rec.content,
-      logical_id: null,
-      parent_id: rec.parent_id,
-      branch_type: rec.branch_type,
-      actor_id: row?.actor_id ?? null,
-      driver_id: row?.driver_id ?? null,
-      tenant_id: '',
-      domains: row?.domains ?? [],
-      content_type: row?.content_type ?? 'text',
-      source: null,
-      metadata: rec.metadata,
-      relevant_until: row?.relevant_until ?? rec.expires_at,
-      deleted_at: null,
-      expires_at: rec.expires_at,
-      embedding_dims: null,
-      injection: 'full',
-      full_content_threshold: 0,
-    },
-    versions: history.map((v) => ({
-      id: v.id,
-      version: v.version,
-      is_current: v.is_current,
-      content: v.content,
-      weight: v.id === rec.id ? rec.weight : NaN,
-      actor_id: null,
-      driver_id: null,
-      owner_id: rec.owner_id,
-      created_at: v.created_at,
-      deleted_at: null,
-    })),
-    branches,
-    relationships,
-    relationships_omitted: 0,
-    contradictions: reports.filter((r) => r.memory_id === id),
-    contradiction_threshold: 0,
-    similar: [],
-    access_count: 0,
-  };
-}
 
 const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   const id = decodeURIComponent(route.path.replace(/^\/memory\//, ''));
@@ -162,7 +60,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
   const { refreshCounts, role } = useApp();
   const userView = role === 'user';
-  const { data, error, loading, reload } = useApi<MemoryContext>(() => loadContext(id), [id]);
+  const { data, error, loading, reload } = useApi<MemoryContext>(() => api.memoryContext(id), [id]);
   const [modal, setModal] = useState<null | 'contradiction' | 'branch' | 'edit' | 'delete' | 'relate'>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [compare, setCompare] = useState<{ from: string; to: string } | null>(null);
@@ -204,6 +102,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   }
 
   const m = data?.memory;
+  const threshold = data?.contradiction_threshold ?? 5;
   const unresolved = (data?.contradictions ?? []).filter((c) => !c.resolved);
   const deleted = Boolean(m?.deleted_at);
   const canWrite = Boolean(m?.capabilities?.write);
@@ -231,7 +130,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
               {m.status !== 'active' && <span className="lbl ylw">{m.status}</span>}
               {unresolved.length > 0 && (
                 <span className="lbl s-role">
-                  ⚠ {unresolved.length} open contradiction{unresolved.length === 1 ? '' : 's'}
+                  ⚠ {unresolved.length} contradiction{unresolved.length === 1 ? '' : 's'} · threshold {threshold}
                 </span>
               )}
               <span className="sm muted">
@@ -473,8 +372,12 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                     <dd>
                       {m.scope} · owner {m.scope_id ?? m.owner_id}
                     </dd>
+                    <dt>Tenant</dt>
+                    <dd className="mono">{m.tenant_id}</dd>
                     <dt>Written by</dt>
                     <dd>{who(m.actor_id, m.driver_id, m.owner_id)}</dd>
+                    <dt>Upstream trust</dt>
+                    <dd>{m.upstream_trust_level ?? 'Not recorded'}</dd>
                     <dt>Relevant until</dt>
                     <dd>{m.relevant_until ? fmtDateTime(m.relevant_until) : 'No semantic expiry'}</dd>
                     <dt>Created</dt>
@@ -482,7 +385,18 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                     <dt>Domains</dt>
                     <dd>{m.domains.length ? m.domains.join(', ') : '—'}</dd>
                     <dt>Type</dt>
-                    <dd>{m.content_type}{m.branch_type ? ` · ${m.branch_type}` : ''}</dd>
+                    <dd>
+                      {m.content_type}
+                      {m.source ? ` · ${m.source}` : ''}
+                    </dd>
+                    <dt>Embedding</dt>
+                    <dd>{m.embedding_dims ? `${m.embedding_dims}-dim` : 'Not embedded'}</dd>
+                    <dt>Injection</dt>
+                    <dd>
+                      {m.injection === 'full'
+                        ? `Full content (weight ≥ ${m.full_content_threshold.toFixed(1)})`
+                        : `Stub only (weight < ${m.full_content_threshold.toFixed(1)})`}
+                    </dd>
                   </dl>
                   {m.metadata && Object.keys(m.metadata).length > 0 && (
                     <>
@@ -504,7 +418,13 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                     )}
                   </div>
                   <div className="sm" style={{ marginBottom: 8 }}>
-                    <b>{unresolved.length}</b> open report{unresolved.length === 1 ? '' : 's'}
+                    <b>
+                      {unresolved.length} of {threshold}
+                    </b>{' '}
+                    reports before a revision prompt
+                  </div>
+                  <div className="bar" style={{ marginBottom: 14 }}>
+                    <span style={{ width: `${Math.min(100, (unresolved.length / threshold) * 100)}%`, background: '#ca6c0f' }} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
                     {unresolved.length === 0 && <span className="sm muted">No open reports.</span>}
@@ -524,6 +444,23 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                   </div>
                 </div>
 
+                <div className="card">
+                  <h2 data-h="3" style={{ marginBottom: 12 }}>Similar memories</h2>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
+                    {data.similar.length === 0 && <span className="sm muted">{m.embedding_dims ? 'No close neighbours.' : 'This memory has no embedding.'}</span>}
+                    {data.similar.map((s) => (
+                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <a href={memoryHref(s.id)}>{truncate(s.stub, 48)}</a>
+                        <span className="mono">{s.score.toFixed(2)}</span>
+                      </div>
+                    ))}
+                    {data.similar.length > 0 && !deleted && canWrite && (
+                      <button type="button" className="btn bs" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => setModal('relate')}>
+                        Link a memory
+                      </button>
+                    )}
+                  </div>
+                </div>
               </aside>
             </div>
           )
@@ -820,12 +757,14 @@ const UserMemoryView: React.FC<{
             </dd>
             <dt>Weight</dt>
             <dd>
-              {fmtWeight(m.weight)}
+              {fmtWeight(m.weight)} · {m.injection === 'full' ? 'agents get the full text' : 'agents get a stub'}
             </dd>
             <dt>Created / updated</dt>
             <dd>
               {fmtShortDateTime(byVersion[0]?.created_at ?? m.created_at)} · {fmtShortDateTime(m.updated_at)}
             </dd>
+            <dt>Indexing</dt>
+            <dd>{m.embedding_dims ? <span className="ok">● Indexed · searchable</span> : <span className="muted">Not indexed — found by text only</span>}</dd>
           </dl>
         </section>
 
@@ -927,6 +866,26 @@ const UserMemoryView: React.FC<{
               <span className="sm">{b.content}</span>
             </div>
           ))}
+        </section>
+
+        <section className="card">
+          <h2 data-h="3" style={{ marginBottom: 10 }}>Similar memories</h2>
+          {data.similar.length === 0 && (
+            <p className="sm muted" style={{ margin: 0 }}>
+              {m.embedding_dims ? 'No close neighbours.' : 'This memory has no embedding.'}
+            </p>
+          )}
+          {data.similar.map((x) => (
+            <div key={x.id} className="side-item row">
+              <span className="sm muted mono">{x.score.toFixed(2)}</span>
+              <a className="sm" href={memoryHref(x.id)}>
+                {truncate(x.stub, 60)}
+              </a>
+            </div>
+          ))}
+          <p className="hint" style={{ margin: '8px 0 0' }}>
+            Only memories you can read are compared.
+          </p>
         </section>
 
         {canDelete && !deleted && (

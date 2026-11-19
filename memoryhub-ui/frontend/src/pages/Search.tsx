@@ -1,66 +1,254 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '@/api/client';
-import { PageHeader, useApp } from '@/components/Shell';
-import { Empty, ErrorState, ScopeLabel, SkLines, Standby } from '@/components/ui';
-import { navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { MemoryRecord } from '@/types';
-import { fmtRelative, truncate } from '@/utils/format';
-import { memoryHref } from './common';
+import { PageHeader, Tabs, useApp } from '@/components/Shell';
+import { copyText, Dropdown, Empty, ErrorState, Icon, Modal, ScopeLabel, Seg, SkLines, Standby, Tokens, useToast } from '@/components/ui';
+import type { HashRoute } from '@/hooks/useHashRoute';
+import type { DroppedMemory, ExplainResult, FunnelKey, SearchRequest, SearchResponse } from '@/types';
+import { shortId, truncate } from '@/utils/format';
+import { MemoryPicker, memoryHref } from './common';
 
-interface Hit {
-  id: string;
-  rank: number;
-  score: number;
-  memory: MemoryRecord | null;
-}
+const ENTITY_ICON: Record<string, { color: string; d: string; label: string }> = {
+  person: { label: 'Person', color: '#0066cc', d: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c1.5-4 4.5-6 8-6s6.5 2 8 6' },
+  organization: { label: 'Organization', color: '#3d7317', d: 'M4 21V5l8-3v19M12 9h8v12M3 21h18' },
+  location: { label: 'Location', color: '#009596', d: 'M12 21s-7-6.5-7-11a7 7 0 0114 0c0 4.5-7 11-7 11z' },
+  object: { label: 'Object', color: '#ca6c0f', d: 'M12 2l9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10' },
+  event: { label: 'Event', color: '#5e40be', d: 'M5 5h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2zM3 10h18' },
+};
 
-/**
- * Search playground. GET /api/graph/search ranks up to 20 current memories
- * the viewer may read: by embedding similarity when the embedding service
- * answers, by plain text match otherwise (every score is then 1.00). Each hit is
- * opened with GET /api/memory/{id} to show what it says.
- */
+const EntityGlyph: React.FC<{ type: string }> = ({ type }) => {
+  const t = ENTITY_ICON[type] ?? ENTITY_ICON.object;
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={t.color} strokeWidth="2.2" aria-hidden="true" style={{ flex: 'none' }}>
+      <path d={t.d} />
+    </svg>
+  );
+};
+
+/** Session focus picked from extracted entities instead of free text. */
+const EntityFocusSelect: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState<{ id: string; name: string; entity_type: string; memory_count: number }[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      api
+        .entities({ q: q.trim() || undefined, per_page: 30 })
+        .then((r) => {
+          setItems(r.items);
+          setFailed(false);
+        })
+        .catch(() => setFailed(true));
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [q]);
+  const current = items?.find((i) => i.name === value);
+  return (
+    <Dropdown
+      style={{ width: '100%' }}
+      toggle={(p) => (
+        <button type="button" className="sel" aria-labelledby="fo-l" aria-haspopup="listbox" style={{ width: '100%', justifyContent: 'space-between' }} {...p}>
+          <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+            {value ? (
+              <>
+                <EntityGlyph type={current?.entity_type ?? 'object'} />
+                <span className="ellipsis">{value}</span>
+              </>
+            ) : (
+              <span className="muted">No session focus</span>
+            )}
+          </span>
+          <Icon.Chevron />
+        </button>
+      )}
+    >
+      {(close) => (
+        <div style={{ width: 340, maxWidth: '80vw' }} role="listbox" aria-label="Entities">
+          <div style={{ padding: '6px 12px 8px' }}>
+            <label className="vh" htmlFor="fo-q">
+              Search entities
+            </label>
+            <input id="fo-q" className="in" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search entities" />
+          </div>
+          <button
+            type="button"
+            role="option"
+            aria-selected={!value}
+            onClick={() => {
+              onChange('');
+              close();
+            }}
+          >
+            <span className="muted">No session focus</span>
+          </button>
+          <hr />
+          <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+            {failed && <div className="mh">Entities are not available.</div>}
+            {!failed && items === null && <div className="mh">Loading…</div>}
+            {items?.length === 0 && <div className="mh">No entities match.</div>}
+            {items?.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                role="option"
+                aria-selected={e.name === value}
+                style={e.name === value ? { fontWeight: 600, background: '#f5f9fc' } : undefined}
+                onClick={() => {
+                  onChange(e.name);
+                  close();
+                }}
+              >
+                <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <EntityGlyph type={e.entity_type} />
+                  <span className="ellipsis" style={{ flex: 1 }}>
+                    {e.name}
+                  </span>
+                  <span className="hint">
+                    {ENTITY_ICON[e.entity_type]?.label ?? e.entity_type} · {e.memory_count}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </Dropdown>
+  );
+};
+
+const STAGE_COLORS: Record<string, string> = {
+  embed: '#004d99',
+  pgvector: '#0066cc',
+  'full-text': '#0066cc',
+  rbac: '#383838',
+  focus: '#009596',
+  rrf: '#5e40be',
+  rerank: '#8f4700',
+  assemble: '#3d7317',
+};
+
+interface Form extends SearchRequest {}
+
+const sdkCall = (f: Form) =>
+  [
+    'results = await client.search(',
+    `    ${JSON.stringify(f.query)},`,
+    f.focus ? `    focus=${JSON.stringify(f.focus)},` : null,
+    f.focus ? `    session_focus_weight=${f.session_focus_weight},` : null,
+    f.project ? `    project_id=${JSON.stringify(f.project)},` : null,
+    `    max_results=${f.max_results},`,
+    `    mode=${JSON.stringify(f.mode)},`,
+    f.weight_threshold ? `    weight_threshold=${f.weight_threshold},` : null,
+    `    max_response_tokens=${f.max_response_tokens},`,
+    f.include_branches ? '    include_branches=True,' : null,
+    ')',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
 const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
-  const { standby } = useApp();
-  const initial = route.params.get('q') || '';
-  const [query, setQuery] = useState(initial);
-  const [hits, setHits] = useState<Hit[] | null>(null);
-  const [ran, setRan] = useState('');
-  const [running, setRunning] = useState(false);
+  const toast = useToast();
+  const { standby, me, role } = useApp();
+  const [form, setForm] = useState<Form>({
+    query: route.params.get('q') || '',
+    focus: '',
+    identity: '',
+    project: '',
+    mode: 'full',
+    max_results: 10,
+    session_focus_weight: 0.4,
+    weight_threshold: 0,
+    max_response_tokens: 4000,
+    current_only: true,
+    include_branches: false,
+    // The BFF accepts rerank but no reranker is configured; it reports `not_configured`.
+    rerank: false,
+    temporal_status: 'current',
+  });
+  const [identities, setIdentities] = useState<{ id: string; label: string }[]>([]);
+  const [projects, setProjects] = useState<string[]>([]);
+  const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [running, setRunning] = useState(false);
+  const [tab, setTab] = useState<'ranked' | 'dropped' | 'context' | 'json'>('ranked');
+  const [why, setWhy] = useState<ExplainResult[]>([]);
+  const [whyOpen, setWhyOpen] = useState(false);
+  const [compareB, setCompareB] = useState<Form | null>(null);
+  const [resultB, setResultB] = useState<SearchResponse | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [dropStage, setDropStage] = useState<FunnelKey | 'all'>('all');
+  useEffect(() => {
+    // GET /api/users: for a user, their own identities and agents; an identity only narrows the search.
+    api
+      .users()
+      .then((rows) => setIdentities(rows.map((u) => ({ id: u.owner_id, label: `${u.name} (${u.identity_type})` }))))
+      .catch(() => undefined);
+    // Project context must be a project the viewer is a member of.
+    api
+      .projects(false)
+      .then((r) => setProjects(r.items.filter((p) => p.my_role).map((p) => p.name)))
+      .catch(() => undefined);
+  }, []);
 
-  const run = async (q = query) => {
-    const text = q.trim();
-    if (!text) return;
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+  const clean = (body: Form, explain: string[] = []): SearchRequest => ({
+    ...body,
+    focus: body.focus?.trim() || undefined,
+    identity: body.identity?.trim() || undefined,
+    project: body.project?.trim() || undefined,
+    explain,
+  });
+  const run = async (override?: Form, explainIds?: string[]) => {
+    const body = override ?? form;
+    if (!body.query.trim()) return;
     setRunning(true);
     setError(null);
-    navigate(route.path, { q: text }, { replace: true });
+    setExpanded(false);
     try {
-      const matches = await api.search(text);
-      const records = await Promise.all(matches.map((m) => api.memory(m.id).catch(() => null)));
-      setHits(matches.map((m, i) => ({ id: m.id, rank: i + 1, score: m.score, memory: records[i] })));
-      setRan(text);
-    } catch (e) {
-      setError(e as Error);
+      const ids = explainIds ?? why.map((w) => w.id);
+      const res = await api.search(clean(body, ids));
+      setResult(res);
+      setWhy(res.explain ?? []);
+      if (compareB) setResultB(await api.search(clean({ ...compareB, query: compareB.query || body.query })));
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setRunning(false);
     }
   };
 
-  useEffect(() => {
-    if (initial) void run(initial);
-    // Run once for a shared link with ?q=.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const textFallback = !!hits?.length && hits.every((h) => h.score === 1);
+  const copySdk = async () => toast((await copyText(sdkCall(form))) ? 'SDK call copied.' : 'Copy failed — select the text instead.', 'ok');
+  const results = result?.results ?? [];
+  // Show every rank up to the last full result (at least five), then fold
+  // the trailing stubs into the dashed "+N stub results" row.
+  const lastFull = Math.max(5, ...results.filter((r) => r.delivery === 'full').map((r) => r.rank));
+  const shownRanked = expanded ? results : results.filter((r) => r.rank <= lastFull);
+  const hiddenStubs = results.length - shownRanked.length;
+  const totalMs = result ? Math.max(1, result.stages.reduce((a, s) => a + s.ms, 0)) : 1;
 
   return (
     <>
       <PageHeader
         title="Search playground"
-        crumbs={[{ label: 'Search playground' }]}
-        description="Search every current memory you can read, the way an agent's search_memory call ranks them. Only memories your access allows ever come back."
+        description={
+          <>
+            Run <span className="mono">search_memory</span> exactly as an agent would — same RBAC, same two-vector retrieval — and see why each result ranked
+            where it did.
+            {role === 'admin' && (
+              <>
+                {' '}
+                As a platform admin you search the scopes you moderate; personal memories are left out.
+              </>
+            )}
+          </>
+        }
+        actions={
+          <>
+            <button type="button" className="btn bs" onClick={copySdk}>
+              Copy as SDK call
+            </button>
+          </>
+        }
       />
       <div className="body">
         <div className="row-wrap">
@@ -75,10 +263,86 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
             <h2 data-h="3">Query</h2>
             <div className="f">
               <label htmlFor="q">Query</label>
-              <textarea id="q" className="in" required value={query} onChange={(e) => setQuery(e.target.value)} placeholder="how should I run containers locally for this repo?" />
-              <span className="hint">Returns the 20 closest current memories.</span>
+              <textarea id="q" className="in" required value={form.query} onChange={(e) => set('query', e.target.value)} placeholder="how should I run containers locally for this repo?" />
             </div>
-            <button type="submit" className="btn bp" style={{ justifyContent: 'center' }} disabled={running || standby || !query.trim()}>
+            <div className="f">
+              <span className="lbl-t" id="fo-l">
+                Session focus
+              </span>
+              {role === 'user' ? (
+                <EntityFocusSelect value={form.focus ?? ''} onChange={(v) => set('focus', v)} />
+              ) : (
+                <input aria-labelledby="fo-l" className="in" value={form.focus ?? ''} onChange={(e) => set('focus', e.target.value)} placeholder="What the session is about" />
+              )}
+              <span className="hint">Biases ranking toward this topic, weighted by the session focus weight below.</span>
+            </div>
+            <div className="f">
+              <label htmlFor="as">Run as identity</label>
+              <input id="as" className="in" list="identity-list" value={form.identity} onChange={(e) => set('identity', e.target.value)} placeholder={`Dashboard (${me?.username ?? 'admin'})`} />
+              <datalist id="identity-list">
+                {identities.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.label}
+                  </option>
+                ))}
+              </datalist>
+              <span className="hint">Search runs as the selected identity and stays within your access permissions.</span>
+            </div>
+            <div className="f">
+              <label htmlFor="pj">Project context</label>
+              <input id="pj" className="in" list="project-list" value={form.project} onChange={(e) => set('project', e.target.value)} />
+              <datalist id="project-list">
+                {projects.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+            </div>
+            <div className="f">
+              <label>Response mode</label>
+              <Seg
+                label="Response mode"
+                value={form.mode}
+                onChange={(v) => set('mode', v)}
+                options={[
+                  { value: 'full', label: 'full' },
+                  { value: 'index', label: 'index' },
+                  { value: 'full_only', label: 'full_only' },
+                ]}
+              />
+            </div>
+            <div className="f">
+              <label htmlFor="mr">Max results · {form.max_results}</label>
+              <input id="mr" type="range" min={1} max={50} value={form.max_results} onChange={(e) => set('max_results', Number(e.target.value))} />
+            </div>
+            <div className="f">
+              <label htmlFor="fw">Session focus weight · {form.session_focus_weight.toFixed(2)}</label>
+              <input id="fw" type="range" min={0} max={100} value={Math.round(form.session_focus_weight * 100)} onChange={(e) => set('session_focus_weight', Number(e.target.value) / 100)} />
+            </div>
+            <div className="f">
+              <label htmlFor="wt">Weight threshold · {form.weight_threshold.toFixed(2)}</label>
+              <input id="wt" type="range" min={0} max={100} value={Math.round(form.weight_threshold * 100)} onChange={(e) => set('weight_threshold', Number(e.target.value) / 100)} />
+            </div>
+            <div className="f">
+              <label htmlFor="tk">Max response tokens</label>
+              <input id="tk" className="in" type="number" min={100} max={100000} value={form.max_response_tokens} onChange={(e) => set('max_response_tokens', Number(e.target.value) || 4000)} />
+            </div>
+            <label className="swrow">
+              <span>Current versions only</span>
+              <input type="checkbox" checked={form.current_only} onChange={(e) => set('current_only', e.target.checked)} />
+            </label>
+            <label className="swrow">
+              <span>Include historical (expired)</span>
+              <input
+                type="checkbox"
+                checked={form.temporal_status === 'all'}
+                onChange={(e) => set('temporal_status', e.target.checked ? 'all' : 'current')}
+              />
+            </label>
+            <label className="swrow">
+              <span>Include branches</span>
+              <input type="checkbox" checked={form.include_branches} onChange={(e) => set('include_branches', e.target.checked)} />
+            </label>
+            <button type="submit" className="btn bp" style={{ justifyContent: 'center' }} disabled={running || standby || !form.query.trim()}>
               {running ? 'Running…' : 'Run search'}
             </button>
             {standby && <span className="hint">Searching starts once the tenant has its first memory.</span>}
@@ -87,77 +351,201 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
           <div className="col-main">
             {standby ? (
               <div className="card">
-                <Standby compact={false}>Ranked results appear here once there is something to search.</Standby>
+                <Standby compact={false}>
+                  Pipeline timing, per-stage scores and the exact context an agent would receive appear here once there is something to search.
+                </Standby>
               </div>
             ) : error ? (
               <div className="card">
                 <ErrorState error={error} onRetry={() => void run()} title="The search failed" />
               </div>
-            ) : running && !hits ? (
+            ) : !result && !running ? (
               <div className="card">
-                <SkLines lines={8} />
+                <Empty title="Run a search">
+                  Enter a query and choose who to run it as. You will see each pipeline stage’s timing and why every result ranked where it did.
+                </Empty>
               </div>
-            ) : !hits ? (
-              <div className="card">
-                <Empty title="Run a search">Enter a query to see which memories come back and how closely each one matches.</Empty>
-              </div>
-            ) : (
-              <div className="card">
-                <div className="ch">
-                  <h2 data-h="3">Ranked results</h2>
-                  <span className="sm muted">
-                    {hits.length} for “{truncate(ran, 60)}” · {textFallback ? 'text match (embedding service unavailable)' : 'semantic similarity'}
-                  </span>
+            ) : running && !result ? (
+              <>
+                <div className="card">
+                  <SkLines lines={2} />
                 </div>
-                {hits.length === 0 ? (
-                  <Empty compact title="No results">
-                    Nothing you can read matched this query. Try fewer words.
-                  </Empty>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {hits.map((h) => (
-                      <div className="res" key={h.id}>
-                        <span className="rk">{h.rank}</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          {h.memory ? (
-                            <>
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-                                <ScopeLabel scope={h.memory.scope} />
-                                <span className="sm muted">{h.memory.owner_id}</span>
-                                {h.memory.branch_type && <span className="lbl g">{h.memory.branch_type}</span>}
-                              </div>
-                              <a href={memoryHref(h.id)} style={{ fontWeight: 500, textDecoration: 'none', color: '#151515' }}>
-                                {truncate(h.memory.stub || h.memory.content, 160)}
-                              </a>
-                            </>
-                          ) : (
-                            <a href={memoryHref(h.id)} className="mono">
-                              {h.id}
-                            </a>
-                          )}
-                          <div className="sc">
-                            {!textFallback && (
-                              <span>
-                                similarity <b>{h.score.toFixed(2)}</b>
-                              </span>
-                            )}
-                            {h.memory && (
-                              <>
-                                <span>
-                                  weight <b>{h.memory.weight.toFixed(2)}</b>
-                                </span>
-                                <span>
-                                  v{h.memory.version} · updated {fmtRelative(h.memory.updated_at)}
-                                </span>
-                              </>
-                            )}
-                          </div>
+                <div className="card">
+                  <SkLines lines={8} />
+                </div>
+              </>
+            ) : (
+              result && (
+                <>
+                  <div className="card">
+                    <div className="ch">
+                      <h2 data-h="3">Pipeline · {Math.round(result.total_ms)} ms</h2>
+                      <span className="sm muted">
+                        {result.returned} returned · {result.full_count} full · {result.stub_count} stubs · <Tokens n={result.tokens} /> ·{' '}
+                        {result.omitted_count} filtered by RBAC
+                      </span>
+                    </div>
+                    <div className="pipe" role="img" aria-label={result.stages.map((s) => `${s.name} ${s.ms} ms`).join(', ')}>
+                      {result.stages.map((s) => (
+                        <div key={s.name} style={{ flex: Math.max(s.ms, 0.5), background: STAGE_COLORS[s.name] ?? '#8a8d90' }} title={`${s.name} ${s.ms} ms`}>
+                          {s.ms / totalMs > 0.12 ? `${s.name} · ${Math.round(s.ms)} ms` : s.ms / totalMs > 0.06 ? s.name : ''}
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, marginTop: 10 }} className="muted">
+                      {result.stages.map((s) => (
+                        <span key={s.name}>
+                          {s.name}
+                          {s.detail ? ` ${s.detail}` : ''} {s.ms < 1 ? '<1' : Math.round(s.ms)} ms
+                        </span>
+                      ))}
+                      {result.rerank === 'not_configured' && <span>rerank not configured</span>}
+                      {result.rerank === 'unavailable' && <span className="warn">reranker unavailable</span>}
+                      <span>run as {result.run_as}</span>
+                    </div>
                   </div>
-                )}
-              </div>
+
+                  {result.funnel && (
+                    <Funnel
+                      result={result}
+                      onStage={(k) => {
+                        setDropStage(k);
+                        setTab('dropped');
+                      }}
+                    />
+                  )}
+
+                  <WhyNot
+                    items={why}
+                    open={whyOpen}
+                    setOpen={setWhyOpen}
+                    onAsk={(id) => void run(undefined, [...why.map((w) => w.id).filter((x) => x !== id), id])}
+                    onClear={() => setWhy([])}
+                  />
+
+                  {compareB && (
+                    <CompareCard
+                      a={form}
+                      b={compareB}
+                      setB={setCompareB}
+                      resA={result}
+                      resB={resultB}
+                      running={running}
+                      onRun={() => void run()}
+                      onClose={() => {
+                        setCompareB(null);
+                        setResultB(null);
+                      }}
+                    />
+                  )}
+
+                  <div className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+                      <Tabs
+                        inCard
+                        label="Result views"
+                        value={tab}
+                        onChange={setTab}
+                        tabs={[
+                          { value: 'ranked', label: 'Ranked results', count: results.length },
+                          // The BFF returns only the authorized result set: no funnel or dropped list yet.
+                          ...(result.dropped ? [{ value: 'dropped' as const, label: 'Didn’t come back', count: result.dropped.length + Object.values(result.hidden_dropped ?? {}).reduce((x, y) => x + y, 0) }] : []),
+                          { value: 'context', label: 'Assembled context' },
+                          { value: 'json', label: 'Raw JSON' },
+                        ]}
+                      />
+                      <span style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                        {!compareB && (
+                          <button type="button" className="btn bl sm" onClick={() => setCompareB({ ...form })}>
+                            Compare settings
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                    {tab === 'dropped' && <DroppedList result={result} stage={dropStage} setStage={setDropStage} />}
+                    {tab === 'ranked' &&
+                      (results.length === 0 ? (
+                        <Empty compact title="No results">
+                          {result.omitted_count > 0
+                            ? `${result.omitted_count} candidate${result.omitted_count === 1 ? '' : 's'} matched but ${result.omitted_count === 1 ? 'is' : 'are'} outside this identity’s access.`
+                            : 'Nothing matched this query. Try fewer words or a lower weight threshold.'}
+                        </Empty>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {shownRanked.map((r) => (
+                            <div className="res" key={r.id}>
+                              <span className="rk">{r.rank}</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+                                  <ScopeLabel scope={r.scope} />
+                                  <span className="lbl g">{expanded ? 'full' : r.delivery}</span>
+                                  <span className="sm muted">{r.scope === 'campaign' ? `campaign:${r.scope_id ?? r.owner_id}` : r.scope_id ?? r.owner_id}</span>
+                                  {r.downgraded && <span className="lbl ylw">stub · budget</span>}
+                                  {r.historical && <span className="lbl ylw" title={r.relevant_until ? `Relevant until ${r.relevant_until}` : undefined}>historical · expired</span>}
+                                </div>
+                                <a href={memoryHref(r.id)} style={{ fontWeight: 500, textDecoration: 'none', color: '#151515' }}>
+                                  {r.delivery === 'full' && r.content ? r.content : truncate(r.stub, 80)}
+                                </a>
+                                <div className="sc">
+                                  {r.scores.vector !== null && (
+                                    <span>
+                                      vector <b>{r.scores.vector.toFixed(2)}</b>
+                                    </span>
+                                  )}
+                                  {r.scores.text !== null && (
+                                    <span>
+                                      text <b>{r.scores.text.toFixed(2)}</b>
+                                    </span>
+                                  )}
+                                  {r.scores.focus !== null && (
+                                    <span>
+                                      focus <b>{r.scores.focus.toFixed(2)}</b>
+                                    </span>
+                                  )}
+                                  <span>
+                                    RRF <b>{r.scores.rrf.toFixed(4)}</b>
+                                  </span>
+                                  {r.scores.rerank !== null && (
+                                    <span>
+                                      rerank <b>{r.scores.rerank.toFixed(2)}</b>
+                                    </span>
+                                  )}
+                                  <span>
+                                    weight <b>{r.scores.weight.toFixed(2)}</b>
+                                  </span>
+                                  <span>
+                                    <b><Tokens n={r.tokens} /></b>
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {hiddenStubs > 0 && (
+                            <div className="dashed muted">
+                              + {hiddenStubs} stub result{hiddenStubs === 1 ? '' : 's'} (id, scope and first 80 characters) —{' '}
+                              <button type="button" className="link-btn" onClick={() => setExpanded(true)}>
+                                expand
+                              </button>{' '}
+                              to load full content with <span className="mono">read_memory</span>.
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    {tab === 'context' && <pre>{result.assembled_context || '(empty)'}</pre>}
+                    {tab === 'json' && <pre className="small">{JSON.stringify(result, null, 2)}</pre>}
+                  </div>
+
+                  <div className="card">
+                    <div className="ch">
+                      <h2 data-h="3">Equivalent SDK call</h2>
+                      <button type="button" className="btn bl sm" onClick={copySdk}>
+                        Copy
+                      </button>
+                    </div>
+                    <pre className="dark">{sdkCall(form)}</pre>
+                  </div>
+                </>
+              )
             )}
           </div>
         </div>
@@ -166,4 +554,283 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
   );
 };
 
+/* ------------------------------------------------------------------ */
+/* Funnel: how many memories survived each stage                       */
+/* ------------------------------------------------------------------ */
+
+const FUNNEL_COLOR: Record<FunnelKey, string> = {
+  matched: '#0066cc',
+  filters: '#5e40be',
+  rbac: '#383838',
+  weight: '#ca6c0f',
+  limit: '#009596',
+  budget: '#3d7317',
+};
+
+const Funnel: React.FC<{ result: SearchResponse; onStage: (k: FunnelKey) => void }> = ({ result, onStage }) => {
+  const f = result.funnel ?? [];
+  const top = Math.max(1, f[0]?.count ?? 1);
+  const hidden = result.hidden_dropped ?? {};
+  return (
+    <div className="card">
+      <div className="ch">
+        <h2 data-h="3">Why these results</h2>
+        <span className="sm muted">
+          {f[0]?.count ?? 0} matched → {result.returned} returned
+        </span>
+      </div>
+      <div className="funnel">
+        {f.map((st) => (
+          <button key={st.key} type="button" className="fstep" disabled={!st.dropped} onClick={() => onStage(st.key)} title={st.dropped ? 'Show what this stage dropped' : undefined}>
+            <span className="fl">{st.label}</span>
+            <span className="fbar">
+              <i style={{ width: `${Math.max(2, (st.count / top) * 100)}%`, background: FUNNEL_COLOR[st.key] }} />
+            </span>
+            <span className="fn">
+              <b>{st.count}</b>
+              {st.dropped ? <span className="fd">−{st.dropped}</span> : null}
+              {st.downgraded ? <span className="hint"> · {st.downgraded} cut to stub</span> : null}
+              {hidden[st.key] ? <span className="hint"> · {hidden[st.key]} you can’t read</span> : null}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const STAGE_SHORT: Record<string, string> = {
+  filters: 'Filters',
+  rbac: 'Access',
+  weight: 'Weight',
+  limit: 'Max results',
+  budget: 'Token budget',
+  matched: 'Not a top match',
+  returned: 'Returned',
+  missing: 'Not found',
+  deleted: 'Deleted',
+};
+
+const DroppedList: React.FC<{ result: SearchResponse; stage: FunnelKey | 'all'; setStage: (k: FunnelKey | 'all') => void }> = ({ result, stage, setStage }) => {
+  const all = result.dropped ?? [];
+  const hidden = Object.entries(result.hidden_dropped ?? {});
+  const stages = useMemo(() => [...new Set(all.map((d) => d.stage))], [all]);
+  const shown = stage === 'all' ? all : all.filter((d) => d.stage === stage);
+  if (!all.length && !hidden.length) {
+    return (
+      <Empty compact title="Nothing was dropped">
+        Every memory that matched came back.
+      </Empty>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button type="button" className={`tag ${stage === 'all' ? 'on' : ''}`} onClick={() => setStage('all')}>
+          All {all.length}
+        </button>
+        {stages.map((k) => (
+          <button key={k} type="button" className={`tag ${stage === k ? 'on' : ''}`} onClick={() => setStage(k)}>
+            {STAGE_SHORT[k]} {all.filter((d) => d.stage === k).length}
+          </button>
+        ))}
+      </div>
+      {shown.map((d: DroppedMemory) => (
+        <div className="res" key={`${d.stage}-${d.id}`}>
+          <span className="rkd" style={{ background: FUNNEL_COLOR[d.stage] }} title={d.rank ? `Ranked #${d.rank}` : STAGE_SHORT[d.stage]}>
+            {d.rank ?? '–'}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+              <ScopeLabel scope={d.scope} />
+              <span className="lbl g">{STAGE_SHORT[d.stage]}</span>
+              <span className="mono muted sm">{shortId(d.id)}</span>
+            </div>
+            <a href={memoryHref(d.id)} style={{ fontWeight: 500, textDecoration: 'none', color: '#151515' }}>
+              {truncate(d.stub, 120)}
+            </a>
+            <div className="sm muted" style={{ marginTop: 4 }}>
+              {d.detail}
+              {d.score !== undefined ? ` · score ${d.score.toFixed(2)}` : ''}
+            </div>
+          </div>
+        </div>
+      ))}
+      {hidden.length > 0 && (
+        <p className="hint" style={{ margin: 0 }}>
+          Also dropped: {hidden.map(([k, n]) => `${n} at ${STAGE_SHORT[k] ?? k}`).join(', ')} — memories you cannot read are counted, never shown.
+        </p>
+      )}
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/* "Why didn't X come back?"                                           */
+/* ------------------------------------------------------------------ */
+
+const WhyNot: React.FC<{ items: ExplainResult[]; open: boolean; setOpen: (o: boolean) => void; onAsk: (id: string) => void; onClear: () => void }> = ({
+  items,
+  open,
+  setOpen,
+  onAsk,
+  onClear,
+}) => (
+  <div className="card">
+    <div className="ch">
+      <h2 data-h="3">Why didn’t it come back?</h2>
+      <span style={{ display: 'flex', gap: 8 }}>
+        {items.length > 0 && (
+          <button type="button" className="btn bl sm" onClick={onClear}>
+            Clear
+          </button>
+        )}
+        <button type="button" className="btn bs sm" onClick={() => setOpen(true)}>
+          Pick a memory
+        </button>
+      </span>
+    </div>
+    {items.length === 0 ? (
+      <p className="sm muted" style={{ margin: 0 }}>
+        Pick a memory you expected. It is traced through every stage, even if it never made the top 50 matches.
+      </p>
+    ) : (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {items.map((w) => (
+          <div key={w.id} className={`why ${w.stage === 'returned' ? 'ok' : ''}`}>
+            <span className={`lbl ${w.stage === 'returned' ? 'grn' : w.stage === 'missing' ? 'g' : 'org'}`}>{STAGE_SHORT[w.stage] ?? w.stage}</span>
+            <div style={{ minWidth: 0 }}>
+              <div className="sm b6 ellipsis">{w.stub ?? w.id}</div>
+              <div className="sm muted">{w.detail}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+    {open && (
+      <Modal title="Which memory did you expect?" onClose={() => setOpen(false)}>
+        <MemoryPicker
+          autoFocus
+          onPick={(m) => {
+            setOpen(false);
+            onAsk(m.id);
+          }}
+        />
+      </Modal>
+    )}
+  </div>
+);
+
+/* ------------------------------------------------------------------ */
+/* Compare two settings                                                */
+/* ------------------------------------------------------------------ */
+
+const CompareCard: React.FC<{
+  a: Form;
+  b: Form;
+  setB: (f: Form) => void;
+  resA: SearchResponse;
+  resB: SearchResponse | null;
+  running: boolean;
+  onRun: () => void;
+  onClose: () => void;
+}> = ({ a, b, setB, resA, resB, running, onRun, onClose }) => {
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setB({ ...b, [k]: v });
+  const rankA = Object.fromEntries(resA.results.map((r) => [r.id, r.rank]));
+  const rankB = resB ? Object.fromEntries(resB.results.map((r) => [r.id, r.rank])) : {};
+  const diffs = (['query', 'max_results', 'weight_threshold', 'session_focus_weight', 'max_response_tokens', 'mode', 'rerank', 'current_only', 'include_branches'] as const).filter(
+    (k) => a[k] !== b[k],
+  );
+  const Col: React.FC<{ res: SearchResponse; other: Record<string, number>; side: 'A' | 'B' }> = ({ res, other, side }) => (
+    <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+      <div className="sm b6" style={{ marginBottom: 6 }}>
+        {side} · {res.returned} returned · {Math.round(res.total_ms)} ms · <Tokens n={res.tokens} />
+      </div>
+      {res.results.map((r) => {
+        const o = other[r.id];
+        const delta = o ? o - r.rank : null;
+        return (
+          <div key={r.id} className="cmp-row">
+            <span className="rk sm">{r.rank}</span>
+            <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>
+              {truncate(r.stub, 70)}
+            </span>
+            {o === undefined ? (
+              <span className="lbl blue">only {side}</span>
+            ) : delta ? (
+              <span className={`sm ${delta > 0 ? 'ok' : 'warn'}`}>{delta > 0 ? `↑${delta}` : `↓${-delta}`}</span>
+            ) : (
+              <span className="hint">=</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+  return (
+    <div className="card">
+      <div className="ch">
+        <h2 data-h="3">Compare settings</h2>
+        <span style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="btn bp sm" disabled={running} onClick={onRun}>
+            {running ? 'Running…' : 'Run A and B'}
+          </button>
+          <button type="button" className="btn bl sm" onClick={onClose}>
+            Close
+          </button>
+        </span>
+      </div>
+      <p className="hint" style={{ margin: '0 0 10px' }}>
+        A is the form on the left. Change B here, then run both.
+      </p>
+      <div className="cmp-form">
+        <div className="f">
+          <label htmlFor="bq">B · query</label>
+          <input id="bq" className="in" value={b.query} onChange={(e) => set('query', e.target.value)} />
+        </div>
+        <div className="f">
+          <label htmlFor="bmr">B · max results · {b.max_results}</label>
+          <input id="bmr" type="range" min={1} max={50} value={b.max_results} onChange={(e) => set('max_results', Number(e.target.value))} />
+        </div>
+        <div className="f">
+          <label htmlFor="bwt">B · weight threshold · {b.weight_threshold.toFixed(2)}</label>
+          <input id="bwt" type="range" min={0} max={100} value={Math.round(b.weight_threshold * 100)} onChange={(e) => set('weight_threshold', Number(e.target.value) / 100)} />
+        </div>
+        <div className="f">
+          <label htmlFor="btk">B · max tokens</label>
+          <input id="btk" className="in" type="number" min={100} value={b.max_response_tokens} onChange={(e) => set('max_response_tokens', Number(e.target.value) || 4000)} />
+        </div>
+        <label className="swrow">
+          <span>B · rerank</span>
+          <input type="checkbox" checked={b.rerank} onChange={(e) => set('rerank', e.target.checked)} />
+        </label>
+        <label className="swrow">
+          <span>B · current versions only</span>
+          <input type="checkbox" checked={b.current_only} onChange={(e) => set('current_only', e.target.checked)} />
+        </label>
+      </div>
+      {diffs.length > 0 && (
+        <p className="sm" style={{ margin: '10px 0 0' }}>
+          Differs in: <b>{diffs.map((d) => d.replace(/_/g, ' ')).join(', ')}</b>
+        </p>
+      )}
+      {resB ? (
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 14 }}>
+          <Col res={resA} other={rankB} side="A" />
+          <Col res={resB} other={rankA} side="B" />
+        </div>
+      ) : (
+        <p className="sm muted" style={{ marginTop: 12 }}>
+          Run both to see which memories move up, drop out or appear.
+        </p>
+      )}
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/* Save a query on the server                                          */
+/* ------------------------------------------------------------------ */
+
 export default Search;
+

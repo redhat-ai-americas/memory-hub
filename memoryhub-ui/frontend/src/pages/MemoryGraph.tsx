@@ -5,7 +5,7 @@ import { useApp } from '@/components/Shell';
 import { Empty, ErrorState, Icon, Modal, ScopeLabel, Sk, SkLines, Standby, Switch, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, type HashRoute } from '@/hooks/useHashRoute';
-import type { BrowseParams, GraphAll, GraphNeighbourhood, GraphNode, GraphPrefer, GraphResponse, NodeBrief } from '@/types';
+import type { GraphAll, GraphNeighbourhood, GraphPrefer, NodeBrief } from '@/types';
 import { fmtInt, fmtRelative, fmtWeight, SCOPE_ORDER, scopeMeta, shortId, truncate } from '@/utils/format';
 import { MemoryPicker, RelationshipModal } from './common';
 
@@ -213,118 +213,6 @@ function treeLayout(nodes: GNode[]): { pos: Pos; h: number; lanes: { scope: stri
   return { pos, h: Math.max(BASE_H, y + 20), lanes: out };
 }
 
-
-/* ------------------------------------------------------------------ */
-/* Shaping GET /api/graph                                              */
-/* ------------------------------------------------------------------ */
-
-const brief = (n: GraphNode): NodeBrief => ({
-  id: n.id,
-  stub: n.stub,
-  scope: n.scope,
-  scope_id: null,
-  owner_id: n.owner_id,
-  weight: n.weight,
-  version: n.version,
-  is_current: true,
-  status: 'active',
-  created_at: n.created_at,
-  updated_at: n.updated_at,
-});
-
-const degreeOf = (edges: GraphResponse['edges']) => {
-  const d: Record<string, number> = {};
-  edges.forEach((e) => {
-    d[e.source] = (d[e.source] ?? 0) + 1;
-    d[e.target] = (d[e.target] ?? 0) + 1;
-  });
-  return d;
-};
-
-/** "All memories": the browser's scope, writer and weight filters, then the node limit. */
-function shapeAll(g: GraphResponse, f: BrowseParams, limit: number, prefer: GraphPrefer, minWeight: number): GraphAll {
-  const deg = degreeOf(g.edges);
-  const matches = g.nodes.filter(
-    (n) =>
-      (!f.scope?.length || f.scope.includes(n.scope)) &&
-      (!f.actor?.length || f.actor.includes(n.owner_id)) &&
-      n.weight >= minWeight - 1e-9,
-  );
-  const rank = (n: GraphNode) => (prefer === 'recent' ? Date.parse(n.updated_at) : prefer === 'weight' ? n.weight : deg[n.id] ?? 0);
-  const kept = [...matches].sort((a, b) => rank(b) - rank(a)).slice(0, limit);
-  const ids = new Set(kept.map((n) => n.id));
-  const edges = g.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
-  const hiddenLinks = g.edges.filter((e) => ids.has(e.source) !== ids.has(e.target)).length;
-  return {
-    nodes: kept.map((n) => ({ ...brief(n), depth: 0, degree: deg[n.id] ?? 0 })),
-    edges,
-    total: matches.length,
-    truncated: matches.length > kept.length,
-    left_out: matches.length - kept.length,
-    max_nodes: limit,
-    limit_ceiling: 1500,
-    prefer,
-    orphan_count: kept.filter((n) => !deg[n.id]).length,
-    hidden_links: hiddenLinks,
-    metadata_only: false,
-  };
-}
-
-/** "One memory": everything within `depth` hops of the focused memory. */
-function shapeNeighbourhood(g: GraphResponse, focusId: string, depth: number, maxNodes: number): GraphNeighbourhood {
-  const byId = new Map(g.nodes.map((n) => [n.id, n]));
-  const focus = byId.get(focusId);
-  const deg = degreeOf(g.edges);
-  const empty: GraphNeighbourhood = { focus: null, nodes: [], edges: [], hidden_count: 0, cut_count: 0, max_nodes: maxNodes, provenance: [], conflicts: [] };
-  if (!focus) return empty;
-  const dist = new Map<string, number>([[focusId, 0]]);
-  let frontier = [focusId];
-  for (let d = 1; d <= depth && frontier.length; d += 1) {
-    const next: string[] = [];
-    g.edges.forEach((e) => {
-      [
-        [e.source, e.target],
-        [e.target, e.source],
-      ].forEach(([from, to]) => {
-        if (frontier.includes(from) && !dist.has(to) && byId.has(to)) {
-          dist.set(to, d);
-          next.push(to);
-        }
-      });
-    });
-    frontier = next;
-  }
-  const reached = [...dist.entries()].sort((a, b) => a[1] - b[1]);
-  const kept = reached.slice(0, maxNodes);
-  const ids = new Set(kept.map(([id]) => id));
-  const edges = g.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
-  // Provenance: follow derived_from / supersedes from the focus.
-  const provenance: NodeBrief[] = [brief(focus)];
-  let cur = focusId;
-  for (let i = 0; i < 20; i += 1) {
-    const step = g.edges.find((e) => e.source === cur && (e.type === 'derived_from' || e.type === 'supersedes'));
-    const nextNode = step && byId.get(step.target);
-    if (!nextNode || provenance.some((n) => n.id === nextNode.id)) break;
-    provenance.push(brief(nextNode));
-    cur = nextNode.id;
-  }
-  const conflicts = g.edges
-    .filter((e) => e.type === 'conflicts_with' && (e.source === focusId || e.target === focusId))
-    .map((e) => byId.get(e.source === focusId ? e.target : e.source))
-    .filter((n): n is GraphNode => !!n)
-    .map(brief);
-  return {
-    focus: { ...brief(focus), content: focus.content, degree: deg[focusId] ?? 0, hidden_degree: 0 },
-    nodes: kept.map(([id, d]) => ({ ...brief(byId.get(id)!), depth: d })),
-    edges,
-    hidden_count: 0,
-    cut_count: reached.length - kept.length,
-    max_nodes: maxNodes,
-    provenance,
-    conflicts,
-  };
-}
-
 /* ------------------------------------------------------------------ */
 /* Component                                                           */
 /* ------------------------------------------------------------------ */
@@ -349,8 +237,8 @@ const MemoryGraph: React.FC<{
 
   const [types, setTypes] = useState<Set<string>>(new Set(EDGE_TYPES));
   const [showOrphans, setShowOrphans] = useState(true);
-  // /api/graph returns current versions only.
-  const superseded = false;
+  const superseded = filters.tab === 'all';
+  const setSuperseded = (value: boolean) => setParams({ tab: value ? 'all' : 'current' });
   const [labels, setLabels] = useState(true);
   const [fade, setFade] = useState(true);
   const selected = p.get('sel') || (focusMode === 'memory' ? focusId ?? null : null);
@@ -361,20 +249,21 @@ const MemoryGraph: React.FC<{
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
 
-  // GET /api/graph returns every current memory the viewer may see and their edges
-  // (filtered by one scope or owner on the server). The browser filters, the node
-  // limit and the neighbourhood of a focused memory are worked out here.
-  const graphScope = filters.scope?.length === 1 ? filters.scope[0] : undefined;
-  const graphOwner = filters.actor?.length === 1 ? filters.actor[0] : undefined;
-  const raw = useApi<GraphResponse>(() => api.graph({ scope: graphScope, owner_id: graphOwner }), [graphScope, graphOwner], standby ? 5000 : null);
-  const active = raw;
-  const data = useMemo<GraphAll | GraphNeighbourhood | null>(() => {
-    if (!raw.data) return null;
-    return focusMode === 'all'
-      ? shapeAll(raw.data, filters, limit, prefer, minWeight)
-      : shapeNeighbourhood(raw.data, focusId ?? '', depth, 300);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [raw.data, focusMode, filterKey, limit, prefer, minWeight, focusId, depth]);
+  const all = useApi<GraphAll>(
+    () =>
+      focusMode === 'all'
+        ? api.graphAll({ ...filters, max_nodes: limit, prefer })
+        : Promise.resolve(null as unknown as GraphAll),
+    [focusMode, limit, prefer, filterKey],
+    standby ? 5000 : null,
+  );
+  const hood = useApi<GraphNeighbourhood>(
+    () => (focusMode === 'memory' ? api.neighbourhood({ ...filters, focus: focusId, depth, max_nodes: 300 }) : Promise.resolve(null as unknown as GraphNeighbourhood)),
+    [focusMode, focusId, depth, filterKey],
+    standby ? 5000 : null,
+  );
+  const active = focusMode === 'all' ? all : hood;
+  const data = active.data;
 
   useEffect(() => setView({ x: 0, y: 0, k: 1 }), [focusMode, focusId, layout]);
 
@@ -541,6 +430,7 @@ const MemoryGraph: React.FC<{
             onClick={() => {
               setTypes(new Set(EDGE_TYPES));
               setShowOrphans(true);
+              setSuperseded(false);
               setLabels(true);
               setFade(true);
               setParams({ gfocus: '', focus: undefined, depth: '', layout: '', color: '', glimit: '', gprefer: '', sel: '' }, false);
@@ -687,6 +577,7 @@ const MemoryGraph: React.FC<{
           </p>
           {[
             { label: 'Unconnected memories', hint: 'Memories with no relationships', on: showOrphans, set: setShowOrphans },
+            { label: 'Superseded versions', hint: 'Older versions, faded', on: superseded, set: setSuperseded },
             { label: 'Labels', hint: metadataOnly ? 'Names on readable nodes; personal memories show IDs' : 'Names on key nodes', on: labels, set: setLabels },
             { label: 'Fade unrelated', hint: 'On select, keep only its links bright', on: fade, set: setFade },
           ].map((s) => (
@@ -1091,7 +982,7 @@ const SidePanel: React.FC<{
           <br />
           <span className="muted">conflicts_with {conflicts.map((c) => `“${truncate(name(c.other), 60)}”`).join(', ')}.</span>
           <div style={{ marginTop: 8 }}>
-            <a href={buildHash('/review', { tab: 'contradictions' })}>Resolve in review queue</a>
+            <a href={buildHash(`/memory/${node.id}`)}>Open the memory to correct it</a>
           </div>
         </div>
       )}

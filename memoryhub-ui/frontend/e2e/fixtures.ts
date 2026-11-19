@@ -23,7 +23,12 @@ export const BFF_ROUTES: [string, RegExp][] = [
   ['PATCH', /^\/api\/entities\/[^/]+$/],
   ['POST', /^\/api\/entities\/[^/]+\/merge$/],
   ['GET', /^\/api\/graph$/],
+  ['GET', /^\/api\/graph\/all$/],
+  ['GET', /^\/api\/graph\/neighbourhood$/],
   ['GET', /^\/api\/graph\/search$/],
+  ['POST', /^\/api\/search$/],
+  ['GET', /^\/api\/memories\/export$/],
+  ['GET', /^\/api\/memory\/[^/]+\/context$/],
   ['GET', /^\/api\/me$/],
   ['POST', /^\/api\/memories$/],
   ['GET', /^\/api\/memories\/browse$/],
@@ -191,8 +196,99 @@ const projectRow = {
   owner: 'dosei',
 };
 
+const brief = (id: string, stub: string) => ({
+  id,
+  stub,
+  scope: 'project',
+  scope_id: 'atlas-planner',
+  owner_id: 'atlas-planner',
+  weight: 0.8,
+  version: 2,
+  is_current: true,
+  status: 'active',
+  created_at: now,
+  updated_at: now,
+});
+
+const context = (role: Role) => ({
+  memory: {
+    ...brief(memoryId, 'Gripper torque limit is 11.5 N·m'),
+    redacted: false,
+    capabilities: { write: true, moderate: role === 'admin' },
+    can_delete: true,
+    content: 'Gripper torque limit is 11.5 N·m. Full text.',
+    logical_id: null,
+    parent_id: null,
+    branch_type: null,
+    actor_id: 'claude-code-mchen',
+    driver_id: 'mchen',
+    tenant_id: 'lumen-eng',
+    domains: ['robotics'],
+    content_type: 'text',
+    source: null,
+    metadata: null,
+    upstream_trust_level: null,
+    relevant_until: null,
+    deleted_at: null,
+    expires_at: null,
+    embedding_dims: 384,
+    injection: 'full',
+    full_content_threshold: 0.8,
+  },
+  versions: [
+    { id: memoryId, version: 2, is_current: true, content: 'Gripper torque limit is 11.5 N·m.', weight: 0.8, actor_id: 'claude-code-mchen', driver_id: 'mchen', owner_id: 'atlas-planner', created_at: now, deleted_at: null },
+    { id: 'v1', version: 1, is_current: false, content: 'Gripper torque limit is 10 N·m.', weight: 0.7, actor_id: 'claude-code-mchen', driver_id: 'mchen', owner_id: 'atlas-planner', created_at: now, deleted_at: null },
+  ],
+  branches: [{ id: branchId, branch_type: 'rationale', content: 'Measured in the soak test', actor_id: 'mchen', created_at: now }],
+  relationships: [{ id: 'rel-1', type: 'related_to', direction: 'out', created_by: 'mchen', created_at: now, other: brief(otherMemoryId, 'Path planner budget is 40 ms') }],
+  relationships_omitted: 0,
+  contradictions: [{ id: reportId, observed_behavior: 'Torque limit is now 12 N·m', confidence: 0.9, reporter: 'curator-agent', created_at: now, resolved: false }],
+  contradiction_threshold: 5,
+  similar: [{ ...brief(otherMemoryId, 'Path planner budget is 40 ms'), score: 0.71 }],
+  access_count: 0,
+});
+
+const graphAll = {
+  nodes: [
+    { ...brief(memoryId, 'Gripper torque limit is 11.5 N·m'), depth: 0, degree: 1 },
+    { ...brief(otherMemoryId, 'Path planner budget is 40 ms'), depth: 0, degree: 1 },
+  ],
+  edges: [{ id: 'rel-1', source: memoryId, target: otherMemoryId, type: 'related_to' }],
+  total: 2,
+  truncated: false,
+  left_out: 0,
+  max_nodes: 300,
+  limit_ceiling: 1500,
+  prefer: 'connected',
+  orphan_count: 0,
+  hidden_links: 0,
+  metadata_only: false,
+};
+
+const searchResponse = (role: Role) => ({
+  run_as: me(role).username,
+  retrieval: 'vector',
+  rerank: 'not_configured',
+  stages: [{ name: 'Core search', ms: 12.5, detail: 'Human scope applied before retrieval and verified per result' }],
+  total_ms: 12.5,
+  candidates: 2,
+  omitted_count: 0,
+  weight_filtered: 0,
+  returned: 2,
+  full_count: 1,
+  stub_count: 1,
+  tokens: 40,
+  results: [
+    { rank: 1, id: memoryId, scope: 'project', scope_id: 'atlas-planner', owner_id: 'atlas-planner', stub: 'Gripper torque limit is 11.5 N·m', content: 'Gripper torque limit is 11.5 N·m. Full text.', delivery: 'full', weight: 0.9, version: 2, relevant_until: null, temporal_status: 'current', historical: false, scores: { vector: null, text: null, focus: null, rrf: 0.82, rerank: null, weight: 0.9 }, tokens: 30 },
+    { rank: 2, id: otherMemoryId, scope: 'project', scope_id: 'atlas-planner', owner_id: 'atlas-planner', stub: 'Path planner budget is 40 ms', content: null, delivery: 'stub', weight: 0.6, version: 1, relevant_until: null, temporal_status: 'current', historical: false, scores: { vector: null, text: null, focus: null, rrf: 0.61, rerank: null, weight: 0.6 }, tokens: 10 },
+  ],
+  assembled_context: 'Gripper torque limit is 11.5 N·m. Full text.\n\nPath planner budget is 40 ms',
+  explain: [],
+});
+
 function respond(role: Role, method: string, path: string, url: URL, body: unknown): unknown {
   const user = role === 'user';
+  if (/\/api\/memory\/[^/]+\/context$/.test(path)) return context(role);
   if (path === '/api/me') return me(role);
   if (path === '/api/auth/status')
     return { mode: 'oauth-proxy', authenticated: true, api_key_login: false, local_accounts: false, user: me(role).username, role, cluster_domain: null, setup_required: false };
@@ -269,6 +365,20 @@ function respond(role: Role, method: string, path: string, url: URL, body: unkno
         { id: `pc-${memoryId}-${branchId}`, source: memoryId, target: branchId, type: 'parent_child' },
       ],
     };
+  if (path === '/api/graph/all') return graphAll;
+  if (path === '/api/graph/neighbourhood')
+    return {
+      focus: { ...brief(memoryId, 'Gripper torque limit is 11.5 N·m'), content: 'Gripper torque limit is 11.5 N·m. Full text.', degree: 1, hidden_degree: 0 },
+      nodes: graphAll.nodes.map((n, i) => ({ ...n, depth: i })),
+      edges: graphAll.edges,
+      hidden_count: 0,
+      cut_count: 0,
+      max_nodes: 300,
+      provenance: [],
+      conflicts: [],
+    };
+  if (path === '/api/search') return searchResponse(role);
+  if (path === '/api/memories/export') return 'export';
   if (path === '/api/graph/search') return [{ id: memoryId, score: 0.82 }, { id: otherMemoryId, score: 0.61 }];
   if (path === '/api/entities')
     return {

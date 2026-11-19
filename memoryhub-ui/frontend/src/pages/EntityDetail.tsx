@@ -124,6 +124,9 @@ const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                 <section className="card" style={{ padding: 0 }}>
                   <div className="ch" style={{ padding: '18px 20px 0' }}>
                     <h2 data-h="3">Memories</h2>
+                    <a className="sm" href={buildHash('/memories', { ...filter, view: 'graph' })}>
+                      Graph
+                    </a>
                   </div>
                   <div className="scroll">
                     <table className="tbl mid">

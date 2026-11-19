@@ -56,13 +56,17 @@ for (const role of ['user', 'admin'] as const) {
       await page.goto('/#/memories');
       await expect(page.getByRole('link', { name: /Gripper torque limit/ })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Timeline' })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: /Export/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Timeline' })).toHaveCount(0);
       await page.getByRole('button', { name: 'Graph', exact: true }).click();
       await expect(page).toHaveURL(/view=graph/);
       await expect(page.locator('svg circle').first()).toBeVisible();
+      expect(bff.calls).toContain('GET /api/graph/all');
       await page.goto(`/#/memory/${memoryId}`);
       await expect(page.getByRole('heading', { level: 1 })).toContainText('Gripper torque limit');
+      expect(bff.calls).toContain(`GET /api/memory/${memoryId}/context`);
       await expect(page.getByText('Access log')).toHaveCount(0);
-      await expect(page.getByText('Similar memories')).toHaveCount(0);
+      await expect(page.getByText('Similar memories')).toBeVisible();
       expectClean(bff, errors);
     });
 
@@ -71,9 +75,11 @@ for (const role of ['user', 'admin'] as const) {
       const bff = await mockBff(page, role);
       const errors = watch(page);
       await page.goto('/#/search');
-      await page.getByLabel('Query').fill('torque');
+      await page.getByLabel('Query', { exact: true }).fill('torque');
       await page.getByRole('button', { name: 'Run search' }).click();
       await expect(page.locator('.res')).toHaveCount(2);
+      expect(bff.calls).toContain('POST /api/search');
+      await expect(page.getByText('Saved queries')).toHaveCount(0);
       expectClean(bff, errors);
     });
 

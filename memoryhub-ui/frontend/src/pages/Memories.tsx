@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '@/api/client';
 import { browseParams } from '@/utils/browse';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
-import { Dropdown, Empty, ErrorState, Icon, Modal, Pager, ScopeLabel, SelectMenu, SkTable, SkLines, Standby, useToast } from '@/components/ui';
+import { Dropdown, Empty, ErrorState, Icon, Pager, ScopeLabel, SelectMenu, SkTable, SkLines, Standby, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
 import type { BrowseResponse, MemoryRow } from '@/types';
@@ -11,13 +11,13 @@ import { ConfirmModal, memoryHref, RelationshipModal, WriteMemoryModal } from '.
 import MemoryGraph, { LockIcon } from './MemoryGraph';
 
 const list = (v: string | null) => (v ? v.split(',').filter(Boolean) : []);
-const COLUMNS = ['scope', 'owner', 'weight', 'version', 'branches', 'relevant', 'updated'] as const;
+const COLUMNS = ['scope', 'entities', 'owner', 'weight', 'version', 'branches', 'relevant', 'updated'] as const;
 type Column = (typeof COLUMNS)[number];
-const COLUMN_LABEL: Record<Column, string> = { scope: 'Scope', owner: 'Owner', weight: 'Weight', version: 'Ver.', branches: 'Branches', relevant: 'Relevant until', updated: 'Updated' };
+const COLUMN_LABEL: Record<Column, string> = { scope: 'Scope', entities: 'Entities', owner: 'Owner', weight: 'Weight', version: 'Ver.', branches: 'Branches', relevant: 'Relevant until', updated: 'Updated' };
 // v4 (Nov 2026): Relevant until and Updated are on for everyone again; older saved choices would hide them.
-const COLS_KEY = 'memoryhub.browser.columns.v6';
+const COLS_KEY = 'memoryhub.browser.columns.v7';
 
-/** Moderators work on scope, owner, weight and dates; versions and branches are one click away in Columns. */
+/** Moderators work on scope, owner, weight and dates; entities and branches are one click away in Columns. */
 const ADMIN_DEFAULT: Column[] = ['scope', 'owner', 'weight', 'relevant', 'updated'];
 const readCols = (admin = false): Column[] => {
   const fallback = admin ? [...ADMIN_DEFAULT] : [...COLUMNS];
@@ -84,10 +84,10 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
   useEffect(() => setSelected(new Set()), [key]);
   const [columns, setColumns] = useState<Column[]>(() => readCols(isAdmin));
   const [moreWriters, setMoreWriters] = useState(false);
-  const [modal, setModal] = useState<null | 'write' | 'weight' | 'relate' | 'delete' | 'quarantine'>(null);
+  const [moreDomains, setMoreDomains] = useState(false);
+  const [modal, setModal] = useState<null | 'write' | 'relate' | 'delete' | 'quarantine'>(null);
   const [qReason, setQReason] = useState('');
   const [rowDelete, setRowDelete] = useState<MemoryRow | null>(null);
-  const [weightValue, setWeightValue] = useState(0.7);
 
   const toggleColumn = (c: Column) => {
     const next = columns.includes(c) ? columns.filter((x) => x !== c) : COLUMNS.filter((x) => columns.includes(x) || x === c);
@@ -133,33 +133,23 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
 
   const toggleIn = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
-  /** Runs one BFF call per memory (or one moderation call), then reports what failed. */
-  const runEach = async (targets: string[], one: (id: string) => Promise<unknown>, done: string) => {
-    const failed: string[] = [];
-    for (const id of targets) {
-      try {
-        await one(id);
-      } catch (e) {
-        failed.push(errorMessage(e));
-      }
-    }
-    if (failed.length) toast(`${failed.length} failed: ${failed[0]}`, 'err');
-    if (failed.length < targets.length) toast(done);
-    setSelected(new Set());
-    reload();
-    refreshCounts();
-  };
-  /** POST /api/memories/bulk: admins quarantine or restore up to 100 memories at once. */
-  const moderate = async (action: 'quarantine' | 'restore', targets: string[], done: string, reason?: string) => {
-    const res = await api.moderate({ action, ids: targets, reason });
+  /**
+   * POST /api/memories/bulk: one transaction for delete and relate (anyone with
+   * the right on every memory) and quarantine / restore (admins).
+   */
+  const runBulk = async (body: Parameters<typeof api.bulk>[0], done: string) => {
+    const res = await api.bulk(body);
     if (res.errors.length) toast(`${res.errors.length} failed: ${res.errors[0].detail}`, 'err');
     else if (res.done.length) toast(done);
     setSelected(new Set());
     reload();
     refreshCounts();
   };
+  const moderate = (action: 'quarantine' | 'restore', targets: string[], done: string, reason?: string) =>
+    runBulk({ action, ids: targets, reason }, done);
 
   const writers = facets?.writers ?? [];
+  const domains = facets?.domains ?? [];
   const filtersDisabled = standby;
 
   return (
@@ -186,6 +176,11 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
         }
         actions={
           <>
+            {view === 'table' && (
+              <a className={`btn ${isAdmin ? 'bs' : 'bg'}`} href={api.exportUrl(params)} download aria-disabled={standby}>
+                {isAdmin ? 'Export metadata CSV' : 'Export JSONL'}
+              </a>
+            )}
             {canWrite && (
               <button type="button" className="btn bp" onClick={() => setModal('write')}>
                 <Icon.Plus />
@@ -337,6 +332,32 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                     options={[{ value: '', label: 'All projects' }, ...(facets.projects ?? []).map((pr) => ({ value: pr.value, label: `${pr.value} · ${fmtCompact(pr.count)}` }))]}
                   />
                 </div>
+                {(
+                <div>
+                  <p className="fh">Domain tags</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {domains.length === 0 && <span className="sm muted">No domain tags yet</span>}
+                    {(moreDomains ? domains : domains.slice(0, 5)).map((d) => (
+                      <button
+                        key={d.value}
+                        type="button"
+                        className="tag"
+                        aria-pressed={state.domain.includes(d.value)}
+                        title={`${d.count} memories`}
+                        style={{ border: state.domain.includes(d.value) ? '1px solid #0066cc' : '1px solid transparent', cursor: 'pointer', background: state.domain.includes(d.value) ? '#e7f1fa' : undefined }}
+                        onClick={() => setParams({ domain: toggleIn(state.domain, d.value) })}
+                      >
+                        {d.value}
+                      </button>
+                    ))}
+                    {domains.length > 5 && (
+                      <button type="button" className="tag" style={{ border: 0, cursor: 'pointer' }} onClick={() => setMoreDomains((m) => !m)}>
+                        {moreDomains ? 'less' : `+${domains.length - 5}`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                )}
                 <WeightFilter value={state.minWeight} disabled={filtersDisabled} onCommit={(v) => setParams({ minw: v ? v.toFixed(2) : '' })} />
                 <div className="f">
                   <label htmlFor="maximum-weight">Maximum weight</label>
@@ -493,9 +514,6 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                   </>
                 ) : (
                 <>
-                <button type="button" className="btn bl" disabled={!selectionCanWrite} title={!selectionCanWrite ? 'Write access is required for every selected memory.' : undefined} onClick={() => setModal('weight')}>
-                  Change weight
-                </button>
                 <button type="button" className="btn bl" disabled={!selectionCanWrite} title={!selectionCanWrite ? 'Write access is required for every selected memory.' : undefined} onClick={() => setModal('relate')}>
                   Add relationship
                 </button>
@@ -571,6 +589,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                         </th>
                         <th>Memory</th>
                         {columns.includes('scope') && <th>Scope</th>}
+                        {columns.includes('entities') && <th style={{ minWidth: 150 }}>Entities</th>}
                         {columns.includes('owner') && <th>Owner</th>}
                         {columns.includes('weight') && <th style={{ width: 120 }}>Weight</th>}
                         {columns.includes('version') && <th>Ver.</th>}
@@ -639,6 +658,29 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                                 </ScopeLabel>
                               ) : (
                                 <ScopeLabel scope={m.scope} />
+                              )}
+                            </td>
+                          )}
+                          {columns.includes('entities') && (
+                            <td>
+                              {m.entities?.length ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                                  {m.entities.slice(0, 3).map((e) => (
+                                    <button
+                                      key={e.id}
+                                      type="button"
+                                      className={`ent ${state.entity === e.id ? 'on' : ''}`}
+                                      title={`${ENTITY_TYPE[e.type]?.label ?? e.type} · show memories that mention it`}
+                                      onClick={() => setParams({ entity: e.id, entityName: e.name })}
+                                    >
+                                      <EntityIcon type={e.type} />
+                                      {e.name}
+                                    </button>
+                                  ))}
+                                  {m.entities.length > 3 && <span className="hint">+{m.entities.length - 3} more</span>}
+                                </div>
+                              ) : (
+                                <span className="muted">—</span>
                               )}
                             </td>
                           )}
@@ -773,35 +815,6 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
         />
       )}
       {modal === 'relate' && <RelationshipModal sourceIds={ids} onClose={() => setModal(null)} onDone={reload} />}
-      {modal === 'weight' && (
-        <Modal
-          title={`Change weight of ${ids.length} ${ids.length === 1 ? 'memory' : 'memories'}`}
-          onClose={() => setModal(null)}
-          actions={
-            <>
-              <button
-                type="button"
-                className="btn bp"
-                onClick={async () => {
-                  setModal(null);
-                  await runEach(ids, (id) => api.newVersion(id, { weight: weightValue }), `Weight set to ${weightValue.toFixed(2)} — new versions created.`);
-                }}
-              >
-                Create new versions
-              </button>
-              <button type="button" className="btn bg" onClick={() => setModal(null)}>
-                Cancel
-              </button>
-            </>
-          }
-        >
-          <div className="f">
-            <label htmlFor="bw">Weight · {weightValue.toFixed(2)}</label>
-            <input id="bw" type="range" min={0} max={100} value={Math.round(weightValue * 100)} onChange={(e) => setWeightValue(Number(e.target.value) / 100)} />
-            <span className="hint">Each memory gets a new version; old versions stay readable for forensics. Audited.</span>
-          </div>
-        </Modal>
-      )}
       {modal === 'quarantine' && (
         <ConfirmModal
           title={`Quarantine ${ids.length} ${ids.length === 1 ? 'memory' : 'memories'}?`}
@@ -831,7 +844,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
           }}
           onConfirm={async () => {
             const target = rowDelete ? [rowDelete.id] : ids;
-            await runEach(target, (id) => api.deleteMemory(id), `${fmtInt(target.length)} deleted.`);
+            await runBulk({ action: 'delete', ids: target }, `${fmtInt(target.length)} deleted.`);
           }}
         >
           This soft-deletes {rowDelete ? <b>“{rowDelete.stub}”</b> : <b>{ids.length} memories</b>} together with every version and child branch. Agents stop
@@ -844,6 +857,23 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
         </ConfirmModal>
       )}
     </>
+  );
+};
+
+const ENTITY_TYPE: Record<string, { label: string; color: string; d: string }> = {
+  person: { label: 'Person', color: '#0066cc', d: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c1.5-4 4.5-6 8-6s6.5 2 8 6' },
+  organization: { label: 'Organization', color: '#3d7317', d: 'M4 21V5l8-3v19M12 9h8v12M3 21h18M7 8h2M7 12h2M7 16h2M15 13h2M15 17h2' },
+  location: { label: 'Location', color: '#009596', d: 'M12 21s-7-6.5-7-11a7 7 0 0114 0c0 4.5-7 11-7 11zM12 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z' },
+  object: { label: 'Object', color: '#ca6c0f', d: 'M12 2l9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10' },
+  event: { label: 'Event', color: '#5e40be', d: 'M5 5h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2zM3 10h18M8 3v4M16 3v4' },
+};
+
+const EntityIcon: React.FC<{ type: string }> = ({ type }) => {
+  const t = ENTITY_TYPE[type] ?? ENTITY_TYPE.object;
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={t.color} strokeWidth="2.2" aria-hidden="true">
+      <path d={t.d} />
+    </svg>
   );
 };
 

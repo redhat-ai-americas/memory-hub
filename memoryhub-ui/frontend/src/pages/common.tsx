@@ -258,9 +258,12 @@ export const RelationshipModal: React.FC<{ sourceIds: string[]; onClose: () => v
     setBusy(true);
     setError(null);
     try {
-      // POST /api/relationships links one pair at a time.
-      for (const source_id of sourceIds) {
-        await api.createRelationship({ source_id, target_id: target.id, relationship_type: type });
+      if (sourceIds.length === 1) {
+        await api.createRelationship({ source_id: sourceIds[0], target_id: target.id, relationship_type: type });
+      } else {
+        // One transaction: every source and the target are checked before anything is linked.
+        const res = await api.bulk({ action: 'relate', ids: sourceIds, target_id: target.id, relationship_type: type });
+        if (res.errors.length) throw new Error(res.errors.map((e) => e.detail).join('; '));
       }
       toast(`Relationship ${type} created.`);
       onDone();

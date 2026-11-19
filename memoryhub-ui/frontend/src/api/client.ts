@@ -13,8 +13,11 @@ import type {
   EntityDetail,
   EntityMergePreview,
   EntityType,
-  GraphResponse,
+  GraphAll,
+  GraphNeighbourhood,
+  GraphPrefer,
   Me,
+  MemoryContext,
   MemoryRecord,
   MemoryVersion,
   NavCounts,
@@ -23,7 +26,8 @@ import type {
   PublicConfig,
   RulePayload,
   RuleVersion,
-  SearchMatch,
+  SearchRequest,
+  SearchResponse,
   SecretRotatedResponse,
   StatsResponse,
   UpdateClientPayload,
@@ -118,6 +122,10 @@ export const api = {
   browse: (params: BrowseParams) => get<BrowseResponse>(`/memories/browse${qs(params as Record<string, unknown>)}`),
   memory: (id: string) => get<MemoryRecord>(`/memory/${enc(id)}`),
   memoryHistory: (id: string) => get<MemoryVersion[]>(`/memory/${enc(id)}/history`),
+  /** Memory page: record, versions, branches, links, reports and similar memories, each checked for access. */
+  memoryContext: (id: string) => get<MemoryContext>(`/memory/${enc(id)}/context`),
+  /** User: JSONL with content; admin: CSV metadata only. Same filters as browse. */
+  exportUrl: (params: BrowseParams = {}) => `${BASE}/memories/export${qs(params as Record<string, unknown>)}`,
   writeMemory: (body: {
     content: string;
     scope: 'user' | 'project' | 'organizational';
@@ -135,13 +143,33 @@ export const api = {
   createRelationship: (body: { source_id: string; target_id: string; relationship_type: 'related_to' | 'derived_from' | 'supersedes' | 'conflicts_with' }) =>
     post<{ id: string }>('/relationships', body),
   deleteMemory: (id: string) => del<void>(`/memory/${enc(id)}`),
-  /** Admins: quarantine or restore up to 100 memories. */
-  moderate: (body: { action: 'quarantine' | 'restore'; ids: string[]; reason?: string }) =>
-    post<{ done: string[]; errors: { id: string; detail: string }[] }>('/memories/bulk', body),
+  /**
+   * Several memories in one transaction: delete (authors, project admins), relate
+   * (both ends writable), and for admins quarantine / restore from quarantine.
+   */
+  bulk: (body: {
+    action: 'quarantine' | 'restore' | 'delete' | 'relate';
+    ids: string[];
+    reason?: string;
+    relationship_type?: 'related_to' | 'derived_from' | 'supersedes' | 'conflicts_with';
+    target_id?: string;
+  }) => post<{ done: string[]; errors: { id: string; detail: string }[] }>('/memories/bulk', body),
 
   // Graph & search
-  graph: (params: { scope?: string; owner_id?: string } = {}) => get<GraphResponse>(`/graph${qs(params)}`),
-  search: (q: string) => get<SearchMatch[]>(`/graph/search${qs({ q })}`),
+  graphAll: (
+    params: BrowseParams & {
+      types?: string[];
+      max_nodes?: number;
+      min_weight?: number;
+      project?: string;
+      entity?: string;
+      prefer?: GraphPrefer;
+    } = {},
+  ) => get<GraphAll>(`/graph/all${qs(params as Record<string, unknown>)}`),
+  neighbourhood: (params: BrowseParams & { focus?: string; depth?: number; types?: string[]; max_nodes?: number }) =>
+    get<GraphNeighbourhood>(`/graph/neighbourhood${qs(params as Record<string, unknown>)}`),
+  /** Search playground: the same Core retrieval agents use, limited to what the person may read. */
+  search: (body: SearchRequest) => post<SearchResponse>('/search', body),
 
   // Entities (users only)
   entities: (params: { q?: string; type?: EntityType | 'all'; project?: string; page?: number; per_page?: number } = {}) =>
