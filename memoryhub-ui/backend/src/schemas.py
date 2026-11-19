@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GraphNode(BaseModel):
@@ -96,14 +96,18 @@ class SearchMatch(BaseModel):
 
 
 class CreateClientRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     client_id: str
     client_name: str
-    identity_type: str = "user"
+    identity_type: str = Field(default="user", pattern="^(user|service)$")
     tenant_id: str
-    default_scopes: list[str] = ["memory:read"]
+    default_scopes: list[str] = Field(default_factory=lambda: ["memory:read"])
 
 
 class UpdateClientRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     client_name: str | None = None
     active: bool | None = None
     default_scopes: list[str] | None = None
@@ -118,6 +122,9 @@ class ClientResponse(BaseModel):
     active: bool
     created_at: datetime
     updated_at: datetime
+    # True when this human is the bound owner (AgentOwner) of the client, which
+    # is what credential rotation requires. The owner's name is not exposed.
+    owned: bool = False
 
 
 class ClientCreatedResponse(ClientResponse):
@@ -145,6 +152,38 @@ class PublicConfigResponse(BaseModel):
 
     mcp_url: str
     auth_url: str
+
+
+class MeResponse(BaseModel):
+    username: str
+    name: str
+    email: str | None
+    initials: str
+    source: str
+    role: str
+    tenant_id: str
+    access: dict | None = None
+    write: dict | None = None
+    labs: bool = False
+    # Agent clients bound to this person: their writes count as the person's own.
+    agents: list[str] = []
+
+
+class AuthStatusResponse(BaseModel):
+    mode: str
+    authenticated: bool
+    api_key_login: bool
+    local_accounts: bool
+    user: str | None
+    role: str
+    cluster_domain: str | None
+    setup_required: bool
+    accounts_available: bool = False
+
+
+class NavCountsResponse(BaseModel):
+    memories: int
+    review_queue: int
 
 
 # --- Curation Rules ---

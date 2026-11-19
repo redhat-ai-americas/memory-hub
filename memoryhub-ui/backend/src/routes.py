@@ -4,23 +4,31 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from memoryhub_core.models.contradiction import ContradictionReport
+from memoryhub_core.models.conversation import ConversationThread
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
+from memoryhub_core.models.project import Project, ProjectMembership
+from memoryhub_core.models.role import RoleAssignment
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import (
     get_memory_history as get_memory_history_service,
 )
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, any_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
+from src.authorization import AccessDep, Principal, get_principal
 from src.config import Settings, get_settings
 from src.database import get_db
+from src.human_adapters import _record_human_audit
 from src.schemas import (
     ApiKeyRotatedResponse,
+    AuthStatusResponse,
     ClientCreatedResponse,
     ClientResponse,
     ContradictionResponse,
@@ -32,6 +40,8 @@ from src.schemas import (
     GraphNode,
     GraphResponse,
     MemoryDetail,
+    MeResponse,
+    NavCountsResponse,
     PublicConfigResponse,
     RecentActivity,
     RuleVersionEntry,
@@ -58,11 +68,12 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 # ---------------------------------------------------------------------------
 
 
-def _node_to_graph_node(node: MemoryNode) -> GraphNode:
+def _node_to_graph_node(node: MemoryNode, access: AccessDep) -> GraphNode:
+    hidden = access.hides_content(node)
     return GraphNode(
         id=str(node.id),
-        content=node.content,
-        stub=node.stub,
+        content="" if hidden else node.content,
+        stub="Content hidden" if hidden else node.stub,
         scope=node.scope,
         weight=node.weight,
         branch_type=node.branch_type,
@@ -70,7 +81,7 @@ def _node_to_graph_node(node: MemoryNode) -> GraphNode:
         version=node.version,
         created_at=node.created_at,
         updated_at=node.updated_at,
-        metadata=node.metadata_,
+        metadata=None if hidden else node.metadata_,
         parent_id=str(node.parent_id) if node.parent_id else None,
     )
 
@@ -90,6 +101,7 @@ async def _admin_request(
     path: str,
     json_body: dict | None = None,
     tenant_id: str | None = None,
+    owner: str | None = None,
 ) -> httpx.Response:
     """Make an authenticated request to the auth service admin API."""
     if not settings.auth_service_url:
@@ -102,6 +114,8 @@ async def _admin_request(
     params: dict[str, str] = {}
     if tenant_id is not None:
         params["tenant_id"] = tenant_id
+    if owner is not None:
+        params["owner"] = owner
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.request(
@@ -153,6 +167,91 @@ async def healthz():
     return {"status": "ok"}
 
 
+@router.get("/api/me", response_model=MeResponse)
+async def get_me(access: AccessDep, response: Response):
+    """Expose only the verified OAuth-proxy principal needed by the UI Shell."""
+    response.headers["Cache-Control"] = "no-store"
+    principal = access.principal
+    if principal.role == "user":
+        write_scopes = ["user"] + (["project"] if access.human_projects else [])
+        project_ids = sorted(access.human_projects)
+    else:
+        write_scopes = (["project"] if access.human_project_admins else [])
+        if "organizational" in access.admin_write_scopes:
+            write_scopes.append("organizational")
+        project_ids = sorted(access.human_project_admins)
+    return MeResponse(
+        username=principal.username,
+        name=principal.username,
+        email=None,
+        initials=principal.username[:2].upper(),
+        source="oauth-proxy",
+        role=principal.role,
+        tenant_id=principal.tenant_id,
+        write={"scopes": write_scopes, "project_ids": project_ids,
+               "campaign_ids": [], "owner_id": principal.username},
+        agents=sorted(access.agents),
+        access={
+            "hidden_scopes": sorted({
+                "user", "project", "campaign", "role", "organizational", "enterprise",
+            } - access.moderation_scopes),
+            "break_glass": None,
+        } if principal.role == "admin" else None,
+    )
+
+
+@router.get("/api/auth/status", response_model=AuthStatusResponse)
+async def auth_status(principal: Annotated[Principal, Depends(get_principal)], response: Response):
+    """Describe the existing OAuth-proxy login mode for a valid session."""
+    response.headers["Cache-Control"] = "no-store"
+    return AuthStatusResponse(
+        mode="oauth-proxy", authenticated=True, api_key_login=False,
+        local_accounts=False, user=principal.username, role=principal.role,
+        cluster_domain=None, setup_required=False,
+    )
+
+
+@router.post("/api/auth/logout")
+async def auth_logout(_principal: Annotated[Principal, Depends(get_principal)]):
+    """Direct the browser to the proxy's existing cookie-clearing endpoint."""
+    return {"ok": True, "redirect": "/oauth/sign_out", "method": "GET"}
+
+
+@router.get("/api/nav-counts", response_model=NavCountsResponse)
+async def nav_counts(db: DbDep, access: AccessDep):
+    """Count only memories and review items visible to this human principal."""
+    tenant = access.principal.tenant_id
+    memories = (await db.execute(select(func.count()).select_from(MemoryNode).where(
+        MemoryNode.tenant_id == tenant,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
+        access.clause(),
+    ))).scalar_one()
+    review_queue = 0
+    if access.principal.role == "admin" and access.human_project_admins and "project" in access.moderation_scopes:
+        review_queue = (await db.execute(select(func.count()).select_from(ContradictionReport).join(
+            MemoryNode, ContradictionReport.memory_id == MemoryNode.id,
+        ).where(
+            ContradictionReport.tenant_id == tenant,
+            ContradictionReport.resolved.is_(False),
+            MemoryNode.tenant_id == tenant,
+            MemoryNode.deleted_at.is_(None),
+            MemoryNode.scope == "project",
+            MemoryNode.scope_id.in_(access.human_project_admins),
+            ~ContradictionReport.reporter.in_(access.identities),
+            ~MemoryNode.owner_id.in_(access.identities),
+            or_(MemoryNode.actor_id.is_(None), ~MemoryNode.actor_id.in_(access.identities)),
+            or_(MemoryNode.driver_id.is_(None), ~MemoryNode.driver_id.in_(access.identities)),
+        ))).scalar_one()
+    return NavCountsResponse(memories=memories, review_queue=review_queue)
+
+
+@router.get("/api/nav-features")
+async def nav_features(_access: AccessDep):
+    """No content-backed Labs modules are implemented by this BFF."""
+    return {}
+
+
 @router.get("/api/public-config", response_model=PublicConfigResponse)
 async def get_public_config(settings: SettingsDep) -> PublicConfigResponse:
     """Return the public-facing route URLs the UI uses to compose contributor
@@ -179,6 +278,7 @@ async def get_public_config(settings: SettingsDep) -> PublicConfigResponse:
 async def get_graph(
     db: DbDep,
     settings: SettingsDep,
+    access: AccessDep,
     scope: str | None = Query(default=None),
     owner_id: str | None = Query(default=None),
 ):
@@ -195,6 +295,7 @@ async def get_graph(
         MemoryNode.tenant_id == tenant_id,
         MemoryNode.is_current.is_(True),
         MemoryNode.deleted_at.is_(None),
+        access.clause(),
     )
     if scope:
         stmt = stmt.where(MemoryNode.scope == scope)
@@ -202,10 +303,14 @@ async def get_graph(
         stmt = stmt.where(MemoryNode.owner_id == owner_id)
 
     result = await db.execute(stmt)
-    nodes = result.scalars().all()
+    nodes = [n for n in result.scalars().all() if access.can_read(n)]
 
     node_ids = {node.id for node in nodes}
-    graph_nodes = [_node_to_graph_node(n) for n in nodes]
+    graph_nodes = [_node_to_graph_node(n, access) for n in nodes]
+    visible_node_ids = {str(node_id) for node_id in node_ids}
+    for graph_node in graph_nodes:
+        if graph_node.parent_id not in visible_node_ids:
+            graph_node.parent_id = None
 
     edges: list[GraphEdge] = []
 
@@ -230,6 +335,7 @@ async def get_graph(
         node_id_list = list(node_ids)
         rel_stmt = select(MemoryRelationship).where(
             MemoryRelationship.tenant_id == tenant_id,
+            MemoryRelationship.valid_until.is_(None),
             MemoryRelationship.source_id.in_(node_id_list),
             MemoryRelationship.target_id.in_(node_id_list),
         )
@@ -249,6 +355,7 @@ async def get_graph(
 async def search_graph(
     db: DbDep,
     settings: SettingsDep,
+    access: AccessDep,
     q: str = Query(min_length=1),
 ):
     """Search current memories by semantic similarity or text fallback.
@@ -259,20 +366,19 @@ async def search_graph(
     embedding = await _get_embedding(q, settings.embedding_url)
 
     if embedding is not None:
-        sql = text(
-            """
-            SELECT id::text, 1 - (embedding <=> CAST(:query_vec AS vector)) AS score
-            FROM memory_nodes
-            WHERE tenant_id = :tenant_id
-              AND is_current = true
-              AND deleted_at IS NULL
-            ORDER BY embedding <=> CAST(:query_vec AS vector)
-            LIMIT 20
-            """
+        distance = MemoryNode.embedding.cosine_distance(embedding)
+        stmt = (
+            select(MemoryNode.id, (1 - distance).label("score"))
+            .where(
+                MemoryNode.tenant_id == tenant_id,
+                MemoryNode.is_current.is_(True),
+                MemoryNode.deleted_at.is_(None),
+                access.content_clause(),
+            )
+            .order_by(distance)
+            .limit(20)
         )
-        result = await db.execute(
-            sql, {"query_vec": str(embedding), "tenant_id": tenant_id}
-        )
+        result = await db.execute(stmt)
         rows = result.fetchall()
         return [SearchMatch(id=row[0], score=float(row[1])) for row in rows]
 
@@ -284,12 +390,13 @@ async def search_graph(
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
+            access.content_clause(),
             (MemoryNode.content.ilike(pattern) | MemoryNode.stub.ilike(pattern)),
         )
         .limit(20)
     )
     result = await db.execute(stmt)
-    nodes = result.scalars().all()
+    nodes = [n for n in result.scalars().all() if access.can_read(n)]
     return [SearchMatch(id=str(n.id), score=1.0) for n in nodes]
 
 
@@ -299,7 +406,7 @@ async def search_graph(
 
 
 @router.get("/api/stats", response_model=StatsResponse)
-async def get_stats(db: DbDep, settings: SettingsDep):
+async def get_stats(db: DbDep, settings: SettingsDep, access: AccessDep):
     """Return dashboard statistics.
 
     All memory counts are scoped to ``settings.ui_tenant_id`` (Phase 6 /
@@ -316,6 +423,7 @@ async def get_stats(db: DbDep, settings: SettingsDep):
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
+            access.clause(),
         )
     )
     total = total_result.scalar_one()
@@ -327,6 +435,7 @@ async def get_stats(db: DbDep, settings: SettingsDep):
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
+            access.clause(),
         )
         .group_by(MemoryNode.scope)
     )
@@ -339,6 +448,7 @@ async def get_stats(db: DbDep, settings: SettingsDep):
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
+            access.clause(),
         )
         .order_by(MemoryNode.updated_at.desc())
         .limit(10)
@@ -347,7 +457,7 @@ async def get_stats(db: DbDep, settings: SettingsDep):
     recent_activity = [
         RecentActivity(
             id=str(n.id),
-            stub=n.stub,
+            stub="Content hidden" if access.hides_content(n) else n.stub,
             scope=n.scope,
             owner_id=n.owner_id,
             updated_at=n.updated_at,
@@ -379,7 +489,7 @@ async def get_stats(db: DbDep, settings: SettingsDep):
 
 
 @router.get("/api/memory/{memory_id}", response_model=MemoryDetail)
-async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
+async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: AccessDep):
     """Return full detail for a single memory node.
 
     Filters by ``settings.ui_tenant_id`` (Phase 6 / issue #46). Cross-
@@ -397,11 +507,13 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
             MemoryNode.id == parsed_id,
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
+            access.clause(),
         )
     )
     node = result.scalar_one_or_none()
     if node is None:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
+    access.require_read(node)
 
     # Children count (exclude deleted)
     count_result = await db.execute(
@@ -411,14 +523,25 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
             MemoryNode.parent_id == parsed_id,
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
+            access.clause(),
         )
     )
     children_count = count_result.scalar_one()
 
     # Relationships (both incoming and outgoing)
+    source = aliased(MemoryNode)
+    target = aliased(MemoryNode)
     rel_result = await db.execute(
-        select(MemoryRelationship).where(
+        select(MemoryRelationship)
+        .join(source, source.id == MemoryRelationship.source_id)
+        .join(target, target.id == MemoryRelationship.target_id)
+        .where(
             MemoryRelationship.tenant_id == tenant_id,
+            MemoryRelationship.valid_until.is_(None),
+            access.clause(source),
+            access.clause(target),
+            source.deleted_at.is_(None),
+            target.deleted_at.is_(None),
             (
                 (MemoryRelationship.source_id == parsed_id)
                 | (MemoryRelationship.target_id == parsed_id)
@@ -428,18 +551,27 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
     relationships = rel_result.scalars().all()
     edges = [_rel_to_edge(r) for r in relationships]
 
+    visible_parent_id = None
+    if node.parent_id:
+        parent = (await db.execute(select(MemoryNode.id).where(
+            MemoryNode.id == node.parent_id,
+            MemoryNode.deleted_at.is_(None),
+            access.clause(),
+        ))).scalar_one_or_none()
+        visible_parent_id = str(parent) if parent else None
+
     return MemoryDetail(
         id=str(node.id),
-        content=node.content,
-        stub=node.stub,
+        content="" if access.hides_content(node) else node.content,
+        stub="Content hidden" if access.hides_content(node) else node.stub,
         scope=node.scope,
         weight=node.weight,
         branch_type=node.branch_type,
         owner_id=node.owner_id,
         version=node.version,
         is_current=node.is_current,
-        parent_id=str(node.parent_id) if node.parent_id else None,
-        metadata=node.metadata_,
+        parent_id=visible_parent_id,
+        metadata=None if access.hides_content(node) else node.metadata_,
         created_at=node.created_at,
         updated_at=node.updated_at,
         expires_at=node.expires_at,
@@ -454,7 +586,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep):
 
 
 @router.get("/api/memory/{memory_id}/history", response_model=list[VersionEntry])
-async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep):
+async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep, access: AccessDep):
     """Return the full version chain for a memory, newest first.
 
     Delegates to ``memoryhub.services.memory.get_memory_history`` so the
@@ -473,6 +605,16 @@ async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep):
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}") from None
 
+    seed = (await db.execute(select(MemoryNode).where(
+        MemoryNode.id == parsed_id,
+        MemoryNode.tenant_id == access.principal.tenant_id,
+        MemoryNode.deleted_at.is_(None),
+        access.clause(),
+    ))).scalar_one_or_none()
+    if seed is None:
+        raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
+    access.require_read(seed)
+
     try:
         # Large max_versions preserves the BFF's unpaginated contract.
         # Version chains are realistically 10s of entries; pagination at
@@ -486,16 +628,31 @@ async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep):
     except MemoryNotFoundError:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found") from None
 
+    # Core's public history entries intentionally omit owner/scope fields.
+    # Re-read the underlying rows with the human policy before returning any
+    # version content; checking only the seed would expose changed ownership.
+    versions = result["versions"]
+    visible_rows = {}
+    if versions:
+        version_rows = (await db.execute(select(MemoryNode).where(
+            MemoryNode.id.in_([version.id for version in versions]),
+            MemoryNode.tenant_id == access.principal.tenant_id,
+            MemoryNode.deleted_at.is_(None),
+            access.clause(),
+        ))).scalars().all()
+        visible_rows = {row.id: row for row in version_rows
+                        if row.deleted_at is None and access.can_read(row)}
+
     return [
         VersionEntry(
             id=str(v.id),
             version=v.version,
             is_current=v.is_current,
-            stub=v.stub,
-            content=v.content,
+            stub="Content hidden" if access.hides_content(visible_rows[v.id]) else v.stub,
+            content="" if access.hides_content(visible_rows[v.id]) else v.content,
             created_at=v.created_at,
         )
-        for v in result["versions"]
+        for v in versions if v.id in visible_rows
     ]
 
 
@@ -505,7 +662,7 @@ async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep):
 
 
 @router.delete("/api/memory/{memory_id}", status_code=204)
-async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
+async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: AccessDep):
     """Soft-delete a memory and its entire version chain.
 
     Phase 6 (#46): every SELECT and the final bulk UPDATE filter by
@@ -528,55 +685,28 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
         select(MemoryNode).where(
             MemoryNode.id == parsed_id,
             MemoryNode.tenant_id == tenant_id,
-        )
+        ).with_for_update()
     )
     node = result.scalar_one_or_none()
     if node is None:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
     if node.deleted_at is not None:
         raise HTTPException(status_code=409, detail=f"Memory {memory_id!r} is already deleted")
+    access.require_delete(node)
+
+    # Use the same closure as the Core delete path, then authorize every row.
+    from memoryhub_core.services.memory import collect_delete_nodes
+
+    found = await collect_delete_nodes(node, db, tenant_id, seed_locked=True)
+    for related in found.values():
+        access.require_delete(related)
 
     now = datetime.now(UTC)
-
-    # Collect version chain (walk backwards with cycle guard)
-    version_ids: set = {parsed_id}
-    current = node
-    while current.previous_version_id and current.previous_version_id not in version_ids:
-        version_ids.add(current.previous_version_id)
-        prev_result = await db.execute(
-            select(MemoryNode).where(
-                MemoryNode.id == current.previous_version_id,
-                MemoryNode.tenant_id == tenant_id,
-            )
-        )
-        current = prev_result.scalar_one_or_none()
-        if current is None:
-            break
-
-    # Walk forward through newer versions
-    changed = True
-    while changed:
-        changed = False
-        fwd_result = await db.execute(
-            select(MemoryNode).where(
-                MemoryNode.tenant_id == tenant_id,
-                MemoryNode.previous_version_id.in_(list(version_ids)),
-                ~MemoryNode.id.in_(list(version_ids)),
-            )
-        )
-        for fwd_node in fwd_result.scalars().all():
-            version_ids.add(fwd_node.id)
-            changed = True
-
-    # Child branches
-    child_result = await db.execute(
-        select(MemoryNode).where(
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.parent_id.in_(list(version_ids)),
-        )
+    all_ids = set(found)
+    _record_human_audit(
+        db, access, "memory.delete", node.scope, node.owner_id, node.id,
+        {"deleted_rows": len(all_ids)},
     )
-    child_ids = {child.id for child in child_result.scalars().all()}
-    all_ids = version_ids | child_ids
 
     # Bulk soft-delete
     await db.execute(
@@ -594,48 +724,169 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
 # Client management (proxy to auth service admin API)
 # ---------------------------------------------------------------------------
 
+READ_CLIENT_SCOPES = frozenset({
+    "memory:read", "memory:read:user", "memory:read:project",
+    "memory:read:campaign", "memory:read:role", "memory:read:organizational",
+    "memory:read:enterprise",
+})
+ASSIGNABLE_CLIENT_SCOPES = READ_CLIENT_SCOPES | {"memory:write:user"}
+
+
+def _client_scopes_allowed(access: AccessDep, scopes: list[str], identity_type: str) -> None:
+    # Human role alone cannot grant project/organizational/service-wide writes:
+    # the current client model has no per-client project or object grant.
+    if not scopes or len(scopes) != len(set(scopes)) or set(scopes) - ASSIGNABLE_CLIENT_SCOPES:
+        raise HTTPException(status_code=403, detail="Client scope forbidden")
+    if identity_type == "service" and "memory:write:user" in scopes:
+        raise HTTPException(status_code=403, detail="Service client personal write forbidden")
+    if access.principal.role == "user" and identity_type != "user":
+        raise HTTPException(status_code=403, detail="Only user agents can be created")
+    if access.principal.role == "admin":
+        allowed_admin_reads = {f"memory:read:{scope}" for scope in access.moderation_scopes}
+        if identity_type != "service" or set(scopes) - allowed_admin_reads:
+            raise HTTPException(status_code=403, detail="Admin client scope or type forbidden")
+
+
+def _with_ownership(client: dict, access: AccessDep, *, owned: bool | None = None) -> dict:
+    """Tell the UI whether this human owns the client (rotation needs ownership)."""
+    return {**client, "owned": client.get("client_id") in access.agents if owned is None else owned}
+
+
+async def _authorize_client(
+    settings: Settings, access: AccessDep, client_id: str,
+) -> dict:
+    if access.principal.role == "user" and client_id not in access.agents:
+        raise HTTPException(status_code=404, detail="Client not found")
+    response = await _admin_request(
+        settings, "GET", f"/admin/clients/{quote(client_id, safe='')}",
+        tenant_id=access.principal.tenant_id,
+        owner=access.principal.username if access.principal.role == "user" else None,
+    )
+    client = response.json()
+    if client.get("tenant_id") != access.principal.tenant_id:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client
+
+
+async def _reject_existing_identity_claim(
+    db: AsyncSession, settings: Settings, client_id: str, tenant_id: str,
+) -> None:
+    """Do not let a new OAuth sub inherit an existing person's object grants."""
+    human_names = {
+        name.strip() for names in (settings.ui_allowed_users, settings.ui_admin_users)
+        for name in names.split(",") if name.strip()
+    }
+    if not client_id or client_id in human_names:
+        raise HTTPException(status_code=409, detail="Client ID is reserved by an existing identity")
+    occupied = or_(
+        select(MemoryNode.id).where(
+            MemoryNode.tenant_id == tenant_id,
+            or_(MemoryNode.owner_id == client_id, MemoryNode.actor_id == client_id,
+                MemoryNode.driver_id == client_id),
+        ).exists(),
+        select(ProjectMembership.id).join(Project, Project.name == ProjectMembership.project_id).where(
+            Project.tenant_id == tenant_id, ProjectMembership.user_id == client_id,
+        ).exists(),
+        select(RoleAssignment.id).where(
+            RoleAssignment.tenant_id == tenant_id, RoleAssignment.user_id == client_id,
+        ).exists(),
+        select(CuratorRule.id).where(
+            CuratorRule.tenant_id == tenant_id, CuratorRule.layer == "user",
+            CuratorRule.owner_id == client_id,
+        ).exists(),
+        select(ConversationThread.id).where(
+            ConversationThread.tenant_id == tenant_id,
+            or_(ConversationThread.owner_id == client_id,
+                ConversationThread.actor_id == client_id,
+                ConversationThread.driver_id == client_id,
+                client_id == any_(ConversationThread.participant_ids)),
+        ).exists(),
+    )
+    if (await db.execute(select(occupied))).scalar_one():
+        raise HTTPException(status_code=409, detail="Client ID is reserved by an existing identity")
+
 
 @router.get("/api/clients", response_model=list[ClientResponse])
-async def list_clients(settings: SettingsDep):
+async def list_clients(settings: SettingsDep, access: AccessDep):
     resp = await _admin_request(
-        settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id
+        settings, "GET", "/admin/clients", tenant_id=access.principal.tenant_id,
+        owner=access.principal.username if access.principal.role == "user" else None,
     )
-    return resp.json()
+    clients = [c for c in resp.json() if c.get("tenant_id") == access.principal.tenant_id]
+    if access.principal.role == "user":
+        clients = [c for c in clients if c.get("client_id") in access.agents]
+    return [_with_ownership(c, access) for c in clients]
 
 
 @router.post("/api/clients", response_model=ClientCreatedResponse, status_code=201)
-async def create_client(body: CreateClientRequest, settings: SettingsDep):
+async def create_client(body: CreateClientRequest, db: DbDep, settings: SettingsDep, access: AccessDep):
+    if body.tenant_id != access.principal.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant override forbidden")
+    if access.principal.role == "user" and body.identity_type != "user":
+        raise HTTPException(status_code=403, detail="Only user agents can be created")
+    _client_scopes_allowed(access, body.default_scopes, body.identity_type)
+    await _reject_existing_identity_claim(db, settings, body.client_id, access.principal.tenant_id)
+    payload = body.model_dump()
+    payload["tenant_id"] = access.principal.tenant_id
+    # Every dashboard-created technical identity has a verified human owner.
+    # Admin-created clients are service-only until the product has a trusted
+    # way to assign a user-type client to the intended person.
+    payload["owner"] = access.principal.username
     resp = await _admin_request(
         settings, "POST", "/admin/clients",
-        json_body=body.model_dump(), tenant_id=settings.ui_tenant_id,
+        json_body=payload, tenant_id=access.principal.tenant_id,
     )
-    return resp.json()
+    # The owner binding is committed with the client, so the creator owns it.
+    return _with_ownership(resp.json(), access, owned=True)
 
 
 @router.patch("/api/clients/{client_id}", response_model=ClientResponse)
-async def update_client(client_id: str, body: UpdateClientRequest, settings: SettingsDep):
+async def update_client(client_id: str, body: UpdateClientRequest, settings: SettingsDep, access: AccessDep):
     payload = body.model_dump(exclude_none=True)
+    client = await _authorize_client(settings, access, client_id)
+    if (access.principal.role == "admin" and body.default_scopes is not None
+            and client_id not in access.agents
+            and (client["identity_type"] == "user"
+                 or set(body.default_scopes) - set(client["default_scopes"]))):
+        raise HTTPException(status_code=403, detail="Foreign agent scope expansion is forbidden")
+    if body.default_scopes is not None:
+        _client_scopes_allowed(access, body.default_scopes, client["identity_type"])
+        if access.principal.role == "user" and set(body.default_scopes) - set(client["default_scopes"]):
+            raise HTTPException(status_code=403, detail="Users cannot expand client scopes")
+    if access.principal.role == "user" and body.active is True:
+        raise HTTPException(status_code=403, detail="Users cannot reactivate clients")
     resp = await _admin_request(
-        settings, "PATCH", f"/admin/clients/{client_id}",
-        json_body=payload, tenant_id=settings.ui_tenant_id,
+        settings, "PATCH", f"/admin/clients/{quote(client_id, safe='')}",
+        json_body=payload, tenant_id=access.principal.tenant_id,
+        owner=access.principal.username if client_id in access.agents else None,
     )
-    return resp.json()
+    return _with_ownership(resp.json(), access)
 
 
 @router.post("/api/clients/{client_id}/rotate-secret", response_model=SecretRotatedResponse)
-async def rotate_client_secret(client_id: str, settings: SettingsDep):
+async def rotate_client_secret(client_id: str, settings: SettingsDep, access: AccessDep):
+    client = await _authorize_client(settings, access, client_id)
+    _client_scopes_allowed(access, client["default_scopes"], client["identity_type"])
+    if access.principal.role == "admin" and client_id not in access.agents:
+        raise HTTPException(status_code=403, detail="Another agent's credentials are protected")
     resp = await _admin_request(
-        settings, "POST", f"/admin/clients/{client_id}/rotate-secret",
-        tenant_id=settings.ui_tenant_id,
+        settings, "POST", f"/admin/clients/{quote(client_id, safe='')}/rotate-secret",
+        tenant_id=access.principal.tenant_id,
+        owner=access.principal.username,
     )
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-api-key", response_model=ApiKeyRotatedResponse)
-async def rotate_api_key(client_id: str, settings: SettingsDep):
+async def rotate_api_key(client_id: str, settings: SettingsDep, access: AccessDep):
+    client = await _authorize_client(settings, access, client_id)
+    _client_scopes_allowed(access, client["default_scopes"], client["identity_type"])
+    if access.principal.role == "admin" and client_id not in access.agents:
+        raise HTTPException(status_code=403, detail="Another agent's credentials are protected")
     resp = await _admin_request(
-        settings, "POST", f"/admin/clients/{client_id}/rotate-api-key",
-        tenant_id=settings.ui_tenant_id,
+        settings, "POST", f"/admin/clients/{quote(client_id, safe='')}/rotate-api-key",
+        tenant_id=access.principal.tenant_id,
+        owner=access.principal.username,
     )
     return resp.json()
 
@@ -646,14 +897,14 @@ async def rotate_api_key(client_id: str, settings: SettingsDep):
 
 
 @router.get("/api/users", response_model=list[dict])
-async def list_users(db: DbDep, settings: SettingsDep):
+async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
     """List all identities with memory counts and last active times.
 
     Merges OAuth client data from auth service with memory stats from DB.
     Both the local memory_nodes aggregation and the auth service client
     list are tenant-scoped by ``settings.ui_tenant_id`` (#105).
     """
-    tenant_id = settings.ui_tenant_id
+    tenant_id = access.principal.tenant_id
 
     # Get memory stats per owner from DB
     stats_query = (
@@ -666,24 +917,26 @@ async def list_users(db: DbDep, settings: SettingsDep):
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
+            access.clause(),
         )
         .group_by(MemoryNode.owner_id)
     )
+    if access.principal.role == "user":
+        stats_query = stats_query.where(MemoryNode.owner_id.in_(access.identities))
     result = await db.execute(stats_query)
     owner_stats = {
         row[0]: {"memory_count": row[1], "last_active": row[2]}
         for row in result.fetchall()
     }
 
-    # Try to get client list from auth service
-    clients = []
-    try:
-        resp = await _admin_request(
-            settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id
-        )
-        clients = resp.json()
-    except Exception:
-        logger.warning("Could not fetch clients from auth service, using DB owner_ids only")
+    # The roster must not masquerade as complete when Auth is unavailable.
+    resp = await _admin_request(
+        settings, "GET", "/admin/clients", tenant_id=tenant_id,
+        owner=access.principal.username if access.principal.role == "user" else None,
+    )
+    clients = [c for c in resp.json() if c.get("tenant_id") == tenant_id]
+    if access.principal.role == "user":
+        clients = [c for c in clients if c.get("client_id") in access.agents]
 
     if clients:
         # Merge: auth clients enriched with memory stats
@@ -754,10 +1007,29 @@ def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
     )
 
 
+def _can_read_rule(access: AccessDep, rule: CuratorRule) -> bool:
+    if rule.tenant_id != access.principal.tenant_id:
+        return False
+    if rule.layer in ("system", "organizational"):
+        return True
+    return rule.layer == "user" and (
+        access.principal.role == "admin" or rule.owner_id == access.principal.username
+    )
+
+
+def _can_change_rule(access: AccessDep, rule: CuratorRule) -> bool:
+    if rule.tenant_id != access.principal.tenant_id:
+        return False
+    if rule.layer == "user":
+        return rule.owner_id == access.principal.username
+    return access.principal.role == "admin" and rule.layer == "organizational"
+
+
 @router.get("/api/rules", response_model=list[CurationRuleResponse])
 async def list_rules(
     db: DbDep,
     settings: SettingsDep,
+    access: AccessDep,
     tier: str | None = Query(default=None),
     enabled: bool | None = Query(default=None),
     layer: str | None = Query(default=None),
@@ -768,10 +1040,18 @@ async def list_rules(
     tenant maintains its own rule set -- default rules are seeded per
     tenant at the service layer.
     """
-    tenant_id = settings.ui_tenant_id
+    tenant_id = access.principal.tenant_id
+    visible_user_rules = (
+        CuratorRule.layer == "user" if access.principal.role == "admin"
+        else and_(CuratorRule.layer == "user", CuratorRule.owner_id == access.principal.username)
+    )
     stmt = (
         select(CuratorRule)
         .where(CuratorRule.tenant_id == tenant_id, CuratorRule.is_current.is_(True))
+        .where(or_(
+            CuratorRule.layer.in_(("system", "organizational")),
+            visible_user_rules,
+        ))
         .order_by(CuratorRule.priority)
     )
     if tier:
@@ -782,19 +1062,29 @@ async def list_rules(
         stmt = stmt.where(CuratorRule.layer == layer)
     result = await db.execute(stmt)
     rules = result.scalars().all()
-    return [_rule_to_response(r) for r in rules]
+    return [_rule_to_response(r) for r in rules if _can_read_rule(access, r)]
 
 
 @router.post("/api/rules", response_model=CurationRuleResponse, status_code=201)
-async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep):
+async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep, access: AccessDep):
     """Create a new curation rule.
 
     Phase 6 (#46): stamps ``settings.ui_tenant_id`` on the new rule so it
     is owned by this UI deployment's tenant. The BFF never writes rules
     into other tenants' namespaces.
     """
+    if body.layer == "system" or body.layer not in ("user", "organizational"):
+        raise HTTPException(status_code=403, detail="Rule layer is protected")
+    if access.principal.role == "user" and body.layer != "user":
+        raise HTTPException(status_code=403, detail="Only personal rules may be created")
+    if body.layer == "user" and body.owner_id not in (None, access.principal.username):
+        raise HTTPException(status_code=403, detail="Rule owner override forbidden")
+    if body.layer == "organizational" and body.owner_id is not None:
+        raise HTTPException(status_code=403, detail="Organizational rule cannot have a personal owner")
+    if access.principal.role == "user" and body.override:
+        raise HTTPException(status_code=403, detail="Personal override forbidden")
     rule = CuratorRule(
-        tenant_id=settings.ui_tenant_id,
+        tenant_id=access.principal.tenant_id,
         name=body.name,
         description=body.description,
         trigger=body.trigger,
@@ -803,12 +1093,13 @@ async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep)
         action=body.action,
         scope_filter=body.scope_filter,
         layer=body.layer,
-        owner_id=body.owner_id,
+        owner_id=access.principal.username if body.layer == "user" else None,
         override=body.override,
         enabled=body.enabled,
         priority=body.priority,
         version=1,
         is_current=True,
+        edited_by=access.principal.username,
     )
     db.add(rule)
     await db.commit()
@@ -817,7 +1108,7 @@ async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep)
 
 
 @router.get("/api/rules/{rule_id}", response_model=CurationRuleResponse)
-async def get_rule(rule_id: str, db: DbDep, settings: SettingsDep):
+async def get_rule(rule_id: str, db: DbDep, settings: SettingsDep, access: AccessDep):
     """Get a single curation rule by ID.
 
     Phase 6 (#46): cross-tenant rule lookups return 404.
@@ -836,6 +1127,8 @@ async def get_rule(rule_id: str, db: DbDep, settings: SettingsDep):
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
+    if not _can_read_rule(access, rule):
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
     return _rule_to_response(rule)
 
 
@@ -845,6 +1138,7 @@ async def update_rule(
     body: UpdateRuleRequest,
     db: DbDep,
     settings: SettingsDep,
+    access: AccessDep,
 ):
     """Create a new version of a curation rule (copy-on-write).
 
@@ -868,11 +1162,21 @@ async def update_rule(
     old_rule = result.scalar_one_or_none()
     if old_rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
+    if not _can_change_rule(access, old_rule):
+        raise HTTPException(status_code=403, detail="Rule change forbidden")
     if not old_rule.is_current:
         raise HTTPException(status_code=409, detail=f"Rule {rule_id!r} is not the current version")
 
     update_data = body.model_dump(exclude_unset=True)
-    edited_by = update_data.pop("edited_by", None)
+    update_data.pop("edited_by", None)
+    if "layer" in update_data and update_data["layer"] != old_rule.layer:
+        raise HTTPException(status_code=403, detail="Rule layer change forbidden")
+    if "owner_id" in update_data and update_data["owner_id"] != old_rule.owner_id:
+        raise HTTPException(status_code=403, detail="Rule owner change forbidden")
+    if access.principal.role == "user" and update_data.get("override"):
+        raise HTTPException(status_code=403, detail="Personal override forbidden")
+    if access.principal.role == "user" and old_rule.override:
+        update_data["override"] = False
 
     if not update_data:
         return _rule_to_response(old_rule)
@@ -894,7 +1198,7 @@ async def update_rule(
         version=old_rule.version + 1,
         previous_version_id=old_rule.id,
         is_current=True,
-        edited_by=edited_by,
+        edited_by=access.principal.username,
     )
 
     old_rule.is_current = False
@@ -905,7 +1209,7 @@ async def update_rule(
 
 
 @router.get("/api/rules/{rule_id}/history", response_model=list[RuleVersionEntry])
-async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep):
+async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, request: Request):
     """Return the full version chain for a rule, newest first.
 
     Accepts any version's UUID — walks backward via previous_version_id
@@ -913,6 +1217,14 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep):
 
     Phase 6 (#46): tenant-scoped; cross-tenant lookups return 404.
     """
+    # The audited UI has no human rule-history operation. This legacy route
+    # remains available only to a local technical caller with the service key.
+    import hmac
+    peer = request.client.host if request.client else ""
+    if peer not in ("127.0.0.1", "::1") or not settings.admin_key or not hmac.compare_digest(
+        request.headers.get("x-admin-key", ""), settings.admin_key
+    ):
+        raise HTTPException(status_code=403, detail="Technical access only")
     tenant_id = settings.ui_tenant_id
     try:
         parsed_id = uuid.UUID(rule_id)
@@ -935,25 +1247,25 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep):
         text("""
             WITH RECURSIVE
               ancestors(id, previous_version_id) AS (
-                SELECT id, previous_version_id FROM curator_rules WHERE id = :seed_id
-                UNION ALL
+                SELECT id, previous_version_id FROM curator_rules WHERE id = :seed_id AND tenant_id = :tenant_id
+                UNION
                 SELECT r.id, r.previous_version_id FROM curator_rules r
-                JOIN ancestors a ON r.id = a.previous_version_id
+                JOIN ancestors a ON r.id = a.previous_version_id WHERE r.tenant_id = :tenant_id
               ),
               root AS (SELECT id FROM ancestors WHERE previous_version_id IS NULL),
               chain AS (
                 SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at
-                FROM curator_rules r JOIN root ON r.id = root.id
-                UNION ALL
+                FROM curator_rules r JOIN root ON r.id = root.id WHERE r.tenant_id = :tenant_id
+                UNION
                 SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at
                 FROM curator_rules r
-                JOIN chain c ON r.previous_version_id = c.id
+                JOIN chain c ON r.previous_version_id = c.id WHERE r.tenant_id = :tenant_id
               )
             SELECT id, version, is_current, name, edited_by, created_at
             FROM chain
             ORDER BY version DESC
         """),
-        {"seed_id": parsed_id},
+        {"seed_id": parsed_id, "tenant_id": tenant_id},
     )
     return [
         RuleVersionEntry(
@@ -969,7 +1281,7 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep):
 
 
 @router.delete("/api/rules/{rule_id}", status_code=204)
-async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep):
+async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep, access: AccessDep):
     """Delete a curation rule.
 
     Only the current version can be deleted (non-current → 409). Historical
@@ -995,8 +1307,13 @@ async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep):
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
+    if not _can_change_rule(access, rule):
+        raise HTTPException(status_code=403, detail="Rule delete forbidden")
     if not rule.is_current:
-        raise HTTPException(status_code=409, detail=f"Rule {rule_id!r} is not the current version; only current rules can be deleted")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Rule {rule_id!r} is not the current version; only current rules can be deleted",
+        )
     await db.delete(rule)
     await db.commit()
 
@@ -1006,7 +1323,7 @@ async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep):
 # ---------------------------------------------------------------------------
 
 
-def _live_contradictions(tenant_id: str):
+def _live_contradictions(tenant_id: str, access: AccessDep):
     """Build a base SELECT for ContradictionReport joined to non-deleted memories.
 
     Reports whose target memory has been soft-deleted are excluded from
@@ -1022,24 +1339,28 @@ def _live_contradictions(tenant_id: str):
     the report table alone would be sufficient -- filtering both is
     belt-and-suspenders defence-in-depth.
     """
-    return (
+    stmt = (
         select(ContradictionReport)
         .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
         .where(
             ContradictionReport.tenant_id == tenant_id,
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
+            access.content_clause(),
         )
     )
+    if access.principal.role == "admin":
+        stmt = stmt.where(MemoryNode.scope.in_(access.moderation_scopes))
+    return stmt
 
 
-def _live_contradiction_count(tenant_id: str):
+def _live_contradiction_count(tenant_id: str, access: AccessDep):
     """Count of contradictions whose target memory still exists.
 
     Phase 6 (#46): tenant-scoped via both the report and memory joined
     rows, matching _live_contradictions above.
     """
-    return (
+    stmt = (
         select(func.count())
         .select_from(ContradictionReport)
         .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
@@ -1047,8 +1368,12 @@ def _live_contradiction_count(tenant_id: str):
             ContradictionReport.tenant_id == tenant_id,
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
+            access.content_clause(),
         )
     )
+    if access.principal.role == "admin":
+        stmt = stmt.where(MemoryNode.scope.in_(access.moderation_scopes))
+    return stmt
 
 
 def _contradiction_to_response(report: ContradictionReport) -> ContradictionResponse:
@@ -1068,6 +1393,7 @@ def _contradiction_to_response(report: ContradictionReport) -> ContradictionResp
 async def list_contradictions(
     db: DbDep,
     settings: SettingsDep,
+    access: AccessDep,
     resolved: bool | None = Query(default=None),
     min_confidence: float | None = Query(default=None),
     max_confidence: float | None = Query(default=None),
@@ -1078,7 +1404,7 @@ async def list_contradictions(
     Phase 6 (#46): tenant-scoped to ``settings.ui_tenant_id``.
     """
     tenant_id = settings.ui_tenant_id
-    stmt = _live_contradictions(tenant_id).order_by(ContradictionReport.created_at.desc())
+    stmt = _live_contradictions(tenant_id, access).order_by(ContradictionReport.created_at.desc())
     if resolved is not None:
         stmt = stmt.where(ContradictionReport.resolved == resolved)
     if min_confidence is not None:
@@ -1091,7 +1417,7 @@ async def list_contradictions(
 
 
 @router.get("/api/contradictions/stats", response_model=ContradictionStatsResponse)
-async def contradiction_stats(db: DbDep, settings: SettingsDep):
+async def contradiction_stats(db: DbDep, settings: SettingsDep, access: AccessDep):
     """Summary counts for the contradiction log dashboard.
 
     All counts exclude reports whose target memory has been soft-deleted.
@@ -1099,28 +1425,28 @@ async def contradiction_stats(db: DbDep, settings: SettingsDep):
     """
     tenant_id = settings.ui_tenant_id
 
-    total_result = await db.execute(_live_contradiction_count(tenant_id))
+    total_result = await db.execute(_live_contradiction_count(tenant_id, access))
     total = total_result.scalar_one()
 
     unresolved_result = await db.execute(
-        _live_contradiction_count(tenant_id).where(ContradictionReport.resolved.is_(False))
+        _live_contradiction_count(tenant_id, access).where(ContradictionReport.resolved.is_(False))
     )
     unresolved = unresolved_result.scalar_one()
 
     high_result = await db.execute(
-        _live_contradiction_count(tenant_id).where(ContradictionReport.confidence > 0.8)
+        _live_contradiction_count(tenant_id, access).where(ContradictionReport.confidence > 0.8)
     )
     high = high_result.scalar_one()
 
     medium_result = await db.execute(
-        _live_contradiction_count(tenant_id).where(
+        _live_contradiction_count(tenant_id, access).where(
             ContradictionReport.confidence.between(0.5, 0.8)
         )
     )
     medium = medium_result.scalar_one()
 
     low_result = await db.execute(
-        _live_contradiction_count(tenant_id).where(ContradictionReport.confidence < 0.5)
+        _live_contradiction_count(tenant_id, access).where(ContradictionReport.confidence < 0.5)
     )
     low = low_result.scalar_one()
 
@@ -1139,6 +1465,7 @@ async def update_contradiction(
     body: UpdateContradictionRequest,
     db: DbDep,
     settings: SettingsDep,
+    access: AccessDep,
 ):
     """Mark a contradiction report as resolved or unresolved.
 
@@ -1146,25 +1473,46 @@ async def update_contradiction(
     filter the joined memory row too, even though tenant consistency
     between report and target memory is already enforced at creation.
     """
-    tenant_id = settings.ui_tenant_id
+    if access.principal.role != "admin":
+        raise HTTPException(status_code=403, detail="Review is for admins only")
+    tenant_id = access.principal.tenant_id
     try:
         parsed_id = uuid.UUID(report_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {report_id!r}") from None
     result = await db.execute(
-        select(ContradictionReport)
+        select(ContradictionReport, MemoryNode)
         .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
         .where(
             ContradictionReport.id == parsed_id,
             ContradictionReport.tenant_id == tenant_id,
             MemoryNode.tenant_id == tenant_id,
+            MemoryNode.deleted_at.is_(None),
         )
+        .with_for_update()
     )
-    report = result.scalar_one_or_none()
-    if report is None:
+    row = result.one_or_none()
+    if row is None:
         raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
+    report, memory = row
+    if not access.can_review(memory):
+        raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
+    if (
+        report.reporter in access.identities
+        or memory.owner_id in access.identities
+        or memory.actor_id in access.identities
+        or memory.driver_id in access.identities
+    ):
+        raise HTTPException(status_code=403, detail="Self review forbidden")
     report.resolved = body.resolved
     report.resolved_at = datetime.now(UTC) if body.resolved else None
+    report.resolved_by = access.principal.username if body.resolved else None
+    _record_human_audit(
+        db, access,
+        "memory.contradiction_resolved" if body.resolved else "memory.contradiction_reopened",
+        memory.scope, memory.owner_id, memory.id,
+        {"report_id": str(report.id), "resolved": body.resolved},
+    )
     await db.commit()
     await db.refresh(report)
     return _contradiction_to_response(report)

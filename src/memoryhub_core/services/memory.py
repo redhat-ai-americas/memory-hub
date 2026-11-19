@@ -31,6 +31,7 @@ from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 from memoryhub_core.services.embeddings import EmbeddingService
 from memoryhub_core.services.exceptions import (
     ContradictionNotFoundError,
+    MemoryAccessDeniedError,
     MemoryAlreadyDeletedError,
     MemoryNotCurrentError,
     MemoryNotFoundError,
@@ -733,6 +734,9 @@ async def delete_memory(
     memory_id: uuid.UUID,
     session: AsyncSession,
     s3_adapter: S3StorageAdapter | None = None,
+    *,
+    tenant_id: str | None = None,
+    expected_ids: set[uuid.UUID] | None = None,
 ) -> dict:
     """Soft-delete a memory and its entire version chain.
 
@@ -747,7 +751,7 @@ async def delete_memory(
     Raises MemoryNotFoundError if the node doesn't exist, or
     MemoryAlreadyDeletedError if already soft-deleted.
     """
-    stmt = select(MemoryNode).where(MemoryNode.id == memory_id)
+    stmt = select(MemoryNode).where(MemoryNode.id == memory_id).with_for_update()
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
 
@@ -757,16 +761,16 @@ async def delete_memory(
     if node.deleted_at is not None:
         raise MemoryAlreadyDeletedError(memory_id)
 
+    effective_tenant = tenant_id or node.tenant_id
+    if node.tenant_id != effective_tenant:
+        raise MemoryNotFoundError(memory_id)
+    found = await collect_delete_nodes(node, session, effective_tenant, seed_locked=True)
+    all_ids = set(found)
+    if expected_ids is not None and all_ids != expected_ids:
+        raise MemoryAccessDeniedError("Delete closure changed after authorization")
+    version_ids = {n.id for n in await _walk_version_chain(node, session)} & all_ids
+    child_ids = all_ids - version_ids
     now = datetime.now(UTC)
-
-    chain_nodes = await _walk_version_chain(node, session)
-    version_ids: set[uuid.UUID] = {n.id for n in chain_nodes}
-
-    # Also delete child branches of all versions in the chain
-    child_stmt = select(MemoryNode).where(MemoryNode.parent_id.in_(list(version_ids)))
-    child_result = await session.execute(child_stmt)
-    child_ids = {child.id for child in child_result.scalars().all()}
-    all_ids = version_ids | child_ids
 
     # Collect S3 content_refs before soft-delete so we can clean up objects
     s3_refs: list[str] = []
@@ -775,6 +779,7 @@ async def delete_memory(
             select(MemoryNode.content_ref)
             .where(
                 MemoryNode.id.in_(list(all_ids)),
+                MemoryNode.tenant_id == effective_tenant,
                 MemoryNode.storage_type == "s3",
                 MemoryNode.content_ref.isnot(None),
             )
@@ -785,7 +790,7 @@ async def delete_memory(
     # Bulk soft-delete
     await session.execute(
         update(MemoryNode)
-        .where(MemoryNode.id.in_(list(all_ids)))
+        .where(MemoryNode.id.in_(list(all_ids)), MemoryNode.tenant_id == effective_tenant)
         .values(deleted_at=now, is_current=False)
     )
 
@@ -801,6 +806,48 @@ async def delete_memory(
         "branches_deleted": len(child_ids),
         "total_deleted": len(all_ids),
     }
+
+
+async def collect_delete_nodes(
+    node: MemoryNode,
+    session: AsyncSession,
+    tenant_id: str,
+    *,
+    seed_locked: bool = False,
+) -> dict[uuid.UUID, MemoryNode]:
+    """Collect versions and descendants to any depth for BFF and Core deletes."""
+    node_id = node.id
+    if not seed_locked:
+        node = (await session.execute(
+            select(MemoryNode).where(
+                MemoryNode.id == node_id, MemoryNode.tenant_id == tenant_id,
+            ).with_for_update()
+        )).scalar_one_or_none()
+    if node is None or node.tenant_id != tenant_id:
+        raise MemoryNotFoundError(node_id)
+    found = {node.id: node}
+    frontier = {node.id}
+    while frontier:
+        previous_ids = {
+            found[i].previous_version_id
+            for i in frontier if found[i].previous_version_id
+        }
+        related = (await session.execute(
+            select(MemoryNode).where(
+                MemoryNode.tenant_id == tenant_id,
+                or_(
+                    MemoryNode.id.in_(previous_ids),
+                    MemoryNode.previous_version_id.in_(frontier),
+                    MemoryNode.parent_id.in_(frontier),
+                ),
+            ).with_for_update()
+        )).scalars().all()
+        frontier = set()
+        for member in related:
+            if member.id not in found:
+                found[member.id] = member
+                frontier.add(member.id)
+    return found
 
 
 def _build_search_filters(
@@ -901,7 +948,15 @@ def _build_search_filters(
                 # If role_names is empty/None, skip — no role
                 # memories are visible to this caller.
                 continue
-            if required_owner is not None:
+            if isinstance(required_owner, (list, set, tuple)):
+                # A human may own several OAuth clients. Keep the existing
+                # tenant/scope filter while admitting only those bound IDs.
+                if required_owner:
+                    scope_conditions.append(and_(
+                        MemoryNode.scope == scope_name,
+                        MemoryNode.owner_id.in_(required_owner),
+                    ))
+            elif required_owner is not None:
                 scope_conditions.append(
                     and_(
                         MemoryNode.scope == scope_name,
@@ -2106,6 +2161,7 @@ async def resolve_contradiction(
     *,
     resolution_action: str | None = None,
     actor_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> ContradictionReport:
     """Mark a contradiction report as resolved with an optional disposition.
 
@@ -2127,6 +2183,11 @@ async def resolve_contradiction(
         )
 
     stmt = select(ContradictionReport).where(ContradictionReport.id == contradiction_id)
+    if tenant_id is not None:
+        stmt = stmt.join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id).where(
+            ContradictionReport.tenant_id == tenant_id,
+            MemoryNode.tenant_id == tenant_id,
+        )
     result = await session.execute(stmt)
     report = result.scalar_one_or_none()
 
@@ -2135,6 +2196,8 @@ async def resolve_contradiction(
 
     if report.resolved:
         raise ValueError(f"Contradiction {contradiction_id} is already resolved")
+    if actor_id is not None and report.reporter == actor_id:
+        raise ValueError("Cannot resolve one's own contradiction report")
 
     report.resolved = True
     report.resolved_at = datetime.now(UTC)

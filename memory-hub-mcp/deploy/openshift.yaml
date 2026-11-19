@@ -53,9 +53,8 @@ spec:
         - name: MEMORYHUB_USERS_FILE
           value: /config/users.json
         # JWT verification — issued by the memoryhub-auth service.
-        # If these vars are unset, the server runs in session-only auth mode
-        # (legacy register_session API key path). Production deployments must
-        # set all three so JWTs from the auth service are verified.
+        # All three settings are required for HTTP startup. API-key clients
+        # continue to authenticate through register_session on this endpoint.
         - name: AUTH_JWKS_URI
           value: "__AUTH_JWKS_URI__"
         - name: AUTH_ISSUER

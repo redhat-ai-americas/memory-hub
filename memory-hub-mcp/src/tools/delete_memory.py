@@ -15,18 +15,6 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
-from memoryhub_core.services.campaign import get_campaigns_for_project
-from memoryhub_core.services.exceptions import (
-    MemoryAccessDeniedError,
-    MemoryAlreadyDeletedError,
-    MemoryNotFoundError,
-)
-from memoryhub_core.services.memory import delete_memory as svc_delete_memory
-from memoryhub_core.services.memory import read_memory as _read_memory
-from memoryhub_core.services.project import get_projects_for_user
-from memoryhub_core.services.push_broadcast import build_uri_only_notification
-from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
 from src.core.authz import (
     AuthenticationError,
@@ -36,7 +24,21 @@ from src.core.authz import (
 )
 from src.tools._audit_helpers import record_audit_event
 from src.tools._deps import get_db_session, get_s3_adapter, release_db_session, resolve_driver_id
+from src.tools._object_access import memory_object_access
 from src.tools._push_helpers import broadcast_after_write
+
+from memoryhub_core.services.campaign import get_campaigns_for_project
+from memoryhub_core.services.exceptions import (
+    MemoryAccessDeniedError,
+    MemoryAlreadyDeletedError,
+    MemoryNotFoundError,
+)
+from memoryhub_core.services.memory import collect_delete_nodes
+from memoryhub_core.services.memory import delete_memory as svc_delete_memory
+from memoryhub_core.services.memory import read_memory as _read_memory
+from memoryhub_core.services.project import get_projects_for_user
+from memoryhub_core.services.push_broadcast import build_uri_only_notification
+from memoryhub_core.services.role import get_roles_for_user
 
 
 @mcp.tool(
@@ -183,6 +185,20 @@ async def delete_memory(
                 "You need either ownership of the memory or the memory:admin scope."
             )
 
+        # Core and BFF use this same closure. Authorize every version and
+        # descendant before Core can mutate any row, including the seed.
+        affected = await collect_delete_nodes(existing, session, tenant)
+        for member in affected.values():
+            if member.tenant_id != tenant:
+                raise ToolError("Not authorized to delete a cross-tenant memory.")
+            if is_admin:
+                continue
+            _can_read, can_write = await memory_object_access(
+                session, claims, member, project_id,
+            )
+            if not can_write:
+                raise ToolError("Not authorized to delete all affected memory objects.")
+
         # Resolve actor/driver identity for audit trail.
         actor_id = claims["sub"]
         resolved_driver = resolve_driver_id(driver_id, claims)
@@ -206,6 +222,8 @@ async def delete_memory(
             memory_id=parsed_id,
             session=session,
             s3_adapter=get_s3_adapter(),
+            tenant_id=tenant,
+            expected_ids=set(affected),
         )
 
         # Pattern E (#62): broadcast to other connected agents post-commit.

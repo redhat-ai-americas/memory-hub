@@ -39,9 +39,9 @@ COPY --from=frontend-build /opt/app-root/src/dist ./frontend/dist
 # Fix permissions for OpenShift arbitrary UIDs
 RUN find ./src -name "*.py" -exec chmod 644 {} \;
 
-ENV HOST=0.0.0.0 \
+ENV HOST=127.0.0.1 \
     PORT=8080
 
 USER 1001
 
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "127.0.0.1", "--port", "8080", "--no-proxy-headers"]

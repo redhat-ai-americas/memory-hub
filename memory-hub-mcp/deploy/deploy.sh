@@ -98,9 +98,10 @@ if [ -n "$AUTH_ROUTE_HOST" ]; then
     echo "  AUTH_JWKS_URI=$AUTH_JWKS_URI"
     echo "  AUTH_ISSUER=$AUTH_ISSUER"
 else
-    echo "WARNING: auth-server Route not found in memoryhub-auth namespace."
-    echo "  JWT verification will not work until auth is deployed and MCP is re-deployed."
+    echo "ERROR: auth-server Route not found in memoryhub-auth namespace."
+    echo "  HTTP MCP requires a JWT verifier; deploy auth first."
     echo "  Run: scripts/deploy-full.sh (deploys auth before MCP)"
+    exit 1
 fi
 
 # Create the memoryhub-db-credentials Secret from the DB namespace's source of

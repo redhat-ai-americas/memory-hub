@@ -56,7 +56,9 @@ def mock_claims():
     with patch(
         "src.tools.manage_session.get_claims_from_context",
         return_value=claims,
-    ) as mocker:
+    ) as mocker, patch(
+        "src.tools.manage_session._require_project_member", new_callable=AsyncMock,
+    ):
         yield mocker
 
 

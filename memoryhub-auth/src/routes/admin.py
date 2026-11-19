@@ -6,11 +6,12 @@ from datetime import UTC, datetime
 
 import bcrypt
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_session
-from src.models import OAuthClient
+from src.models import AgentOwnerBinding, OAuthClient
 from src.schemas import (
     ApiKeyRotatedResponse,
     ClientCreatedResponse,
@@ -49,12 +50,26 @@ def _client_to_response(client: OAuthClient) -> ClientResponse:
     )
 
 
+def _with_owner_binding(stmt, owner: str | None):
+    """Apply the dashboard owner check in the same DB query as the operation."""
+    if owner is None:
+        return stmt
+    return stmt.join(
+        AgentOwnerBinding,
+        and_(
+            AgentOwnerBinding.tenant_id == OAuthClient.tenant_id,
+            AgentOwnerBinding.client_id == OAuthClient.client_id,
+        ),
+    ).where(AgentOwnerBinding.owner == owner)
+
+
 @router.get("/clients", dependencies=[Depends(require_admin_key)])
 async def list_clients(
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    owner: str | None = Query(default=None, description="Filter by owner binding"),
     session: AsyncSession = Depends(get_session),
 ) -> list[ClientResponse]:
-    stmt = select(OAuthClient)
+    stmt = _with_owner_binding(select(OAuthClient), owner)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
     result = await session.execute(stmt)
@@ -105,7 +120,15 @@ async def create_client(
         api_key_hash=api_key_hash,
     )
     session.add(client)
-    await session.commit()
+    if body.owner is not None:
+        session.add(AgentOwnerBinding(
+            tenant_id=body.tenant_id, client_id=body.client_id, owner=body.owner,
+        ))
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Client or owner binding already exists") from exc
     await session.refresh(client)
 
     log.info("Created client %s (tenant=%s)", body.client_id, body.tenant_id)
@@ -130,9 +153,10 @@ async def create_client(
 async def get_client(
     client_id: str,
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    owner: str | None = Query(default=None, description="Filter by owner binding"),
     session: AsyncSession = Depends(get_session),
 ) -> ClientResponse:
-    stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
+    stmt = _with_owner_binding(select(OAuthClient).where(OAuthClient.client_id == client_id), owner)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
     result = await session.execute(stmt)
@@ -147,9 +171,10 @@ async def update_client(
     client_id: str,
     body: UpdateClientRequest,
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    owner: str | None = Query(default=None, description="Filter by owner binding"),
     session: AsyncSession = Depends(get_session),
 ) -> ClientResponse:
-    stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
+    stmt = _with_owner_binding(select(OAuthClient).where(OAuthClient.client_id == client_id), owner)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
     result = await session.execute(stmt)
@@ -183,9 +208,10 @@ async def update_client(
 async def rotate_secret(
     client_id: str,
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    owner: str | None = Query(default=None, description="Filter by owner binding"),
     session: AsyncSession = Depends(get_session),
 ) -> SecretRotatedResponse:
-    stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
+    stmt = _with_owner_binding(select(OAuthClient).where(OAuthClient.client_id == client_id), owner)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
     result = await session.execute(stmt)
@@ -217,9 +243,10 @@ async def rotate_secret(
 async def rotate_api_key(
     client_id: str,
     tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    owner: str | None = Query(default=None, description="Filter by owner binding"),
     session: AsyncSession = Depends(get_session),
 ) -> ApiKeyRotatedResponse:
-    stmt = select(OAuthClient).where(OAuthClient.client_id == client_id)
+    stmt = _with_owner_binding(select(OAuthClient).where(OAuthClient.client_id == client_id), owner)
     if tenant_id is not None:
         stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
     result = await session.execute(stmt)

@@ -4,6 +4,8 @@ import asyncio
 import logging
 from typing import Any
 
+from fastmcp.exceptions import ToolError
+from src.core.authz import AuthenticationError, get_claims_from_context, get_tenant_filter
 from src.tools._deps import get_db_session, get_embedding_service, release_db_session
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,14 @@ async def backfill_entities(
 
     Returns a summary dict with processing results.
     """
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError:
+        raise ToolError("Authentication required for entity backfill") from None
+    if "memory:admin" not in claims.get("scopes", []):
+        raise ToolError("memory:admin scope required for entity backfill")
+    tenant_id = get_tenant_filter(claims)
+
     from sqlalchemy import func, or_, select
 
     from memoryhub_core.models.memory import MemoryNode
@@ -41,6 +51,7 @@ async def backfill_entities(
             )
 
         base_where = [
+            MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
             MemoryNode.is_current.is_(True),
             MemoryNode.scope != "entity",
@@ -98,7 +109,7 @@ async def backfill_entities(
                 )
 
                 # Update status
-                node_stmt = select(MemoryNode).where(MemoryNode.id == row.id)
+                node_stmt = select(MemoryNode).where(MemoryNode.id == row.id, MemoryNode.tenant_id == tenant_id)
                 node = (await sess.execute(node_stmt)).scalar_one_or_none()
                 if node:
                     meta = dict(node.metadata_ or {})
@@ -115,7 +126,7 @@ async def backfill_entities(
                     row.id, exc_info=True,
                 )
                 try:
-                    node_stmt = select(MemoryNode).where(MemoryNode.id == row.id)
+                    node_stmt = select(MemoryNode).where(MemoryNode.id == row.id, MemoryNode.tenant_id == tenant_id)
                     node = (await sess.execute(node_stmt)).scalar_one_or_none()
                     if node:
                         meta = dict(node.metadata_ or {})

@@ -14,7 +14,7 @@ from fastmcp.exceptions import ToolError
 from src.core.authz import AuthenticationError
 from src.tools.manage_project import manage_project
 
-_CLAIMS = {"sub": "wjackson", "tenant_id": "default", "scopes": []}
+_CLAIMS = {"sub": "wjackson", "tenant_id": "default", "scopes": ["memory:admin"]}
 
 
 @pytest.fixture(autouse=True)
@@ -182,6 +182,7 @@ class TestDescribeAction:
 
         class FakeProject:
             name = "my-proj"
+            tenant_id = "default"
             description = "Test project"
             invite_only = False
             created_at = datetime(2026, 4, 1, tzinfo=UTC)
@@ -198,6 +199,7 @@ class TestDescribeAction:
 
         monkeypatch.setattr("src.tools.manage_project.get_project_members", fake_members)
         monkeypatch.setattr("src.tools.manage_project.get_project", fake_get_project)
+        monkeypatch.setattr("src.tools.manage_project._get_membership", _fake_return(object()))
         monkeypatch.setattr("src.tools.manage_project.memory_counts", fake_counts)
         monkeypatch.setattr("src.tools.manage_project.get_db_session", _fake_db_session)
         monkeypatch.setattr("src.tools.manage_project.release_db_session", _fake_release)
@@ -223,9 +225,10 @@ class TestDescribeAction:
 
 
 class TestAddMemberAction:
-    async def test_add_member_open_project(self, monkeypatch):
+    async def test_add_member_open_project_requires_project_admin(self, monkeypatch):
         class FakeProject:
             invite_only = False
+            tenant_id = "default"
 
         class FakeMembership:
             role = "member"
@@ -233,24 +236,21 @@ class TestAddMemberAction:
         async def fake_get(session, name):
             return FakeProject()
 
-        async def fake_add(session, name, user_id, added_by, role):
-            return True
-
         monkeypatch.setattr("src.tools.manage_project.get_project", fake_get)
         monkeypatch.setattr("src.tools.manage_project._get_membership", _fake_return(FakeMembership()))
-        monkeypatch.setattr("src.tools.manage_project.add_project_member", fake_add)
         monkeypatch.setattr("src.tools.manage_project.get_db_session", _fake_db_session)
         monkeypatch.setattr("src.tools.manage_project.release_db_session", _fake_release)
 
-        result = await manage_project(
-            action="add_member", project_name="proj", user_id="newguy",
-        )
-        assert "newguy" in result["message"]
+        with pytest.raises(ToolError, match="Only project admins"):
+            await manage_project(
+                action="add_member", project_name="proj", user_id="newguy",
+            )
 
     async def test_add_member_requires_caller_membership(self, monkeypatch):
         """Non-members cannot add users even to open projects."""
         class FakeProject:
             invite_only = False
+            tenant_id = "default"
 
         async def fake_get(session, name):
             return FakeProject()
@@ -268,6 +268,7 @@ class TestAddMemberAction:
     async def test_add_member_invite_only_by_non_admin(self, monkeypatch):
         class FakeProject:
             invite_only = True
+            tenant_id = "default"
 
         class FakeMembership:
             role = "member"
@@ -289,6 +290,7 @@ class TestAddMemberAction:
         """Admins can add members to invite-only projects."""
         class FakeProject:
             invite_only = True
+            tenant_id = "default"
 
         class FakeMembership:
             role = "admin"
@@ -314,9 +316,10 @@ class TestAddMemberAction:
         """Adding an existing member returns an informative message."""
         class FakeProject:
             invite_only = False
+            tenant_id = "default"
 
         class FakeMembership:
-            role = "member"
+            role = "admin"
 
         async def fake_get(session, name):
             return FakeProject()
@@ -337,6 +340,13 @@ class TestAddMemberAction:
 
 
 class TestRemoveMemberAction:
+    @pytest.fixture(autouse=True)
+    def project_in_tenant(self, monkeypatch):
+        class FakeProject:
+            tenant_id = "default"
+
+        monkeypatch.setattr("src.tools.manage_project.get_project", _fake_return(FakeProject()))
+
     async def test_remove_member_success(self, monkeypatch):
         """Admin can remove another member."""
         class FakeMembership:
@@ -375,6 +385,9 @@ class TestRemoveMemberAction:
             pass
 
         monkeypatch.setattr("src.tools.manage_project.remove_project_member", fake_remove)
+        monkeypatch.setattr("src.tools.manage_project.get_claims_from_context", lambda: {
+            "sub": "wjackson", "tenant_id": "default", "scopes": [],
+        })
         monkeypatch.setattr("src.tools.manage_project.get_db_session", _fake_db_session)
         monkeypatch.setattr("src.tools.manage_project.release_db_session", _fake_release)
 

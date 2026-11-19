@@ -47,6 +47,10 @@ AUTH_URL = os.getenv(
     "AUTH_SERVER_URL",
     "https://auth-server-memoryhub-auth.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com",
 )
+# Bootstrap the test client through an explicit internal tunnel (for example,
+# oc port-forward svc/auth-server 8081:8081 -n memoryhub-auth). The public
+# OAuth Route intentionally does not serve /admin/*.
+AUTH_ADMIN_INTERNAL_URL = os.getenv("AUTH_ADMIN_INTERNAL_URL")
 MCP_URL = os.getenv(
     "MCP_SERVER_URL",
     "https://memory-hub-mcp-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/",
@@ -125,6 +129,8 @@ def _get_admin_key() -> str | None:
 
 async def _ensure_e2e_client(http: httpx.AsyncClient) -> None:
     """Register the e2e-test public OAuth client (idempotent)."""
+    if not AUTH_ADMIN_INTERNAL_URL:
+        pytest.skip("AUTH_ADMIN_INTERNAL_URL not set for internal client bootstrap")
     admin_key = _get_admin_key()
     if not admin_key:
         pytest.skip("Cannot determine AUTH_ADMIN_KEY — cannot register e2e client")
@@ -133,13 +139,13 @@ async def _ensure_e2e_client(http: httpx.AsyncClient) -> None:
 
     # Already registered?
     resp = await http.get(
-        f"{AUTH_URL}/admin/clients/{CLIENT_ID}", headers=headers,
+        f"{AUTH_ADMIN_INTERNAL_URL}/admin/clients/{CLIENT_ID}", headers=headers,
     )
     if resp.status_code == 200:
         return
 
     resp = await http.post(
-        f"{AUTH_URL}/admin/clients",
+        f"{AUTH_ADMIN_INTERNAL_URL}/admin/clients",
         headers={**headers, "Content-Type": "application/json"},
         json={
             "client_id": CLIENT_ID,

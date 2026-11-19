@@ -24,7 +24,7 @@ from memoryhub_core.services.exceptions import (
     EmbeddingServiceError,
     EmbeddingServiceUnavailableError,
 )
-from memoryhub_core.services.project import list_projects_for_tenant
+from memoryhub_core.services.project import get_projects_for_user_in_tenant, list_projects_for_tenant
 from memoryhub_core.services.valkey_client import (
     ValkeyUnavailableError,
     get_valkey_client,
@@ -41,6 +41,19 @@ _ACTIONS_REQUIRING_FOCUS = {"set_focus"}
 _ACTIONS_REQUIRING_PROJECT = {"set_focus", "focus_history"}
 
 _DEFAULT_WINDOW_DAYS = 30
+
+
+async def _require_project_member(claims: dict[str, Any], project: str) -> None:
+    """Authorize access before reading or writing project focus history."""
+    session, gen = await get_db_session()
+    try:
+        projects = await get_projects_for_user_in_tenant(
+            session, claims["sub"], get_tenant_filter(claims),
+        )
+    finally:
+        await release_db_session(gen)
+    if project not in projects:
+        raise ToolError(f"Not a member of project '{project}'.")
 
 
 def _require_param(action: str, name: str, value: str | None) -> str:
@@ -250,6 +263,8 @@ async def _handle_set_focus(
     user_id = claims["sub"]
     session_id = get_session_id() or user_id
 
+    await _require_project_member(claims, project)
+
     embedding_service = get_embedding_service()
     try:
         focus_vector = await embedding_service.embed(focus)
@@ -310,7 +325,7 @@ async def _handle_focus_history(
 ) -> dict[str, Any]:
     """Aggregate per-project focus declarations into a sorted histogram."""
     try:
-        get_claims_from_context()
+        claims = get_claims_from_context()
     except AuthenticationError:
         raise ToolError(
             "No authenticated session found. Call register_session first, or "
@@ -331,6 +346,8 @@ async def _handle_focus_history(
             f"({parsed_end.isoformat()}). Provide dates as YYYY-MM-DD where "
             "start_date <= end_date."
         )
+
+    await _require_project_member(claims, project)
 
     valkey = get_valkey_client()
     try:

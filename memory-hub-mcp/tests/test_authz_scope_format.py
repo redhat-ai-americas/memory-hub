@@ -6,6 +6,7 @@ names (e.g. "user", "project") that need expansion.
 """
 
 from unittest.mock import patch
+from contextlib import nullcontext
 
 import pytest
 
@@ -13,10 +14,10 @@ from src.core.authz import _normalize_session_scopes, get_claims_from_context
 
 
 def _patch_no_jwt():
-    """Context manager that disables both JWT resolution paths."""
+    """Context manager that disables the verified JWT resolution path."""
     return (
         patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-        patch("src.core.authz._extract_jwt_from_headers", return_value=None),
+        nullcontext(),
     )
 
 

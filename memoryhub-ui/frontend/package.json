@@ -6,23 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@patternfly/react-charts": "^8.0.0",
     "@patternfly/react-core": "^6.1.0",
-    "@patternfly/react-icons": "^6.1.0",
-    "@patternfly/react-styles": "^6.1.0",
-    "@patternfly/react-table": "^6.4.1",
-    "cytoscape": "^3.30.4",
-    "cytoscape-fcose": "^2.2.0",
     "react": "^18.3.1",
-    "react-cytoscapejs": "^2.0.0",
-    "react-dom": "^18.3.1",
-    "victory": "^37.3.6"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@types/cytoscape": "^3.21.8",
+    "@playwright/test": "^1.64.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

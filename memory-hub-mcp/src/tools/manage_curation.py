@@ -452,6 +452,11 @@ async def _handle_resolve_contradiction(
             f"Must be one of: {', '.join(sorted(VALID_RESOLUTION_ACTIONS))}."
         )
 
+    # A direct MCP resolution is a technical executor, not the dashboard's
+    # human review decision. Ordinary agent scopes must not bypass review.
+    if "memory:admin" not in claims.get("scopes", []):
+        raise ToolError("Direct contradiction resolution requires memory:admin scope")
+
     user_id = claims["sub"]
 
     if ctx:
@@ -467,6 +472,7 @@ async def _handle_resolve_contradiction(
             session,
             resolution_action=resolution_action,
             actor_id=user_id,
+            tenant_id=get_tenant_filter(claims),
         )
 
         return {

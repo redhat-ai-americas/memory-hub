@@ -13,6 +13,18 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field, ValidationError
+from src.core.app import mcp
+from src.core.authz import (
+    DEFAULT_TENANT_ID,
+    AuthenticationError,
+    authorize_read,
+    get_claims_from_context,
+    get_tenant_filter,
+)
+from src.tools._audit_helpers import record_audit_event
+from src.tools._deps import get_db_session, release_db_session, resolve_driver_id
+from src.tools._guidance import run_guidance
+from src.tools._object_access import memory_object_access
 
 from memoryhub_core.models.schemas import RelationshipCreate, RelationshipType
 from memoryhub_core.services.campaign import get_campaigns_for_project
@@ -30,17 +42,6 @@ from memoryhub_core.services.graph import (
 from memoryhub_core.services.memory import read_memory as read_memory_service
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
-from src.core.app import mcp
-from src.core.authz import (
-    DEFAULT_TENANT_ID,
-    AuthenticationError,
-    authorize_read,
-    get_claims_from_context,
-    get_tenant_filter,
-)
-from src.tools._audit_helpers import record_audit_event
-from src.tools._deps import get_db_session, release_db_session, resolve_driver_id
-from src.tools._guidance import run_guidance
 
 logger = logging.getLogger(__name__)
 
@@ -377,11 +378,7 @@ async def _handle_create_relationship(
             f"Creating {relationship_type!r} relationship {source_id} -> {target_id}"
         )
 
-    # Resolve campaign membership once — used for both nodes if either is
-    # campaign-scoped.
-    campaign_ids: set[str] | None = None
-
-    # Verify read access to both nodes. The tenant filter on read_memory makes
+    # Verify read and write access to both nodes. The tenant filter makes
     # a cross-tenant ID indistinguishable from a nonexistent row, so a
     # cross-tenant attempt is rejected as "not found" rather than leaking
     # tenant information in the error message.
@@ -393,14 +390,10 @@ async def _handle_create_relationship(
             node = await read_memory_service(node_id_parsed, session, tenant_id=tenant)
         except MemoryNotFoundError:
             raise ToolError(f"Memory node {node_id_parsed} not found.") from None
-        if node.scope == "campaign" and campaign_ids is None:
-            if not project_id:
-                raise ToolError(
-                    f"project_id is required when {label} is a campaign-scoped memory. "
-                    "Set it to your project identifier so enrollment can be verified."
-                )
-            campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
-        if not authorize_read(claims, node, campaign_ids=campaign_ids):
+        if node.scope == "campaign" and not project_id:
+            raise ToolError(f"project_id is required when {label} is a campaign-scoped memory.")
+        can_read, can_write = await memory_object_access(session, claims, node, project_id)
+        if not (can_read and can_write):
             # Gap #2 fix: Record denied audit event
             await record_audit_event(
                 event_type="memory.relationship_created",
@@ -414,7 +407,7 @@ async def _handle_create_relationship(
                 metadata={"relationship_type": relationship_type, "failed_on": label},
                 session=session,
             )
-            raise ToolError(f"Not authorized to access {label} ({node_id_parsed}).")
+            raise ToolError(f"Not authorized to write {label} ({node_id_parsed}).")
 
     await record_audit_event(
         event_type="memory.relationship_created",
