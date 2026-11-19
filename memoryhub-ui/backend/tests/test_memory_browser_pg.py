@@ -309,3 +309,48 @@ async def test_graph_and_export_use_the_same_filters(env):
     assert len(exported) == 1 and str(a) in exported[0]
     deleted = (await http.get("/api/graph/all", params={"tab": "deleted"}))
     assert deleted.status_code == 200 and deleted.json()["nodes"] == []
+
+
+async def test_written_by_facet_and_filter_agree_and_search_defaults_to_relevance(env):
+    """API clients get the same behaviour as the page without sending its defaults."""
+    http, seed = env["http"], env["seed"]
+    by_agent = await seed("Gripper torque limit agreed at 11.5 Nm", scope="project", scope_id="atlas",
+                          owner="alice", actor="alice-agent")
+    await seed("Unrelated note about the coffee machine", actor="alice")
+    body = (await http.get("/api/memories/browse")).json()
+    writers = {row["value"]: row["count"] for row in body["facets"]["writers"]}
+    assert writers == {"alice-agent": 1, "alice": 1}
+    # Every value the facet offers finds exactly the rows it counted.
+    for writer, count in writers.items():
+        rows = (await http.get("/api/memories/browse", params={"actor": writer})).json()["items"]
+        assert len(rows) == count
+    # No sort sent: a search ranks by relevance, a plain listing by last update.
+    body = (await http.get("/api/memories/browse", params={"q": "gripper torque limit"})).json()
+    assert body["items"][0]["id"] == str(by_agent) and body["items"][0]["score"] is not None
+    exported = (await http.get("/api/memories/export", params={"q": "gripper torque limit"})).text.splitlines()
+    assert str(by_agent) in exported[0]
+
+
+async def test_every_facet_count_matches_its_filter_in_every_tab(env):
+    http, seed = env["http"], env["seed"]
+    first = await seed("Valve inspection every 90 days", scope="project", scope_id="atlas", actor="alice-agent",
+                       domains=["plant"])
+    await seed("Valve inspection every 90 days", domains=["plant", "safety"])
+    await http.post("/api/memories/bulk", json={"action": "weight", "ids": [str(first)], "weight": 0.9})
+    gone = await seed("Old badge rules", domains=["hr"])
+    await http.post("/api/memories/bulk", json={"action": "delete", "ids": [str(gone)]})
+
+    async def total(**params) -> int:
+        return (await http.get("/api/memories/browse", params={**params, "per_page": 100})).json()["total"]
+
+    for tab in ("current", "all", "deleted", "quarantined"):
+        facets = (await http.get("/api/memories/browse", params={"tab": tab})).json()["facets"]
+        for param, key in (("actor", "writers"), ("scope", "scopes"), ("project", "projects"), ("domain", "domains")):
+            for row in facets[key]:
+                assert await total(tab=tab, **{param: row["value"]}) == row["count"], (tab, param, row)
+        for flag, count in facets["flags"].items():
+            if count is not None:
+                assert await total(tab=tab, flag=flag) == count, (tab, flag)
+    # Restoring something that is not deleted says so instead of "moderation forbidden".
+    response = await http.post("/api/memories/bulk", json={"action": "restore", "ids": [str(first)]})
+    assert response.status_code == 409

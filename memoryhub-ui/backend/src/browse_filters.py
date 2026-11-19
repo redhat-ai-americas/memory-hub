@@ -295,6 +295,22 @@ def nearest_similarity(access: Access, node_id: uuid.UUID, node_embedding):
 
 # --- the filter set ------------------------------------------------------
 
+def written_by(model=MemoryNode):
+    """Who wrote a memory: its actor, or its owner for rows written before actors were recorded.
+
+    The "Written by" facet and the actor filter both use this, so a value the
+    facet offers always finds the rows it counted.
+    """
+    return func.coalesce(model.actor_id, model.owner_id)
+
+
+def resolve_sort(sort: str | None, query: BrowseQuery) -> str:
+    """Best match first when there is a search, newest first otherwise."""
+    if sort is None:
+        return "relevance" if query.q else "updated"
+    return sort
+
+
 def conditions(access: Access, query: BrowseQuery, plan: SearchPlan, model=MemoryNode) -> list:
     """Visibility, tab and every URL filter, in SQL."""
     tenant = access.principal.tenant_id
@@ -304,7 +320,7 @@ def conditions(access: Access, query: BrowseQuery, plan: SearchPlan, model=Memor
     if query.scope:
         where.append(model.scope.in_(query.scope))
     if query.actor:
-        where.append(model.actor_id.in_(query.actor))
+        where.append(written_by(model).in_(query.actor))
     if query.project:
         where += [model.scope == "project", model.scope_id == query.project]
     if query.domain:

@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import AccessDep
-from src.browse_filters import BrowseQueryDep, OptionalEmbeddingDep, plan_search
+from src.browse_filters import BrowseQueryDep, OptionalEmbeddingDep, plan_search, resolve_sort
 from src.database import get_db
 from src.human_adapters import Sort, _human_can_see_content, browse_page
 
@@ -34,7 +34,7 @@ def _csv_safe(value: object) -> object:
 @router.get("/api/memories/export")
 async def export_memories(
     db: DbDep, access: AccessDep, query: BrowseQueryDep, embedding: OptionalEmbeddingDep,
-    sort: Sort = "updated",
+    sort: Sort | None = None,
     order: Literal["asc", "desc"] = "desc",
     mine: bool = False,
 ):
@@ -42,6 +42,7 @@ async def export_memories(
         raise HTTPException(status_code=403, detail="Personal export forbidden")
     # Embed once: every page of the export ranks against the same query vector.
     plan = await plan_search(query, embedding)
+    sort = resolve_sort(sort, query)
     first = await browse_page(db, access, query, plan, sort=sort, order=order,
                               page=1, per_page=EXPORT_PAGE_SIZE, summary=False)
 

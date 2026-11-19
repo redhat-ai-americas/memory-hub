@@ -77,9 +77,11 @@ from src.browse_filters import (
     nearest_similarity,
     plan_search,
     relevance_order,
+    resolve_sort,
     similarity_column,
     state_clause,
     tab_conditions,
+    written_by,
 )
 from src.browse_filters import conditions as browse_conditions
 from src.config import Settings, get_settings
@@ -607,6 +609,14 @@ async def moderate_bulk(body: BulkBody, db: DbDep, access: AccessDep, embedding:
             raise HTTPException(status_code=422, detail="Restore deleted and quarantined memories separately")
         if deleted:
             return await _bulk_restore_deleted(body.ids, db, access)
+        if access.principal.role != "admin":
+            # A person restores only deletes; lifting a quarantine is moderation.
+            quarantined = (await db.execute(select(func.count()).select_from(MemoryNode).where(
+                MemoryNode.id.in_(body.ids), MemoryNode.tenant_id == access.principal.tenant_id,
+                MemoryNode.status == "quarantined",
+            ))).scalar_one()
+            if not quarantined:
+                raise HTTPException(status_code=409, detail="Memory is not deleted")
     if access.principal.role != "admin":
         raise HTTPException(status_code=403, detail="Moderation forbidden")
     nodes = []
@@ -964,14 +974,15 @@ async def browse_memories(
     access: AccessDep,
     query: BrowseQueryDep,
     embedding: OptionalEmbeddingDep,
-    sort: Sort = "updated",
+    sort: Sort | None = Query(None, description="Default: relevance with a search, else updated"),
     order: Literal["asc", "desc"] = "desc",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ):
     """The Memory browser table: one page of rows plus tab counts and facets."""
     plan = await plan_search(query, embedding)
-    return await browse_page(db, access, query, plan, sort=sort, order=order, page=page, per_page=per_page)
+    return await browse_page(db, access, query, plan, sort=resolve_sort(sort, query), order=order,
+                             page=page, per_page=per_page)
 
 
 async def browse_page(
@@ -1101,19 +1112,20 @@ async def browse_page(
             MemoryNode.tenant_id == tenant, state_clause(access, name), *tab_conditions(name),
         )
         tabs[name] = (await db.execute(stmt)).scalar_one()
-    # Facets describe the live memories this person may list (not the tab).
-    live = (MemoryNode.tenant_id == tenant, state_clause(access, "all"), MemoryNode.deleted_at.is_(None))
+    # Facets count the rows of the open tab before the other filters, so each
+    # count matches what ticking that filter alone would list.
+    live = (MemoryNode.tenant_id == tenant, state_clause(access, query.tab), *tab_conditions(query.tab))
     facets = {}
     for name, column, extra in (
         ("scopes", MemoryNode.scope, ()),
-        ("writers", MemoryNode.owner_id, ()),
+        ("writers", written_by(), ()),
         ("projects", MemoryNode.scope_id, (MemoryNode.scope == "project",)),
     ):
         facet_rows = (await db.execute(select(column, func.count()).select_from(MemoryNode).where(
             *live, *extra,
         ).group_by(column))).all()
         facets[name] = [{"value": value, "count": count} for value, count in facet_rows if value is not None]
-    readable = (MemoryNode.tenant_id == tenant, content_clause(access, "all"), MemoryNode.deleted_at.is_(None))
+    readable = (*live, content_clause(access, query.tab))
     domain_rows = select(func.unnest(MemoryNode.domains).label("value")).where(*readable).subquery()
     domains = (await db.execute(select(domain_rows.c.value, func.count()).select_from(
         domain_rows).group_by(domain_rows.c.value))).all()
@@ -1135,12 +1147,12 @@ async def browse_page(
         ).exists(),
     ))).scalar_one()
     embedded = (await db.execute(select(func.count()).select_from(MemoryNode).where(
-        *readable, *tab_conditions("current"), MemoryNode.embedding.is_not(None),
+        *readable, MemoryNode.embedding.is_not(None),
     ))).scalar_one()
     near_duplicates = None
     if embedded <= NEAR_DUPLICATE_FACET_LIMIT:
         near_duplicates = (await db.execute(select(func.count()).select_from(MemoryNode).where(
-            *readable, *tab_conditions("current"), near_duplicate_exists(access, "current"),
+            *readable, near_duplicate_exists(access, query.tab),
         ))).scalar_one()
     facets["flags"] = {"contradicted": contradicted, "has_branches": has_branches,
                        "near_duplicate": near_duplicates}
