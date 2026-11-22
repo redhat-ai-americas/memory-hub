@@ -65,7 +65,7 @@ for (const role of ['user', 'admin'] as const) {
       await page.goto(`/#/memory/${memoryId}`);
       await expect(page.getByRole('heading', { level: 1 })).toContainText('Gripper torque limit');
       expect(bff.calls).toContain(`GET /api/memory/${memoryId}/context`);
-      await expect(page.getByText('Access log')).toHaveCount(0);
+      await expect(page.getByText('Access log').first()).toBeVisible();
       await expect(page.getByText('Similar memories')).toBeVisible();
       expectClean(bff, errors);
     });
@@ -201,5 +201,71 @@ test('admin: resolves a contradiction and adds a project member', async ({ page 
   await page.getByRole('button', { name: '+ Add member' }).click();
   await expect(page.getByRole('dialog')).toContainText('Add members to atlas-planner');
   await expect(page.getByText('Teams')).toHaveCount(0);
+  expectClean(bff, errors);
+});
+
+/* ---------------- Memory detail ---------------- */
+
+test('user: memory page shows who read it, agent usage, provenance and hidden links', async ({ page }) => {
+  const bff = await mockBff(page, 'user');
+  const errors = watch(page);
+  await page.goto(`/#/memory/${memoryId}`);
+  await expect(page.getByRole('heading', { name: 'Access log' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'claude-code-jlee · for jlee' }).first()).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'search_memory' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'answering question' })).toBeVisible();
+  await expect(page.getByText('Agent usage · 30 d')).toBeVisible();
+  await expect(page.getByText('2 (67%)')).toBeVisible();
+  await expect(page.getByText('2 more point to memories you cannot read.')).toBeVisible();
+  await expect(page.getByText(/claude-code-mchen \(mchen\) · current/)).toBeVisible();
+  expect(bff.calls).toContain(`GET /api/memory/${memoryId}/access-log`);
+  expect(bff.calls).toContain(`GET /api/memory/${memoryId}/usage`);
+  expectClean(bff, errors);
+});
+
+test('user: a member who may not see readers gets no access log', async ({ page }) => {
+  const bff = await mockBff(page, 'user', (key, payload) => {
+    if (!key.endsWith('/context')) return payload;
+    const ctx = payload as { memory: Record<string, unknown> };
+    return { ...ctx, memory: { ...ctx.memory, can_view_access: false } };
+  });
+  const errors = watch(page);
+  await page.goto(`/#/memory/${memoryId}`);
+  await expect(page.getByText('Agent usage · 30 d')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Access log' })).toHaveCount(0);
+  expect(bff.calls.some((c) => c.endsWith('/access-log'))).toBe(false);
+  expectClean(bff, errors);
+});
+
+test('user: delete stays on the page, and restore brings the memory back', async ({ page }) => {
+  let deleted = false;
+  const bff = await mockBff(page, 'user', (key, payload) => {
+    if (key === `DELETE /api/memory/${memoryId}`) deleted = true;
+    if (key === `POST /api/memory/${memoryId}/restore`) deleted = false;
+    if (!key.endsWith('/context') || !deleted) return payload;
+    const ctx = payload as { memory: Record<string, unknown> };
+    return { ...ctx, memory: { ...ctx.memory, deleted_at: new Date().toISOString(), can_restore: true, can_delete: false, capabilities: { write: false, moderate: false } } };
+  });
+  const errors = watch(page);
+  await page.goto(`/#/memory/${memoryId}`);
+  await page.getByRole('button', { name: 'Delete memory…' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByText(/Deleted .*Agents no longer receive it\. Restore brings back/)).toBeVisible();
+  await page.getByRole('button', { name: 'Restore memory' }).click();
+  await expect(page.getByText('Restored 3 rows — agents get it again.')).toBeVisible();
+  expect(bff.calls).toContain(`POST /api/memory/${memoryId}/restore`);
+  await expect(page.getByRole('button', { name: 'Restore memory' })).toHaveCount(0);
+  expectClean(bff, errors);
+});
+
+test('admin: memory page has an Access log tab and agent usage', async ({ page }) => {
+  const bff = await mockBff(page, 'admin');
+  const errors = watch(page);
+  await page.goto(`/#/memory/${memoryId}`);
+  await expect(page.getByRole('heading', { name: 'Agent usage' })).toBeVisible();
+  await expect(page.getByText('2 more relationships point to memories outside your access.')).toBeVisible();
+  await page.getByRole('tab', { name: /Access log/ }).click();
+  await expect(page.getByRole('cell', { name: 'read_memory' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'v2' }).first()).toBeVisible();
   expectClean(bff, errors);
 });

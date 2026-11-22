@@ -1,5 +1,6 @@
 import type {
   ApiKeyRotatedResponse,
+  AuditEvent,
   AuthStatus,
   BrowseParams,
   BrowseResponse,
@@ -18,6 +19,7 @@ import type {
   GraphPrefer,
   Me,
   MemoryContext,
+  MemoryUsage,
   MemoryRecord,
   MemoryVersion,
   NavCounts,
@@ -123,6 +125,11 @@ export const api = {
   memoryHistory: (id: string) => get<MemoryVersion[]>(`/memory/${enc(id)}/history`),
   /** Memory page: record, versions, branches, links, reports and similar memories, each checked for access. */
   memoryContext: (id: string) => get<MemoryContext>(`/memory/${enc(id)}/context`),
+  /** Audited access to every version; reads_only keeps reads and searches that returned it. */
+  memoryAccessLog: (id: string, page = 1, opts: { days?: number; reads_only?: boolean } = {}) =>
+    get<{ total: number; items: AuditEvent[] }>(`/memory/${enc(id)}/access-log${qs({ page, ...opts })}`),
+  memoryUsage: (id: string, days = 30) => get<MemoryUsage>(`/memory/${enc(id)}/usage${qs({ days })}`),
+  restoreMemory: (id: string) => post<{ id: string; restored_rows: number }>(`/memory/${enc(id)}/restore`),
   /** User: JSONL with content; admin: CSV metadata only. Same filters as browse. */
   exportUrl: (params: BrowseParams = {}) => `${BASE}/memories/export${qs(params as Record<string, unknown>)}`,
   writeMemory: (body: {

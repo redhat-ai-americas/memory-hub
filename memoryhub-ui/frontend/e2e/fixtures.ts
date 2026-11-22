@@ -29,6 +29,9 @@ export const BFF_ROUTES: [string, RegExp][] = [
   ['POST', /^\/api\/search$/],
   ['GET', /^\/api\/memories\/export$/],
   ['GET', /^\/api\/memory\/[^/]+\/context$/],
+  ['GET', /^\/api\/memory\/[^/]+\/access-log$/],
+  ['GET', /^\/api\/memory\/[^/]+\/usage$/],
+  ['POST', /^\/api\/memory\/[^/]+\/restore$/],
   ['GET', /^\/api\/me$/],
   ['POST', /^\/api\/memories$/],
   ['GET', /^\/api\/memories\/browse$/],
@@ -218,6 +221,8 @@ const context = (role: Role) => ({
     redacted: false,
     capabilities: { write: true, moderate: role === 'admin' },
     can_delete: true,
+    can_restore: false,
+    can_view_access: true,
     content: 'Gripper torque limit is 11.5 N·m. Full text.',
     logical_id: null,
     parent_id: null,
@@ -243,11 +248,11 @@ const context = (role: Role) => ({
   ],
   branches: [{ id: branchId, branch_type: 'rationale', content: 'Measured in the soak test', actor_id: 'mchen', created_at: now }],
   relationships: [{ id: 'rel-1', type: 'related_to', direction: 'out', created_by: 'mchen', created_at: now, other: brief(otherMemoryId, 'Path planner budget is 40 ms') }],
-  relationships_omitted: 0,
+  relationships_omitted: 2,
   contradictions: [{ id: reportId, observed_behavior: 'Torque limit is now 12 N·m', confidence: 0.9, reporter: 'curator-agent', created_at: now, resolved: false }],
   contradiction_threshold: 5,
   similar: [{ ...brief(otherMemoryId, 'Path planner budget is 40 ms'), score: 0.71 }],
-  access_count: 0,
+  access_count: 2,
 });
 
 const graphAll = {
@@ -291,6 +296,19 @@ const searchResponse = (role: Role) => ({
 function respond(role: Role, method: string, path: string, url: URL, body: unknown): unknown {
   const user = role === 'user';
   if (/\/api\/memory\/[^/]+\/context$/.test(path)) return context(role);
+  if (/\/api\/memory\/[^/]+\/access-log$/.test(path))
+    return {
+      total: 2,
+      page: 1,
+      per_page: 25,
+      items: [
+        { id: 2, timestamp: now, event_type: 'memory.read', operation: 'memory.read', actor_id: 'claude-code-jlee', driver_id: 'jlee', actor_type: null, scope: 'project', owner_id: 'atlas-planner', memory_id: memoryId, memory_stub: null, memory_version: 2, decision: 'allowed', metadata: { purpose: 'answering_question' } },
+        { id: 1, timestamp: now, event_type: 'memory.served', operation: 'memory.search', actor_id: 'claude-code-jlee', driver_id: 'jlee', actor_type: null, scope: 'all', owner_id: 'jlee', memory_id: memoryId, memory_stub: null, memory_version: 2, decision: 'allowed', metadata: { full: true } },
+      ],
+    };
+  if (/\/api\/memory\/[^/]+\/usage$/.test(path))
+    return { days: 30, served: 4, used: 2, skipped: 1, full: 1, reads: 2, last: now, full_text: false, use_rate: 0.6667 };
+  if (/\/api\/memory\/[^/]+\/restore$/.test(path)) return { id: memoryId, restored_rows: 3 };
   if (path === '/api/me') return me(role);
   if (path === '/api/auth/status')
     return { mode: 'oauth-proxy', authenticated: true, api_key_login: false, local_accounts: false, user: me(role).username, role, cluster_domain: null, setup_required: false };

@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { api } from '@/api/client';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
-import { Empty, ErrorState, Modal, ScopeLabel, Sk, SkLines, useToast } from '@/components/ui';
+import { Empty, ErrorState, Modal, Pager, ScopeLabel, Sk, SkLines, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { MemoryContext } from '@/types';
-import { errorMessage, fmtDateTime, fmtMonthDay, fmtRelative, fmtShortDateTime, fmtWeight, scopeMeta, shortId, truncate } from '@/utils/format';
-import { ConfirmModal, memoryHref, MemoryLink, RelationshipModal } from './common';
+import type { AuditEvent, MemoryContext, MemoryUsage } from '@/types';
+import { errorMessage, fmtDateTime, fmtMonthDay, fmtRelative, fmtShortDateTime, fmtUtc, fmtWeight, scopeMeta, shortId, truncate } from '@/utils/format';
+import { actorName, ConfirmModal, decisionOf, memoryHref, MemoryLink, RelationshipModal } from './common';
 
 type Version = MemoryContext['versions'][number];
 
@@ -113,6 +113,24 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
   const canModerate = !userView && Boolean(m?.capabilities?.moderate) && !deleted;
   /** The BFF blanks what a personal memory says for admins; show that instead of an empty page. */
   const hidden = Boolean(m?.redacted);
+  const canRestore = Boolean(m?.can_restore);
+  const canViewAccess = Boolean(m?.can_view_access);
+  const [restoring, setRestoring] = useState(false);
+  /** POST /api/memory/{id}/restore: brings back every version and branch deleted with it. */
+  const restore = async () => {
+    setRestoring(true);
+    try {
+      const res = await api.restoreMemory(id);
+      toast(`Restored ${res.restored_rows} ${res.restored_rows === 1 ? 'row' : 'rows'} — agents get it again.`);
+      refreshCounts();
+      if (res.id !== id) navigate(`/memory/${res.id}`);
+      else reload();
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   return (
     <>
@@ -164,7 +182,11 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           ) : null
         }
         actions={
-          m && !deleted ? (
+          m && deleted && canRestore ? (
+            <button type="button" className="btn bp" disabled={restoring} onClick={restore}>
+              {restoring ? 'Restoring…' : 'Restore memory'}
+            </button>
+          ) : m && !deleted ? (
             <>
               {canWrite && (
                 <>
@@ -207,6 +229,8 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
               { value: 'versions', label: 'Versions', count: data ? versions.length : null },
               { value: 'branches', label: 'Branches', count: data ? data.branches.length : null },
               { value: 'relationships', label: 'Relationships', count: data ? data.relationships.length : null },
+              // Who accessed it: for its author, its project's admins and admins (the BFF decides).
+              ...(!userView && canViewAccess ? [{ value: 'access', label: 'Access log', count: data ? data.access_count : null }] : []),
             ]}
           />
         }
@@ -230,7 +254,9 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
         ) : data && m && userView && tab === 'details' ? (
           <UserMemoryView data={data} byVersion={byVersion} canWrite={canWrite} canDelete={canDelete} deleted={deleted} onDelete={() => setModal('delete')} onRelate={() => setModal('relate')} />
         ) : data && m ? (
-          (
+          tab === 'access' && canViewAccess ? (
+            <AccessLog id={id} />
+          ) : (
             <div className="row-wrap">
               <div className="col-main">
                 {hidden && (
@@ -268,7 +294,7 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                                 <div>
                                   <div style={{ fontWeight: 600 }}>
                                     v{v.version}
-                                    {v.is_current ? ' · current' : v.version === 1 ? ' · created' : ''}
+                                    {v.deleted_at ? ' · deleted' : v.is_current ? ' · current' : v.version === 1 ? ' · created' : ''}
                                   </div>
                                   <div className="sm muted">
                                     {fmtShortDateTime(v.created_at)} · {who(v.actor_id, v.driver_id, v.owner_id)}
@@ -394,12 +420,19 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
                           </MemoryLink>
                         </div>
                       ))}
+                      {data.relationships_omitted > 0 && (
+                        <div className="sm muted" style={{ paddingTop: 6 }}>
+                          {data.relationships_omitted} more {data.relationships_omitted === 1 ? 'relationship points' : 'relationships point'} to memories outside your access.
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
               </div>
 
               <aside className="col-side" style={{ flex: '1 1 320px' }}>
+                {deleted && <DeletedNote deletedAt={m.deleted_at as string} canRestore={canRestore} />}
+                <UsageCard id={m.id} />
                 <div className="card">
                   <h2 data-h="3" style={{ marginBottom: 14 }}>Details</h2>
                   <dl className="dl">
@@ -529,13 +562,13 @@ const MemoryDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
           onClose={() => setModal(null)}
           onConfirm={async () => {
             await api.deleteMemory(id);
-            toast('Memory deleted. Agents no longer receive it.');
+            toast('Memory deleted. Agents no longer receive it — you can restore it from this page.');
             refreshCounts();
-            navigate('/memories');
+            reload();
           }}
         >
           This soft-deletes <b>{hidden ? shortId(id) : `“${truncate(m.content, 80)}”`}</b>, all {versions.length} version{versions.length === 1 ? '' : 's'} and {data?.branches.length ?? 0}{' '}
-          branch{data?.branches.length === 1 ? '' : 'es'}. Agents stop receiving it immediately. The deletion is recorded in the audit log.
+          branch{data?.branches.length === 1 ? '' : 'es'}. Agents stop receiving it immediately. You can restore it from this page. The deletion is recorded in the audit log.
         </ConfirmModal>
       )}
       {modal === 'quarantine' && m && canModerate && (
@@ -787,13 +820,7 @@ const UserMemoryView: React.FC<{
   return (
     <div className="row-wrap">
       <div className="col-main">
-        {deleted && (
-          <div className="alert" role="note">
-            <div>
-              <b>Deleted {fmtRelative(m.deleted_at as string).toLowerCase()}.</b> Agents no longer receive it.
-            </div>
-          </div>
-        )}
+        {deleted && <DeletedNote deletedAt={m.deleted_at as string} canRestore={Boolean(m.can_restore)} />}
         <section className="card">
           <div className="ch">
             <h2 data-h="3">Content</h2>
@@ -838,6 +865,10 @@ const UserMemoryView: React.FC<{
             </dd>
             <dt>Indexing</dt>
             <dd>{m.embedding_dims ? <span className="ok">● Indexed · searchable</span> : <span className="muted">Not indexed — found by text only</span>}</dd>
+            <dt>Provenance</dt>
+            <dd>
+              {SOURCE[m.source ?? ''] ?? m.source ?? 'Not recorded'} · {who(m.actor_id, m.driver_id, m.owner_id)}
+            </dd>
           </dl>
         </section>
 
@@ -859,7 +890,7 @@ const UserMemoryView: React.FC<{
                   <div style={{ minWidth: 0 }}>
                     <div className={i === 0 ? 'b6' : ''}>{prev ? changeSummary(v, prev) : truncate(v.content, 90)}</div>
                     <div className="hint">
-                      {fmtMonthDay(v.created_at)} · {v.is_current ? 'current' : 'superseded'}
+                      {fmtMonthDay(v.created_at)} · {who(v.actor_id, v.driver_id, v.owner_id)} · {v.deleted_at ? 'deleted' : v.is_current ? 'current' : 'superseded'}
                     </div>
                   </div>
                 </div>
@@ -878,6 +909,7 @@ const UserMemoryView: React.FC<{
           )}
         </section>
 
+        {m.can_view_access && <ReadersLog id={m.id} />}
       </div>
 
       <aside className="col-side" style={{ flex: '1 1 300px' }}>
@@ -924,6 +956,7 @@ const UserMemoryView: React.FC<{
               </MemoryLink>
             </div>
           ))}
+          {data.relationships_omitted > 0 && <p className="hint">{data.relationships_omitted} more point to memories you cannot read.</p>}
         </section>
 
         <section className="card">
@@ -961,6 +994,8 @@ const UserMemoryView: React.FC<{
           </p>
         </section>
 
+        <UsageCompact id={m.id} />
+
         {canDelete && !deleted && (
           <button type="button" className="btn bd outline" style={{ alignSelf: 'flex-start' }} onClick={onDelete}>
             Delete memory…
@@ -968,5 +1003,215 @@ const UserMemoryView: React.FC<{
         )}
       </aside>
     </div>
+  );
+};
+
+/** Where a memory came from (MemoryNode.source). */
+const SOURCE: Record<string, string> = {
+  // Core records 'agent' for every MCP and dashboard write: the writer is the actor.
+  agent: 'Written',
+  user: 'Pinned by a person',
+  dreaming: 'Consolidated by dreaming',
+  import: 'Imported',
+};
+
+const DeletedNote: React.FC<{ deletedAt: string; canRestore: boolean }> = ({ deletedAt, canRestore }) => (
+  <div className="alert" role="note">
+    <div>
+      <b>Deleted {fmtRelative(deletedAt).toLowerCase()}.</b> Agents no longer receive it.
+      {canRestore ? ' Restore brings back every version and branch deleted with it, as they were.' : ''}
+    </div>
+  </div>
+);
+
+/** Admin tab: every audited access to any version, newest first. */
+const AccessLog: React.FC<{ id: string }> = ({ id }) => {
+  const [page, setPage] = useState(1);
+  const { data, error, loading, reload } = useApi<{ total: number; items: AuditEvent[] }>(() => api.memoryAccessLog(id, page), [id, page]);
+  return (
+    <section className="card" style={{ padding: 0 }}>
+      <div style={{ padding: '16px 20px' }}>
+        <h2 data-h="3">Access log</h2>
+        <p className="hint" style={{ margin: '4px 0 0' }}>
+          Reads, searches that returned it, changes and links — for every version. Search text is not shown.
+        </p>
+      </div>
+      {error && !data ? (
+        <ErrorState error={error} onRetry={reload} />
+      ) : loading && !data ? (
+        <SkLines lines={5} />
+      ) : data!.items.length === 0 ? (
+        <Empty title="No recorded access" compact>
+          Reads, searches and updates touching this memory will appear here.
+        </Empty>
+      ) : (
+        <>
+          <div className="scroll">
+            <table className="tbl" style={{ minWidth: 720 }}>
+              <thead>
+                <tr>
+                  <th>Timestamp (UTC)</th>
+                  <th>Operation</th>
+                  <th>Version</th>
+                  <th>Actor</th>
+                  <th>Decision</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data!.items.map((e) => {
+                  const d = decisionOf(e);
+                  return (
+                    <tr key={e.id}>
+                      <td className="mono muted">{fmtUtc(e.timestamp)}</td>
+                      <td className="mono">{HOW[e.operation] ?? e.operation}</td>
+                      <td className="sm">{e.memory_version ? `v${e.memory_version}` : '—'}</td>
+                      <td className="sm">{actorName(e)}</td>
+                      <td className={`sm ${d.cls}`} style={{ fontWeight: 600 }}>
+                        {d.label}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Pager page={page} perPage={25} total={data!.total} onPage={setPage} noun="events" />
+        </>
+      )}
+    </section>
+  );
+};
+
+/** Do agents act on this memory when search returns it? From the audit log. */
+const UsageCard: React.FC<{ id: string }> = ({ id }) => {
+  const { data } = useApi<MemoryUsage>(() => api.memoryUsage(id, 30), [id]);
+  if (!data) return null;
+  const measured = data.used + data.skipped;
+  return (
+    <div className="card">
+      <div className="ch">
+        <h2 data-h="3">Agent usage</h2>
+        <span className="sm muted">30 days</span>
+      </div>
+      {data.served === 0 ? (
+        <p className="sm muted" style={{ margin: 0 }}>
+          No agent search returned this memory in the last 30 days.
+        </p>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 10 }}>
+            <div>
+              <div className="b6" style={{ fontSize: 22 }}>{data.served}</div>
+              <div className="hint">times returned</div>
+            </div>
+            <div>
+              <div className="b6" style={{ fontSize: 22 }}>{data.used}</div>
+              <div className="hint">acted on</div>
+            </div>
+            <div>
+              <div className="b6" style={{ fontSize: 22 }}>{data.skipped}</div>
+              <div className="hint">skipped</div>
+            </div>
+          </div>
+          {measured > 0 && (
+            <div className="bar" aria-label={`Used ${Math.round((data.use_rate ?? 0) * 100)}% of the time`}>
+              <span style={{ width: `${Math.round((data.use_rate ?? 0) * 100)}%` }} />
+            </div>
+          )}
+          <p className="hint" style={{ margin: '8px 0 0' }}>
+            {data.full_text
+              ? 'Weight ≥ 0.80: agents get the full text in the search result, so a follow-up read is not needed and skips are not counted.'
+              : 'Acted on = the same agent read, updated, linked or reported it within 30 minutes. Memories that are often skipped may need a clearer text, a lower weight, or fading.'}
+          </p>
+        </>
+      )}
+    </div>
+  );
+};
+
+const HOW: Record<string, string> = {
+  'memory.search': 'search_memory',
+  'memory.read': 'read_memory',
+  'memory.write': 'write_memory',
+  'memory.update': 'update_memory',
+  'memory.delete': 'delete_memory',
+  'memory.restore': 'restore (dashboard)',
+  'memory.relationship_created': 'create_relationship',
+  'memory.contradiction_reported': 'report_contradiction',
+};
+
+/** User view: who read this memory in the last 30 days — when, who, how and why. */
+const ReadersLog: React.FC<{ id: string }> = ({ id }) => {
+  const { data, error, loading, reload } = useApi<{ total: number; items: AuditEvent[] }>(
+    () => api.memoryAccessLog(id, 1, { days: 30, reads_only: true }),
+    [id],
+  );
+  return (
+    <section className="card">
+      <div className="ch">
+        <h2 data-h="3">Access log</h2>
+        <span className="sm muted">Who read this memory · 30 days</span>
+      </div>
+      {error && !data ? (
+        <ErrorState error={error} onRetry={reload} compact />
+      ) : loading && !data ? (
+        <SkLines lines={4} />
+      ) : !data?.items?.length ? (
+        <p className="sm muted" style={{ margin: 0 }}>
+          Nobody read this memory in the last 30 days.
+        </p>
+      ) : (
+        <div className="scroll">
+          <table className="tbl" style={{ minWidth: 520 }}>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Reader</th>
+                <th>How</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.slice(0, 10).map((e) => {
+                const purpose = (e.metadata?.purpose as string) || (e.metadata?.reason as string) || (e.metadata?.origin as string) || (e.metadata?.full ? 'full text in search' : '—');
+                const today = new Date(e.timestamp).toDateString() === new Date().toDateString();
+                return (
+                  <tr key={e.id}>
+                    <td className="mono muted">{today ? fmtShortDateTime(e.timestamp).split(' ').pop() : fmtMonthDay(e.timestamp)}</td>
+                    <td className="sm">
+                      {e.actor_id}
+                      {e.driver_id && e.driver_id !== e.actor_id && <span className="hint"> · for {e.driver_id}</span>}
+                    </td>
+                    <td className="mono sm">{HOW[e.operation] ?? e.operation}</td>
+                    <td className="sm">{String(purpose).replace(/_/g, ' ')}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {data.total > 10 && <p className="hint">{data.total - 10} more in the last 30 days.</p>}
+        </div>
+      )}
+    </section>
+  );
+};
+
+const UsageCompact: React.FC<{ id: string }> = ({ id }) => {
+  const { data } = useApi<MemoryUsage>(() => api.memoryUsage(id, 30), [id]);
+  if (!data) return null;
+  const pct = data.use_rate === null ? null : Math.round(data.use_rate * 100);
+  return (
+    <section className="card">
+      <h2 data-h="3" style={{ marginBottom: 10 }}>Agent usage · 30 d</h2>
+      <dl className="kv">
+        <dt>Served in search</dt>
+        <dd>{data.served}</dd>
+        <dt>Acted on</dt>
+        <dd>
+          {data.used}
+          {pct !== null ? ` (${pct}%)` : ''}
+        </dd>
+      </dl>
+    </section>
   );
 };

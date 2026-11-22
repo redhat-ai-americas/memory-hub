@@ -1500,6 +1500,24 @@ async def search_memory(
                 }
                 for sig in pattern_signals
             ]
+        # Which memories this search handed to the agent, and which in full.
+        # The dashboard reads it for "who received this memory" and agent usage.
+        served = [entry for entry in formatted if entry.get("id")]
+        await record_audit_event(
+            event_type="memory.served",
+            actor_id=claims["sub"],
+            driver_id=claims["sub"],
+            scope=scope or "all",
+            owner_id=owner_id or claims["sub"],
+            memory_id=None,
+            decision="allowed",
+            tenant_id=tenant,
+            metadata={
+                "result_ids": [str(entry["id"]) for entry in served],
+                "full_ids": [str(entry["id"]) for entry in served if entry.get("result_type") == "full"],
+            },
+            session=session,
+        )
         return response
 
     except EmbeddingContentTooLargeError as exc:

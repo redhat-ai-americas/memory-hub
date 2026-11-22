@@ -344,6 +344,10 @@ export interface MemoryContext {
     capabilities: { write: boolean; moderate: boolean };
   /** #671: authors (and project admins) may delete this row; moderation alone is not enough for shared memories. */
   can_delete?: boolean;
+    /** Deleted: whoever could delete it may bring it back. */
+    can_restore?: boolean;
+    /** Who read it: shown to its author, its project's admins and admins. */
+    can_view_access?: boolean;
     content: string;
     logical_id: string | null;
     parent_id: string | null;

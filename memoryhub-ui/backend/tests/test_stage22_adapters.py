@@ -79,7 +79,7 @@ def test_context_rechecks_history_and_relationship_neighbor(client):
     db.execute.side_effect = [
         query_result(own), query_result(items=[own, foreign]), query_result(items=[]),
         query_result(items=[edge]), query_result(items=[foreign]),
-        query_result(items=[]), query_result(0),
+        query_result(items=[]), query_result(items=[own.id]), query_result(0),
     ]
     with patch("src.memory_context.get_memory_history", new_callable=AsyncMock,
                return_value={"versions": [SimpleNamespace(id=own.id), SimpleNamespace(id=foreign.id)]}):
@@ -89,6 +89,7 @@ def test_context_rechecks_history_and_relationship_neighbor(client):
     assert payload["memory"]["content"] == "own content"
     assert [item["id"] for item in payload["versions"]] == [str(own.id)]
     assert payload["relationships"] == []
+    assert payload["relationships_omitted"] == 1  # counted, never identified
     assert "foreign secret" not in response.text and "foreign title" not in response.text
     assert "tenant-a" in str(db.execute.await_args_list[4].args[0].compile(
         compile_kwargs={"literal_binds": True}))
@@ -100,7 +101,7 @@ def test_context_admin_personal_is_metadata_only_and_cross_tenant_is_404(client)
     personal = node(owner_id="bob", content="foreign secret", stub="private title")
     db.execute.side_effect = [
         query_result(personal), query_result(items=[personal]), query_result(items=[]),
-        query_result(items=[]), query_result(items=[]), query_result(0),
+        query_result(items=[]), query_result(items=[]), query_result(items=[personal.id]), query_result(0),
     ]
     with patch("src.memory_context.get_memory_history", new_callable=AsyncMock,
                return_value={"versions": [SimpleNamespace(id=personal.id)]}):
@@ -124,7 +125,7 @@ def test_context_filters_hidden_branches_and_similar_hits(client):
     db.execute.side_effect = [
         query_result(seed), query_result(items=[seed]), query_result(items=[foreign]),
         query_result(items=[]), query_result(items=[]),
-        query_result(items=[foreign, own_match]), query_result(0),
+        query_result(items=[foreign, own_match]), query_result(items=[seed.id]), query_result(0),
     ]
     with patch("src.memory_context.get_memory_history", new_callable=AsyncMock,
                return_value={"versions": [SimpleNamespace(id=seed.id)]}), patch(

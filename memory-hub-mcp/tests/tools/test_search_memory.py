@@ -2682,3 +2682,35 @@ async def test_s3_hydration_then_budget_degrades_to_stub():
     # The stub must not leak the hydrated (huge) content -- _to_stub()
     # discards it, falling back to the original truncated prefix.
     assert entry["content"] == "big item"
+
+
+@pytest.mark.asyncio
+async def test_search_memory_records_which_memories_it_served():
+    """A successful search audits the IDs it returned, and which came back in full.
+
+    The dashboard reads these "memory.served" events to show who received a
+    memory and whether agents act on it.
+    """
+    full, full_score = _fake_full_result("served in full", weight=0.95)
+    stub, stub_score = _fake_full_result("served as stub", weight=0.95)
+    with patch("src.tools.search_memory.record_audit_event", new_callable=AsyncMock) as audit:
+        result = await _patched_search_call(
+            page_results=[(full, full_score), (stub, stub_score)],
+            total_matching=2,
+            max_results=1,
+        ).run()
+    served = [call.kwargs for call in audit.await_args_list if call.kwargs["event_type"] == "memory.served"]
+    assert len(served) == 1
+    returned = [entry["id"] for entry in result["results"]]
+    assert served[0]["metadata"]["result_ids"] == [str(i) for i in returned]
+    assert served[0]["metadata"]["full_ids"] == [
+        str(entry["id"]) for entry in result["results"] if entry["result_type"] == "full"
+    ]
+    assert served[0]["memory_id"] is None and served[0]["decision"] == "allowed"
+
+
+@pytest.mark.asyncio
+async def test_search_memory_with_no_results_records_no_served_event():
+    with patch("src.tools.search_memory.record_audit_event", new_callable=AsyncMock) as audit:
+        await _patched_search_call(page_results=[], total_matching=0).run()
+    assert [c.kwargs["event_type"] for c in audit.await_args_list] == ["memory.search"]

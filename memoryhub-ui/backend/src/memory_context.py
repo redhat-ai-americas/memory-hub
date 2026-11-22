@@ -19,6 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.authorization import Access, AccessDep
 from src.database import get_db
 from src.human_adapters import _human_can_see_content
+from src.memory_detail_adapter import (
+    access_events,
+    can_open,
+    can_restore,
+    can_view_access,
+    chain_ids,
+    content_visible,
+)
 
 router = APIRouter()
 DbDep = Annotated[AsyncSession, Depends(get_db)]
@@ -53,12 +61,19 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
     tenant = access.principal.tenant_id
     seed = (await db.execute(select(MemoryNode).where(
         MemoryNode.id == memory_id, MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None),
     ))).scalar_one_or_none()
-    if seed is None or not _readable(access, seed):
+    # A deleted memory opens for whoever may restore it (and as metadata for admins).
+    if seed is None or not can_open(access, seed):
         raise HTTPException(status_code=404, detail="Memory not found")
+    deleted = seed.deleted_at is not None
 
-    hidden = not _human_can_see_content(access, seed)
+    def shown(node: MemoryNode) -> bool:
+        """Live rows this person reads, plus rows deleted together with a deleted seed."""
+        if node.deleted_at is None:
+            return _readable(access, node)
+        return deleted and node.deleted_at == seed.deleted_at and can_open(access, node)
+
+    hidden = not content_visible(access, seed)
     try:
         history = await get_memory_history(memory_id, db, tenant_id=tenant, max_versions=10_000)
     except MemoryNotFoundError:
@@ -66,12 +81,11 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
     version_ids = [version.id for version in history["versions"]]
     version_rows = (await db.execute(select(MemoryNode).where(
         MemoryNode.id.in_(version_ids), MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None),
     ))).scalars().all() if version_ids else []
-    version_map = {row.id: row for row in version_rows if _readable(access, row)}
+    version_map = {row.id: row for row in version_rows if shown(row)}
     versions = [{
         "id": str(row.id), "version": row.version, "is_current": row.is_current,
-        "content": "" if not _human_can_see_content(access, row) else row.content,
+        "content": "" if not content_visible(access, row) else row.content,
         "weight": row.weight, "actor_id": row.actor_id,
         "driver_id": row.driver_id, "owner_id": row.owner_id,
         "created_at": row.created_at, "deleted_at": row.deleted_at,
@@ -79,13 +93,12 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
 
     children = (await db.execute(select(MemoryNode).where(
         MemoryNode.parent_id == seed.id, MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None),
     ))).scalars().all()
     branches = [{
         "id": str(child.id), "branch_type": child.branch_type,
-        "content": child.content if _human_can_see_content(access, child) else "",
+        "content": child.content if content_visible(access, child) else "",
         "actor_id": child.actor_id, "created_at": child.created_at,
-    } for child in children if _readable(access, child)]
+    } for child in children if shown(child)]
 
     rels = (await db.execute(select(MemoryRelationship).where(
         MemoryRelationship.tenant_id == tenant,
@@ -99,10 +112,13 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
     ))).scalars().all() if neighbor_ids else []
     neighbors = {node.id: node for node in neighbor_rows if _readable(access, node)}
     relationships = []
+    relationships_omitted = 0
     for rel in rels:
         other_id = rel.target_id if rel.source_id == seed.id else rel.source_id
         other = neighbors.get(other_id)
         if other is None:
+            # Said as a count, never as an ID: the other memory is outside this person's access.
+            relationships_omitted += 1
             continue
         relationships.append({
             "id": str(rel.id), "type": rel.relationship_type,
@@ -139,8 +155,7 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
                    for item in matches["results"] if (uid := uuid.UUID(str(item["id"]))) in match_map]
 
     access_count = (await db.execute(select(func.count()).select_from(AuditLog).where(
-        AuditLog.tenant_id == tenant, AuditLog.memory_id == seed.id,
-        AuditLog.event_type == "memory.read", AuditLog.decision == "allowed",
+        AuditLog.tenant_id == tenant, access_events(await chain_ids(db, tenant, seed)),
     ))).scalar_one()
     visible_parent = None
     if seed.parent_id:
@@ -153,10 +168,15 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
 
     memory = {
         **_brief(seed, access),
+        "stub": "Content hidden" if hidden else seed.stub, "redacted": hidden,
         "capabilities": {
-            "write": access.can_write(seed), "moderate": access.can_moderate(seed),
+            "write": not deleted and access.can_write(seed),
+            "moderate": not deleted and access.can_moderate(seed),
         },
-        "can_delete": access.can_delete(seed),
+        "can_delete": not deleted and access.can_delete(seed),
+        "can_restore": can_restore(access, seed),
+        # Who read it is shown to its author, its project's admins and admins.
+        "can_view_access": can_view_access(access, seed),
         "content": "" if hidden else seed.content,
         "logical_id": str(seed.logical_id) if seed.logical_id else None,
         "parent_id": visible_parent, "branch_type": seed.branch_type,
@@ -173,7 +193,7 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
     }
     return {
         "memory": memory, "versions": versions, "branches": branches,
-        "relationships": relationships, "relationships_omitted": 0,
+        "relationships": relationships, "relationships_omitted": relationships_omitted,
         "contradictions": contradictions,
         "contradiction_threshold": CONTRADICTION_THRESHOLD,
         "similar": similar, "access_count": access_count,
