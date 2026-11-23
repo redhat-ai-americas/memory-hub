@@ -7,8 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_session
-from src.models import OAuthClient
+from src.models import ApiKey, OAuthClient
 from src.schemas import ValidateApiKeyRequest, ValidateApiKeyResponse
+from src.usage import mark_client_used, mark_key_used
 
 log = logging.getLogger("memoryhub-auth.routes.internal")
 
@@ -39,8 +40,21 @@ async def validate_api_key(
         )
     )
     client = result.scalar_one_or_none()
-    if client is None:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    if client is not None:
+        due = mark_key_used(client, "api_key_last_used_at")
+    else:
+        # A named key (#721): active client, key not revoked.
+        row = (await session.execute(
+            select(ApiKey, OAuthClient).join(OAuthClient, OAuthClient.client_id == ApiKey.client_id).where(
+                ApiKey.key_hash == key_hash, ApiKey.revoked_at.is_(None), OAuthClient.active,
+            )
+        )).first()
+        if row is None:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        key, client = row
+        due = mark_key_used(key)
+    if mark_client_used(client, "api_key") or due:
+        await session.commit()
     return ValidateApiKeyResponse(
         user_id=client.client_id,
         name=client.client_name,

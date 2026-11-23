@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { api } from '@/api/client';
 import { PageHeader, useApp } from '@/components/Shell';
-import { Empty, ErrorState, Icon, SkTable } from '@/components/ui';
+import { Empty, ErrorState, Icon, Modal, SkTable, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { buildHash, type HashRoute } from '@/hooks/useHashRoute';
 import type { ClientResponse, UserRow } from '@/types';
-import { avatarColor, fmtInt, fmtRelative, initials } from '@/utils/format';
+import { avatarColor, errorMessage, fmtInt, fmtRelative, initials } from '@/utils/format';
 import { CreateClientModal } from './Clients';
 
 const TYPE_LABEL: Record<string, { label: string; cls: string }> = {
@@ -34,6 +34,7 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
   const [kind, setKind] = useState<'' | 'user' | 'service' | 'unknown'>('');
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
+  const [linking, setLinking] = useState(isUser && route.params.get('link') === '1');
   const all: Row[] = data ?? [];
   const rows = all
     .filter((r) => !kind || r.identity_type === kind)
@@ -158,7 +159,12 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
     </>
   );
 
-  const modal = creating && <CreateClientModal onClose={() => setCreating(false)} onCreated={() => reload()} />;
+  const modal = (
+    <>
+      {creating && <CreateClientModal onClose={() => setCreating(false)} onCreated={() => reload()} />}
+      {linking && <LinkAgentModal onClose={() => setLinking(false)} onLinked={() => reload()} />}
+    </>
+  );
 
   return (
     <>
@@ -171,14 +177,78 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
             : 'Every identity that has an OAuth client or owns memories in this tenant: people, user agents and service identities, with what they have written.'
         }
         actions={
-          <button type="button" className="btn bp" onClick={() => setCreating(true)}>
-            <Icon.Plus /> {isUser ? 'Register an agent' : 'New service client'}
-          </button>
+          <>
+            {isUser && (
+              <button type="button" className="btn bs" onClick={() => setLinking(true)}>
+                Link an existing agent
+              </button>
+            )}
+            <button type="button" className="btn bp" onClick={() => setCreating(true)}>
+              <Icon.Plus /> {isUser ? 'Register an agent' : 'New service client'}
+            </button>
+          </>
         }
       />
       <div className="body">{body}</div>
       {modal}
     </>
+  );
+};
+
+/** Link an existing user agent: the client secret proves you hold it; it is checked, never stored or shown (#721). */
+const LinkAgentModal: React.FC<{ onClose: () => void; onLinked: () => void }> = ({ onClose, onLinked }) => {
+  const toast = useToast();
+  const [clientId, setClientId] = useState('');
+  const [secret, setSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submit = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.linkAgent(clientId.trim(), secret);
+      toast(`${clientId.trim()} is now registered to you. Its memories count as yours.`);
+      onLinked();
+      onClose();
+    } catch (e) {
+      setErr(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title="Link an existing agent"
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="btn bg" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn bp" disabled={busy || !clientId.trim() || !secret} onClick={submit}>
+            {busy ? 'Checking…' : 'Link agent'}
+          </button>
+        </>
+      }
+    >
+      <p className="sm" style={{ marginTop: 0 }}>
+        Enter the agent’s client ID and its client secret. The secret proves you hold the agent; it is checked by the auth service and not kept. Only user agents that are not
+        registered to anyone can be linked.
+      </p>
+      <div className="f">
+        <label htmlFor="la-id">Client ID</label>
+        <input id="la-id" className="in mono" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" />
+      </div>
+      <div className="f">
+        <label htmlFor="la-secret">Client secret</label>
+        <input id="la-secret" className="in mono" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" />
+      </div>
+      {err && (
+        <p className="sm err" role="alert" style={{ marginBottom: 0 }}>
+          {err}
+        </p>
+      )}
+    </Modal>
   );
 };
 

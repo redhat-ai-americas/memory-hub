@@ -35,6 +35,10 @@ class ClientResponse(BaseModel):
     active: bool
     created_at: datetime
     updated_at: datetime
+    # When the client last obtained a token or had a key accepted, and how (#721).
+    last_used_at: datetime | None = None
+    last_used_via: str | None = None
+    api_key_last_used_at: datetime | None = None
 
 
 class ClientCreatedResponse(ClientResponse):
@@ -63,3 +67,28 @@ class ValidateApiKeyResponse(BaseModel):
     identity_type: str
     tenant_id: str
     scopes: list[str]
+
+
+class CreateApiKeyRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    # Internal admin API only: the BFF passes its verified principal.
+    created_by: str | None = Field(default=None, max_length=255)
+
+
+class ApiKeyResponse(BaseModel):
+    id: str
+    client_id: str
+    name: str
+    key_prefix: str
+    created_at: datetime
+    created_by: str | None = None
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class ApiKeyCreatedResponse(ApiKeyResponse):
+    api_key: str  # plaintext, shown once
+
+
+class VerifySecretRequest(BaseModel):
+    client_secret: str = Field(min_length=1, max_length=512)

@@ -56,6 +56,14 @@ export const BFF_ROUTES: [string, RegExp][] = [
   // GET /api/rules/{id}/history exists but answers only a local technical caller
   // with the service key (403 for every person), so the dashboard must not call it.
   ['GET', /^\/api\/stats$/],
+  ['GET', /^\/api\/connect$/],
+  ['GET', /^\/api\/verify$/],
+  ['POST', /^\/api\/verify\/run$/],
+  ['POST', /^\/api\/verify\/results$/],
+  ['POST', /^\/api\/identities\/link$/],
+  ['GET', /^\/api\/clients\/[^/]+\/keys$/],
+  ['POST', /^\/api\/clients\/[^/]+\/keys$/],
+  ['DELETE', /^\/api\/clients\/[^/]+\/keys\/[^/]+$/],
   ['GET', /^\/api\/users$/],
 ];
 
@@ -160,7 +168,31 @@ const client = (id: string, type: 'user' | 'service', active = true, owned = fal
   created_at: now,
   updated_at: now,
   owned,
+  last_used_at: owned ? now : null,
+  last_used_via: owned ? 'client_credentials' : null,
+  api_key_last_used_at: null,
 });
+
+const verifyCheck = (id: string, status: string, explanation: string, extra: Record<string, unknown> = {}) => ({
+  id, title: id, status, category: null, category_label: null, code: null, explanation, next_action: null, source: 'dashboard', duration_ms: 12, ...extra,
+});
+const verifyResult = {
+  id: 'run-1',
+  created_at: now,
+  schema: 'memoryhub.verify/v1',
+  source: 'dashboard',
+  produced_by: { tool: 'memoryhub-dashboard', host: null },
+  started_at: now,
+  finished_at: now,
+  context: { endpoint: 'https://mcp.test/mcp/', tenant: 'lumen-eng', identity: 'mchen' },
+  checks: [
+    verifyCheck('endpoint', 'pass', 'https://mcp.test/mcp/ answered (HTTP 405).'),
+    verifyCheck('credentials', 'warn', '1 active client(s), none has been used to get a token yet.', { category: 'identity', category_label: 'Identity and credentials', code: 'credentials.never_used', next_action: 'Run memoryhub login on the agent host.' }),
+    verifyCheck('storage', 'pass', 'Wrote a test memory in your personal scope, read it back and removed it.'),
+    verifyCheck('cross_session', 'not_run', 'Can only be checked on the agent host.'),
+  ],
+  summary: { pass: 2, warn: 1, fail: 0, not_run: 1, state: 'warn' },
+};
 
 const rule = (id: string, layer: string, owner: string | null) => ({
   id,
@@ -454,6 +486,21 @@ function respond(role: Role, method: string, path: string, url: URL, body: unkno
       : [client('claude-code-mchen', 'user'), client('curator-agent', 'service', true, true), client('other-svc', 'service'), client('old-bot', 'service', false)];
   if (path === '/api/clients' && method === 'POST')
     return { ...client((body as { client_id: string }).client_id, user ? 'user' : 'service', true, true), client_secret: 'sec_123', api_key: 'mh_123' };
+  if (path === '/api/connect')
+    return {
+      mcp_url: 'https://mcp.test/mcp/', auth_url: 'https://auth.test', tenant: 'lumen-eng', agents: ['claude-code-mchen'], projects: ['atlas-planner'],
+      oauth: { token_endpoint: 'https://auth.test/token', metadata_url: 'https://auth.test/.well-known/oauth-authorization-server', grant_types: ['client_credentials', 'refresh_token'], api_key_header: 'Authorization: Bearer <api key>' },
+      cli: { login: 'memoryhub login …', init: 'memoryhub config init' },
+    };
+  if (path === '/api/verify')
+    return { schema: 'memoryhub.verify/v1', checks: [], categories: [{ id: 'identity', label: 'Identity and credentials' }], host_command: null, results: [] };
+  if (path === '/api/verify/run') return verifyResult;
+  if (path === '/api/verify/results') return { ...verifyResult, id: 'host-1', source: 'host', produced_by: { tool: 'memoryhub', host: 'claude-code' } };
+  if (path === '/api/identities/link') return { ok: true, client_id: (body as { client_id: string }).client_id, owner: 'mchen' };
+  if (/\/api\/clients\/[^/]+\/keys$/.test(path) && method === 'GET')
+    return { items: [{ id: 'k1', client_id: 'claude-code-mchen', name: 'laptop', key_prefix: 'mh-key-1a2b', created_at: now, created_by: 'mchen', last_used_at: now, revoked_at: null }], can_manage: user };
+  if (/\/api\/clients\/[^/]+\/keys$/.test(path)) return { id: 'k2', client_id: 'claude-code-mchen', name: (body as { name: string }).name, key_prefix: 'mh-key-9f8e', created_at: now, created_by: 'mchen', last_used_at: null, revoked_at: null, api_key: 'mh-key-9f8e7d6c' };
+  if (/\/api\/clients\/[^/]+\/keys\//.test(path)) return { id: 'k1', client_id: 'claude-code-mchen', name: 'laptop', key_prefix: 'mh-key-1a2b', created_at: now, created_by: 'mchen', last_used_at: now, revoked_at: now };
   if (path.endsWith('/rotate-secret')) return { client_id: 'claude-code-mchen', client_secret: 'sec_456', api_key: 'mh_456' };
   if (path.endsWith('/rotate-api-key')) return { client_id: 'claude-code-mchen', api_key: 'mh_789' };
   if (path.startsWith('/api/clients/')) return client(path.split('/')[3], 'user', (body as { active?: boolean } | undefined)?.active ?? true);

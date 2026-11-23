@@ -11,14 +11,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_session
-from src.models import AgentOwnerBinding, OAuthClient
+from src.models import AgentOwnerBinding, ApiKey, OAuthClient
 from src.schemas import (
+    ApiKeyCreatedResponse,
+    ApiKeyResponse,
     ApiKeyRotatedResponse,
     ClientCreatedResponse,
     ClientResponse,
+    CreateApiKeyRequest,
     CreateClientRequest,
     SecretRotatedResponse,
     UpdateClientRequest,
+    VerifySecretRequest,
 )
 
 log = logging.getLogger("memoryhub-auth.routes.admin")
@@ -47,6 +51,9 @@ def _client_to_response(client: OAuthClient) -> ClientResponse:
         active=client.active,
         created_at=client.created_at,
         updated_at=client.updated_at,
+        last_used_at=client.last_used_at,
+        last_used_via=client.last_used_via,
+        api_key_last_used_at=client.api_key_last_used_at,
     )
 
 
@@ -261,3 +268,100 @@ async def rotate_api_key(
 
     log.info("Rotated API key for client %s", client_id)
     return ApiKeyRotatedResponse(client_id=client.client_id, api_key=api_key)
+
+
+# --- named API keys (#721) -------------------------------------------------------
+
+
+async def _owned_client(client_id: str, tenant_id: str | None, owner: str | None, session: AsyncSession) -> OAuthClient:
+    stmt = _with_owner_binding(select(OAuthClient).where(OAuthClient.client_id == client_id), owner)
+    if tenant_id is not None:
+        stmt = stmt.where(OAuthClient.tenant_id == tenant_id)
+    client = (await session.execute(stmt)).scalar_one_or_none()
+    if client is None:
+        raise HTTPException(status_code=404, detail=f"Client '{client_id}' not found")
+    return client
+
+
+def _key_to_response(key: ApiKey) -> ApiKeyResponse:
+    return ApiKeyResponse(
+        id=str(key.id), client_id=key.client_id, name=key.name, key_prefix=key.key_prefix,
+        created_at=key.created_at, created_by=key.created_by, last_used_at=key.last_used_at,
+        revoked_at=key.revoked_at,
+    )
+
+
+@router.get("/clients/{client_id}/keys", dependencies=[Depends(require_admin_key)])
+async def list_api_keys(
+    client_id: str,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    owner: str | None = Query(default=None, description="Filter by owner binding"),
+    session: AsyncSession = Depends(get_session),
+) -> list[ApiKeyResponse]:
+    """Named keys of a client, newest first; revoked keys stay listed with their revocation time."""
+    client = await _owned_client(client_id, tenant_id, owner, session)
+    rows = (await session.execute(
+        select(ApiKey).where(ApiKey.client_id == client.client_id).order_by(ApiKey.created_at.desc())
+    )).scalars().all()
+    return [_key_to_response(k) for k in rows]
+
+
+@router.post("/clients/{client_id}/keys", status_code=201, dependencies=[Depends(require_admin_key)])
+async def create_api_key(
+    client_id: str,
+    body: CreateApiKeyRequest,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    owner: str | None = Query(default=None, description="Filter by owner binding"),
+    session: AsyncSession = Depends(get_session),
+) -> ApiKeyCreatedResponse:
+    """A new key for the client. The plaintext is returned once; only its hash is stored."""
+    client = await _owned_client(client_id, tenant_id, owner, session)
+    if not client.active:
+        raise HTTPException(status_code=409, detail="Client is inactive")
+    plaintext = "mh-key-" + secrets.token_hex(20)
+    key = ApiKey(
+        client_id=client.client_id, name=body.name.strip(),
+        key_hash=hashlib.sha256(plaintext.encode()).hexdigest(), key_prefix=plaintext[:11],
+        created_by=body.created_by, created_at=datetime.now(UTC),
+    )
+    session.add(key)
+    await session.commit()
+    await session.refresh(key)
+    log.info("Created API key %s for client %s", key.id, client.client_id)
+    return ApiKeyCreatedResponse(**_key_to_response(key).model_dump(), api_key=plaintext)
+
+
+@router.delete("/clients/{client_id}/keys/{key_id}", dependencies=[Depends(require_admin_key)])
+async def revoke_api_key(
+    client_id: str,
+    key_id: str,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    owner: str | None = Query(default=None, description="Filter by owner binding"),
+    session: AsyncSession = Depends(get_session),
+) -> ApiKeyResponse:
+    """Revoke a key at once. It stays listed so its history is visible."""
+    client = await _owned_client(client_id, tenant_id, owner, session)
+    key = (await session.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.client_id == client.client_id)
+    )).scalar_one_or_none()
+    if key is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    if key.revoked_at is None:
+        key.revoked_at = datetime.now(UTC)
+        await session.commit()
+        await session.refresh(key)
+        log.info("Revoked API key %s of client %s", key.id, client.client_id)
+    return _key_to_response(key)
+
+
+@router.post("/clients/{client_id}/verify-secret", dependencies=[Depends(require_admin_key)])
+async def verify_secret(
+    client_id: str,
+    body: VerifySecretRequest,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Check a client secret without issuing a token: proof that the caller holds the client (#721)."""
+    client = await _owned_client(client_id, tenant_id, None, session)
+    valid = client.active and bcrypt.checkpw(body.client_secret.encode(), client.client_secret_hash.encode())
+    return {"client_id": client.client_id, "valid": bool(valid)}

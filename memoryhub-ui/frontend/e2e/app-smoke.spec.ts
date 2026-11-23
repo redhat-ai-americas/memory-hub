@@ -203,3 +203,43 @@ test('admin: resolves a contradiction and adds a project member', async ({ page 
   await expect(page.getByText('Teams')).toHaveCount(0);
   expectClean(bff, errors);
 });
+
+/* ---------------- My agents & API keys (#721) ---------------- */
+
+test('user: connect guide and connection check with history', async ({ page }) => {
+  const bff = await mockBff(page, 'user');
+  const errors = watch(page);
+  await page.goto('/#/identities?view=connect');
+  await expect(page.getByText('https://auth.test/token')).toBeVisible();
+  await expect(page.getByText('memoryhub login --url https://mcp.test/mcp/ --auth-url https://auth.test', { exact: false })).toBeVisible();
+  await page.getByRole('tab', { name: 'Connection check' }).click();
+  await page.getByRole('button', { name: 'Run check' }).first().click();
+  await expect(page.getByText('Works, with things to fix')).toBeVisible();
+  await expect(page.getByText('Next: Run memoryhub login on the agent host.')).toBeVisible();
+  expect(bff.calls).toContain('POST /api/verify/run');
+  expectClean(bff, errors);
+});
+
+test('user: link an existing agent with its secret, and manage named API keys', async ({ page }) => {
+  const bff = await mockBff(page, 'user');
+  const errors = watch(page);
+  await page.goto('/#/identities');
+  await page.getByRole('button', { name: 'Link an existing agent' }).click();
+  await page.getByLabel('Client ID').fill('old-laptop');
+  await page.getByLabel('Client secret').fill('s3cret');
+  await page.getByRole('button', { name: 'Link agent' }).click();
+  await expect(page.getByText('old-laptop is now registered to you.')).toBeVisible();
+  expect(bff.calls).toContain('POST /api/identities/link');
+
+  await page.getByRole('tab', { name: 'API keys & OAuth clients' }).click();
+  await expect(page.getByText('via client secret')).toBeVisible();
+  await page.getByRole('button', { name: 'API keys', exact: true }).click();
+  await expect(page.getByRole('cell', { name: 'mh-key-1a2b…' })).toBeVisible();
+  await page.getByLabel('Key name').fill('ci');
+  await page.getByRole('button', { name: 'New key' }).click();
+  await expect(page.getByText('mh-key-9f8e7d6c')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Revoke' }).click();
+  await expect(page.getByText('Key laptop revoked.', { exact: false })).toBeVisible();
+  expect(bff.calls).toContain('DELETE /api/clients/claude-code-mchen/keys/k1');
+  expectClean(bff, errors);
+});

@@ -125,6 +125,10 @@ class ClientResponse(BaseModel):
     # True when this human is the bound owner (AgentOwner) of the client, which
     # is what credential rotation requires. The owner's name is not exposed.
     owned: bool = False
+    # When the client last got a token (and how) or its primary API key was accepted (#721).
+    last_used_at: datetime | None = None
+    last_used_via: str | None = None
+    api_key_last_used_at: datetime | None = None
 
 
 class ClientCreatedResponse(ClientResponse):

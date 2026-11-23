@@ -1,5 +1,9 @@
 import type {
   ApiKeyRotatedResponse,
+  ApiKeyRow,
+  ConnectInfo,
+  VerifyList,
+  VerifyResult,
   AuthStatus,
   BrowseParams,
   BrowseResponse,
@@ -210,4 +214,15 @@ export const api = {
   contradictionStats: () => get<ContradictionStats>('/contradictions/stats'),
   setContradictionResolved: (id: string, resolved: boolean) =>
     patch<ContradictionReport>(`/contradictions/${enc(id)}`, { resolved }),
+
+  // My agents & API keys (#721)
+  connectInfo: () => get<ConnectInfo>('/connect'),
+  verifyResults: () => get<VerifyList>('/verify'),
+  runVerify: () => post<VerifyResult>('/verify/run'),
+  uploadVerify: (result: unknown) => post<VerifyResult>('/verify/results', { result }),
+  linkAgent: (client_id: string, client_secret: string) =>
+    post<{ ok: boolean; client_id: string; owner: string }>('/identities/link', { client_id, client_secret }),
+  apiKeys: (clientId: string) => get<{ items: ApiKeyRow[]; can_manage: boolean }>(`/clients/${enc(clientId)}/keys`),
+  createApiKey: (clientId: string, name: string) => post<ApiKeyRow & { api_key: string }>(`/clients/${enc(clientId)}/keys`, { name }),
+  revokeApiKey: (clientId: string, keyId: string) => del<ApiKeyRow>(`/clients/${enc(clientId)}/keys/${enc(keyId)}`),
 };

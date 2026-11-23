@@ -26,6 +26,28 @@ class OAuthClient(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     api_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    # When the client last obtained a token, and how; when its primary API key was last accepted.
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_via: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    api_key_last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ApiKey(Base):
+    """A named API key for a client, beside the client's primary key. Only its hash is stored."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, server_default=sa.text("uuid_generate_v4()"))
+    client_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("oauth_clients.client_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AgentOwnerBinding(Base):

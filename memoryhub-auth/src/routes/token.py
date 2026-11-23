@@ -19,6 +19,7 @@ from src.token_exchange import (
     validate_subject_token,
 )
 from src.tokens import create_access_token, create_refresh_token
+from src.usage import mark_client_used
 
 log = logging.getLogger("memoryhub-auth.routes.token")
 
@@ -140,6 +141,7 @@ async def _handle_client_credentials(
 
     client = await _authenticate_client(client_id, client_secret, session)
     scopes = _resolve_scopes(scope, client)
+    mark_client_used(client, "client_credentials")
 
     access_token = create_access_token(
         subject=client.client_id,
@@ -184,6 +186,7 @@ async def _handle_refresh_token(
     # Public clients: skip secret validation, rely on refresh token binding.
     # Confidential clients: require client_secret.
     client = await _lookup_client(client_id, session)
+    mark_client_used(client, "refresh_token")
     if not client.public:
         if not client_secret:
             raise OAuthError(
@@ -263,6 +266,7 @@ async def _handle_authorization_code(
 
     # Authenticate client — public clients skip secret validation
     client = await _lookup_client(client_id, session)
+    mark_client_used(client, "authorization_code")
     if not client.public:
         if not client_secret:
             raise OAuthError(
@@ -366,6 +370,8 @@ async def _handle_token_exchange(
 
     client = await lookup_exchange_client(client_id, session)
     scopes = _resolve_scopes(scope, client)
+    if mark_client_used(client, "token_exchange"):
+        await session.commit()
 
     subject = token_info["username"]
     access_token = create_access_token(

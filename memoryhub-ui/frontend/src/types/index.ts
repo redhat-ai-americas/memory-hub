@@ -882,6 +882,33 @@ export interface ClientResponse {
   updated_at: string;
   /** This person owns the client (bound owner); only owners rotate credentials. */
   owned?: boolean;
+  /** When the client last got a token, and how; when its primary API key was last accepted (#721). */
+  last_used_at?: string | null;
+  last_used_via?: string | null;
+  api_key_last_used_at?: string | null;
+}
+
+/** A named API key of a client (#721). The key itself is shown only when created. */
+export interface ApiKeyRow {
+  id: string;
+  client_id: string;
+  name: string;
+  key_prefix: string;
+  created_at: string;
+  created_by: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+/** GET /api/connect: what an agent needs to reach this deployment. */
+export interface ConnectInfo {
+  mcp_url: string;
+  auth_url: string;
+  tenant: string;
+  agents: string[];
+  projects: string[];
+  oauth: { token_endpoint: string; metadata_url: string; grant_types: string[]; api_key_header: string };
+  cli: { login: string; init: string };
 }
 
 export interface CredentialRow extends ClientResponse {

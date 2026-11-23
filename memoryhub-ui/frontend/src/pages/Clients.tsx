@@ -58,6 +58,7 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
   const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ClientResponse | null>(null);
+  const [keysFor, setKeysFor] = useState<ClientResponse | null>(null);
   const [confirm, setConfirm] = useState<null | { kind: 'secret' | 'key' | 'revoke' | 'restore'; row: ClientResponse }>(null);
   // QA 2026-11-10 BR-PA2-04: show the confirmed revoke/re-activate at once.
   const [applied, setApplied] = useState<Record<string, boolean>>({});
@@ -167,7 +168,7 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
                     <th>Client</th>
                     <th>Type</th>
                     <th>Scopes allowed</th>
-                    <th>Updated</th>
+                    <th>Last used</th>
                     <th>Status</th>
                     <th>
                       <span className="vh">Actions</span>
@@ -186,7 +187,7 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
                         {c.default_scopes.map((x) => x.replace(/^memory:/, '')).join(' · ') || '—'}
                       </td>
                       <td className="sm" style={{ whiteSpace: 'nowrap' }}>
-                        {fmtRelative(c.updated_at)}
+                        <LastUsed c={c} />
                       </td>
                       <td>
                         <span className={`lbl ${c.active ? 'grn' : 'g'}`}>{c.active ? 'Active' : 'Revoked'}</span>
@@ -219,6 +220,9 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
                               </button>
                             </>
                           )}
+                          <button type="button" className="link-btn" onClick={() => setKeysFor(c)}>
+                            API keys
+                          </button>
                           <button type="button" className="link-btn muted-link" onClick={() => setEditing(c)}>
                             Edit
                           </button>
@@ -251,6 +255,7 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
         />
       )}
       {editing && <EditClientModal row={editing} onClose={() => setEditing(null)} onSaved={reload} />}
+      {keysFor && <KeysModal row={keysFor} onClose={() => setKeysFor(null)} />}
       {confirm && (
         <ConfirmModal
           title={
@@ -538,6 +543,148 @@ const EditClientModal: React.FC<{ row: ClientResponse; onClose: () => void; onSa
       {managedScopes && <p className="hint">Some of these scopes are outside what you may assign. You can change the display name.</p>}
       {role === 'user' && <p className="hint">You can remove scopes from your agent, never add them.</p>}
       {err && <div className="alert err-a">{err}</div>}
+    </Modal>
+  );
+};
+
+const VIA: Record<string, string> = {
+  client_credentials: 'client secret',
+  refresh_token: 'refresh token',
+  authorization_code: 'sign-in',
+  token_exchange: 'token exchange',
+  api_key: 'API key',
+};
+
+/** When a client was last used, and how (#721). */
+const LastUsed: React.FC<{ c: ClientResponse }> = ({ c }) => {
+  const stamps = [c.last_used_at, c.api_key_last_used_at].filter(Boolean) as string[];
+  if (!stamps.length) return <span className="muted">Never</span>;
+  const latest = stamps.sort()[stamps.length - 1];
+  return (
+    <>
+      {fmtRelative(latest)}
+      {c.last_used_via && <div className="hint">via {VIA[c.last_used_via] ?? c.last_used_via}</div>}
+    </>
+  );
+};
+
+/** Named API keys of a client: when each was last used; the owner creates and revokes them (#721). */
+const KeysModal: React.FC<{ row: ClientResponse; onClose: () => void }> = ({ row, onClose }) => {
+  const toast = useToast();
+  const { data, error, loading, reload } = useApi(() => api.apiKeys(row.client_id), [row.client_id]);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState<string | null>(null);
+  const create = async () => {
+    setBusy(true);
+    try {
+      const k = await api.createApiKey(row.client_id, name.trim());
+      setShown(k.api_key);
+      setName('');
+      reload();
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (id: string, label: string) => {
+    try {
+      await api.revokeApiKey(row.client_id, id);
+      toast(`Key ${label} revoked. Agents using it are refused from now on.`);
+      reload();
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+    }
+  };
+  return (
+    <Modal
+      title={`API keys · ${row.client_name}`}
+      onClose={onClose}
+      wide
+      actions={
+        <button type="button" className="btn bg" onClick={onClose}>
+          Close
+        </button>
+      }
+    >
+      <p className="sm" style={{ marginTop: 0 }}>
+        Besides the client’s primary key (rotated with “Rotate API key”), an agent can have named keys — one per machine or CI job — that you revoke one by one. A key is shown once
+        when it is created.
+      </p>
+      <p className="sm muted">
+        Primary key last used: {row.api_key_last_used_at ? fmtRelative(row.api_key_last_used_at) : 'never'}
+      </p>
+      {shown && (
+        <div className="alert ok-a" role="status" style={{ marginBottom: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <b>Copy the new key now.</b> It is not shown again.
+            <div className="mono sm" style={{ wordBreak: 'break-all', marginTop: 4 }}>{shown}</div>
+            <button type="button" className="btn bs sm" style={{ marginTop: 6 }} onClick={async () => toast((await copyText(shown)) ? 'Key copied.' : 'Could not copy.', 'ok')}>
+              Copy key
+            </button>
+          </div>
+        </div>
+      )}
+      {error && !data ? (
+        <ErrorState error={error} onRetry={reload} compact />
+      ) : loading && !data ? (
+        <SkTable rows={2} cols={4} />
+      ) : (
+        data && (
+          <>
+            {data.items.length === 0 ? (
+              <p className="sm muted">No named keys yet.</p>
+            ) : (
+              <table className="tbl mid">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Key</th>
+                    <th>Created</th>
+                    <th>Last used</th>
+                    <th>
+                      <span className="vh">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((k) => (
+                    <tr key={k.id}>
+                      <td>{k.name}</td>
+                      <td className="mono sm">{k.key_prefix}…</td>
+                      <td className="sm">{fmtRelative(k.created_at)}</td>
+                      <td className="sm">{k.last_used_at ? fmtRelative(k.last_used_at) : <span className="muted">Never</span>}</td>
+                      <td>
+                        {k.revoked_at ? (
+                          <span className="lbl g">Revoked</span>
+                        ) : (
+                          data.can_manage && (
+                            <button type="button" className="link-btn" onClick={() => revoke(k.id, k.name)}>
+                              Revoke
+                            </button>
+                          )
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {data.can_manage && row.active && (
+              <div className="filters" style={{ marginTop: 12 }}>
+                <label htmlFor="key-name" className="vh">
+                  Key name
+                </label>
+                <input id="key-name" className="in" placeholder="Name, e.g. laptop or ci" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+                <button type="button" className="btn bp" disabled={busy || !name.trim()} onClick={create}>
+                  New key
+                </button>
+              </div>
+            )}
+          </>
+        )
+      )}
     </Modal>
   );
 };
