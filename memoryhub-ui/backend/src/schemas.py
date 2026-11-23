@@ -12,7 +12,7 @@ class GraphNode(BaseModel):
     scope: str
     weight: float
     branch_type: str | None
-    owner_id: str
+    owner_id: str | None
     version: int
     created_at: datetime
     updated_at: datetime
@@ -60,7 +60,7 @@ class MemoryDetail(BaseModel):
     scope: str
     weight: float
     branch_type: str | None
-    owner_id: str
+    owner_id: str | None
     version: int
     is_current: bool
     parent_id: str | None
@@ -162,6 +162,7 @@ class MeResponse(BaseModel):
     access: dict | None = None
     write: dict | None = None
     labs: bool = False
+    capabilities: dict = Field(default_factory=dict)
 
 
 class AuthStatusResponse(BaseModel):
@@ -243,7 +244,7 @@ class ContradictionResponse(BaseModel):
     memory_id: str
     observed_behavior: str
     confidence: float
-    reporter: str
+    reporter: str | None
     created_at: datetime
     resolved: bool
     resolved_at: datetime | None

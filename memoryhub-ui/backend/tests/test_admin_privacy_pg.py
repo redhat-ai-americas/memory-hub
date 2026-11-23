@@ -25,11 +25,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from memoryhub_core.models.audit import AuditLog
+from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.schemas import MemoryNodeCreate, MemoryNodeUpdate
 from memoryhub_core.services.embeddings import MockEmbeddingService
+from memoryhub_core.services.entity import find_or_create_entity
 from memoryhub_core.services.memory import create_memory, update_memory
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -158,6 +160,11 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
     shared = await seed("Atlas gripper torque limit is 11.5 Nm", weight=0.9)
     org = await seed("All deploys need a change ticket", scope="organizational", owner="admin", actor="admin")
     async with env["sessions"]() as db:
+        private_entity, _ = await find_or_create_entity(
+            "Dana private medical contact", "person", db, MockEmbeddingService(), tenant_id=TENANT, owner_id="dana",
+        )
+        db.add(MemoryRelationship(source_id=personal.id, target_id=private_entity.id,
+                                  relationship_type="mentions", created_by="dana", tenant_id=TENANT))
         for src, dst in ((personal.id, shared.id), (shared.id, org.id)):
             db.add(MemoryRelationship(source_id=src, target_id=dst, relationship_type="related_to",
                                       created_by="dana", tenant_id=TENANT))
@@ -168,11 +175,12 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
         await db.commit()
 
     act_as("admin", "admin")
-    leaks = (str(personal.id), "dana", "Dana private")
+    leaks = (str(personal.id), str(private_entity.id), "dana", "Dana private")
     checks = {
         "stats": await http.get("/api/stats"),
         "nav-counts": await http.get("/api/nav-counts"),
         "graph": await http.get("/api/graph/all"),
+        "legacy graph": await http.get("/api/graph"),
         "graph search": await http.get("/api/graph/search", params={"q": "salary"}),
         "browse": await http.get("/api/memories/browse", params={"tab": "all", "per_page": 100}),
         "browse text": await http.get("/api/memories/browse", params={"q": "salary", "mode": "text"}),
@@ -192,7 +200,8 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
             assert leak not in response.text, f"{name} reveals {leak!r}"
 
     for path in (f"/api/memory/{personal.id}", f"/api/memory/{personal.id}/history",
-                 f"/api/memory/{personal.id}/context", f"/api/graph/neighbourhood?focus={personal.id}"):
+                 f"/api/memory/{personal.id}/context", f"/api/graph/neighbourhood?focus={personal.id}",
+                 f"/api/memory/{private_entity.id}", f"/api/memory/{private_entity.id}/context"):
         response = await http.get(path)
         assert response.status_code == 404, path
         assert "dana" not in response.text
@@ -250,3 +259,56 @@ async def test_admin_sees_no_individual_activity(env):
     mine = (await http.get("/api/memories/browse", params={"tab": "all"})).json()
     assert {"value": "alice", "count": 1} in mine["facets"]["writers"]
     assert (await http.get("/api/memories/browse", params={"actor": "alice"})).status_code == 200
+
+
+async def test_admin_memory_attribution_is_redacted_across_projections(env):
+    http, seed = env["http"], env["seed"]
+    shared = await seed("Gripper torque specification", weight=0.9)
+    other = await seed("Camera mount specification", owner="carol", actor="carol", weight=0.9)
+    await seed("Supporting evidence", parent=shared.id, branch="evidence")
+    async with env["sessions"]() as db:
+        db.add(MemoryRelationship(source_id=shared.id, target_id=other.id, relationship_type="related_to",
+                                  created_by="carol", tenant_id=TENANT))
+        db.add(ContradictionReport(memory_id=shared.id, observed_behavior="Conflicting measurement",
+                                   confidence=0.9, reporter="carol", tenant_id=TENANT))
+        policy = CuratorRule(name="Shared policy", trigger="on_write", tier="regex", config={}, action="flag",
+                             layer="organizational", tenant_id=TENANT, priority=5, edited_by="carol")
+        db.add(policy)
+        await db.commit()
+        policy_id = policy.id
+    env["act_as"]("admin", "admin")
+    paths = ["/api/graph", "/api/graph/all", "/api/stats", "/api/memories/browse", "/api/memories/export",
+             "/api/contradictions", "/api/rules", f"/api/rules/{policy_id}/history",
+             f"/api/memory/{shared.id}", f"/api/memory/{shared.id}/history", f"/api/memory/{shared.id}/context",
+             f"/api/graph/neighbourhood?focus={shared.id}"]
+    responses = [await http.get(path) for path in paths]
+    responses.append(await http.post("/api/search", json={"query": "specification"}))
+    for response in responses:
+        assert response.status_code == 200, (response.request.url, response.text)
+        for identity in ("alice", "carol"):
+            assert identity not in response.text, (response.request.url, identity)
+    env["act_as"]("alice")
+    response = await http.get(f"/api/memory/{shared.id}/context")
+    assert response.status_code == 200 and response.json()["memory"]["owner_id"] == "alice"
+
+
+async def test_parent_versioning_skips_retired_and_deleted_branches(env):
+    http = env["http"]
+    parent = await env["seed"]("Original specification")
+    branch = await http.post(f"/api/memory/{parent.id}/branches",
+                             json={"branch_type": "evidence", "content": "Original evidence"})
+    assert branch.status_code == 201, branch.text
+    revised = await http.post(f"/api/memory/{branch.json()['id']}/versions", json={"content": "Revised evidence"})
+    assert revised.status_code == 201, revised.text
+    removed = await env["seed"]("Removed evidence", parent=parent.id, branch="evidence")
+    deleted = await http.delete(f"/api/memory/{removed.id}")
+    assert deleted.status_code == 204, deleted.text
+    updated = await http.post(f"/api/memory/{parent.id}/versions", json={"content": "Revised specification"})
+    assert updated.status_code == 201, updated.text
+    async with env["sessions"]() as db:
+        children = (await db.execute(select(MemoryNode).where(
+            MemoryNode.parent_id == uuid.UUID(updated.json()["id"]),
+        ))).scalars().all()
+    assert len(children) == 1
+    assert children[0].content == "Revised evidence"
+    assert children[0].scope_id == "atlas-p" and children[0].is_current

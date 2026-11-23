@@ -99,10 +99,29 @@ MEMORYHUB_UI_TENANT_ID=default
 refuses to run in local mode inside a cluster (`KUBERNETES_SERVICE_HOST`
 set) or without `MEMORYHUB_UI_LOCAL_USER`.
 
+The local MCP HTTP listener also verifies JWTs. Compose supplies its JWKS
+URL over the internal `auth:8081` connection, the same public issuer as the
+local Auth service, and the `memoryhub` audience. API-key registration
+continues to work on that listener.
+
+## Dashboard capabilities
+
+The frontend loads `/api/me` before rendering protected views. Its
+`capabilities.clients` contains the allowed identity types, scopes and
+default scopes for client creation. Admins create service clients with
+their permitted shared read scopes; Users create their own user clients.
+The form uses the session tenant and does not offer arbitrary tenant overrides.
+
+Rule history uses the human session and the same visibility checks as rule
+detail. Every returned version is authorized separately. A technical
+service key is not required by the browser.
+
 ## Admin privacy
 
 Admin queries are filtered at a single point in `authorization.py`
-(`clause()` / `can_read()`): `scope != 'user'`. This covers every Admin path:
+(`clause()` / `can_read()`): only project, campaign, role, organizational
+and enterprise scopes are visible. User and entity scopes are excluded,
+including entity metadata derived from personal memories. This covers every Admin path:
 stats, nav counts, graph and graph search, browse, export, search,
 contradictions, detail, history, context and neighbourhood. The dashboard
 has no audit read view yet. Audit records are only written, and an Admin can
@@ -120,8 +139,11 @@ values can identify a person and show when and how much they work. That means:
 - no per-person filters: `actor`, `owner_id`, search `identity`, and
   metadata search by owner all answer `403` or match memory IDs only.
 
-Project and tenant totals stay. Each row still shows its author, because
-moderation needs to know who wrote an item. `tests/test_admin_privacy_pg.py`
+Project and tenant totals stay. Memory projections, context, search,
+exports, contradiction reports and rule history redact writer identities
+for Admins. The frontend also hides owner filters and per-person memory
+navigation. Identity names remain in the access-management roster without
+memory counts or last-active times. `tests/test_admin_privacy_pg.py`
 checks all of this end to end on Postgres. CI runs it with
 `MEMORYHUB_REQUIRE_PG=1`, so a missing database fails the job instead of
 skipping the test.

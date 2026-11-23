@@ -645,7 +645,11 @@ async def update_memory(
     # Deep-copy one level of child branches from old node to new node.
     # Chunk branches are skipped when content changed (they reflect old
     # content and will be replaced by fresh chunks below).
-    children_stmt = select(MemoryNode).where(MemoryNode.parent_id == old_node.id)
+    children_stmt = select(MemoryNode).where(
+        MemoryNode.parent_id == old_node.id,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
+    )
     children_result = await session.execute(children_stmt)
     old_children = children_result.scalars().all()
 
@@ -665,6 +669,7 @@ async def update_memory(
             content=child.content,
             stub=child.stub,
             scope=child.scope,
+            scope_id=child.scope_id,
             weight=child.weight,
             owner_id=child.owner_id,
             tenant_id=child.tenant_id,
@@ -678,6 +683,7 @@ async def update_memory(
             version=child.version,
             previous_version_id=None,
             storage_type=child.storage_type,
+            status=child.status,
             content_ref=child.content_ref,
             created_at=child.created_at,
             updated_at=now,

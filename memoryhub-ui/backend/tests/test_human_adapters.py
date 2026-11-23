@@ -627,7 +627,8 @@ def test_browse_admin_excludes_personal_and_redacts_unmoderated_shared_rows(clie
     assert body["facets"]["flags"] == {"contradicted": 0, "has_branches": 0,
                                       "near_duplicate": None}
     sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
-    assert "tenant-a" in sql and "bob" in sql and "memory_nodes.scope != 'user'" in sql
+    assert "tenant-a" in sql and "bob" in sql and "memory_nodes.scope IN" in sql
+    assert "'entity'" not in sql and "'user'" not in sql
 
 
 def test_browse_user_cannot_request_quarantine_or_see_foreign_row(client):

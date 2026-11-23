@@ -222,7 +222,7 @@ def test_graph_admin_excludes_personal_nodes_their_edges_and_other_tenants(clien
     assert str(personal.id) not in response.text and "bob" not in response.text
     assert "tenant secret" not in response.text
     sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
-    assert "memory_nodes.scope != 'user'" in sql
+    assert "memory_nodes.scope IN" in sql and "'entity'" not in sql and "'user'" not in sql
 
 
 def test_graph_connected_sort_still_uses_human_visible_subquery(client):

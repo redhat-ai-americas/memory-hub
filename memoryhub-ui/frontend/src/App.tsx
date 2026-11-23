@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Button,
+  Label,
   Masthead,
   MastheadMain,
   MastheadBrand,
@@ -22,6 +23,7 @@ import CurationRules from './components/CurationRules';
 import MemoryGraph from './components/MemoryGraph';
 import StatusOverview from './components/StatusOverview';
 import UsersAgents from './components/UsersAgents';
+import { SessionProvider, useSession } from './context/SessionContext';
 
 type ActivePanel = 'graph' | 'status' | 'users' | 'rules' | 'contradictions' | 'clients';
 
@@ -42,7 +44,8 @@ const NAV_ITEMS: NavEntry[] = [
   { id: 'clients', label: 'Client Management', panel: 'clients' },
 ];
 
-const App: React.FC = () => {
+const Dashboard: React.FC = () => {
+  const session = useSession();
   const [activePanel, setActivePanel] = useState<ActivePanel>('graph');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [graphOwnerFilter, setGraphOwnerFilter] = useState<string | undefined>();
@@ -87,7 +90,7 @@ const App: React.FC = () => {
           </Title>
         </MastheadBrand>
       </MastheadMain>
-      <MastheadContent />
+      <MastheadContent><Label>{session.role === 'admin' ? 'Admin' : 'User'}</Label></MastheadContent>
     </Masthead>
   );
 
@@ -129,5 +132,7 @@ const App: React.FC = () => {
     </Page>
   );
 };
+
+const App: React.FC = () => <SessionProvider><Dashboard /></SessionProvider>;
 
 export default App;

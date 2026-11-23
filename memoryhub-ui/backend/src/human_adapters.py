@@ -389,6 +389,8 @@ async def _mutation_neighbors(db: AsyncSession, access: AccessDep, node: MemoryN
     """Preflight the branch/relationship set that Core versioning mutates."""
     children = (await db.execute(select(MemoryNode).where(
         MemoryNode.parent_id == node.id,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
     ).with_for_update())).scalars().all()
     rels = (await db.execute(select(MemoryRelationship).where(
         MemoryRelationship.valid_until.is_(None),
@@ -905,7 +907,9 @@ async def browse_memories(
             "id": str(memory.id), "stub": "Content hidden" if hidden else memory.stub,
             "content_preview": "" if hidden else memory.content[:240],
             "scope": memory.scope, "scope_id": memory.scope_id,
-            "owner_id": memory.owner_id, "actor_id": memory.actor_id, "driver_id": memory.driver_id,
+            "owner_id": access.visible_identity(memory.owner_id),
+            "actor_id": access.visible_identity(memory.actor_id),
+            "driver_id": access.visible_identity(memory.driver_id),
             "domains": [] if hidden else (memory.domains or []),
             "weight": memory.weight, "version": memory.version,
             "is_current": memory.is_current, "status": memory.status,

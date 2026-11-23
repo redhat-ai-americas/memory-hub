@@ -27,6 +27,7 @@ from src.database import get_db
 logger = logging.getLogger(__name__)
 OwnerBase = declarative_base()
 ADMIN_MODERATION_SCOPES = frozenset({"project", "campaign", "role", "organizational"})
+ADMIN_VISIBLE_SCOPES = ADMIN_MODERATION_SCOPES | {"enterprise"}
 
 
 class AgentOwner(OwnerBase):
@@ -114,7 +115,7 @@ class Access:
         path that is built on this predicate or on ``can_read`` (#667).
         """
         if self.principal.role == "admin":
-            return and_(node.tenant_id == self.principal.tenant_id, node.scope != "user")
+            return and_(node.tenant_id == self.principal.tenant_id, node.scope.in_(ADMIN_VISIBLE_SCOPES))
         return and_(
             node.tenant_id == self.principal.tenant_id,
             node.status == "active",
@@ -149,7 +150,7 @@ class Access:
             return False
         if self.principal.role == "admin":
             # Shared scopes only; metadata of personal memories is not an admin's (#667).
-            return node.scope != "user"
+            return node.scope in ADMIN_VISIBLE_SCOPES
         if node.status != "active":
             return False
         return (
@@ -238,6 +239,10 @@ class Access:
     def forbid_person_filter(self, *values) -> None:
         if not self.sees_individual_activity and any(values):
             raise HTTPException(status_code=403, detail="Per-person filters are not available to admins")
+
+    def visible_identity(self, identity: str | None) -> str | None:
+        """Keep writer attribution out of administrator memory projections."""
+        return identity if self.sees_individual_activity else None
 
     def require_read(self, node: MemoryNode) -> None:
         if not self.can_read(node):

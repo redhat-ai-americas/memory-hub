@@ -18,6 +18,7 @@ import {
 import { SearchIcon } from '@patternfly/react-icons';
 import type { GraphResponse, SearchMatch } from '@/types';
 import { fetchGraph, searchGraph } from '@/api/client';
+import { useSession } from '@/context/SessionContext';
 import MemoryDetailDrawer from './MemoryDetailDrawer';
 import type { EdgeInfo } from './MemoryDetailDrawer';
 import { SCOPE_COLORS, SCOPE_OPTIONS } from '@/utils/scopes';
@@ -174,6 +175,7 @@ interface MemoryGraphProps {
 }
 
 const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
+  const showIndividualActivity = useSession().capabilities.individual_activity;
   const [graphData, setGraphData] = useState<GraphResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -187,10 +189,10 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   // Apply initial owner filter from navigation (e.g. Users & Agents panel)
   useEffect(() => {
-    if (initialOwnerFilter !== undefined) {
+    if (showIndividualActivity && initialOwnerFilter !== undefined) {
       setOwnerFilter(initialOwnerFilter);
     }
-  }, [initialOwnerFilter]);
+  }, [initialOwnerFilter, showIndividualActivity]);
 
   const [graphHeight, setGraphHeight] = useState(600);
   const [needsLayout, setNeedsLayout] = useState(true);
@@ -300,14 +302,14 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
     const filtered: GraphResponse = {
       nodes: graphData.nodes.filter((n) => {
         if (!enabledScopes.has(n.scope)) return false;
-        if (ownerFilter && !n.owner_id.includes(ownerFilter)) return false;
+        if (showIndividualActivity && ownerFilter && !(n.owner_id ?? '').includes(ownerFilter)) return false;
         return true;
       }),
       edges: graphData.edges,
     };
     setNeedsLayout(true);
     return buildElements(filtered);
-  }, [graphData, enabledScopes, ownerFilter]);
+  }, [graphData, enabledScopes, ownerFilter, showIndividualActivity]);
 
   const toggleScope = (scope: string) => {
     setEnabledScopes((prev) => {
@@ -385,7 +387,7 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
             ))}
           </ToolbarGroup>
 
-          <ToolbarItem>
+          {showIndividualActivity && <ToolbarItem>
             <TextInput
               value={ownerFilter}
               onChange={(_e, val) => setOwnerFilter(val)}
@@ -393,7 +395,7 @@ const MemoryGraph: React.FC<MemoryGraphProps> = ({ initialOwnerFilter }) => {
               style={{ width: '180px' }}
               aria-label="Filter by owner"
             />
-          </ToolbarItem>
+          </ToolbarItem>}
 
           <ToolbarItem>
             <Button variant="secondary" onClick={loadGraph} isDisabled={loading}>

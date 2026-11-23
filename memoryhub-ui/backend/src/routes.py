@@ -7,7 +7,7 @@ from typing import Annotated
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.conversation import ConversationThread
 from memoryhub_core.models.curation import CuratorRule
@@ -77,7 +77,7 @@ def _node_to_graph_node(node: MemoryNode, access: AccessDep) -> GraphNode:
         scope=node.scope,
         weight=node.weight,
         branch_type=node.branch_type,
-        owner_id=node.owner_id,
+        owner_id=access.visible_identity(node.owner_id),
         version=node.version,
         created_at=node.created_at,
         updated_at=node.updated_at,
@@ -188,6 +188,10 @@ async def get_me(access: AccessDep, settings: SettingsDep, response: Response):
         source="local" if settings.ui_auth_mode == "local" else "oauth-proxy",
         role=principal.role,
         tenant_id=principal.tenant_id,
+        capabilities={
+            "individual_activity": access.sees_individual_activity,
+            "clients": _client_capabilities(access),
+        },
         write={"scopes": write_scopes, "project_ids": project_ids,
                "campaign_ids": [], "owner_id": principal.username},
         access={
@@ -568,7 +572,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: A
         scope=node.scope,
         weight=node.weight,
         branch_type=node.branch_type,
-        owner_id=node.owner_id,
+        owner_id=access.visible_identity(node.owner_id),
         version=node.version,
         is_current=node.is_current,
         parent_id=visible_parent_id,
@@ -731,6 +735,24 @@ READ_CLIENT_SCOPES = frozenset({
     "memory:read:enterprise",
 })
 ASSIGNABLE_CLIENT_SCOPES = READ_CLIENT_SCOPES | {"memory:write:user"}
+
+
+def _client_capabilities(access: AccessDep) -> dict:
+    """Publish the same client creation policy enforced by the BFF."""
+    if access.principal.role == "admin":
+        scopes = sorted(f"memory:read:{scope}" for scope in access.moderation_scopes)
+        identity_types = ["service"]
+        default = "memory:read:organizational"
+    else:
+        scopes = sorted(ASSIGNABLE_CLIENT_SCOPES)
+        identity_types = ["user"]
+        default = "memory:read"
+    return {
+        "can_create": bool(scopes),
+        "identity_types": identity_types,
+        "scopes": scopes,
+        "default_scopes": [default] if default in scopes else scopes[:1],
+    }
 
 
 def _client_scopes_allowed(access: AccessDep, scopes: list[str], identity_type: str) -> None:
@@ -986,7 +1008,7 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
 # ---------------------------------------------------------------------------
 
 
-def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
+def _rule_to_response(rule: CuratorRule, access: AccessDep) -> CurationRuleResponse:
     return CurationRuleResponse(
         id=str(rule.id),
         name=rule.name,
@@ -997,14 +1019,14 @@ def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
         action=rule.action,
         scope_filter=rule.scope_filter,
         layer=rule.layer,
-        owner_id=rule.owner_id,
+        owner_id=access.visible_identity(rule.owner_id),
         override=rule.override,
         enabled=rule.enabled,
         priority=rule.priority,
         version=rule.version,
         is_current=rule.is_current,
         previous_version_id=str(rule.previous_version_id) if rule.previous_version_id else None,
-        edited_by=rule.edited_by,
+        edited_by=access.visible_identity(rule.edited_by),
         created_at=rule.created_at,
         updated_at=rule.updated_at,
     )
@@ -1062,7 +1084,7 @@ async def list_rules(
         stmt = stmt.where(CuratorRule.layer == layer)
     result = await db.execute(stmt)
     rules = result.scalars().all()
-    return [_rule_to_response(r) for r in rules if _can_read_rule(access, r)]
+    return [_rule_to_response(r, access) for r in rules if _can_read_rule(access, r)]
 
 
 @router.post("/api/rules", response_model=CurationRuleResponse, status_code=201)
@@ -1104,7 +1126,7 @@ async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep,
     db.add(rule)
     await db.commit()
     await db.refresh(rule)
-    return _rule_to_response(rule)
+    return _rule_to_response(rule, access)
 
 
 @router.get("/api/rules/{rule_id}", response_model=CurationRuleResponse)
@@ -1129,7 +1151,7 @@ async def get_rule(rule_id: str, db: DbDep, settings: SettingsDep, access: Acces
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
     if not _can_read_rule(access, rule):
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
-    return _rule_to_response(rule)
+    return _rule_to_response(rule, access)
 
 
 @router.patch("/api/rules/{rule_id}", response_model=CurationRuleResponse)
@@ -1179,7 +1201,7 @@ async def update_rule(
         update_data["override"] = False
 
     if not update_data:
-        return _rule_to_response(old_rule)
+        return _rule_to_response(old_rule, access)
 
     new_rule = CuratorRule(
         tenant_id=tenant_id,
@@ -1205,11 +1227,11 @@ async def update_rule(
     db.add(new_rule)
     await db.commit()
     await db.refresh(new_rule)
-    return _rule_to_response(new_rule)
+    return _rule_to_response(new_rule, access)
 
 
 @router.get("/api/rules/{rule_id}/history", response_model=list[RuleVersionEntry])
-async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, request: Request):
+async def get_rule_history(rule_id: str, db: DbDep, access: AccessDep):
     """Return the full version chain for a rule, newest first.
 
     Accepts any version's UUID — walks backward via previous_version_id
@@ -1217,15 +1239,7 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, reque
 
     Phase 6 (#46): tenant-scoped; cross-tenant lookups return 404.
     """
-    # The audited UI has no human rule-history operation. This legacy route
-    # remains available only to a local technical caller with the service key.
-    import hmac
-    peer = request.client.host if request.client else ""
-    if peer not in ("127.0.0.1", "::1") or not settings.admin_key or not hmac.compare_digest(
-        request.headers.get("x-admin-key", ""), settings.admin_key
-    ):
-        raise HTTPException(status_code=403, detail="Technical access only")
-    tenant_id = settings.ui_tenant_id
+    tenant_id = access.principal.tenant_id
     try:
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
@@ -1238,7 +1252,8 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, reque
             CuratorRule.tenant_id == tenant_id,
         )
     )
-    if seed_result.scalar_one_or_none() is None:
+    seed = seed_result.scalar_one_or_none()
+    if seed is None or not _can_read_rule(access, seed):
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
 
     # Single recursive CTE: walk backward to the oldest ancestor, then forward
@@ -1254,14 +1269,16 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, reque
               ),
               root AS (SELECT id FROM ancestors WHERE previous_version_id IS NULL),
               chain AS (
-                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at
+                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at,
+                       r.tenant_id, r.layer, r.owner_id
                 FROM curator_rules r JOIN root ON r.id = root.id WHERE r.tenant_id = :tenant_id
                 UNION
-                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at
+                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at,
+                       r.tenant_id, r.layer, r.owner_id
                 FROM curator_rules r
                 JOIN chain c ON r.previous_version_id = c.id WHERE r.tenant_id = :tenant_id
               )
-            SELECT id, version, is_current, name, edited_by, created_at
+            SELECT id, version, is_current, name, edited_by, created_at, tenant_id, layer, owner_id
             FROM chain
             ORDER BY version DESC
         """),
@@ -1273,10 +1290,10 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, reque
             version=row.version,
             is_current=row.is_current,
             name=row.name,
-            edited_by=row.edited_by,
+            edited_by=access.visible_identity(row.edited_by),
             created_at=row.created_at,
         )
-        for row in chain_result.fetchall()
+        for row in chain_result.fetchall() if _can_read_rule(access, row)
     ]
 
 
@@ -1376,13 +1393,13 @@ def _live_contradiction_count(tenant_id: str, access: AccessDep):
     return stmt
 
 
-def _contradiction_to_response(report: ContradictionReport) -> ContradictionResponse:
+def _contradiction_to_response(report: ContradictionReport, access: AccessDep) -> ContradictionResponse:
     return ContradictionResponse(
         id=str(report.id),
         memory_id=str(report.memory_id),
         observed_behavior=report.observed_behavior,
         confidence=report.confidence,
-        reporter=report.reporter,
+        reporter=access.visible_identity(report.reporter),
         created_at=report.created_at,
         resolved=report.resolved,
         resolved_at=report.resolved_at,
@@ -1413,7 +1430,7 @@ async def list_contradictions(
         stmt = stmt.where(ContradictionReport.confidence <= max_confidence)
     result = await db.execute(stmt)
     reports = result.scalars().all()
-    return [_contradiction_to_response(r) for r in reports]
+    return [_contradiction_to_response(r, access) for r in reports]
 
 
 @router.get("/api/contradictions/stats", response_model=ContradictionStatsResponse)
@@ -1515,4 +1532,4 @@ async def update_contradiction(
     )
     await db.commit()
     await db.refresh(report)
-    return _contradiction_to_response(report)
+    return _contradiction_to_response(report, access)

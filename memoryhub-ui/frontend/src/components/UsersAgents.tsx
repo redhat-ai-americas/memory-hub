@@ -11,6 +11,7 @@ import {
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import type { UserEntry } from '@/types';
 import { fetchUsers } from '@/api/client';
+import { useSession } from '@/context/SessionContext';
 import { formatRelativeTime } from '@/utils/time';
 
 interface UsersAgentsProps {
@@ -18,6 +19,8 @@ interface UsersAgentsProps {
 }
 
 const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
+  const showIndividualActivity = useSession().capabilities.individual_activity;
+  const navigateToGraph = showIndividualActivity ? onNavigateToGraph : undefined;
   const [users, setUsers] = useState<UserEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +56,8 @@ const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
       <div style={{ marginBottom: '1rem' }}>
         <Title headingLevel="h2" size="lg">Users &amp; Agents</Title>
         <Content component="small" style={{ color: 'var(--pf-v6-global--Color--200)', marginTop: '0.25rem' }}>
-          Registered OAuth clients and memory owners. Click &quot;View Memories&quot; to see an owner&apos;s memories in the graph.
+          Registered OAuth clients and memory owners.
+          {showIndividualActivity && <> Click &quot;View Memories&quot; to see an owner&apos;s memories in the graph.</>}
         </Content>
       </div>
 
@@ -82,9 +86,9 @@ const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
             users.map((u) => (
               <Tr
                 key={u.owner_id}
-                isClickable={!!onNavigateToGraph}
-                onRowClick={() => onNavigateToGraph?.(u.owner_id)}
-                style={{ cursor: onNavigateToGraph ? 'pointer' : 'default' }}
+                isClickable={!!navigateToGraph}
+                onRowClick={() => navigateToGraph?.(u.owner_id)}
+                style={{ cursor: navigateToGraph ? 'pointer' : 'default' }}
               >
                 <Td dataLabel="Name">{u.name}</Td>
                 <Td dataLabel="Type">
@@ -101,13 +105,13 @@ const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
                   {u.memory_count === null ? '—' : u.last_active ? formatRelativeTime(u.last_active) : 'Never'}
                 </Td>
                 <Td dataLabel="Action">
-                  {onNavigateToGraph && (
+                  {navigateToGraph && (
                     <Button
                       variant="link"
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onNavigateToGraph(u.owner_id);
+                        navigateToGraph(u.owner_id);
                       }}
                     >
                       View Memories

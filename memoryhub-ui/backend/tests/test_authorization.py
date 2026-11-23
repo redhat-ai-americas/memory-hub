@@ -427,11 +427,12 @@ async def test_personal_rule_owner_and_layer_cannot_be_forged():
 
 
 @pytest.mark.asyncio
-async def test_rule_history_is_technical_only_even_for_admin():
+async def test_rule_history_hides_another_users_personal_rule_from_admin():
     app.dependency_overrides[get_access] = lambda: access(role="admin")
     db = AsyncMock()
+    db.execute.return_value = result(scalar=SimpleNamespace(tenant_id="tenant-a", layer="user", owner_id="bob"))
     app.dependency_overrides[get_db] = lambda: db
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/api/rules/{uuid.uuid4()}/history")
-    assert response.status_code == 403
-    db.execute.assert_not_awaited()
+    assert response.status_code == 404
+    db.execute.assert_awaited_once()
