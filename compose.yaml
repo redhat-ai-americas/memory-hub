@@ -39,6 +39,9 @@ services:
       MEMORYHUB_USERS_FILE: /config/dev-users.json
       AUTH_API_KEY_VALIDATE_URL: http://auth:8081/internal/validate-api-key
       AUTH_INTERNAL_SERVICE_KEY: ${AUTH_INTERNAL_SERVICE_KEY:-memoryhub-local-internal}
+      AUTH_JWKS_URI: http://auth:8081/.well-known/jwks.json
+      AUTH_ISSUER: http://localhost:18081
+      AUTH_AUDIENCE: memoryhub
       MCP_TRANSPORT: http
       MCP_HTTP_HOST: 0.0.0.0
       MCP_HTTP_PORT: 8080
