@@ -755,6 +755,7 @@ async def browse_memories(
         raise HTTPException(status_code=422, detail="Unsupported flag filter")
     if access.principal.role == "user" and tab in ("quarantined", "deleted"):
         raise HTTPException(status_code=403, detail="Memory state forbidden")
+    access.forbid_person_filter(actor)
     tenant = access.principal.tenant_id
     base = [MemoryNode.tenant_id == tenant]
     if access.principal.role == "user":
@@ -820,9 +821,10 @@ async def browse_memories(
     search_mode = "none"
     if q:
         pattern = f"%{q.strip()}%"
+        # Searching by owner would count one person's memories; admins match IDs only.
         metadata_match = or_(
             cast(MemoryNode.id, String).ilike(pattern), MemoryNode.owner_id.ilike(pattern),
-        )
+        ) if access.sees_individual_activity else cast(MemoryNode.id, String).ilike(pattern)
         if mode == "metadata":
             filters.append(metadata_match)
             search_mode = "metadata"
@@ -935,10 +937,11 @@ async def browse_memories(
         else:
             stmt = select(func.count()).select_from(MemoryNode).where(*base, *condition)
             tabs[name] = (await db.execute(stmt)).scalar_one()
-    facets = {}
+    facets = {"writers": []}
     for name, column, extra in (
         ("scopes", MemoryNode.scope, ()),
-        ("writers", MemoryNode.owner_id, ()),
+        # Memories per person is individual activity: not an admin facet (#667).
+        *((("writers", MemoryNode.owner_id, ()),) if access.sees_individual_activity else ()),
         ("projects", MemoryNode.scope_id, (MemoryNode.scope == "project",)),
     ):
         rows = (await db.execute(select(column, func.count()).select_from(MemoryNode).where(

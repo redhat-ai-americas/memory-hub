@@ -25,7 +25,7 @@ const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
   useEffect(() => {
     fetchUsers()
       .then((data) => {
-        data.sort((a, b) => b.memory_count - a.memory_count);
+        data.sort((a, b) => (b.memory_count ?? 0) - (a.memory_count ?? 0) || a.name.localeCompare(b.name));
         setUsers(data);
       })
       .catch((err: unknown) => {
@@ -96,9 +96,9 @@ const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
                   </Label>
                 </Td>
                 <Td dataLabel="Owner ID"><code>{u.owner_id}</code></Td>
-                <Td dataLabel="Memories">{u.memory_count.toLocaleString()}</Td>
+                <Td dataLabel="Memories">{u.memory_count === null ? '—' : u.memory_count.toLocaleString()}</Td>
                 <Td dataLabel="Last Active">
-                  {u.last_active ? formatRelativeTime(u.last_active) : 'Never'}
+                  {u.memory_count === null ? '—' : u.last_active ? formatRelativeTime(u.last_active) : 'Never'}
                 </Td>
                 <Td dataLabel="Action">
                   {onNavigateToGraph && (

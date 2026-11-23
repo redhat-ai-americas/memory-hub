@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
+from src.csrf import CrossSiteRequestGuard
 from src.export_adapter import router as export_router
 from src.graph_adapters import router as graph_router
 from src.human_adapters import router as human_router
@@ -42,6 +43,8 @@ def create_app() -> FastAPI:
     if problem:
         logger.error("Dashboard cannot authenticate anyone: %s", problem)
     cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    # Only explicitly configured origins may change state besides the dashboard's own.
+    trusted_origins = [origin for origin in cors_origins if origin != "*"]
     if not cors_origins:
         cors_origins = ["*"]
 
@@ -58,6 +61,10 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
+
+    # Refuse state-changing requests that another site's page triggers with the
+    # dashboard's session cookie (src/csrf.py).
+    app.add_middleware(CrossSiteRequestGuard, allowed_origins=trusted_origins)
 
     app.include_router(router)
     app.include_router(human_router)

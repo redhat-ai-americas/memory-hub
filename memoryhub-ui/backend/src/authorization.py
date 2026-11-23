@@ -229,6 +229,16 @@ class Access:
                 and node.owner_id in self.human_campaigns)
         )
 
+    @property
+    def sees_individual_activity(self) -> bool:
+        """Admins get no per-person activity: no counts, last-active times or
+        per-person filters, which would show who works when and how much (#667)."""
+        return self.principal.role != "admin"
+
+    def forbid_person_filter(self, *values) -> None:
+        if not self.sees_individual_activity and any(values):
+            raise HTTPException(status_code=403, detail="Per-person filters are not available to admins")
+
     def require_read(self, node: MemoryNode) -> None:
         if not self.can_read(node):
             raise HTTPException(status_code=404, detail="Memory not found")

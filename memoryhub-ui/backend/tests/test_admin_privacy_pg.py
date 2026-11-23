@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from memoryhub_core.models.audit import AuditLog
+from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.schemas import MemoryNodeCreate, MemoryNodeUpdate
@@ -64,6 +65,9 @@ def database():
             return False
 
     if not asyncio.run(reachable()):
+        # CI sets MEMORYHUB_REQUIRE_PG=1: there the privacy boundary must be proven, never skipped.
+        if os.environ.get("MEMORYHUB_REQUIRE_PG") == "1":
+            pytest.fail("MEMORYHUB_REQUIRE_PG=1 but PostgreSQL is not reachable")
         pytest.skip("Integration PostgreSQL (localhost:15433) is not running")
     env = {**os.environ, "MEMORYHUB_DB_PORT": os.environ.get("MEMORYHUB_DB_PORT", "15433"),
            "MEMORYHUB_DB_PASSWORD": os.environ.get("MEMORYHUB_DB_PASSWORD", "memoryhub-test")}
@@ -77,7 +81,8 @@ def database():
 async def env(database):
     """Project 'atlas': alice member, bob admin, carol member. alice owns agent alice-agent."""
     async with database.begin() as conn:
-        for table in ("audit_log", "contradiction_reports", "memory_relationships", "memory_nodes"):
+        for table in ("audit_log", "contradiction_reports", "memory_relationships", "memory_nodes",
+                      "curator_rules"):
             await conn.execute(text(f"delete from {table} where tenant_id = :t"), {"t": TENANT})
         await conn.execute(text("delete from project_memberships where project_id = 'atlas-p'"))
         await conn.execute(text("delete from projects where name = 'atlas-p'"))
@@ -156,6 +161,10 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
         for src, dst in ((personal.id, shared.id), (shared.id, org.id)):
             db.add(MemoryRelationship(source_id=src, target_id=dst, relationship_type="related_to",
                                       created_by="dana", tenant_id=TENANT))
+        # A personal curation rule: its name and pattern are personal data too.
+        db.add(CuratorRule(name="dana-private-rule", trigger="on_write", tier="regex",
+                           config={"pattern": "salary"}, action="flag", layer="user",
+                           owner_id="dana", tenant_id=TENANT, priority=5, edited_by="dana"))
         await db.commit()
 
     act_as("admin", "admin")
@@ -171,6 +180,8 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
         "search": await http.post("/api/search", json={"query": "salary note"}),
         "contradictions": await http.get("/api/contradictions"),
         "entities": await http.get("/api/entities"),
+        "rules": await http.get("/api/rules"),
+        "personal rules": await http.get("/api/rules", params={"layer": "user"}),
     }
     with patch("src.routes._admin_request", new_callable=AsyncMock, return_value=_Clients()):
         checks["users"] = await http.get("/api/users")
@@ -199,3 +210,43 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
     act_as("dana")
     mine = await http.get("/api/memories/browse", params={"tab": "all"})
     assert str(personal.id) in mine.text
+    assert "dana-private-rule" in (await http.get("/api/rules")).text
+
+
+async def test_admin_sees_no_individual_activity(env):
+    """No per-person counts, last-active times, recent-activity authors or per-person filters (#667)."""
+    http, seed, act_as = env["http"], env["seed"], env["act_as"]
+    await seed("Atlas gripper torque limit is 11.5 Nm", owner="alice", actor="alice")
+    await seed("Atlas camera mount moved to rail B", owner="carol", actor="carol")
+
+    act_as("admin", "admin")
+    with patch("src.routes._admin_request", new_callable=AsyncMock, return_value=_Clients()):
+        users = await http.get("/api/users")
+    assert users.status_code == 200
+    assert all(u["memory_count"] is None and u["last_active"] is None for u in users.json())
+
+    browse = (await http.get("/api/memories/browse", params={"tab": "all"})).json()
+    assert browse["total"] == 2
+    assert browse["facets"]["writers"] == []
+    by_owner = (await http.get("/api/memories/browse", params={"q": "alice", "mode": "metadata"})).json()
+    assert by_owner["total"] == 0
+    graph_by_owner = (await http.get("/api/graph/all", params={"q": "alice", "mode": "metadata"})).json()
+    assert graph_by_owner["total"] == 0
+
+    stats = (await http.get("/api/stats")).json()
+    assert stats["recent_activity"] and all(a["owner_id"] is None for a in stats["recent_activity"])
+
+    for response in (
+        await http.get("/api/memories/browse", params={"actor": "alice"}),
+        await http.get("/api/graph/all", params={"actor": "alice"}),
+        await http.get("/api/memories/export", params={"actor": "alice"}),
+        await http.get("/api/graph", params={"owner_id": "alice"}),
+        await http.post("/api/search", json={"query": "gripper", "identity": "alice"}),
+    ):
+        assert response.status_code == 403, response.request.url
+
+    # A user still sees their own activity.
+    act_as("alice")
+    mine = (await http.get("/api/memories/browse", params={"tab": "all"})).json()
+    assert {"value": "alice", "count": 1} in mine["facets"]["writers"]
+    assert (await http.get("/api/memories/browse", params={"actor": "alice"})).status_code == 200

@@ -50,6 +50,11 @@ What the script does:
 | none | yes | Secret left as it is; counts printed, with a warning if there is no Admin |
 | none | no | the deployer (`oc whoami`) becomes the first Admin; the script fails if the deployer is a service account |
 
+The script runs on the macOS system shell (Bash 3.2). Its scenarios are
+tested against a stub `oc` in
+`memoryhub-ui/backend/tests/test_human_access_script.py`. On a Mac, run them
+with `HUMAN_ACCESS_BASH=/bin/bash`.
+
 Names are trimmed, de-duplicated and checked against
 `^[A-Za-z0-9._@:+-]{1,255}$`. The script refuses to write two empty lists.
 
@@ -103,8 +108,32 @@ contradictions, detail, history, context and neighbourhood. The dashboard
 has no audit read view yet. Audit records are only written, and an Admin can
 only act on non-personal memories. Personal memories do not appear in
 counts, lists, graphs or exports. A direct
-request for one returns `404`. `tests/test_admin_privacy_pg.py` checks this
-end to end on Postgres.
+request for one returns `404`. Personal curation rules (their names and
+patterns) are likewise visible only to their owner.
+
+Admins also get no **individual activity** in shared scopes: combined
+values can identify a person and show when and how much they work. That means:
+
+- no memory counts or last-active times per person in the Users roster;
+- no "writers" facet in browse;
+- no author in the overview's recent-activity feed;
+- no per-person filters: `actor`, `owner_id`, search `identity`, and
+  metadata search by owner all answer `403` or match memory IDs only.
+
+Project and tenant totals stay. Each row still shows its author, because
+moderation needs to know who wrote an item. `tests/test_admin_privacy_pg.py`
+checks all of this end to end on Postgres. CI runs it with
+`MEMORYHUB_REQUIRE_PG=1`, so a missing database fails the job instead of
+skipping the test.
+
+## Cross-site requests
+
+The dashboard session is a browser cookie, so requests that change state
+(POST, PUT, PATCH, DELETE) are accepted only from the dashboard's own
+origin (`src/csrf.py`). The guard refuses `Sec-Fetch-Site: cross-site` and
+`same-site`. Every Route under the cluster's `*.apps` domain is the same
+site. The guard also refuses any `Origin` other than the requested host or
+`MEMORYHUB_CORS_ORIGINS`.
 
 ### Out of scope: exceptional access (break-glass)
 

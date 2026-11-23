@@ -366,7 +366,7 @@ def test_personal_rule_read_and_write_are_independent():
     foreign = SimpleNamespace(tenant_id="tenant-a", layer="user", owner_id="bob")
     assert _can_read_rule(_access("user"), own)
     assert not _can_read_rule(_access("user"), foreign)
-    assert _can_read_rule(_access("admin"), foreign)
+    assert not _can_read_rule(_access("admin"), foreign)
     assert not _can_change_rule(_access("admin"), foreign)
     assert _can_change_rule(_access("admin"), own)
 

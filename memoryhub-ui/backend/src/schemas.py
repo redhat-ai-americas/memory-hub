@@ -41,7 +41,7 @@ class RecentActivity(BaseModel):
     id: str
     stub: str
     scope: str
-    owner_id: str
+    owner_id: str | None  # None for admins: no individual activity (#667)
     updated_at: datetime
     action: str  # "created" or "updated"
 

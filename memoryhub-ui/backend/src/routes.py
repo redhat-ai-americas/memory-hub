@@ -289,6 +289,7 @@ async def get_graph(
     straddle tenants even though we defensively filter the relationship
     table too.
     """
+    access.forbid_person_filter(owner_id)
     tenant_id = settings.ui_tenant_id
     stmt = select(MemoryNode).where(
         MemoryNode.tenant_id == tenant_id,
@@ -458,7 +459,8 @@ async def get_stats(db: DbDep, settings: SettingsDep, access: AccessDep):
             id=str(n.id),
             stub="Content hidden" if access.hides_content(n) else n.stub,
             scope=n.scope,
-            owner_id=n.owner_id,
+            # Who changed what and when is individual activity; admins see what changed only.
+            owner_id=n.owner_id if access.sees_individual_activity else None,
             updated_at=n.updated_at,
             action="created" if n.version == 1 else "updated",
         )
@@ -896,6 +898,9 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
     Merges OAuth client data from auth service with memory stats from DB.
     Both the local memory_nodes aggregation and the auth service client
     list are tenant-scoped by ``settings.ui_tenant_id`` (#105).
+
+    Admins get the roster only: per-person memory counts and last-active
+    times are individual activity (#667), so they are null for an Admin.
     """
     tenant_id = access.principal.tenant_id
 
@@ -916,11 +921,14 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
     )
     if access.principal.role == "user":
         stats_query = stats_query.where(MemoryNode.owner_id.in_(access.identities))
-    result = await db.execute(stats_query)
-    owner_stats = {
-        row[0]: {"memory_count": row[1], "last_active": row[2]}
-        for row in result.fetchall()
-    }
+    if access.sees_individual_activity:
+        result = await db.execute(stats_query)
+        owner_stats = {
+            row[0]: {"memory_count": row[1], "last_active": row[2]}
+            for row in result.fetchall()
+        }
+    else:
+        owner_stats = {}
 
     # The roster must not masquerade as complete when Auth is unavailable.
     resp = await _admin_request(
@@ -937,7 +945,9 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
         seen_owners: set[str] = set()
         for c in clients:
             cid = c["client_id"]
-            stats = owner_stats.get(cid, {"memory_count": 0, "last_active": None})
+            stats = owner_stats.get(cid, {
+                "memory_count": 0 if access.sees_individual_activity else None, "last_active": None,
+            })
             users.append({
                 "name": c["client_name"],
                 "owner_id": cid,
@@ -1005,9 +1015,9 @@ def _can_read_rule(access: AccessDep, rule: CuratorRule) -> bool:
         return False
     if rule.layer in ("system", "organizational"):
         return True
-    return rule.layer == "user" and (
-        access.principal.role == "admin" or rule.owner_id == access.principal.username
-    )
+    # Personal rules (their names and patterns) belong to their owner only;
+    # an Admin sees no personal data (#667, PR 710 review).
+    return rule.layer == "user" and rule.owner_id == access.principal.username
 
 
 def _can_change_rule(access: AccessDep, rule: CuratorRule) -> bool:
@@ -1034,10 +1044,7 @@ async def list_rules(
     tenant at the service layer.
     """
     tenant_id = access.principal.tenant_id
-    visible_user_rules = (
-        CuratorRule.layer == "user" if access.principal.role == "admin"
-        else and_(CuratorRule.layer == "user", CuratorRule.owner_id == access.principal.username)
-    )
+    visible_user_rules = and_(CuratorRule.layer == "user", CuratorRule.owner_id == access.principal.username)
     stmt = (
         select(CuratorRule)
         .where(CuratorRule.tenant_id == tenant_id, CuratorRule.is_current.is_(True))

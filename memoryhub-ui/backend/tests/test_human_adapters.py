@@ -610,7 +610,8 @@ def test_browse_admin_excludes_personal_and_redacts_unmoderated_shared_rows(clie
     db.execute.side_effect = [
         result(2), result(items=[personal, foreign_project]), result(rows=[]), result(rows=[]),
         result(1), result(1), result(0), result(0),
-        result(rows=[("project", 1)]), result(rows=[("bob", 1)]), result(rows=[]),
+        # No "writers" facet query for an admin: per-person counts are individual activity.
+        result(rows=[("project", 1)]), result(rows=[]),
         result(rows=[]), result(0), result(0),
     ]
     response = http.get("/api/memories/browse?q=bob&mode=semantic")

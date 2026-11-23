@@ -43,21 +43,25 @@ OC=(oc)
 
 normalize() {
     # Trim surrounding spaces, drop empties and duplicates, keep order.
-    local out=() seen=" " item
-    IFS=',' read -ra items <<< "${1:-}"
-    for item in "${items[@]}"; do
+    # No arrays: macOS ships Bash 3.2, where expanding an empty array under
+    # `set -u` is an "unbound variable" error.
+    local rest="${1:-}" item out="" seen=","
+    while [ -n "$rest" ]; do
+        case "$rest" in
+            *,*) item="${rest%%,*}"; rest="${rest#*,}" ;;
+            *) item="$rest"; rest="" ;;
+        esac
         item="$(printf '%s' "$item" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
         [ -z "$item" ] && continue
-        if [[ ! "$item" =~ ^[A-Za-z0-9._@:+-]{1,255}$ ]]; then
+        if ! printf '%s' "$item" | grep -Eq '^[A-Za-z0-9._@:+-]{1,255}$'; then
             echo "Invalid OpenShift username in human access list: '$item'" >&2
             exit 1
         fi
-        [[ "$seen" == *" $item "* ]] && continue
-        seen+="$item "
-        out+=("$item")
+        case "$seen" in *",$item,"*) continue ;; esac
+        seen="$seen$item,"
+        out="${out:+$out,}$item"
     done
-    local IFS=','
-    echo "${out[*]}"
+    printf '%s\n' "$out"
 }
 
 count() { [ -z "$1" ] && echo 0 || awk -F',' '{print NF}' <<< "$1"; }
@@ -70,8 +74,8 @@ if [ -n "${MEMORYHUB_UI_ADMIN_USERS+x}" ] || [ -n "${MEMORYHUB_UI_ALLOWED_USERS+
     USERS="$(normalize "${MEMORYHUB_UI_ALLOWED_USERS:-}")"
     SOURCE="deploy-input"
 elif "${OC[@]}" get secret "$SECRET" -n "$NAMESPACE" &>/dev/null; then
-    ADMINS="$("${OC[@]}" get secret "$SECRET" -n "$NAMESPACE" -o jsonpath='{.data.MEMORYHUB_UI_ADMIN_USERS}' | base64 -d 2>/dev/null || true)"
-    USERS="$("${OC[@]}" get secret "$SECRET" -n "$NAMESPACE" -o jsonpath='{.data.MEMORYHUB_UI_ALLOWED_USERS}' | base64 -d 2>/dev/null || true)"
+    ADMINS="$("${OC[@]}" get secret "$SECRET" -n "$NAMESPACE" -o jsonpath='{.data.MEMORYHUB_UI_ADMIN_USERS}' | base64 --decode 2>/dev/null || true)"
+    USERS="$("${OC[@]}" get secret "$SECRET" -n "$NAMESPACE" -o jsonpath='{.data.MEMORYHUB_UI_ALLOWED_USERS}' | base64 --decode 2>/dev/null || true)"
     echo "  Human access: keeping existing $SECRET ($(count "$ADMINS") admin(s), $(count "$USERS") user(s))."
     if [ "$(count "$ADMINS")" = 0 ]; then
         echo "  WARNING: no Admin is listed. Re-run with MEMORYHUB_UI_ADMIN_USERS=<you> to add one."

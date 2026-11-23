@@ -76,7 +76,10 @@ async def test_direct_http_requires_local_oauth_proxy_and_verified_username():
 @pytest.mark.asyncio
 async def test_empty_access_lists_say_so_instead_of_refusing_everyone():
     """A clean deploy with no bootstrap admin answers 503 with the fix, not a bare 403 (#667 review)."""
-    app.dependency_overrides[get_settings] = lambda: Settings(ui_tenant_id="tenant-a")
+    # Explicit empty lists: Settings would otherwise read them from the environment.
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ui_tenant_id="tenant-a", ui_admin_users="", ui_allowed_users="",
+    )
     app.dependency_overrides[get_db] = lambda: AsyncMock()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/graph", headers={"x-forwarded-user": "alice"})

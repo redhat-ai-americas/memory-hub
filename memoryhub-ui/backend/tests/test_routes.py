@@ -2201,6 +2201,10 @@ class TestTenantFiltering:
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: settings
+        # Only a User gets per-person stats; an Admin's roster runs no stats query (#667).
+        app.dependency_overrides[get_access] = lambda: Access(
+            principal=Principal("test-user", "user", "tenant_b"), agents={"test-client"},
+        )
 
         # An unavailable Auth service must not produce a partial roster.
         with patch(

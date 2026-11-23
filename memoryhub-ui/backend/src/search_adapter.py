@@ -81,6 +81,7 @@ async def human_search(body: SearchBody, db: DbDep, access: AccessDep,
             raise HTTPException(status_code=404, detail="Project not found")
         projects = {body.project}
         scopes = {"project": [body.project]}
+    access.forbid_person_filter(body.identity)
     if body.identity and access.principal.role == "user" and body.identity not in access.identities:
         raise HTTPException(status_code=404, detail="Identity not found")
     start = time.monotonic()

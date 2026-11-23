@@ -34,7 +34,7 @@ export interface RecentActivity {
   id: string;
   stub: string;
   scope: string;
-  owner_id: string;
+  owner_id: string | null; // null for admins (no individual activity)
   updated_at: string;
   action: string;
 }
@@ -141,7 +141,7 @@ export interface UserEntry {
   name: string;
   owner_id: string;
   identity_type: string;
-  memory_count: number;
+  memory_count: number | null; // null for admins (no individual activity)
   last_active: string | null;
 }
 

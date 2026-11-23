@@ -41,6 +41,7 @@ def _conditions(
         raise HTTPException(status_code=422, detail="Unsupported graph flag")
     if access.principal.role == "user" and tab in {"quarantined", "deleted"}:
         raise HTTPException(status_code=403, detail="Memory state forbidden")
+    access.forbid_person_filter(actor)
     where = [MemoryNode.tenant_id == tenant, access.clause()]
     if tab == "current":
         where += [MemoryNode.deleted_at.is_(None), MemoryNode.status == "active",
@@ -102,7 +103,8 @@ def _conditions(
         ).exists())
     if q:
         pattern = f"%{q.strip()}%"
-        metadata = or_(cast(MemoryNode.id, String).ilike(pattern), MemoryNode.owner_id.ilike(pattern))
+        metadata = (or_(cast(MemoryNode.id, String).ilike(pattern), MemoryNode.owner_id.ilike(pattern))
+                    if access.sees_individual_activity else cast(MemoryNode.id, String).ilike(pattern))
         if mode == "metadata":
             where.append(metadata)
         elif mode in {"semantic", "text"}:
