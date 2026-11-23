@@ -246,7 +246,8 @@ def test_search_uses_human_grants_and_hides_foreign_hit_and_explanation(client):
     set_access(access(agents={"agent-alice"}))
     own = node(owner_id="agent-alice")
     foreign = node(owner_id="bob", content="foreign secret")
-    db.execute.side_effect = [query_result(items=[own, foreign])]
+    # Rows for the hits, then the rows the explanation looks up.
+    db.execute.side_effect = [query_result(items=[own, foreign]), query_result(items=[foreign])]
     hits = [(SimpleNamespace(id=own.id), 0.7), (SimpleNamespace(id=foreign.id), 0.6)]
     with patch("src.search_adapter.search_memories", new_callable=AsyncMock,
                return_value=hits) as search:
@@ -254,10 +255,12 @@ def test_search_uses_human_grants_and_hides_foreign_hit_and_explanation(client):
     assert response.status_code == 200
     payload = response.json()
     assert [hit["id"] for hit in payload["results"]] == [str(own.id)]
-    assert payload["returned"] == payload["candidates"] == 1
+    assert payload["returned"] == 1 and payload["candidates"] == 2
+    # A hit the person may not read is counted, never described.
+    assert payload["hidden_dropped"] == {"rbac": 1} and payload["dropped"] == []
     assert payload["explain"] == [{"id": str(foreign.id), "found": False,
                                    "stage": "missing",
-                                   "detail": "Not returned in this authorized result set"}]
+                                   "detail": "No memory you can read has this ID"}]
     assert "foreign secret" not in response.text
     assert search.await_args.kwargs["authorized_scopes"]["user"] == ["agent-alice", "alice"]
     assert http.post("/api/search", json={"query": "x", "identity": "bob"}).status_code == 404
@@ -268,7 +271,7 @@ def test_search_admin_cannot_read_personal_even_with_core_hit(client):
     set_access(access("admin"))
     personal = node(owner_id="bob", content="foreign secret")
     shared = node(scope="organizational", content="shared allowed")
-    db.execute.side_effect = [query_result(items=[personal, shared])]
+    db.execute.side_effect = [query_result(items=[personal, shared]), query_result(items=[personal])]
     hits = [(SimpleNamespace(id=personal.id), 0.9), (SimpleNamespace(id=shared.id), 0.8)]
     with patch("src.search_adapter.search_memories", new_callable=AsyncMock,
                return_value=hits) as search:

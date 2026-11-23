@@ -26,6 +26,7 @@ import type {
   PublicConfig,
   RulePayload,
   SearchRequest,
+  SearchHealth,
   SearchResponse,
   SecretRotatedResponse,
   StatsResponse,
@@ -169,6 +170,7 @@ export const api = {
     get<GraphNeighbourhood>(`/graph/neighbourhood${qs(params as Record<string, unknown>)}`),
   /** Search playground: the same Core retrieval agents use, limited to what the person may read. */
   search: (body: SearchRequest) => post<SearchResponse>('/search', body),
+  searchHealth: () => get<SearchHealth>('/search/health'),
 
   // Entities (users only)
   entities: (params: { q?: string; type?: EntityType | 'all'; project?: string; page?: number; per_page?: number } = {}) =>

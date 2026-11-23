@@ -27,6 +27,7 @@ export const BFF_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/graph\/neighbourhood$/],
   ['GET', /^\/api\/graph\/search$/],
   ['POST', /^\/api\/search$/],
+  ['GET', /^\/api\/search\/health$/],
   ['GET', /^\/api\/memories\/export$/],
   ['GET', /^\/api\/memory\/[^/]+\/context$/],
   ['GET', /^\/api\/me$/],
@@ -379,7 +380,9 @@ function respond(role: Role, method: string, path: string, url: URL, body: unkno
       provenance: [],
       conflicts: [],
     };
-  if (path === '/api/search') return searchResponse(role);
+  if (path === '/api/search') return { ...searchResponse(role), notes: (body as { domains?: string[]; focus?: string })?.domains?.length && !(body as { focus?: string }).focus ? ['Domain and graph boosts apply only with a session focus, as in search_memory.'] : [] };
+  if (path === '/api/search/health')
+    return { embedding: { status: 'ok', dimensions: 384, ms: 4 }, reranker: { status: 'not_configured' }, search_mode: 'vector', fallback: null };
   if (path === '/api/memories/export') return 'export';
   if (path === '/api/graph/search') return [{ id: memoryId, score: 0.82 }, { id: otherMemoryId, score: 0.61 }];
   if (path === '/api/entities')

@@ -203,3 +203,48 @@ test('admin: resolves a contradiction and adds a project member', async ({ page 
   await expect(page.getByText('Teams')).toHaveCount(0);
   expectClean(bff, errors);
 });
+
+/* ---------------- Search playground (#714) ---------------- */
+
+test('user: search options reach the BFF, notes and both snippets show', async ({ page }) => {
+  const bff = await mockBff(page, 'user');
+  const errors = watch(page);
+  const bodies: Record<string, unknown>[] = [];
+  page.on('request', (r) => {
+    if (r.url().endsWith('/api/search') && r.method() === 'POST') bodies.push(r.postDataJSON());
+  });
+  await page.goto('/#/search');
+  await expect(page.getByText('No reranker is configured on this deployment', { exact: false })).toBeVisible();
+  await page.getByLabel('Query', { exact: true }).fill('torque');
+  await page.getByLabel('Scope').selectOption('project');
+  await page.getByLabel('Content type').selectOption('knowledge');
+  await page.getByLabel('Domains').fill('robotics, firmware');
+  await page.getByLabel('Entities').fill('Atlas gripper');
+  await page.getByLabel('Use the keyword signal').uncheck();
+  await page.getByRole('button', { name: 'Run search' }).click();
+  await expect(page.locator('.res')).toHaveCount(2);
+  await expect(page.getByText('Domain and graph boosts apply only with a session focus', { exact: false })).toBeVisible();
+  expect(bodies.at(-1)).toMatchObject({ scope: 'project', content_type: 'knowledge', domains: ['robotics', 'firmware'], entities: ['Atlas gripper'], disabled_signals: ['keyword'], rerank: true });
+  await expect(page.locator('pre.dark')).toContainText('content_type="knowledge"');
+  await page.getByRole('radio', { name: 'MCP' }).or(page.getByRole('button', { name: 'MCP', exact: true })).first().click();
+  await expect(page.locator('pre.dark')).toContainText('"name": "search_memory"');
+  await expect(page.locator('pre.dark')).toContainText('"disabled_signals": [');
+  expectClean(bff, errors);
+});
+
+test('user: search shows the text fallback when embeddings are down', async ({ page }) => {
+  const bff = await mockBff(page, 'user', (key, payload) =>
+    key === 'GET /api/search/health'
+      ? { embedding: { status: 'down', error: 'ConnectError' }, reranker: { status: 'not_configured' }, search_mode: 'text', fallback: 'Searches use text matching until the embedding service answers' }
+      : key === 'POST /api/search'
+        ? { ...(payload as object), retrieval: 'text', fallback_reason: 'Vector search failed (ConnectError); text match used' }
+        : payload,
+  );
+  const errors = watch(page);
+  await page.goto('/#/search');
+  await expect(page.getByText('Semantic search is unavailable.')).toBeVisible();
+  await page.getByLabel('Query', { exact: true }).fill('torque');
+  await page.getByRole('button', { name: 'Run search' }).click();
+  await expect(page.getByText('Vector search failed (ConnectError); text match used')).toBeVisible();
+  expectClean(bff, errors);
+});

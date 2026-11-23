@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     db_user: str = "memoryhub"
     db_password: str = ""
     embedding_url: str = ""
+    # The cross-encoder MCP's search_memory uses (MEMORYHUB_RERANKER_URL); empty = no reranker.
+    reranker_url: str = ""
     valkey_url: str = ""
     mcp_server_url: str = "http://memory-hub-mcp:8080/mcp/"
     auth_service_url: str = "http://auth-server.memoryhub-auth.svc:8081"

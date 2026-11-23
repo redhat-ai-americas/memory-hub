@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '@/api/client';
 import { PageHeader, Tabs, useApp } from '@/components/Shell';
 import { copyText, Dropdown, Empty, ErrorState, Icon, Modal, ScopeLabel, Seg, SkLines, Standby, Tokens, useToast } from '@/components/ui';
+import { useApi } from '@/hooks/useApi';
 import type { HashRoute } from '@/hooks/useHashRoute';
 import type { DroppedMemory, ExplainResult, FunnelKey, SearchRequest, SearchResponse } from '@/types';
 import { shortId, truncate } from '@/utils/format';
@@ -128,22 +129,61 @@ const STAGE_COLORS: Record<string, string> = {
 
 interface Form extends SearchRequest {}
 
+const list = (v?: string[]) => (v && v.length ? v : null);
+
+/** The equivalent Python SDK call. Only options that differ from search_memory's defaults are written. */
 const sdkCall = (f: Form) =>
   [
     'results = await client.search(',
     `    ${JSON.stringify(f.query)},`,
+    f.scope ? `    scope=${JSON.stringify(f.scope)},` : null,
+    f.project ? `    project_id=${JSON.stringify(f.project)},` : null,
+    f.identity ? `    owner_id=${JSON.stringify(f.identity)},` : null,
+    list(f.domains) ? `    domains=${JSON.stringify(f.domains)},` : null,
+    list(f.entities) ? `    entities=${JSON.stringify(f.entities)},` : null,
+    f.content_type ? `    content_type=${JSON.stringify(f.content_type)},` : null,
     f.focus ? `    focus=${JSON.stringify(f.focus)},` : null,
     f.focus ? `    session_focus_weight=${f.session_focus_weight},` : null,
-    f.project ? `    project_id=${JSON.stringify(f.project)},` : null,
+    f.focus && list(f.domains) ? `    domain_boost_weight=${f.domain_boost_weight},` : null,
+    f.focus && f.graph_depth ? `    graph_depth=${f.graph_depth},` : null,
+    f.focus && f.graph_depth ? `    graph_boost_weight=${f.graph_boost_weight},` : null,
+    list(disabledOf(f)) ? `    disabled_signals=${JSON.stringify(disabledOf(f))},` : null,
     `    max_results=${f.max_results},`,
     `    mode=${JSON.stringify(f.mode)},`,
-    f.weight_threshold ? `    weight_threshold=${f.weight_threshold},` : null,
+    `    weight_threshold=${f.weight_threshold},`,
     `    max_response_tokens=${f.max_response_tokens},`,
+    f.current_only ? null : '    current_only=False,',
     f.include_branches ? '    include_branches=True,' : null,
     ')',
   ]
     .filter(Boolean)
     .join('\n');
+
+const disabledOf = (f: Form) => [...new Set([...(f.disabled_signals ?? []), ...(f.rerank ? [] : ['reranker' as const])])];
+
+/** The same search as an MCP tools/call, as an agent sends it. */
+const mcpCall = (f: Form) => {
+  const args: Record<string, unknown> = { query: f.query, max_results: f.max_results, mode: f.mode, weight_threshold: f.weight_threshold, max_response_tokens: f.max_response_tokens };
+  if (f.scope) args.scope = f.scope;
+  if (f.project) args.project_id = f.project;
+  if (f.identity) args.owner_id = f.identity;
+  if (list(f.domains)) args.domains = f.domains;
+  if (list(f.entities)) args.entities = f.entities;
+  if (f.content_type) args.content_type = f.content_type;
+  if (f.focus) Object.assign(args, { focus: f.focus, session_focus_weight: f.session_focus_weight });
+  if (f.focus && list(f.domains)) args.domain_boost_weight = f.domain_boost_weight;
+  if (f.focus && f.graph_depth) Object.assign(args, { graph_depth: f.graph_depth, graph_boost_weight: f.graph_boost_weight });
+  if (list(disabledOf(f))) args.disabled_signals = disabledOf(f);
+  if (!f.current_only) args.current_only = false;
+  if (f.include_branches) args.include_branches = true;
+  return JSON.stringify({ method: 'tools/call', params: { name: 'search_memory', arguments: args } }, null, 2);
+};
+
+const splitList = (v: string) =>
+  v
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 
 const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
@@ -160,10 +200,22 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
     max_response_tokens: 4000,
     current_only: true,
     include_branches: false,
-    // The BFF accepts rerank but no reranker is configured; it reports `not_configured`.
-    rerank: false,
+    // Same default as search_memory: the reranker runs when one is configured.
+    rerank: true,
     temporal_status: 'current',
+    scope: undefined,
+    domains: [],
+    entities: [],
+    content_type: undefined,
+    domain_boost_weight: 0.3,
+    graph_depth: 0,
+    graph_boost_weight: 0.2,
+    disabled_signals: [],
   });
+  const [domainsText, setDomainsText] = useState('');
+  const [entitiesText, setEntitiesText] = useState('');
+  const [snippet, setSnippet] = useState<'sdk' | 'mcp'>('sdk');
+  const health = useApi(() => api.searchHealth(), []);
   const [identities, setIdentities] = useState<{ id: string; label: string }[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
   const [result, setResult] = useState<SearchResponse | null>(null);
@@ -196,6 +248,8 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
     focus: body.focus?.trim() || undefined,
     identity: body.identity?.trim() || undefined,
     project: body.project?.trim() || undefined,
+    scope: body.scope || undefined,
+    content_type: body.content_type || undefined,
     explain,
   });
   const run = async (override?: Form, explainIds?: string[]) => {
@@ -218,6 +272,8 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
   };
 
   const copySdk = async () => toast((await copyText(sdkCall(form))) ? 'SDK call copied.' : 'Copy failed — select the text instead.', 'ok');
+  const copySnippet = async () =>
+    toast((await copyText(snippet === 'sdk' ? sdkCall(form) : mcpCall(form))) ? `${snippet === 'sdk' ? 'SDK' : 'MCP'} call copied.` : 'Copy failed — select the text instead.', 'ok');
   const results = result?.results ?? [];
   // Show every rank up to the last full result (at least five), then fold
   // the trailing stubs into the dashed "+N stub results" row.
@@ -300,6 +356,56 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
               </datalist>
             </div>
             <div className="f">
+              <label htmlFor="sc">Scope</label>
+              <select id="sc" className="in" value={form.scope ?? ''} onChange={(e) => set('scope', (e.target.value || undefined) as Form['scope'])}>
+                <option value="">All scopes you can read</option>
+                <option value="user">Personal</option>
+                <option value="project">Project</option>
+                <option value="organizational">Organizational</option>
+                <option value="enterprise">Enterprise</option>
+                <option value="role">Role</option>
+                <option value="campaign">Campaign</option>
+              </select>
+            </div>
+            <div className="f">
+              <label htmlFor="ct">Content type</label>
+              <select id="ct" className="in" value={form.content_type ?? ''} onChange={(e) => set('content_type', (e.target.value || undefined) as Form['content_type'])}>
+                <option value="">Any</option>
+                <option value="experiential">experiential</option>
+                <option value="knowledge">knowledge</option>
+                <option value="behavioral">behavioral</option>
+                <option value="procedural">procedural</option>
+              </select>
+            </div>
+            <div className="f">
+              <label htmlFor="dm">Domains</label>
+              <input
+                id="dm"
+                className="in"
+                value={domainsText}
+                placeholder="robotics, firmware"
+                onChange={(e) => {
+                  setDomainsText(e.target.value);
+                  set('domains', splitList(e.target.value));
+                }}
+              />
+              <span className="hint">Boosts memories in these domains (only with a session focus, as in search_memory).</span>
+            </div>
+            <div className="f">
+              <label htmlFor="en">Entities</label>
+              <input
+                id="en"
+                className="in"
+                value={entitiesText}
+                placeholder="Atlas gripper"
+                onChange={(e) => {
+                  setEntitiesText(e.target.value);
+                  set('entities', splitList(e.target.value));
+                }}
+              />
+              <span className="hint">Keeps memories that mention these entities.</span>
+            </div>
+            <div className="f">
               <label>Response mode</label>
               <Seg
                 label="Response mode"
@@ -344,6 +450,41 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
               <span>Include branches</span>
               <input type="checkbox" checked={form.include_branches} onChange={(e) => set('include_branches', e.target.checked)} />
             </label>
+            <h2 data-h="3" style={{ marginTop: 4 }}>Ranking</h2>
+            <label className="swrow">
+              <span>Rerank with the cross-encoder</span>
+              <input type="checkbox" checked={form.rerank} onChange={(e) => set('rerank', e.target.checked)} />
+            </label>
+            {health.data && health.data.reranker.status !== 'ok' && (
+              <span className="hint">{health.data.reranker.status === 'not_configured' ? 'No reranker is configured on this deployment: results keep their fused order.' : 'The reranker is not answering.'}</span>
+            )}
+            {['keyword', 'focus', 'domain', 'graph'].map((sig) => (
+              <label key={sig} className="swrow">
+                <span>Use the {sig} signal</span>
+                <input
+                  type="checkbox"
+                  checked={!(form.disabled_signals ?? []).includes(sig as never)}
+                  onChange={(e) =>
+                    set(
+                      'disabled_signals',
+                      e.target.checked ? (form.disabled_signals ?? []).filter((x) => x !== sig) : [...(form.disabled_signals ?? []), sig as 'keyword'],
+                    )
+                  }
+                />
+              </label>
+            ))}
+            <div className="f">
+              <label htmlFor="db">Domain boost · {(form.domain_boost_weight ?? 0.3).toFixed(2)}</label>
+              <input id="db" type="range" min={0} max={100} value={Math.round((form.domain_boost_weight ?? 0.3) * 100)} onChange={(e) => set('domain_boost_weight', Number(e.target.value) / 100)} />
+            </div>
+            <div className="f">
+              <label htmlFor="gd">Graph depth · {form.graph_depth ?? 0}</label>
+              <input id="gd" type="range" min={0} max={3} value={form.graph_depth ?? 0} onChange={(e) => set('graph_depth', Number(e.target.value))} />
+            </div>
+            <div className="f">
+              <label htmlFor="gb">Graph boost · {(form.graph_boost_weight ?? 0.2).toFixed(2)}</label>
+              <input id="gb" type="range" min={0} max={100} value={Math.round((form.graph_boost_weight ?? 0.2) * 100)} onChange={(e) => set('graph_boost_weight', Number(e.target.value) / 100)} />
+            </div>
             <button type="submit" className="btn bp" style={{ justifyContent: 'center' }} disabled={running || standby || !form.query.trim()}>
               {running ? 'Running…' : 'Run search'}
             </button>
@@ -351,6 +492,28 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
           </form>
 
           <div className="col-main">
+            {health.data && health.data.search_mode === 'text' && (
+              <div className="alert warn-a" role="status">
+                <Icon.Warn size={18} />
+                <span className="sm">
+                  <b>Semantic search is unavailable.</b> {health.data.fallback} The embedding service reports {health.data.embedding.error ?? 'no answer'}.
+                </span>
+              </div>
+            )}
+            {result?.fallback_reason && (
+              <div className="alert warn-a" role="status">
+                <Icon.Warn size={18} />
+                <span className="sm">
+                  <b>Fallback used.</b> {result.fallback_reason}
+                </span>
+              </div>
+            )}
+            {(result?.notes ?? []).map((n) => (
+              <div key={n} className="alert" role="note">
+                <Icon.Info size={16} />
+                <span className="sm">{n}</span>
+              </div>
+            ))}
             {standby ? (
               <div className="card">
                 <Standby compact={false}>
@@ -483,7 +646,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
                                   <ScopeLabel scope={r.scope} />
                                   <span className="lbl g">{expanded ? 'full' : r.delivery}</span>
                                   <span className="sm muted">{r.scope === 'campaign' ? `campaign:${r.scope_id ?? r.owner_id}` : r.scope_id ?? r.owner_id}</span>
-                                  {r.downgraded && <span className="lbl ylw">stub · budget</span>}
+                                  {r.downgraded && <span className="lbl ylw">stub · below weight</span>}
                                   {r.historical && <span className="lbl ylw" title={r.relevant_until ? `Relevant until ${r.relevant_until}` : undefined}>historical · expired</span>}
                                 </div>
                                 <a href={memoryHref(r.id)} style={{ fontWeight: 500, textDecoration: 'none', color: '#151515' }}>
@@ -520,6 +683,13 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
                                     <b><Tokens n={r.tokens} /></b>
                                   </span>
                                 </div>
+                                {r.why && r.why.length > 0 && (
+                                  <ul className="hint why" style={{ margin: '6px 0 0', paddingLeft: 16 }}>
+                                    {r.why.map((w) => (
+                                      <li key={w}>{w}</li>
+                                    ))}
+                                  </ul>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -540,12 +710,23 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
 
                   <div className="card">
                     <div className="ch">
-                      <h2 data-h="3">Equivalent SDK call</h2>
-                      <button type="button" className="btn bl sm" onClick={copySdk}>
-                        Copy
-                      </button>
+                      <h2 data-h="3">Equivalent call</h2>
+                      <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <Seg
+                          label="Snippet"
+                          value={snippet}
+                          onChange={setSnippet}
+                          options={[
+                            { value: 'sdk', label: 'SDK' },
+                            { value: 'mcp', label: 'MCP' },
+                          ]}
+                        />
+                        <button type="button" className="btn bl sm" onClick={copySnippet}>
+                          Copy
+                        </button>
+                      </span>
                     </div>
-                    <pre className="dark">{sdkCall(form)}</pre>
+                    <pre className="dark">{snippet === 'sdk' ? sdkCall(form) : mcpCall(form)}</pre>
                   </div>
                 </>
               )

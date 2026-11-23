@@ -443,6 +443,23 @@ export interface SearchRequest {
   include_branches: boolean;
   rerank: boolean;
   temporal_status?: 'current' | 'expired' | 'all';
+  /** Filters and ranking options of MCP search_memory (#714). */
+  scope?: Scope;
+  domains?: string[];
+  entities?: string[];
+  content_type?: 'experiential' | 'knowledge' | 'behavioral' | 'procedural';
+  domain_boost_weight?: number;
+  graph_depth?: number;
+  graph_boost_weight?: number;
+  disabled_signals?: ('reranker' | 'focus' | 'keyword' | 'domain' | 'graph')[];
+}
+
+/** GET /api/search/health. */
+export interface SearchHealth {
+  embedding: { status: 'ok' | 'down'; dimensions?: number; ms?: number; error?: string };
+  reranker: { status: 'ok' | 'down' | 'not_configured'; ms?: number; error?: string };
+  search_mode: 'vector' | 'text';
+  fallback: string | null;
 }
 
 export interface SearchResult {
@@ -468,6 +485,9 @@ export interface SearchResult {
     rerank: number | null;
     weight: number;
   };
+  /** Plain reasons: what matched and how it was delivered. */
+  why?: string[];
+  domains?: string[];
   tokens: number;
 }
 
@@ -488,6 +508,10 @@ export interface SearchResponse {
   assembled_context: string;
   funnel?: FunnelStage[];
   dropped?: DroppedMemory[];
+  /** Set when vector search failed and text matching was used. */
+  fallback_reason?: string | null;
+  /** Option notes, e.g. boosts that only apply with a session focus. */
+  notes?: string[];
   hidden_dropped?: Record<string, number>;
   explain?: ExplainResult[];
 }
