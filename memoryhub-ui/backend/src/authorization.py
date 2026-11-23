@@ -193,6 +193,11 @@ class Access:
             and node.scope_id in self.human_project_admins
         )
 
+    def can_resolve_report(self, node: MemoryNode, reporter: str) -> bool:
+        """Publish review permission without exposing redacted author identities."""
+        authors = {reporter, node.owner_id, node.actor_id, node.driver_id}
+        return self.can_review(node) and not self.identities.intersection(authors)
+
     def can_write(self, node: MemoryNode) -> bool:
         """A human write grant is independent of the MCP token scopes."""
         if (node.tenant_id != self.principal.tenant_id or node.status != "active"

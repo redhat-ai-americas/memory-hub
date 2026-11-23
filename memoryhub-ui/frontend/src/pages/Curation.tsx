@@ -13,7 +13,7 @@ const ACTIONS = ['quarantine', 'flag', 'block', 'reject_with_pointer', 'decay_we
 const ACTION_LABEL: Record<string, string> = {
   block: 'Block',
   quarantine: 'Quarantine',
-  reject_with_pointer: 'Route to project',
+  reject_with_pointer: 'Reject with reference',
   flag: 'Flag for review',
   decay_weight: 'Decay weight',
   merge: 'Suggest merge',
@@ -118,7 +118,7 @@ const Curation: React.FC<{ route: HashRoute }> = ({ route }) => {
         crumbs={[{ label: isUser ? 'My curation rules' : 'Curation rules' }]}
         description={
           isUser
-            ? 'Personal rules check what your agents write to your memories — block secrets, quarantine sensitive text or flag near-duplicates. System and organization rules always apply and are shown read-only.'
+            ? 'Personal rules check memory writes owned by your identity — block secrets, quarantine sensitive text or flag near-duplicates. System and organization rules always apply and are shown read-only.'
             : 'Rules run inline on every write. Lower priority numbers run first; the first blocking match wins. You change organizational and your own rules; system rules are shown read-only.'
         }
         actions={
@@ -438,7 +438,7 @@ const RuleEditor: React.FC<{
             <option value="">{APPLIES['']}</option>
             {SCOPE_ORDER.map((sc) => (
               <option key={sc} value={sc}>
-                {APPLIES[sc] ?? sc}
+                {sc === 'user' && d.layer === 'user' ? 'Your personal memories' : APPLIES[sc] ?? sc}
               </option>
             ))}
             {d.scope_filter && !SCOPE_ORDER.includes(d.scope_filter as never) && <option value={d.scope_filter}>{d.scope_filter}</option>}

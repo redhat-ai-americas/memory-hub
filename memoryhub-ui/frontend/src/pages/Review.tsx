@@ -4,7 +4,7 @@ import { PageHeader, Tabs, useApp } from '@/components/Shell';
 import { Empty, ErrorState, Icon, ScopeLabel, SkLines, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { navigate, type HashRoute } from '@/hooks/useHashRoute';
-import type { ContradictionReport, Me, MemoryContext } from '@/types';
+import type { ContradictionReport, MemoryContext } from '@/types';
 import { errorMessage, scopeMeta, shortId, truncate } from '@/utils/format';
 import { memoryHref } from './common';
 
@@ -32,19 +32,6 @@ interface Group {
   reports: ContradictionReport[];
   latest: string;
 }
-
-/**
- * Mirrors PATCH /api/contradictions/{id} (can_review + self-review check): only a
- * project memory in a project this admin administers, and never a memory or report
- * of their own. The list is wider (every scope they moderate), so say why when not.
- */
-const resolveBlock = (m: MemoryContext['memory'], me: Me | null): string | null => {
-  if (m.scope !== 'project') return `The dashboard resolves reports only on project memories. Reports on ${scopeMeta(m.scope).label.toLowerCase()} memories are shown for context.`;
-  if (!m.scope_id || !(me?.write?.project_ids ?? []).includes(m.scope_id)) return `Only an admin of project ${m.scope_id ?? ''} can resolve these reports.`;
-  const mine = me?.username;
-  if (mine && [m.owner_id, m.actor_id, m.driver_id].includes(mine)) return 'You wrote this memory, so another project admin has to resolve its reports.';
-  return null;
-};
 
 const groupReports = (reports: ContradictionReport[]): Group[] => {
   const byMemory = new Map<string, ContradictionReport[]>();
@@ -115,8 +102,8 @@ const Review: React.FC<{ route: HashRoute }> = ({ route }) => {
                       <span className="sm muted">{ago(g.latest)}</span>
                     </div>
                     <div className="sm rq-item-sub">
-                      <span className="mono">{shortId(g.memoryId)}</span> · {g.reports.length} report{g.reports.length === 1 ? '' : 's'} · reported by{' '}
-                      {[...new Set(g.reports.map((r) => r.reporter))].join(', ')}
+                      <span className="mono">{shortId(g.memoryId)}</span> · {g.reports.length} report{g.reports.length === 1 ? '' : 's'}
+                      {g.reports.some((r) => r.reporter) && <> · reported by {[...new Set(g.reports.map((r) => r.reporter).filter(Boolean))].join(', ')}</>}
                     </div>
                   </button>
                 ))
@@ -153,8 +140,7 @@ const Review: React.FC<{ route: HashRoute }> = ({ route }) => {
 
 const Detail: React.FC<{ group: Group; resolvedTab: boolean; onChanged: () => void }> = ({ group, resolvedTab, onChanged }) => {
   const toast = useToast();
-  const { me } = useApp();
-  // /context carries scope_id and the writers, which the resolve rule needs.
+  // Content comes from context; action permissions come from each report.
   const memory = useApi<MemoryContext>(() => api.memoryContext(group.memoryId), [group.memoryId]);
   const [busy, setBusy] = React.useState<string | null>(null);
 
@@ -172,8 +158,7 @@ const Detail: React.FC<{ group: Group; resolvedTab: boolean; onChanged: () => vo
   };
 
   const m = memory.data?.memory;
-  const blocked = m ? resolveBlock(m, me) : 'Loading…';
-  const canResolve = (r: ContradictionReport) => !blocked && r.reporter !== me?.username;
+  const canResolve = (r: ContradictionReport) => r.can_resolve === true;
   const resolvable = group.reports.filter(canResolve);
   return (
     <>
@@ -199,7 +184,7 @@ const Detail: React.FC<{ group: Group; resolvedTab: boolean; onChanged: () => vo
               </div>
               <p>{m.redacted ? <span className="muted">Content hidden</span> : m.content}</p>
               <div className="sm muted">
-                {m.owner_id} · updated {day(m.updated_at)}
+                {m.owner_id && <>{m.owner_id} · </>}updated {day(m.updated_at)}
               </div>
             </>
           )}
@@ -219,8 +204,6 @@ const Detail: React.FC<{ group: Group; resolvedTab: boolean; onChanged: () => vo
                 <button type="button" className="link-btn" disabled={!!busy} onClick={() => setResolved([r.id], !r.resolved)}>
                   {r.resolved ? 'Open again' : 'Mark resolved'}
                 </button>
-              ) : !blocked && r.reporter === me?.username ? (
-                <span className="sm muted">Your report</span>
               ) : null}
             </div>
           </div>
@@ -239,8 +222,8 @@ const Detail: React.FC<{ group: Group; resolvedTab: boolean; onChanged: () => vo
           </a>
         </div>
         <p className="sm muted" style={{ margin: 0 }}>
-          {m && blocked
-            ? blocked
+          {resolvable.length === 0
+            ? 'You cannot resolve these reports. Another project administrator may be able to review them.'
             : 'Correct the memory first if the report is right: open it and save a new version. You can never resolve a report on your own memory or your own report.'}
         </p>
       </div>

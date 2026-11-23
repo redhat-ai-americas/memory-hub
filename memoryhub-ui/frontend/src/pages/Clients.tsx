@@ -25,10 +25,11 @@ export interface Revealed {
   scopes: string[];
 }
 
-// QA 2026-11-10 D3 / BR-PA2-04: what revocation really does (memory-hub-mcp core/revocation.py).
+// Deactivation rejects token grants; MCP currently caches API-key validation
+// for five minutes and does not revoke issued tokens or registered sessions.
 const REVOCATION_TIMING =
-  'Tokens and API-key sessions it already holds are refused within 5 seconds on every MCP server, and on the next request for admin-level clients.';
-const REVOKED_TOAST = 'Client revoked. New tokens are refused now; existing tokens and sessions stop within 5 seconds.';
+  'Issued access tokens remain valid until they expire. Existing MCP sessions are not ended. Cached API-key validation may allow new registrations for up to five minutes.';
+const REVOKED_TOAST = 'Client deactivated. New OAuth tokens are refused; existing tokens and MCP sessions are not ended.';
 
 /**
  * OAuth clients (GET /api/clients, proxied to the auth service). Users see and
@@ -253,14 +254,14 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
           onConfirm={doConfirm}
         >
           {confirm.kind === 'secret' && (
-            <>The current secret for <b>{confirm.row.client_id}</b> stops working immediately. Agents using it fail until you give them the new one. Audited.</>
+            <>The current secret for <b>{confirm.row.client_id}</b> stops issuing new tokens immediately. Issued tokens and existing MCP sessions are not ended. Audited.</>
           )}
           {confirm.kind === 'key' && (
-            <>Any existing API key for <b>{confirm.row.client_id}</b> stops working immediately. The new key is shown once. Audited.</>
+            <>The new API key for <b>{confirm.row.client_id}</b> is shown once. Cached validation may accept the old key for up to five minutes. Existing MCP sessions are not ended. Audited.</>
           )}
           {confirm.kind === 'revoke' && (
             <>
-              <b>{confirm.row.client_id}</b> can no longer sign in or obtain tokens. {REVOCATION_TIMING} Its memories stay; it simply loses access.
+              <b>{confirm.row.client_id}</b> can no longer obtain new OAuth tokens. {REVOCATION_TIMING} Its memories stay.
               {role !== 'user' ? ' You can re-activate it later.' : ' Only a platform admin can re-activate it.'} Audited.
             </>
           )}
@@ -425,7 +426,7 @@ export const CreateClientModal: React.FC<{ onClose: () => void; onCreated: (r: R
         <p className="sm muted" style={{ margin: 0 }}>
           {type === 'service'
             ? 'A service identity of its own, owned by you, that reads only the scopes you moderate.'
-            : 'An agent that acts for you, with no more access than you have.'}{' '}
+            : 'An agent client you own, with the scopes selected below.'}{' '}
           Its secret and API key are shown once.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

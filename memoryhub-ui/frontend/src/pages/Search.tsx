@@ -178,7 +178,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
   const [dropStage, setDropStage] = useState<FunnelKey | 'all'>('all');
   useEffect(() => {
     // GET /api/users: for a user, their own identities and agents; an identity only narrows the search.
-    api
+    if (me?.capabilities.individual_activity) api
       .users()
       .then((rows) => setIdentities(rows.map((u) => ({ id: u.owner_id, label: `${u.name} (${u.identity_type})` }))))
       .catch(() => undefined);
@@ -194,7 +194,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
   const clean = (body: Form, explain: string[] = []): SearchRequest => ({
     ...body,
     focus: body.focus?.trim() || undefined,
-    identity: body.identity?.trim() || undefined,
+    identity: me?.capabilities.individual_activity ? body.identity?.trim() || undefined : undefined,
     project: body.project?.trim() || undefined,
     explain,
   });
@@ -276,7 +276,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
               )}
               <span className="hint">Biases ranking toward this topic, weighted by the session focus weight below.</span>
             </div>
-            <div className="f">
+            {me?.capabilities.individual_activity && <div className="f">
               <label htmlFor="as">Written by (owner)</label>
               <input id="as" className="in" list="identity-list" value={form.identity} onChange={(e) => set('identity', e.target.value)} placeholder="Any owner" />
               <datalist id="identity-list">
@@ -289,7 +289,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
               <span className="hint">
                 Keeps only memories owned by this identity{role === 'user' ? ' (you or one of your agents)' : ''}. The search itself always runs as {me?.username ?? 'you'}, within your access.
               </span>
-            </div>
+            </div>}
             <div className="f">
               <label htmlFor="pj">Project context</label>
               <input id="pj" className="in" list="project-list" value={form.project} onChange={(e) => set('project', e.target.value)} />
@@ -364,7 +364,7 @@ const Search: React.FC<{ route: HashRoute }> = ({ route }) => {
             ) : !result && !running ? (
               <div className="card">
                 <Empty title="Run a search">
-                  Enter a query and choose who to run it as. You will see each pipeline stage’s timing and why every result ranked where it did.
+                  Enter a query to search within your access. You will see each pipeline stage’s timing and why every result ranked where it did.
                 </Empty>
               </div>
             ) : running && !result ? (
@@ -661,7 +661,7 @@ const DroppedList: React.FC<{ result: SearchResponse; stage: FunnelKey | 'all'; 
       ))}
       {hidden.length > 0 && (
         <p className="hint" style={{ margin: 0 }}>
-          Also dropped: {hidden.map(([k, n]) => `${n} at ${STAGE_SHORT[k] ?? k}`).join(', ')} — memories you cannot read are counted, never shown.
+          Also dropped: {hidden.map(([k, n]) => `${n} at ${STAGE_SHORT[k] ?? k}`).join(', ')}. Memories outside your access are excluded before retrieval.
         </p>
       )}
     </div>

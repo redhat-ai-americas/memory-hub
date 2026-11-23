@@ -166,7 +166,7 @@ export const USER_MOVED: Record<string, { path: string; view: string }> = {
   '/clients': { path: '/identities', view: 'keys' },
 };
 
-/** The platform admin's menu (role "admin"): personal memories stay metadata only. */
+/** The platform admin's menu (role "admin"): personal memories are excluded. */
 export const ADMIN_NAV: NavSection[] = [
   { items: [{ path: '/overview', label: 'Tenant overview' }] },
   {
@@ -273,7 +273,7 @@ export const Shell: React.FC<{ activePath: string; children: React.ReactNode }> 
         {role !== 'operator' && (
           <span
             className={`role-pill ${role}`}
-            title={role === 'admin' ? 'You moderate every scope except user; personal memories show metadata only' : 'You see memories you are allowed to read'}
+            title={role === 'admin' ? 'You moderate granted shared scopes; personal memories are excluded' : 'You see memories you are allowed to read'}
           >
             {ROLE_LABEL[role]}
           </span>

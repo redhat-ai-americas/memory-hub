@@ -324,14 +324,15 @@ function respond(role: Role, method: string, path: string, url: URL, body: unkno
         memory_id: memoryId,
         observed_behavior: 'Torque limit is now 12 N·m',
         confidence: 0.9,
-        reporter: 'curator-agent',
+        reporter: user ? 'curator-agent' : null,
         created_at: now,
         resolved: url.searchParams.get('resolved') === 'true',
         resolved_at: null,
+        can_resolve: !user,
       },
     ];
   if (path.startsWith('/api/contradictions/'))
-    return { id: reportId, memory_id: memoryId, observed_behavior: 'Torque limit is now 12 N·m', confidence: 0.9, reporter: 'curator-agent', created_at: now, resolved: true, resolved_at: now };
+    return { id: reportId, memory_id: memoryId, observed_behavior: 'Torque limit is now 12 N·m', confidence: 0.9, reporter: user ? 'curator-agent' : null, created_at: now, resolved: true, resolved_at: now, can_resolve: !user };
   if (path === '/api/memories/browse')
     return {
       items: [row(memoryId, 'Gripper torque limit is 11.5 N·m'), row(otherMemoryId, 'Path planner budget is 40 ms')],

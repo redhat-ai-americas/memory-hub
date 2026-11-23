@@ -20,7 +20,7 @@ from memoryhub_core.services.memory import (
 )
 from sqlalchemy import and_, any_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, contains_eager
 
 from src.authorization import AccessDep, Principal, get_principal
 from src.config import Settings, get_settings
@@ -1366,6 +1366,7 @@ def _live_contradictions(tenant_id: str, access: AccessDep):
     stmt = (
         select(ContradictionReport)
         .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
+        .options(contains_eager(ContradictionReport.memory))
         .where(
             ContradictionReport.tenant_id == tenant_id,
             MemoryNode.tenant_id == tenant_id,
@@ -1400,7 +1401,13 @@ def _live_contradiction_count(tenant_id: str, access: AccessDep):
     return stmt
 
 
-def _contradiction_to_response(report: ContradictionReport, access: AccessDep) -> ContradictionResponse:
+def _contradiction_to_response(
+    report: ContradictionReport, access: AccessDep, memory: MemoryNode | None = None,
+) -> ContradictionResponse:
+    # The list query loads this relationship in its existing authorized join.
+    # Read the loaded value only; never trigger async lazy loading here.
+    if memory is None:
+        memory = report.__dict__.get("memory")
     return ContradictionResponse(
         id=str(report.id),
         memory_id=str(report.memory_id),
@@ -1410,6 +1417,7 @@ def _contradiction_to_response(report: ContradictionReport, access: AccessDep) -
         created_at=report.created_at,
         resolved=report.resolved,
         resolved_at=report.resolved_at,
+        can_resolve=memory is not None and access.can_resolve_report(memory, report.reporter),
     )
 
 
@@ -1521,12 +1529,7 @@ async def update_contradiction(
     report, memory = row
     if not access.can_review(memory):
         raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
-    if (
-        report.reporter in access.identities
-        or memory.owner_id in access.identities
-        or memory.actor_id in access.identities
-        or memory.driver_id in access.identities
-    ):
+    if not access.can_resolve_report(memory, report.reporter):
         raise HTTPException(status_code=403, detail="Self review forbidden")
     report.resolved = body.resolved
     report.resolved_at = datetime.now(UTC) if body.resolved else None
@@ -1539,4 +1542,4 @@ async def update_contradiction(
     )
     await db.commit()
     await db.refresh(report)
-    return _contradiction_to_response(report, access)
+    return _contradiction_to_response(report, access, memory)

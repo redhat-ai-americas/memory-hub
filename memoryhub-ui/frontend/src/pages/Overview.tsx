@@ -83,7 +83,7 @@ const Overview: React.FC = () => {
         description={
           isAdmin ? (
             <>
-              Governed agent memory for <b>{tenant || '…'}</b> in the scopes you moderate. Personal memories are counted, never shown.
+              Governed agent memory for <b>{tenant || '…'}</b> in the scopes you moderate. Personal memories and their counts are excluded.
             </>
           ) : (
             <>

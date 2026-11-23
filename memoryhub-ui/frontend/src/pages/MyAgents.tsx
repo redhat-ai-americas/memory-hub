@@ -8,7 +8,7 @@ import Identities from './Identities';
 const MyAgents: React.FC<{ route: HashRoute }> = ({ route }) => (
   <Hub
     title="My agents & API keys"
-    description="The agents registered to you and the credentials they use to reach MemoryHub. Your agents act with your permissions: they read what you can read and write where you can write."
+    description="The agents registered to you and the credentials they use to reach MemoryHub. Agents use their own client scopes and project memberships. You manage their credentials and can read their personal memories."
     route={route}
     fallback="agents"
     views={[

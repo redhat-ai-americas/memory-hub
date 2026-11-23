@@ -292,6 +292,32 @@ async def test_admin_memory_attribution_is_redacted_across_projections(env):
     assert response.status_code == 200 and response.json()["memory"]["owner_id"] == "alice"
 
 
+async def test_report_capabilities_match_mutations_with_redacted_authors(env):
+    own = await env["seed"]("Admin-authored procedure", owner="admin", actor="admin")
+    other = await env["seed"]("Member-authored procedure")
+    async with env["sessions"]() as db:
+        reports = [ContradictionReport(memory_id=memory.id, observed_behavior=label,
+                                       confidence=0.9, reporter=reporter, tenant_id=TENANT)
+                   for memory, reporter, label in (
+                       (own, "carol", "Own memory"), (other, "admin", "Own report"),
+                       (other, "carol", "Independent report"),
+                   )]
+        db.add_all(reports)
+        await db.commit()
+    env["act_as"]("admin", "admin")
+    http = env["http"]
+    response = await http.get("/api/contradictions")
+    assert response.status_code == 200, response.text
+    rows = {row["id"]: row for row in response.json()}
+    for report, allowed in zip(reports, (False, False, True), strict=True):
+        row = rows[str(report.id)]
+        assert row["reporter"] is None and row["can_resolve"] is allowed
+        mutation = await http.patch(f"/api/contradictions/{report.id}", json={"resolved": True})
+        assert mutation.status_code == (200 if allowed else 403), mutation.text
+        if allowed:
+            assert mutation.json()["can_resolve"] is True
+
+
 async def test_parent_versioning_skips_retired_and_deleted_branches(env):
     http = env["http"]
     parent = await env["seed"]("Original specification")

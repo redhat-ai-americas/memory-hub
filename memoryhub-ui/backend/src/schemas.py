@@ -251,6 +251,7 @@ class ContradictionResponse(BaseModel):
     created_at: datetime
     resolved: bool
     resolved_at: datetime | None
+    can_resolve: bool = False
 
 
 class ContradictionStatsResponse(BaseModel):

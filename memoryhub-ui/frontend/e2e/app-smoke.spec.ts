@@ -180,16 +180,41 @@ test('user: an entity the BFF would not let them change is read only', async ({ 
 
 test('admin: no resolve button on a report about their own memory', async ({ page }) => {
   const bff = await mockBff(page, 'admin', (key, payload) => {
+    if (key === 'GET /api/contradictions') return (payload as Record<string, unknown>[]).map((r) => ({ ...r, reporter: null, can_resolve: false }));
     if (!key.endsWith('/context')) return payload;
     const ctx = payload as { memory: Record<string, unknown> };
-    return { ...ctx, memory: { ...ctx.memory, actor_id: 'dosei' } };
+    return { ...ctx, memory: { ...ctx.memory, owner_id: null, actor_id: null, driver_id: null } };
   });
   const errors = watch(page);
   await page.goto('/#/review');
-  await expect(page.getByText('You wrote this memory, so another project admin has to resolve its reports.')).toBeVisible();
+  await expect(page.getByText('You cannot resolve these reports. Another project administrator may be able to review them.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Mark resolved' })).toHaveCount(0);
   expect(bff.calls.some((c) => c.startsWith('PATCH /api/contradictions/'))).toBe(false);
   expectClean(bff, errors);
+});
+
+test('admin: direct search excludes the individual owner filter', async ({ page }) => {
+  const bff = await mockBff(page, 'admin');
+  await page.goto('/#/search');
+  await expect(page.getByLabel('Written by (owner)')).toHaveCount(0);
+  await page.getByLabel('Query', { exact: true }).fill('torque');
+  const request = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/api/search'));
+  await page.getByRole('button', { name: 'Run search' }).click();
+  expect((await request).postDataJSON()).not.toHaveProperty('identity');
+  await expect(page.locator('.res')).toHaveCount(2);
+  expect(bff.calls).not.toContain('GET /api/users');
+});
+
+test('client deactivation explains the actual lifetime of issued credentials', async ({ page }) => {
+  await mockBff(page, 'user');
+  await page.goto('/#/identities?view=keys');
+  await page.getByRole('button', { name: 'Revoke', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Existing MCP sessions are not ended.');
+  await expect(dialog).toContainText('up to five minutes');
+  await expect(dialog).not.toContainText('5 seconds');
+  await dialog.getByRole('button', { name: 'Revoke', exact: true }).click();
+  await expect(page.getByText('Client deactivated. New OAuth tokens are refused; existing tokens and MCP sessions are not ended.')).toBeVisible();
 });
 
 test('admin: memory page quarantines, and hides what a personal memory says', async ({ page }) => {

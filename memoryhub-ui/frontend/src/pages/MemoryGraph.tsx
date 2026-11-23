@@ -578,7 +578,7 @@ const MemoryGraph: React.FC<{
           {[
             { label: 'Unconnected memories', hint: 'Memories with no relationships', on: showOrphans, set: setShowOrphans },
             { label: 'Superseded versions', hint: 'Older versions, faded', on: superseded, set: setSuperseded },
-            { label: 'Labels', hint: metadataOnly ? 'Names on readable nodes; personal memories show IDs' : 'Names on key nodes', on: labels, set: setLabels },
+            { label: 'Labels', hint: metadataOnly ? 'Names on readable shared nodes' : 'Names on key nodes', on: labels, set: setLabels },
             { label: 'Fade unrelated', hint: 'On select, keep only its links bright', on: fade, set: setFade },
           ].map((s) => (
             <div className="swrow" key={s.label}>

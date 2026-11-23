@@ -152,7 +152,7 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
         <Icon.Info size={16} />
         <span className="sm">
           {isUser
-            ? 'Your agents act with your permissions: they read what you can read and write where you can write.'
+            ? 'Agents use their own client scopes and project memberships. Add each agent to the projects it needs.'
             : 'Seeing an agent here never opens its owner’s memory. Revoke and re-activate clients under OAuth clients & keys.'}
         </span>
       </div>

@@ -590,6 +590,7 @@ export interface ContradictionReport {
   created_at: string;
   resolved: boolean;
   resolved_at: string | null;
+  can_resolve: boolean;
 }
 
 /** GET /api/contradictions/stats. */

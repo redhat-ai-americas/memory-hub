@@ -163,7 +163,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
               Content moderation
               <span className="lbl g" style={{ fontFamily: 'var(--mh-font-text)' }}>
                 <LockIcon size={12} />
-                Personal memories: metadata only
+                Personal memories excluded
               </span>
             </span>
           ) : (
@@ -237,11 +237,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
           <div className="alert" role="note">
             <LockIcon size={18} />
             <div style={{ flex: '1 1 400px', minWidth: 0 }}>
-              <b>Personal memories are private.</b> You read and moderate the {(me?.access?.hidden_scopes ?? []).length ? 'scopes not hidden from you' : 'tenant’s shared scopes'}. User-scope memories show
-              metadata only and are left out of search{data?.hidden_scopes?.includes('user') && (facets?.scopes.find((f) => f.value === 'user')?.count ?? 0) > 0
-                ? ` (${fmtCompact(facets!.scopes.find((f) => f.value === 'user')!.count)} here)`
-                : ''}
-              . Only their owner can read them.
+              <b>Personal memories are private.</b> Their content, metadata and counts are excluded. You read and moderate only the shared scopes granted to you.
             </div>
           </div>
         )}
@@ -510,7 +506,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                       </button>
                     )}
                     <span style={{ marginLeft: 'auto' }} className="sm muted">
-                      Personal memories stay metadata only · audited
+                      Personal memories are excluded · audited
                     </span>
                   </>
                 ) : (
