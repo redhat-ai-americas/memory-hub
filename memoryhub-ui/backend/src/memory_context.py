@@ -79,13 +79,13 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
 
     children = (await db.execute(select(MemoryNode).where(
         MemoryNode.parent_id == seed.id, MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None),
+        MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
     ))).scalars().all()
     branches = [{
         "id": str(child.id), "branch_type": child.branch_type,
         "content": child.content if _human_can_see_content(access, child) else "",
         "actor_id": access.visible_identity(child.actor_id), "created_at": child.created_at,
-    } for child in children if _readable(access, child)]
+    } for child in children if child.is_current and _readable(access, child)]
 
     rels = (await db.execute(select(MemoryRelationship).where(
         MemoryRelationship.tenant_id == tenant,

@@ -520,7 +520,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: A
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
     access.require_read(node)
 
-    # Children count (exclude deleted)
+    # Count current, undeleted children rather than historical versions.
     count_result = await db.execute(
         select(func.count())
         .select_from(MemoryNode)
@@ -528,6 +528,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: A
             MemoryNode.parent_id == parsed_id,
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
+            MemoryNode.is_current.is_(True),
             access.clause(),
         )
     )

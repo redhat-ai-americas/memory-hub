@@ -796,6 +796,7 @@ async def browse_memories(
         filters.append(select(child.id).where(
             child.parent_id == MemoryNode.id, child.tenant_id == tenant,
             child.branch_type == branch_type, child.deleted_at.is_(None),
+            child.is_current.is_(True),
             access.clause(child),
         ).exists())
     if flag:
@@ -810,6 +811,7 @@ async def browse_memories(
             filters.append(select(child.id).where(
                 child.parent_id == MemoryNode.id, child.tenant_id == tenant,
                 child.deleted_at.is_(None),
+                child.is_current.is_(True),
                 access.clause(child),
             ).exists())
     if entity:
@@ -858,6 +860,7 @@ async def browse_memories(
         children = (await db.execute(select(MemoryNode.parent_id, MemoryNode.branch_type).where(
             MemoryNode.parent_id.in_(ids), MemoryNode.tenant_id == tenant,
             MemoryNode.deleted_at.is_(None),
+            MemoryNode.is_current.is_(True),
             access.clause(),
         ))).all()
         for parent_id, branch in children:
@@ -974,7 +977,7 @@ async def browse_memories(
         *base, MemoryNode.deleted_at.is_(None),
         select(branch.id).where(
             branch.parent_id == MemoryNode.id, branch.tenant_id == tenant,
-            branch.deleted_at.is_(None), access.clause(branch),
+            branch.deleted_at.is_(None), branch.is_current.is_(True), access.clause(branch),
         ).exists(),
     ))).scalar_one()
     facets["flags"] = {"contradicted": contradicted, "has_branches": has_branches,

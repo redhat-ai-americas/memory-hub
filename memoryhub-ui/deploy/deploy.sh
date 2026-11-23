@@ -252,6 +252,17 @@ ROUTE_EOF
         # proxy lets through without a sign-in (--skip-auth-regex).
         RHOAI_HOST=$(oc get route memoryhub-ui --context "$CONTEXT" -n "$RHOAI_NS" \
             -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+        if [ -z "$RHOAI_HOST" ]; then
+            echo "ERROR: could not resolve the RHOAI MemoryHub Route hostname."
+            exit 1
+        fi
+        # OAuthRedirectReference resolves Routes in the ServiceAccount's own
+        # namespace only. Explicitly allow the callback on the dashboard's
+        # secondary Route as well, otherwise OAuth rejects its sign-in even
+        # though /healthz succeeds through that Route.
+        oc annotate serviceaccount memoryhub-ui --context "$CONTEXT" -n "$NAMESPACE" \
+            --overwrite \
+            "serviceaccounts.openshift.io/oauth-redirecturi.rhoai=https://$RHOAI_HOST/oauth/callback"
         HEALTH_CODE=000
         for _ in $(seq 1 12); do
             HEALTH_CODE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \

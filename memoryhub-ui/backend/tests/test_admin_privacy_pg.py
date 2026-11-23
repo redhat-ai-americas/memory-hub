@@ -303,6 +303,13 @@ async def test_parent_versioning_skips_retired_and_deleted_branches(env):
     removed = await env["seed"]("Removed evidence", parent=parent.id, branch="evidence")
     deleted = await http.delete(f"/api/memory/{removed.id}")
     assert deleted.status_code == 204, deleted.text
+    context = await http.get(f"/api/memory/{parent.id}/context")
+    assert [row["id"] for row in context.json()["branches"]] == [revised.json()["id"]]
+    detail = await http.get(f"/api/memory/{parent.id}")
+    assert detail.json()["children_count"] == 1
+    browse = await http.get("/api/memories/browse")
+    row = next(item for item in browse.json()["items"] if item["id"] == str(parent.id))
+    assert row["branch_count"] == 1
     updated = await http.post(f"/api/memory/{parent.id}/versions", json={"content": "Revised specification"})
     assert updated.status_code == 201, updated.text
     async with env["sessions"]() as db:
@@ -312,3 +319,14 @@ async def test_parent_versioning_skips_retired_and_deleted_branches(env):
     assert len(children) == 1
     assert children[0].content == "Revised evidence"
     assert children[0].scope_id == "atlas-p" and children[0].is_current
+    old_context = await http.get(f"/api/memory/{parent.id}/context")
+    assert old_context.json()["branches"] == []
+    for path in ("/api/memories/browse", "/api/graph/all"):
+        for selection in ({"branch_type": "evidence"}, {"flag": "has_branches"}):
+            filtered = await http.get(path, params={"tab": "all", **selection})
+            assert filtered.status_code == 200, filtered.text
+            rows = filtered.json().get("items", filtered.json().get("nodes"))
+            assert {item["id"] for item in rows} == {updated.json()["id"]}
+    browse = await http.get("/api/memories/browse", params={"tab": "all"})
+    old = next(item for item in browse.json()["items"] if item["id"] == str(parent.id))
+    assert old["branch_count"] == 0

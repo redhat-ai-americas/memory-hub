@@ -76,6 +76,7 @@ def _conditions(
         where.append(select(child.id).where(
             child.parent_id == MemoryNode.id, child.tenant_id == tenant,
             child.deleted_at.is_(None), child.branch_type == branch_type,
+            child.is_current.is_(True),
             access.clause(child),
         ).exists())
     if flag:
@@ -90,7 +91,7 @@ def _conditions(
             child = aliased(MemoryNode)
             where.append(select(child.id).where(
                 child.parent_id == MemoryNode.id, child.tenant_id == tenant,
-                child.deleted_at.is_(None), access.clause(child),
+                child.deleted_at.is_(None), child.is_current.is_(True), access.clause(child),
             ).exists())
     if entity:
         where.append(select(MemoryRelationship.id).where(
