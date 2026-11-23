@@ -24,8 +24,9 @@ interface Row extends UserRow {
  * see only their own agents. Credentials are managed under OAuth clients.
  */
 const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
-  const { role } = useApp();
+  const { me, role } = useApp();
   const isUser = role === 'user';
+  const individualActivity = me?.capabilities.individual_activity;
   const { data, error, loading, reload } = useApi(async () => {
     const [users, clients] = await Promise.all([api.users(), api.clients().catch(() => [] as ClientResponse[])]);
     const byId = new Map(clients.map((c) => [c.client_id, c]));
@@ -52,7 +53,7 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
           title={q || kind ? 'No identities match' : isUser ? 'No agents yet' : 'No identities yet'}
           action={
             !(q || kind) && (
-              <button type="button" className="btn bp" onClick={() => setCreating(true)}>
+              <button type="button" className="btn bp" disabled={!me?.capabilities.clients.can_create} onClick={() => setCreating(true)}>
                 {isUser ? 'Register an agent' : 'Create a service client'}
               </button>
             )
@@ -67,8 +68,8 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
               <tr>
                 <th>Identity</th>
                 <th>Type</th>
-                <th>Memories</th>
-                <th>Last write</th>
+                {individualActivity && <th>Memories</th>}
+                {individualActivity && <th>Last write</th>}
                 <th>Status</th>
                 <th>
                   <span className="vh">Credentials</span>
@@ -92,10 +93,10 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
                   <td>
                     <span className={`lbl ${TYPE_LABEL[i.identity_type]?.cls ?? 'g'}`}>{TYPE_LABEL[i.identity_type]?.label ?? i.identity_type}</span>
                   </td>
-                  <td>
+                  {individualActivity && <td>
                     <a href={buildHash('/memories', { actor: i.owner_id })}>{fmtInt(i.memory_count)}</a>
-                  </td>
-                  <td className="sm muted">{i.last_active ? fmtRelative(i.last_active) : '—'}</td>
+                  </td>}
+                  {individualActivity && <td className="sm muted">{i.last_active ? fmtRelative(i.last_active) : '—'}</td>}
                   <td className="sm">
                     {!i.client ? <span className="muted">no OAuth client</span> : i.client.active ? <span className="ok">● Active</span> : <span className="err">Revoked</span>}
                   </td>
@@ -171,7 +172,7 @@ const Identities: React.FC<{ route: HashRoute }> = ({ route }) => {
             : 'Every identity that has an OAuth client or owns memories in this tenant: people, user agents and service identities, with what they have written.'
         }
         actions={
-          <button type="button" className="btn bp" onClick={() => setCreating(true)}>
+          <button type="button" className="btn bp" disabled={!me?.capabilities.clients.can_create} onClick={() => setCreating(true)}>
             <Icon.Plus /> {isUser ? 'Register an agent' : 'New service client'}
           </button>
         }

@@ -9,25 +9,10 @@ import type { ClientResponse, PublicConfig } from '@/types';
 import { errorMessage, fmtRelative } from '@/utils/format';
 import { ConfirmModal } from './common';
 
-/** Scopes the BFF lets anyone assign to a client (READ_CLIENT_SCOPES + memory:write:user). */
-const READ_SCOPES = [
-  'memory:read',
-  'memory:read:user',
-  'memory:read:project',
-  'memory:read:campaign',
-  'memory:read:role',
-  'memory:read:organizational',
-  'memory:read:enterprise',
-];
-const USER_SCOPE_OPTIONS = [...READ_SCOPES, 'memory:write:user'];
-const ALL_SCOPES = ['user', 'project', 'campaign', 'role', 'organizational', 'enterprise'];
-
-/** Admins create service clients that read only the scopes they moderate. */
+/** Use the client policy published by the BFF for the verified principal. */
 const useScopeOptions = () => {
-  const { me, role } = useApp();
-  if (role === 'user') return USER_SCOPE_OPTIONS;
-  const hidden = new Set(me?.access?.hidden_scopes ?? []);
-  return ALL_SCOPES.filter((s) => !hidden.has(s)).map((s) => `memory:read:${s}`);
+  const { me } = useApp();
+  return me?.capabilities.clients.scopes ?? [];
 };
 
 /** Freshly issued credentials, shown once. */
@@ -52,7 +37,7 @@ const REVOKED_TOAST = 'Client revoked. New tokens are refused now; existing toke
  */
 const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
   const toast = useToast();
-  const { role } = useApp();
+  const { me, role } = useApp();
   const focusClient = route.params.get('client');
   const { data, error, loading, reload } = useApi(() => api.clients(), []);
   const [revealed, setRevealed] = useState<Revealed | null>(null);
@@ -102,7 +87,7 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
             : 'The tenant’s OAuth clients. You create service clients that read the scopes you moderate. Secrets and API keys are shown once; nobody can view them later, including you.'
         }
         actions={
-          <button type="button" className="btn bp" disabled={!data} onClick={() => setCreating(true)}>
+          <button type="button" className="btn bp" disabled={!data || !me?.capabilities.clients.can_create} onClick={() => setCreating(true)}>
             <Icon.Plus /> {role === 'user' ? 'New OAuth client' : 'New service client'}
           </button>
         }
@@ -151,7 +136,7 @@ const Clients: React.FC<{ route: HashRoute }> = ({ route }) => {
               title={rows.length ? 'Nothing matches' : 'No OAuth clients yet'}
               action={
                 !rows.length && (
-                  <button type="button" className="btn bp" onClick={() => setCreating(true)}>
+                  <button type="button" className="btn bp" disabled={!me?.capabilities.clients.can_create} onClick={() => setCreating(true)}>
                     {role === 'user' ? 'New OAuth client' : 'New service client'}
                   </button>
                 )
@@ -395,12 +380,12 @@ const RevealCard: React.FC<{ revealed: Revealed; onDismiss: () => void }> = ({ r
 /** POST /api/clients: users create user agents, admins create service clients. */
 export const CreateClientModal: React.FC<{ onClose: () => void; onCreated: (r: Revealed) => void }> = ({ onClose, onCreated }) => {
   const toast = useToast();
-  const { tenant, role } = useApp();
+  const { tenant, me } = useApp();
   const options = useScopeOptions();
-  const type: 'user' | 'service' = role === 'user' ? 'user' : 'service';
+  const type = me!.capabilities.clients.identity_types[0];
   const [clientId, setClientId] = useState('');
   const [name, setName] = useState('');
-  const [scopes, setScopes] = useState<string[]>(role === 'user' ? ['memory:read', 'memory:write:user'] : options.slice(0, 1));
+  const [scopes, setScopes] = useState<string[]>(me!.capabilities.clients.default_scopes);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<Revealed | null>(null);
@@ -468,7 +453,7 @@ export const CreateClientModal: React.FC<{ onClose: () => void; onCreated: (r: R
         </div>
         {err && <div className="alert err-a">{err}</div>}
         <div className="modal-actions">
-          <button type="submit" className="btn bp" disabled={busy || !clientId.trim() || scopes.length === 0}>
+          <button type="submit" className="btn bp" disabled={busy || !clientId.trim() || scopes.length === 0 || !me?.capabilities.clients.can_create}>
             {busy ? 'Creating…' : 'Create'}
           </button>
           <button type="button" className="btn bg" onClick={onClose}>

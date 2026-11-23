@@ -81,6 +81,17 @@ const me = (role: Role) => ({
       ? { scopes: ['project', 'organizational'], project_ids: ['atlas-planner'], campaign_ids: [], owner_id: 'dosei' }
       : { scopes: ['user', 'project'], project_ids: ['atlas-planner'], campaign_ids: [], owner_id: 'mchen' },
   access: role === 'admin' ? { hidden_scopes: ['enterprise', 'user'], break_glass: null } : null,
+  capabilities: {
+    individual_activity: role === 'user',
+    clients: {
+      can_create: true,
+      identity_types: [role === 'admin' ? 'service' : 'user'],
+      scopes: role === 'admin'
+        ? ['memory:read:campaign', 'memory:read:organizational', 'memory:read:project', 'memory:read:role']
+        : ['memory:read', 'memory:read:user', 'memory:read:project', 'memory:read:campaign', 'memory:read:role', 'memory:read:organizational', 'memory:read:enterprise', 'memory:write:user'],
+      default_scopes: [role === 'admin' ? 'memory:read:organizational' : 'memory:read'],
+    },
+  },
   labs: false,
 });
 

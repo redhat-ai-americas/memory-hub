@@ -616,28 +616,34 @@ def test_entity_merge_rejects_inaccessible_linked_source(client, inaccessible):
         merge.assert_not_awaited()
 
 
-def test_browse_redacts_admin_personal_content_and_capabilities(client):
+def test_browse_admin_excludes_personal_and_redacts_unmoderated_shared_rows(client):
     http, db, set_access = client
     set_access(access("admin"))
     personal = node(owner_id="bob", content="private text", stub="private stub")
+    foreign_project = node(scope="project", scope_id="other", owner_id="bob",
+                           content="project text", stub="project stub")
     db.execute.side_effect = [
-        result(1), result(items=[personal]), result(rows=[]), result(rows=[]),
+        result(2), result(items=[personal, foreign_project]), result(rows=[]), result(rows=[]),
         result(1), result(1), result(0), result(0),
-        result(rows=[("user", 1)]), result(rows=[("bob", 1)]), result(rows=[]),
+        # No "writers" facet query for an admin: per-person counts are individual activity.
+        result(rows=[("project", 1)]), result(rows=[]),
         result(rows=[]), result(0), result(0),
     ]
     response = http.get("/api/memories/browse?q=bob&mode=semantic")
     assert response.status_code == 200
     body = response.json()
     assert body["search_mode"] == "text"
-    assert body["items"][0]["redacted"] is True
-    assert body["items"][0]["content_preview"] == ""
-    assert body["items"][0]["stub"] == "Content hidden"
-    assert body["items"][0]["capabilities"] == {"write": False, "moderate": False}
+    # A personal row is not an admin's even as metadata (#667); it is dropped.
+    assert [item["id"] for item in body["items"]] == [str(foreign_project.id)]
+    assert "private" not in response.text
+    item = body["items"][0]
+    assert item["redacted"] is True and item["content_preview"] == "" and item["stub"] == "Content hidden"
+    assert item["capabilities"] == {"write": False, "moderate": False}
     assert body["facets"]["flags"] == {"contradicted": 0, "has_branches": 0,
                                       "near_duplicate": None}
     sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
-    assert "tenant-a" in sql and "bob" in sql
+    assert "tenant-a" in sql and "bob" in sql and "memory_nodes.scope IN" in sql
+    assert "'entity'" not in sql and "'user'" not in sql
 
 
 def test_browse_user_cannot_request_quarantine_or_see_foreign_row(client):

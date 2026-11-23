@@ -81,6 +81,7 @@ async def human_search(body: SearchBody, db: DbDep, access: AccessDep,
             raise HTTPException(status_code=404, detail="Project not found")
         projects = {body.project}
         scopes = {"project": [body.project]}
+    access.forbid_person_filter(body.identity)
     if body.identity and access.principal.role == "user" and body.identity not in access.identities:
         raise HTTPException(status_code=404, detail="Identity not found")
     start = time.monotonic()
@@ -141,7 +142,7 @@ async def human_search(body: SearchBody, db: DbDep, access: AccessDep,
         temporal = "expired" if node.relevant_until and node.relevant_until <= now else "current"
         results.append({
             "rank": len(results) + 1, "id": str(node.id), "scope": node.scope,
-            "scope_id": node.scope_id, "owner_id": node.owner_id, "stub": node.stub,
+            "scope_id": node.scope_id, "owner_id": access.visible_identity(node.owner_id), "stub": node.stub,
             "content": content, "delivery": "full" if full else "stub",
             "weight": node.weight, "version": node.version,
             "relevant_until": node.relevant_until, "temporal_status": temporal,

@@ -47,8 +47,8 @@ const changeSummary = (v: Version, prev?: Version): string => {
   return parts.join(' · ') || 'New version';
 };
 
-const who = (actor: string | null, driver: string | null, owner: string) => {
-  const a = actor || owner;
+const who = (actor: string | null, driver: string | null, owner: string | null) => {
+  const a = actor || owner || '—';
   if (driver && driver !== a) return `${a} (${driver})`;
   return a;
 };

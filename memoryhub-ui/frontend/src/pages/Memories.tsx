@@ -35,7 +35,8 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
   const { standby, refreshCounts, role, me } = useApp();
   const isAdmin = role === 'admin';
   const canWrite = (me?.write?.scopes ?? []).length > 0;
-  const p = route.params;
+  const p = new URLSearchParams(route.params);
+  if (isAdmin) p.delete('actor');
   const view: 'table' | 'graph' = p.get('view') === 'graph' ? 'graph' : 'table';
   const state = {
     entity: p.get('entity') || '',
@@ -263,7 +264,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
           </div>
         )}
         {view === 'graph' ? (
-          <MemoryGraph route={route} setParams={setParams} />
+          <MemoryGraph route={{ ...route, params: p }} setParams={setParams} />
         ) : (
         <div className="row-wrap">
           <aside className="card" style={{ flex: '1 1 230px', maxWidth: '100%', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 20 }} aria-label="Filters">
@@ -303,7 +304,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                       ))}
                   </div>
                 </div>
-                <div>
+                {!isAdmin && <div>
                   <p className="fh">Written by</p>
                   <div className="fx">
                     {writers.length === 0 && <span className="sm muted">No writers yet</span>}
@@ -322,7 +323,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                       </button>
                     )}
                   </div>
-                </div>
+                </div>}
                 <div>
                   <p className="fh">Project</p>
                   <SelectMenu

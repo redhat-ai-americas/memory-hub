@@ -7,7 +7,7 @@ from typing import Annotated
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.conversation import ConversationThread
 from memoryhub_core.models.curation import CuratorRule
@@ -77,7 +77,7 @@ def _node_to_graph_node(node: MemoryNode, access: AccessDep) -> GraphNode:
         scope=node.scope,
         weight=node.weight,
         branch_type=node.branch_type,
-        owner_id=node.owner_id,
+        owner_id=access.visible_identity(node.owner_id),
         version=node.version,
         created_at=node.created_at,
         updated_at=node.updated_at,
@@ -168,7 +168,7 @@ async def healthz():
 
 
 @router.get("/api/me", response_model=MeResponse)
-async def get_me(access: AccessDep, response: Response):
+async def get_me(access: AccessDep, settings: SettingsDep, response: Response):
     """Expose only the verified OAuth-proxy principal needed by the UI Shell."""
     response.headers["Cache-Control"] = "no-store"
     principal = access.principal
@@ -185,9 +185,13 @@ async def get_me(access: AccessDep, response: Response):
         name=principal.username,
         email=None,
         initials=principal.username[:2].upper(),
-        source="oauth-proxy",
+        source="local" if settings.ui_auth_mode == "local" else "oauth-proxy",
         role=principal.role,
         tenant_id=principal.tenant_id,
+        capabilities={
+            "individual_activity": access.sees_individual_activity,
+            "clients": _client_capabilities(access),
+        },
         write={"scopes": write_scopes, "project_ids": project_ids,
                "campaign_ids": [], "owner_id": principal.username},
         access={
@@ -289,6 +293,7 @@ async def get_graph(
     straddle tenants even though we defensively filter the relationship
     table too.
     """
+    access.forbid_person_filter(owner_id)
     tenant_id = settings.ui_tenant_id
     stmt = select(MemoryNode).where(
         MemoryNode.tenant_id == tenant_id,
@@ -458,7 +463,8 @@ async def get_stats(db: DbDep, settings: SettingsDep, access: AccessDep):
             id=str(n.id),
             stub="Content hidden" if access.hides_content(n) else n.stub,
             scope=n.scope,
-            owner_id=n.owner_id,
+            # Who changed what and when is individual activity; admins see what changed only.
+            owner_id=n.owner_id if access.sees_individual_activity else None,
             updated_at=n.updated_at,
             action="created" if n.version == 1 else "updated",
         )
@@ -514,7 +520,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: A
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
     access.require_read(node)
 
-    # Children count (exclude deleted)
+    # Count current, undeleted children rather than historical versions.
     count_result = await db.execute(
         select(func.count())
         .select_from(MemoryNode)
@@ -522,6 +528,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: A
             MemoryNode.parent_id == parsed_id,
             MemoryNode.tenant_id == tenant_id,
             MemoryNode.deleted_at.is_(None),
+            MemoryNode.is_current.is_(True),
             access.clause(),
         )
     )
@@ -566,7 +573,7 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: A
         scope=node.scope,
         weight=node.weight,
         branch_type=node.branch_type,
-        owner_id=node.owner_id,
+        owner_id=access.visible_identity(node.owner_id),
         version=node.version,
         is_current=node.is_current,
         parent_id=visible_parent_id,
@@ -729,6 +736,24 @@ READ_CLIENT_SCOPES = frozenset({
     "memory:read:enterprise",
 })
 ASSIGNABLE_CLIENT_SCOPES = READ_CLIENT_SCOPES | {"memory:write:user"}
+
+
+def _client_capabilities(access: AccessDep) -> dict:
+    """Publish the same client creation policy enforced by the BFF."""
+    if access.principal.role == "admin":
+        scopes = sorted(f"memory:read:{scope}" for scope in access.moderation_scopes)
+        identity_types = ["service"]
+        default = "memory:read:organizational"
+    else:
+        scopes = sorted(ASSIGNABLE_CLIENT_SCOPES)
+        identity_types = ["user"]
+        default = "memory:read"
+    return {
+        "can_create": bool(scopes),
+        "identity_types": identity_types,
+        "scopes": scopes,
+        "default_scopes": [default] if default in scopes else scopes[:1],
+    }
 
 
 def _client_scopes_allowed(access: AccessDep, scopes: list[str], identity_type: str) -> None:
@@ -902,6 +927,9 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
     Merges OAuth client data from auth service with memory stats from DB.
     Both the local memory_nodes aggregation and the auth service client
     list are tenant-scoped by ``settings.ui_tenant_id`` (#105).
+
+    Admins get the roster only: per-person memory counts and last-active
+    times are individual activity (#667), so they are null for an Admin.
     """
     tenant_id = access.principal.tenant_id
 
@@ -922,11 +950,14 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
     )
     if access.principal.role == "user":
         stats_query = stats_query.where(MemoryNode.owner_id.in_(access.identities))
-    result = await db.execute(stats_query)
-    owner_stats = {
-        row[0]: {"memory_count": row[1], "last_active": row[2]}
-        for row in result.fetchall()
-    }
+    if access.sees_individual_activity:
+        result = await db.execute(stats_query)
+        owner_stats = {
+            row[0]: {"memory_count": row[1], "last_active": row[2]}
+            for row in result.fetchall()
+        }
+    else:
+        owner_stats = {}
 
     # The roster must not masquerade as complete when Auth is unavailable.
     resp = await _admin_request(
@@ -943,7 +974,9 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
         seen_owners: set[str] = set()
         for c in clients:
             cid = c["client_id"]
-            stats = owner_stats.get(cid, {"memory_count": 0, "last_active": None})
+            stats = owner_stats.get(cid, {
+                "memory_count": 0 if access.sees_individual_activity else None, "last_active": None,
+            })
             users.append({
                 "name": c["client_name"],
                 "owner_id": cid,
@@ -982,7 +1015,7 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
 # ---------------------------------------------------------------------------
 
 
-def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
+def _rule_to_response(rule: CuratorRule, access: AccessDep) -> CurationRuleResponse:
     return CurationRuleResponse(
         id=str(rule.id),
         name=rule.name,
@@ -993,14 +1026,14 @@ def _rule_to_response(rule: CuratorRule) -> CurationRuleResponse:
         action=rule.action,
         scope_filter=rule.scope_filter,
         layer=rule.layer,
-        owner_id=rule.owner_id,
+        owner_id=access.visible_identity(rule.owner_id),
         override=rule.override,
         enabled=rule.enabled,
         priority=rule.priority,
         version=rule.version,
         is_current=rule.is_current,
         previous_version_id=str(rule.previous_version_id) if rule.previous_version_id else None,
-        edited_by=rule.edited_by,
+        edited_by=access.visible_identity(rule.edited_by),
         created_at=rule.created_at,
         updated_at=rule.updated_at,
     )
@@ -1011,9 +1044,9 @@ def _can_read_rule(access: AccessDep, rule: CuratorRule) -> bool:
         return False
     if rule.layer in ("system", "organizational"):
         return True
-    return rule.layer == "user" and (
-        access.principal.role == "admin" or rule.owner_id == access.principal.username
-    )
+    # Personal rules (their names and patterns) belong to their owner only;
+    # an Admin sees no personal data (#667, PR 710 review).
+    return rule.layer == "user" and rule.owner_id == access.principal.username
 
 
 def _can_change_rule(access: AccessDep, rule: CuratorRule) -> bool:
@@ -1040,10 +1073,7 @@ async def list_rules(
     tenant at the service layer.
     """
     tenant_id = access.principal.tenant_id
-    visible_user_rules = (
-        CuratorRule.layer == "user" if access.principal.role == "admin"
-        else and_(CuratorRule.layer == "user", CuratorRule.owner_id == access.principal.username)
-    )
+    visible_user_rules = and_(CuratorRule.layer == "user", CuratorRule.owner_id == access.principal.username)
     stmt = (
         select(CuratorRule)
         .where(CuratorRule.tenant_id == tenant_id, CuratorRule.is_current.is_(True))
@@ -1061,7 +1091,7 @@ async def list_rules(
         stmt = stmt.where(CuratorRule.layer == layer)
     result = await db.execute(stmt)
     rules = result.scalars().all()
-    return [_rule_to_response(r) for r in rules if _can_read_rule(access, r)]
+    return [_rule_to_response(r, access) for r in rules if _can_read_rule(access, r)]
 
 
 @router.post("/api/rules", response_model=CurationRuleResponse, status_code=201)
@@ -1103,7 +1133,7 @@ async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep,
     db.add(rule)
     await db.commit()
     await db.refresh(rule)
-    return _rule_to_response(rule)
+    return _rule_to_response(rule, access)
 
 
 @router.get("/api/rules/{rule_id}", response_model=CurationRuleResponse)
@@ -1128,7 +1158,7 @@ async def get_rule(rule_id: str, db: DbDep, settings: SettingsDep, access: Acces
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
     if not _can_read_rule(access, rule):
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
-    return _rule_to_response(rule)
+    return _rule_to_response(rule, access)
 
 
 @router.patch("/api/rules/{rule_id}", response_model=CurationRuleResponse)
@@ -1178,7 +1208,7 @@ async def update_rule(
         update_data["override"] = False
 
     if not update_data:
-        return _rule_to_response(old_rule)
+        return _rule_to_response(old_rule, access)
 
     new_rule = CuratorRule(
         tenant_id=tenant_id,
@@ -1204,11 +1234,11 @@ async def update_rule(
     db.add(new_rule)
     await db.commit()
     await db.refresh(new_rule)
-    return _rule_to_response(new_rule)
+    return _rule_to_response(new_rule, access)
 
 
 @router.get("/api/rules/{rule_id}/history", response_model=list[RuleVersionEntry])
-async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, request: Request):
+async def get_rule_history(rule_id: str, db: DbDep, access: AccessDep):
     """Return the full version chain for a rule, newest first.
 
     Accepts any version's UUID — walks backward via previous_version_id
@@ -1216,15 +1246,7 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, reque
 
     Phase 6 (#46): tenant-scoped; cross-tenant lookups return 404.
     """
-    # The audited UI has no human rule-history operation. This legacy route
-    # remains available only to a local technical caller with the service key.
-    import hmac
-    peer = request.client.host if request.client else ""
-    if peer not in ("127.0.0.1", "::1") or not settings.admin_key or not hmac.compare_digest(
-        request.headers.get("x-admin-key", ""), settings.admin_key
-    ):
-        raise HTTPException(status_code=403, detail="Technical access only")
-    tenant_id = settings.ui_tenant_id
+    tenant_id = access.principal.tenant_id
     try:
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
@@ -1237,7 +1259,8 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, reque
             CuratorRule.tenant_id == tenant_id,
         )
     )
-    if seed_result.scalar_one_or_none() is None:
+    seed = seed_result.scalar_one_or_none()
+    if seed is None or not _can_read_rule(access, seed):
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
 
     # Single recursive CTE: walk backward to the oldest ancestor, then forward
@@ -1253,14 +1276,16 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, reque
               ),
               root AS (SELECT id FROM ancestors WHERE previous_version_id IS NULL),
               chain AS (
-                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at
+                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at,
+                       r.tenant_id, r.layer, r.owner_id
                 FROM curator_rules r JOIN root ON r.id = root.id WHERE r.tenant_id = :tenant_id
                 UNION
-                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at
+                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at,
+                       r.tenant_id, r.layer, r.owner_id
                 FROM curator_rules r
                 JOIN chain c ON r.previous_version_id = c.id WHERE r.tenant_id = :tenant_id
               )
-            SELECT id, version, is_current, name, edited_by, created_at
+            SELECT id, version, is_current, name, edited_by, created_at, tenant_id, layer, owner_id
             FROM chain
             ORDER BY version DESC
         """),
@@ -1272,10 +1297,10 @@ async def get_rule_history(rule_id: str, db: DbDep, settings: SettingsDep, reque
             version=row.version,
             is_current=row.is_current,
             name=row.name,
-            edited_by=row.edited_by,
+            edited_by=access.visible_identity(row.edited_by),
             created_at=row.created_at,
         )
-        for row in chain_result.fetchall()
+        for row in chain_result.fetchall() if _can_read_rule(access, row)
     ]
 
 
@@ -1375,13 +1400,13 @@ def _live_contradiction_count(tenant_id: str, access: AccessDep):
     return stmt
 
 
-def _contradiction_to_response(report: ContradictionReport) -> ContradictionResponse:
+def _contradiction_to_response(report: ContradictionReport, access: AccessDep) -> ContradictionResponse:
     return ContradictionResponse(
         id=str(report.id),
         memory_id=str(report.memory_id),
         observed_behavior=report.observed_behavior,
         confidence=report.confidence,
-        reporter=report.reporter,
+        reporter=access.visible_identity(report.reporter),
         created_at=report.created_at,
         resolved=report.resolved,
         resolved_at=report.resolved_at,
@@ -1412,7 +1437,7 @@ async def list_contradictions(
         stmt = stmt.where(ContradictionReport.confidence <= max_confidence)
     result = await db.execute(stmt)
     reports = result.scalars().all()
-    return [_contradiction_to_response(r) for r in reports]
+    return [_contradiction_to_response(r, access) for r in reports]
 
 
 @router.get("/api/contradictions/stats", response_model=ContradictionStatsResponse)
@@ -1514,4 +1539,4 @@ async def update_contradiction(
     )
     await db.commit()
     await db.refresh(report)
-    return _contradiction_to_response(report)
+    return _contradiction_to_response(report, access)

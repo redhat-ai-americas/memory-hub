@@ -389,6 +389,8 @@ async def _mutation_neighbors(db: AsyncSession, access: AccessDep, node: MemoryN
     """Preflight the branch/relationship set that Core versioning mutates."""
     children = (await db.execute(select(MemoryNode).where(
         MemoryNode.parent_id == node.id,
+        MemoryNode.is_current.is_(True),
+        MemoryNode.deleted_at.is_(None),
     ).with_for_update())).scalars().all()
     rels = (await db.execute(select(MemoryRelationship).where(
         MemoryRelationship.valid_until.is_(None),
@@ -755,10 +757,14 @@ async def browse_memories(
         raise HTTPException(status_code=422, detail="Unsupported flag filter")
     if access.principal.role == "user" and tab in ("quarantined", "deleted"):
         raise HTTPException(status_code=403, detail="Memory state forbidden")
+    access.forbid_person_filter(actor)
     tenant = access.principal.tenant_id
     base = [MemoryNode.tenant_id == tenant]
     if access.principal.role == "user":
         base.append(_human_content_clause(access))
+    else:
+        # Admin rows are metadata of shared scopes only; personal memories are excluded (#667).
+        base.append(access.clause())
     filters = list(base)
     if tab == "current":
         filters.extend((MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
@@ -790,6 +796,7 @@ async def browse_memories(
         filters.append(select(child.id).where(
             child.parent_id == MemoryNode.id, child.tenant_id == tenant,
             child.branch_type == branch_type, child.deleted_at.is_(None),
+            child.is_current.is_(True),
             access.clause(child),
         ).exists())
     if flag:
@@ -804,6 +811,7 @@ async def browse_memories(
             filters.append(select(child.id).where(
                 child.parent_id == MemoryNode.id, child.tenant_id == tenant,
                 child.deleted_at.is_(None),
+                child.is_current.is_(True),
                 access.clause(child),
             ).exists())
     if entity:
@@ -817,9 +825,10 @@ async def browse_memories(
     search_mode = "none"
     if q:
         pattern = f"%{q.strip()}%"
+        # Searching by owner would count one person's memories; admins match IDs only.
         metadata_match = or_(
             cast(MemoryNode.id, String).ilike(pattern), MemoryNode.owner_id.ilike(pattern),
-        )
+        ) if access.sees_individual_activity else cast(MemoryNode.id, String).ilike(pattern)
         if mode == "metadata":
             filters.append(metadata_match)
             search_mode = "metadata"
@@ -839,7 +848,8 @@ async def browse_memories(
     memories = [
         memory for memory in memories
         if memory.tenant_id == tenant and (
-            access.principal.role == "admin" or _human_can_see_content(access, memory)
+            access.can_read(memory) if access.principal.role == "admin"
+            else _human_can_see_content(access, memory)
         )
     ]
     ids = [memory.id for memory in memories]
@@ -850,6 +860,7 @@ async def browse_memories(
         children = (await db.execute(select(MemoryNode.parent_id, MemoryNode.branch_type).where(
             MemoryNode.parent_id.in_(ids), MemoryNode.tenant_id == tenant,
             MemoryNode.deleted_at.is_(None),
+            MemoryNode.is_current.is_(True),
             access.clause(),
         ))).all()
         for parent_id, branch in children:
@@ -899,7 +910,9 @@ async def browse_memories(
             "id": str(memory.id), "stub": "Content hidden" if hidden else memory.stub,
             "content_preview": "" if hidden else memory.content[:240],
             "scope": memory.scope, "scope_id": memory.scope_id,
-            "owner_id": memory.owner_id, "actor_id": memory.actor_id, "driver_id": memory.driver_id,
+            "owner_id": access.visible_identity(memory.owner_id),
+            "actor_id": access.visible_identity(memory.actor_id),
+            "driver_id": access.visible_identity(memory.driver_id),
             "domains": [] if hidden else (memory.domains or []),
             "weight": memory.weight, "version": memory.version,
             "is_current": memory.is_current, "status": memory.status,
@@ -931,10 +944,11 @@ async def browse_memories(
         else:
             stmt = select(func.count()).select_from(MemoryNode).where(*base, *condition)
             tabs[name] = (await db.execute(stmt)).scalar_one()
-    facets = {}
+    facets = {"writers": []}
     for name, column, extra in (
         ("scopes", MemoryNode.scope, ()),
-        ("writers", MemoryNode.owner_id, ()),
+        # Memories per person is individual activity: not an admin facet (#667).
+        *((("writers", MemoryNode.owner_id, ()),) if access.sees_individual_activity else ()),
         ("projects", MemoryNode.scope_id, (MemoryNode.scope == "project",)),
     ):
         rows = (await db.execute(select(column, func.count()).select_from(MemoryNode).where(
@@ -963,7 +977,7 @@ async def browse_memories(
         *base, MemoryNode.deleted_at.is_(None),
         select(branch.id).where(
             branch.parent_id == MemoryNode.id, branch.tenant_id == tenant,
-            branch.deleted_at.is_(None), access.clause(branch),
+            branch.deleted_at.is_(None), branch.is_current.is_(True), access.clause(branch),
         ).exists(),
     ))).scalar_one()
     facets["flags"] = {"contradicted": contradicted, "has_branches": has_branches,

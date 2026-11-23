@@ -1404,6 +1404,9 @@ class TestCurationRulesEndpoints:
                 self.name = rule.name
                 self.edited_by = rule.edited_by
                 self.created_at = rule.created_at
+                self.tenant_id = rule.tenant_id
+                self.layer = rule.layer
+                self.owner_id = rule.owner_id
 
         execute_calls = [
             # Call 1: seed check (scalar_one_or_none)
@@ -1429,7 +1432,7 @@ class TestCurationRulesEndpoints:
             # newest first
             assert body[0]["version"] == 2
             assert body[0]["is_current"] is True
-            assert body[0]["edited_by"] == "dashboard-operator"
+            assert body[0]["edited_by"] is None
             assert body[1]["version"] == 1
             assert body[1]["is_current"] is False
             assert body[1]["edited_by"] is None
@@ -2201,6 +2204,10 @@ class TestTenantFiltering:
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: settings
+        # Only a User gets per-person stats; an Admin's roster runs no stats query (#667).
+        app.dependency_overrides[get_access] = lambda: Access(
+            principal=Principal("test-user", "user", "tenant_b"), agents={"test-client"},
+        )
 
         # An unavailable Auth service must not produce a partial roster.
         with patch(

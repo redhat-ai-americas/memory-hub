@@ -79,7 +79,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // Remount every screen on an authorization change to discard cached content.
-  const authorizationKey = JSON.stringify([me?.tenant_id, me?.username, me?.role, me?.access, me?.write]);
+  const authorizationKey = JSON.stringify([me?.tenant_id, me?.username, me?.role, me?.access, me?.write, me?.capabilities]);
 
   useEffect(() => {
     if (!me) return;

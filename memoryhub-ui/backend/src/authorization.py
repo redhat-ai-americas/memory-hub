@@ -8,6 +8,7 @@ the peer check below also rejects direct calls to the application port.
 from __future__ import annotations
 
 import ipaddress
+import logging
 from dataclasses import dataclass, field
 from typing import Annotated
 
@@ -23,8 +24,10 @@ from sqlalchemy.orm import declarative_base
 from src.config import Settings, get_settings
 from src.database import get_db
 
+logger = logging.getLogger(__name__)
 OwnerBase = declarative_base()
 ADMIN_MODERATION_SCOPES = frozenset({"project", "campaign", "role", "organizational"})
+ADMIN_VISIBLE_SCOPES = ADMIN_MODERATION_SCOPES | {"enterprise"}
 
 
 class AgentOwner(OwnerBase):
@@ -46,6 +49,23 @@ class Principal:
 
 
 def get_principal(request: Request, settings: Annotated[Settings, Depends(get_settings)]) -> Principal:
+    problem = settings.identity_problem()
+    if problem:
+        raise HTTPException(status_code=503, detail=problem)
+    if settings.ui_auth_mode == "local":
+        # Local development: one configured identity; request headers are never trusted.
+        username = settings.ui_local_user.strip()
+    else:
+        username = _proxy_user(request)
+    admins, allowed = settings.human_access()
+    if username not in admins and username not in allowed:
+        logger.warning("Dashboard access denied: %r is not in the human access lists", username)
+        raise HTTPException(status_code=403, detail="Tenant access forbidden")
+    return Principal(username=username, role="admin" if username in admins else "user", tenant_id=settings.ui_tenant_id)
+
+
+def _proxy_user(request: Request) -> str:
+    """The user the OpenShift OAuth proxy authenticated; only the loopback sidecar may say."""
     peer = request.client.host if request.client else ""
     try:
         local = ipaddress.ip_address(peer).is_loopback
@@ -53,19 +73,13 @@ def get_principal(request: Request, settings: Annotated[Settings, Depends(get_se
         local = False
     if not local:
         raise HTTPException(status_code=401, detail="OAuth proxy required")
-    if not settings.ui_tenant_id.strip():
-        raise HTTPException(status_code=503, detail="Dashboard tenant is not configured")
     users = request.headers.getlist("x-forwarded-user")
     if len(users) != 1:
         raise HTTPException(status_code=401, detail="Authenticated user required")
     username = users[0].strip()
     if not username or len(username) > 255 or any(c in username for c in "\r\n\x00"):
         raise HTTPException(status_code=401, detail="Authenticated user required")
-    admins = {item.strip() for item in settings.ui_admin_users.split(",") if item.strip()}
-    allowed = {item.strip() for item in settings.ui_allowed_users.split(",") if item.strip()}
-    if username not in admins and username not in allowed:
-        raise HTTPException(status_code=403, detail="Tenant access forbidden")
-    return Principal(username=username, role="admin" if username in admins else "user", tenant_id=settings.ui_tenant_id)
+    return username
 
 
 @dataclass
@@ -94,9 +108,14 @@ class Access:
         return {self.principal.username} | self.agents
 
     def clause(self, node=MemoryNode):
-        """SQL predicate applied before graph/search/stats/contradiction rows leave DB."""
+        """SQL predicate applied before graph/search/stats/contradiction rows leave DB.
+
+        Admins never see user-scope (personal) memories, not even their
+        metadata: IDs, owners, timestamps and counts stay out of every admin
+        path that is built on this predicate or on ``can_read`` (#667).
+        """
         if self.principal.role == "admin":
-            return node.tenant_id == self.principal.tenant_id
+            return and_(node.tenant_id == self.principal.tenant_id, node.scope.in_(ADMIN_VISIBLE_SCOPES))
         return and_(
             node.tenant_id == self.principal.tenant_id,
             node.status == "active",
@@ -130,7 +149,8 @@ class Access:
         if node.tenant_id != self.principal.tenant_id:
             return False
         if self.principal.role == "admin":
-            return True  # metadata only for user-scope memories
+            # Shared scopes only; metadata of personal memories is not an admin's (#667).
+            return node.scope in ADMIN_VISIBLE_SCOPES
         if node.status != "active":
             return False
         return (
@@ -209,6 +229,20 @@ class Access:
             or (node.scope == "campaign" and "campaign" in self.moderation_scopes
                 and node.owner_id in self.human_campaigns)
         )
+
+    @property
+    def sees_individual_activity(self) -> bool:
+        """Admins get no per-person activity: no counts, last-active times or
+        per-person filters, which would show who works when and how much (#667)."""
+        return self.principal.role != "admin"
+
+    def forbid_person_filter(self, *values) -> None:
+        if not self.sees_individual_activity and any(values):
+            raise HTTPException(status_code=403, detail="Per-person filters are not available to admins")
+
+    def visible_identity(self, identity: str | None) -> str | None:
+        """Keep writer attribution out of administrator memory projections."""
+        return identity if self.sees_individual_activity else None
 
     def require_read(self, node: MemoryNode) -> None:
         if not self.can_read(node):

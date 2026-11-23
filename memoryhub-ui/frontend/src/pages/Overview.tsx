@@ -195,7 +195,7 @@ const Overview: React.FC = () => {
                         <tr>
                           <th>When</th>
                           <th>Memory</th>
-                          <th>Owner</th>
+                          {role === 'user' && <th>Owner</th>}
                           <th>Scope</th>
                           <th>Change</th>
                         </tr>
@@ -209,7 +209,7 @@ const Overview: React.FC = () => {
                             <td style={{ maxWidth: 420 }}>
                               <a href={memoryHref(r.id)}>{truncate(r.stub, 110)}</a>
                             </td>
-                            <td>{r.owner_id}</td>
+                            {role === 'user' && <td>{r.owner_id}</td>}
                             <td>
                               <ScopeLabel scope={r.scope} />
                             </td>

@@ -40,7 +40,7 @@ def _brief(node: MemoryNode, access: Access) -> dict:
     hidden = not _human_can_see_content(access, node)
     return {
         "id": str(node.id), "stub": "Content hidden" if hidden else node.stub,
-        "scope": node.scope, "scope_id": node.scope_id, "owner_id": node.owner_id,
+        "scope": node.scope, "scope_id": node.scope_id, "owner_id": access.visible_identity(node.owner_id),
         "weight": node.weight, "version": node.version,
         "is_current": node.is_current, "status": node.status,
         "created_at": node.created_at, "updated_at": node.updated_at,
@@ -72,20 +72,20 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
     versions = [{
         "id": str(row.id), "version": row.version, "is_current": row.is_current,
         "content": "" if not _human_can_see_content(access, row) else row.content,
-        "weight": row.weight, "actor_id": row.actor_id,
-        "driver_id": row.driver_id, "owner_id": row.owner_id,
+        "weight": row.weight, "actor_id": access.visible_identity(row.actor_id),
+        "driver_id": access.visible_identity(row.driver_id), "owner_id": access.visible_identity(row.owner_id),
         "created_at": row.created_at, "deleted_at": row.deleted_at,
     } for version in history["versions"] if (row := version_map.get(version.id)) is not None]
 
     children = (await db.execute(select(MemoryNode).where(
         MemoryNode.parent_id == seed.id, MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None),
+        MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
     ))).scalars().all()
     branches = [{
         "id": str(child.id), "branch_type": child.branch_type,
         "content": child.content if _human_can_see_content(access, child) else "",
-        "actor_id": child.actor_id, "created_at": child.created_at,
-    } for child in children if _readable(access, child)]
+        "actor_id": access.visible_identity(child.actor_id), "created_at": child.created_at,
+    } for child in children if child.is_current and _readable(access, child)]
 
     rels = (await db.execute(select(MemoryRelationship).where(
         MemoryRelationship.tenant_id == tenant,
@@ -107,7 +107,7 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
         relationships.append({
             "id": str(rel.id), "type": rel.relationship_type,
             "direction": "out" if rel.source_id == seed.id else "in",
-            "created_by": rel.created_by, "created_at": rel.created_at,
+            "created_by": access.visible_identity(rel.created_by), "created_at": rel.created_at,
             "other": _brief(other, access),
         })
 
@@ -119,7 +119,7 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
         ).order_by(ContradictionReport.created_at.desc()))).scalars().all()
         contradictions = [{
             "id": str(report.id), "observed_behavior": report.observed_behavior,
-            "confidence": report.confidence, "reporter": report.reporter,
+            "confidence": report.confidence, "reporter": access.visible_identity(report.reporter),
             "created_at": report.created_at, "resolved": report.resolved,
         } for report in report_rows]
 
@@ -160,7 +160,7 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
         "content": "" if hidden else seed.content,
         "logical_id": str(seed.logical_id) if seed.logical_id else None,
         "parent_id": visible_parent, "branch_type": seed.branch_type,
-        "actor_id": seed.actor_id, "driver_id": seed.driver_id,
+        "actor_id": access.visible_identity(seed.actor_id), "driver_id": access.visible_identity(seed.driver_id),
         "tenant_id": tenant, "domains": [] if hidden else (seed.domains or []),
         "content_type": seed.content_type, "source": seed.source,
         "metadata": None if hidden else seed.metadata_,

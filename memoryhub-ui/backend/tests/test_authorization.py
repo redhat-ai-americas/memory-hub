@@ -74,6 +74,55 @@ async def test_direct_http_requires_local_oauth_proxy_and_verified_username():
 
 
 @pytest.mark.asyncio
+async def test_empty_access_lists_say_so_instead_of_refusing_everyone():
+    """A clean deploy with no bootstrap admin answers 503 with the fix, not a bare 403 (#667 review)."""
+    # Explicit empty lists: Settings would otherwise read them from the environment.
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ui_tenant_id="tenant-a", ui_admin_users="", ui_allowed_users="",
+    )
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/graph", headers={"x-forwarded-user": "alice"})
+    assert response.status_code == 503
+    assert "MEMORYHUB_UI_ADMIN_USERS" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_local_mode_uses_the_configured_user_and_ignores_identity_headers(monkeypatch):
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    settings = Settings(ui_tenant_id="tenant-a", ui_auth_mode="local", ui_local_user="dev",
+                        ui_admin_users="dev", ui_allowed_users="bob")
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result(items=[]))
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_db] = lambda: db
+    # A non-loopback peer (Compose port mapping) is fine in local mode ...
+    async with AsyncClient(transport=ASGITransport(app=app, client=("172.18.0.1", 5000)),
+                           base_url="http://test") as client:
+        me = await client.get("/api/me", headers={"x-forwarded-user": "bob"})
+    assert me.status_code == 200
+    # ... and a forged header never changes who you are.
+    assert me.json()["username"] == "dev" and me.json()["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_local_mode_is_refused_in_a_cluster_and_without_a_user(monkeypatch):
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ui_tenant_id="tenant-a", ui_auth_mode="local", ui_local_user="dev", ui_admin_users="dev")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        refused = await client.get("/api/me")
+    assert refused.status_code == 503 and "inside a cluster" in refused.json()["detail"]
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST")
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ui_tenant_id="tenant-a", ui_auth_mode="local", ui_admin_users="dev")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        missing = await client.get("/api/me")
+    assert missing.status_code == 503 and "MEMORYHUB_UI_LOCAL_USER" in missing.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_role_cannot_be_supplied_by_request_header():
     settings = Settings(ui_tenant_id="tenant-a", ui_admin_users="alice", ui_allowed_users="bob")
     db = AsyncMock()
@@ -102,7 +151,8 @@ def test_independent_memory_capabilities_and_tenant_boundary():
     assert not user.can_read(other) and not user.can_delete(other)
     assert user.can_read(shared) and not user.can_delete(shared)
     assert not user.can_read(foreign) and not admin.can_read(foreign)
-    assert admin.can_read(other) and admin.hides_content(other)
+    # Admins never read personal memories, not even their metadata (#667).
+    assert not admin.can_read(other)
     assert not admin.can_delete(other)  # Admin does not inherit User's personal writes
     assert admin.can_delete(shared)
     assert not user.can_delete(node(scope="organizational"))
@@ -192,17 +242,17 @@ async def test_admin_search_excludes_personal_content_in_sql():
 
 
 @pytest.mark.asyncio
-async def test_admin_personal_detail_is_redacted_and_user_foreign_detail_denied():
+async def test_admin_and_foreign_user_get_no_personal_detail():
     personal = node(owner="bob")
     db = AsyncMock()
+    # Even if a row slipped past the SQL predicate, the object check refuses it.
     db.execute = AsyncMock(side_effect=[result(scalar=personal), result(scalar=0), result(items=[])])
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_access] = lambda: access(role="admin")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/api/memory/{personal.id}")
-    assert response.status_code == 200
-    assert response.json()["content"] == ""
-    assert response.json()["metadata"] is None
+    assert response.status_code == 404
+    assert "bob" not in response.text
 
     db.execute = AsyncMock(return_value=result(scalar=personal))
     app.dependency_overrides[get_access] = lambda: access(role="user")
@@ -377,11 +427,12 @@ async def test_personal_rule_owner_and_layer_cannot_be_forged():
 
 
 @pytest.mark.asyncio
-async def test_rule_history_is_technical_only_even_for_admin():
+async def test_rule_history_hides_another_users_personal_rule_from_admin():
     app.dependency_overrides[get_access] = lambda: access(role="admin")
     db = AsyncMock()
+    db.execute.return_value = result(scalar=SimpleNamespace(tenant_id="tenant-a", layer="user", owner_id="bob"))
     app.dependency_overrides[get_db] = lambda: db
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/api/rules/{uuid.uuid4()}/history")
-    assert response.status_code == 403
-    db.execute.assert_not_awaited()
+    assert response.status_code == 404
+    db.execute.assert_awaited_once()

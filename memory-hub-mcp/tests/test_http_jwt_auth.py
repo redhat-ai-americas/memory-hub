@@ -3,11 +3,13 @@
 import base64
 import json
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 import jwt
 import pytest
+import yaml
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.http import RequestContextMiddleware
@@ -146,3 +148,16 @@ def test_http_startup_requires_complete_verifier_config(monkeypatch):
     monkeypatch.setenv("AUTH_JWKS_URI", "__AUTH_JWKS_URI__")
     with pytest.raises(RuntimeError, match="valid AUTH_JWKS_URI"):
         create_http_middleware()
+
+
+def test_local_compose_supplies_a_complete_http_verifier(monkeypatch):
+    """API-key local stacks still need the HTTP listener's JWT configuration."""
+    compose = yaml.safe_load((Path(__file__).resolve().parents[2] / "compose.yaml").read_text())
+    environment = compose["services"]["mcp"]["environment"]
+    for name in ("AUTH_JWKS_URI", "AUTH_ISSUER", "AUTH_AUDIENCE"):
+        monkeypatch.delenv(name, raising=False)
+        assert name in environment
+        monkeypatch.setenv(name, str(environment[name]))
+    middleware = create_http_middleware()
+    assert middleware[0].cls is VerifiedJWTMiddleware
+    assert environment["AUTH_ISSUER"] == compose["services"]["auth"]["environment"]["AUTH_ISSUER"]

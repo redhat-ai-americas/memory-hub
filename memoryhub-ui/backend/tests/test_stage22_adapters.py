@@ -94,21 +94,14 @@ def test_context_rechecks_history_and_relationship_neighbor(client):
         compile_kwargs={"literal_binds": True}))
 
 
-def test_context_admin_personal_is_metadata_only_and_cross_tenant_is_404(client):
+def test_context_admin_gets_no_personal_memory_and_cross_tenant_is_404(client):
     http, db, set_access = client
     set_access(access("admin"))
     personal = node(owner_id="bob", content="foreign secret", stub="private title")
-    db.execute.side_effect = [
-        query_result(personal), query_result(items=[personal]), query_result(items=[]),
-        query_result(items=[]), query_result(items=[]), query_result(0),
-    ]
-    with patch("src.memory_context.get_memory_history", new_callable=AsyncMock,
-               return_value={"versions": [SimpleNamespace(id=personal.id)]}):
-        response = http.get(f"/api/memory/{personal.id}/context")
-    assert response.status_code == 200
-    assert response.json()["memory"]["redacted"] is True
-    assert response.json()["versions"][0]["content"] == ""
-    assert "foreign secret" not in response.text and "private title" not in response.text
+    db.execute.side_effect = [query_result(personal)]
+    response = http.get(f"/api/memory/{personal.id}/context")
+    assert response.status_code == 404
+    assert "bob" not in response.text and "private title" not in response.text
     db.execute.side_effect = [query_result(None)]
     assert http.get(f"/api/memory/{uuid.uuid4()}/context").status_code == 404
     db.execute.side_effect = [query_result(node(deleted_at=personal.created_at))]
@@ -191,43 +184,45 @@ def test_graph_neighbourhood_includes_authorized_project_neighbor(client):
     assert payload["provenance"][0]["id"] == str(project.id)
 
 
-def test_graph_neighbourhood_admin_personal_focus_is_redacted(client):
+def test_graph_neighbourhood_admin_personal_focus_is_not_found(client):
     http, db, set_access = client
     set_access(access("admin"))
     personal = node(owner_id="bob", content="foreign secret", stub="private title")
     db.execute.side_effect = [query_result(personal), query_result(items=[]),
                               query_result(items=[])]
     response = http.get(f"/api/graph/neighbourhood?focus={personal.id}&depth=1&types=related_to")
-    assert response.status_code == 200
-    assert response.json()["focus"]["content"] == ""
-    assert response.json()["focus"]["redacted"] is True
-    assert "foreign secret" not in response.text and "private title" not in response.text
+    assert response.status_code == 404
+    assert "bob" not in response.text and "private title" not in response.text
 
 
-def test_graph_admin_personal_is_redacted_and_cross_tenant_edge_is_hidden(client):
+def test_graph_admin_excludes_personal_nodes_their_edges_and_other_tenants(client):
     http, db, set_access = client
     set_access(access("admin"))
     personal = node(owner_id="bob", content="foreign secret", stub="private title")
     shared = node(scope="organizational", content="shared content")
+    other = node(scope="organizational", content="other shared")
     other_tenant = node(tenant_id="tenant-b", content="tenant secret")
-    allowed_edge = SimpleNamespace(id=uuid.uuid4(), source_id=personal.id,
-                                   target_id=shared.id, relationship_type="related_to",
-                                   tenant_id="tenant-a")
+    personal_edge = SimpleNamespace(id=uuid.uuid4(), source_id=personal.id,
+                                    target_id=shared.id, relationship_type="related_to",
+                                    tenant_id="tenant-a")
+    shared_edge = SimpleNamespace(id=uuid.uuid4(), source_id=shared.id, target_id=other.id,
+                                  relationship_type="related_to", tenant_id="tenant-a")
     forbidden_edge = SimpleNamespace(id=uuid.uuid4(), source_id=shared.id,
                                      target_id=other_tenant.id,
                                      relationship_type="related_to", tenant_id="tenant-b")
-    db.execute.side_effect = [query_result(2),
-                              query_result(items=[personal, shared, other_tenant]),
-                              query_result(items=[allowed_edge, forbidden_edge])]
+    # Rows that slip past the SQL predicate are still dropped by the object check.
+    db.execute.side_effect = [query_result(3),
+                              query_result(items=[personal, shared, other, other_tenant]),
+                              query_result(items=[personal_edge, shared_edge, forbidden_edge])]
     response = http.get("/api/graph/all?prefer=recent")
     assert response.status_code == 200
     payload = response.json()
-    assert {item["id"] for item in payload["nodes"]} == {str(personal.id), str(shared.id)}
-    assert payload["edges"] == [{"id": str(allowed_edge.id), "source": str(personal.id),
-                                 "target": str(shared.id), "type": "related_to"}]
-    assert next(item for item in payload["nodes"] if item["id"] == str(personal.id))["redacted"]
-    assert "foreign secret" not in response.text and "private title" not in response.text
+    assert {item["id"] for item in payload["nodes"]} == {str(shared.id), str(other.id)}
+    assert [edge["id"] for edge in payload["edges"]] == [str(shared_edge.id)]
+    assert str(personal.id) not in response.text and "bob" not in response.text
     assert "tenant secret" not in response.text
+    sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "memory_nodes.scope IN" in sql and "'entity'" not in sql and "'user'" not in sql
 
 
 def test_graph_connected_sort_still_uses_human_visible_subquery(client):
@@ -334,6 +329,7 @@ def test_export_rejects_forbidden_state_before_streaming(client):
 def test_new_read_routes_require_verified_human_principal(client):
     http, db, _ = client
     app.dependency_overrides.pop(get_access)
+    app.dependency_overrides[get_settings] = lambda: Settings(ui_tenant_id="tenant-a", ui_admin_users="alice")
     uid = uuid.uuid4()
     for path in (f"/api/memory/{uid}/context", "/api/graph/all",
                  f"/api/graph/neighbourhood?focus={uid}", "/api/memories/export"):

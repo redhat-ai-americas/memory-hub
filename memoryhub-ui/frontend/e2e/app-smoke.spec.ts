@@ -95,12 +95,25 @@ for (const role of ['user', 'admin'] as const) {
     });
 
     test('OAuth clients: create and rotate', async ({ page }) => {
-      const bff = await mockBff(page, role);
+      const allowedScope = role === 'admin' ? 'memory:read:project' : 'memory:read:user';
+      const bff = await mockBff(page, role, (key, payload) => {
+        if (key !== 'GET /api/me') return payload;
+        const viewer = payload as { capabilities: { clients: Record<string, unknown> } };
+        return { ...viewer, capabilities: { ...viewer.capabilities, clients: {
+          ...viewer.capabilities.clients, scopes: [allowedScope], default_scopes: [allowedScope],
+        } } };
+      });
       const errors = watch(page);
       await page.goto(role === 'user' ? '/#/identities?view=keys' : '/#/clients');
       await page.getByRole('button', { name: role === 'user' ? 'New OAuth client' : 'New service client' }).first().click();
+      await expect(page.getByRole('dialog').getByRole('checkbox')).toHaveCount(1);
+      await expect(page.getByRole('dialog').getByRole('checkbox', { name: allowedScope, exact: true })).toBeChecked();
       await page.getByLabel('client_id').fill('test-bot');
+      const created = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/clients'));
       await page.getByRole('button', { name: 'Create', exact: true }).click();
+      expect((await created).postDataJSON()).toMatchObject({
+        identity_type: role === 'admin' ? 'service' : 'user', tenant_id: 'lumen-eng', default_scopes: [allowedScope],
+      });
       await expect(page.getByText('Copy these credentials now')).toBeVisible();
       await page.keyboard.press('Escape');
       // Rotation needs ownership: a user owns their one agent; the admin only curator-agent of the three active clients.
@@ -114,6 +127,33 @@ for (const role of ['user', 'admin'] as const) {
     });
   });
 }
+
+test('admin: client creation follows the server capability', async ({ page }) => {
+  await mockBff(page, 'admin', (key, payload) => {
+    if (key !== 'GET /api/me') return payload;
+    const viewer = payload as { capabilities: { clients: Record<string, unknown> } };
+    return { ...viewer, capabilities: { ...viewer.capabilities, clients: {
+      ...viewer.capabilities.clients, can_create: false, scopes: [], default_scopes: [],
+    } } };
+  });
+  await page.goto('/#/clients');
+  await expect(page.getByRole('button', { name: 'New service client' })).toBeDisabled();
+  await page.goto('/#/identities');
+  await expect(page.getByRole('button', { name: 'New service client' })).toBeDisabled();
+});
+
+test('admin: individual activity controls stay hidden', async ({ page }) => {
+  await mockBff(page, 'admin');
+  await page.goto('/#/identities');
+  await expect(page.getByRole('columnheader', { name: 'Memories', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('columnheader', { name: 'Last write', exact: true })).toHaveCount(0);
+  await expect(page.locator('a[href*="actor="]')).toHaveCount(0);
+  await page.goto('/#/memories?actor=mchen');
+  await expect(page.getByRole('link', { name: /Gripper torque limit/ })).toBeVisible();
+  await expect(page.getByText('Written by', { exact: true })).toHaveCount(0);
+  await page.goto('/#/overview');
+  await expect(page.getByRole('columnheader', { name: 'Owner', exact: true })).toHaveCount(0);
+});
 
 test('user: entity page renames only', async ({ page }) => {
   const bff = await mockBff(page, 'user');

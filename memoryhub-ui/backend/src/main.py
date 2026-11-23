@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
+from src.csrf import CrossSiteRequestGuard
 from src.export_adapter import router as export_router
 from src.graph_adapters import router as graph_router
 from src.human_adapters import router as human_router
@@ -30,7 +31,20 @@ FRONTEND_DIST = _default_dist if _default_dist.is_dir() else _local_dist
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # Say at startup how people are identified, so a misconfiguration shows in
+    # the pod log rather than as every request being refused.
+    admins, users = settings.human_access()
+    logger.info("Dashboard identity: mode=%s, %d admin(s), %d user(s), tenant=%s",
+                settings.ui_auth_mode, len(admins), len(users), settings.ui_tenant_id)
+    if settings.ui_auth_mode == "local":
+        logger.warning("LOCAL identity mode: every request acts as %r; never use this in a cluster",
+                       settings.ui_local_user)
+    problem = settings.identity_problem()
+    if problem:
+        logger.error("Dashboard cannot authenticate anyone: %s", problem)
     cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    # Only explicitly configured origins may change state besides the dashboard's own.
+    trusted_origins = [origin for origin in cors_origins if origin != "*"]
     if not cors_origins:
         cors_origins = ["*"]
 
@@ -47,6 +61,10 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
+
+    # Refuse state-changing requests that another site's page triggers with the
+    # dashboard's session cookie (src/csrf.py).
+    app.add_middleware(CrossSiteRequestGuard, allowed_origins=trusted_origins)
 
     app.include_router(router)
     app.include_router(human_router)

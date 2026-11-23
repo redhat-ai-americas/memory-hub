@@ -3,8 +3,8 @@
 
 export type Scope = 'user' | 'project' | 'campaign' | 'role' | 'organizational' | 'enterprise' | string;
 
-/** BFF roles (backend-admin-user-roles): admin moderates every scope it is
- *  granted and sees personal memories as metadata only; user owns memories and
+/** BFF roles (backend-admin-user-roles): admin moderates granted shared scopes
+ *  and cannot see personal memories; user owns memories and
  *  reads what RBAC allows. operator: the moment before /api/me answers. */
 export type Role = 'admin' | 'user' | 'operator';
 
@@ -17,6 +17,15 @@ export interface Me {
   source: string;
   role: 'admin' | 'user';
   tenant_id: string;
+  capabilities: {
+    individual_activity: boolean;
+    clients: {
+      can_create: boolean;
+      identity_types: ('user' | 'service')[];
+      scopes: string[];
+      default_scopes: string[];
+    };
+  };
   /** Admins: the scopes whose content stays hidden from them. */
   access?: { hidden_scopes: string[]; break_glass: null } | null;
   /** Where this person may write from the dashboard. */
@@ -244,7 +253,7 @@ export interface MemoryRow {
   content_preview: string;
   scope: Scope;
   scope_id: string | null;
-  owner_id: string;
+  owner_id: string | null;
   actor_id: string | null;
   driver_id: string | null;
   domains: string[];
@@ -329,7 +338,7 @@ export interface NodeBrief {
   stub: string;
   scope: Scope;
   scope_id: string | null;
-  owner_id: string;
+  owner_id: string | null;
   weight: number;
   version: number;
   is_current: boolean;
@@ -374,16 +383,16 @@ export interface MemoryContext {
     weight: number;
     actor_id: string | null;
     driver_id: string | null;
-    owner_id: string;
+    owner_id: string | null;
     created_at: string;
     deleted_at: string | null;
   }[];
-  branches: { id: string; branch_type: string | null; content: string; actor_id: string; created_at: string }[];
+  branches: { id: string; branch_type: string | null; content: string; actor_id: string | null; created_at: string }[];
   relationships: {
     id: string;
     type: string;
     direction: 'in' | 'out';
-    created_by: string;
+    created_by: string | null;
     created_at: string;
     other: NodeBrief;
   }[];
@@ -392,7 +401,7 @@ export interface MemoryContext {
     id: string;
     observed_behavior: string;
     confidence: number;
-    reporter: string;
+    reporter: string | null;
     created_at: string;
     resolved: boolean;
   }[];
@@ -451,7 +460,7 @@ export interface SearchResult {
   id: string;
   scope: Scope;
   scope_id: string | null;
-  owner_id: string;
+  owner_id: string | null;
   stub: string;
   content: string | null;
   delivery: 'full' | 'stub';
@@ -505,7 +514,7 @@ export interface DroppedMemory {
   stub: string;
   scope: Scope;
   scope_id: string | null;
-  owner_id: string;
+  owner_id: string | null;
   weight: number;
   version: number;
   stage: FunnelKey;
@@ -567,7 +576,7 @@ export interface ProjectsResponse {
 export interface StatsResponse {
   total_memories: number;
   scope_counts: { scope: string; count: number }[];
-  recent_activity: { id: string; stub: string; scope: string; owner_id: string; updated_at: string; action: 'created' | 'updated' | string }[];
+  recent_activity: { id: string; stub: string; scope: string; owner_id: string | null; updated_at: string; action: 'created' | 'updated' | string }[];
   mcp_health: boolean;
 }
 
@@ -577,7 +586,7 @@ export interface ContradictionReport {
   memory_id: string;
   observed_behavior: string;
   confidence: number;
-  reporter: string;
+  reporter: string | null;
   created_at: string;
   resolved: boolean;
   resolved_at: string | null;
@@ -600,7 +609,7 @@ export interface GraphNode {
   scope: string;
   weight: number;
   branch_type: string | null;
-  owner_id: string;
+  owner_id: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -627,7 +636,7 @@ export interface MemoryRecord {
   scope: string;
   weight: number;
   branch_type: string | null;
-  owner_id: string;
+  owner_id: string | null;
   version: number;
   is_current: boolean;
   parent_id: string | null;
@@ -660,7 +669,7 @@ export interface UserRow {
   name: string;
   owner_id: string;
   identity_type: 'user' | 'service' | 'unknown' | string;
-  memory_count: number;
+  memory_count: number | null;
   last_active: string | null;
 }
 
