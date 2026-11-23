@@ -54,6 +54,8 @@ Admin pages claimed personal memories appeared as metadata or contributed to cou
 | Final fixed review/search screens | On the selected image, own-memory and own-report capabilities are false and no resolve buttons appear. An independent report resolves successfully through the UI with its author still redacted. Admin search has no owner selector, runs successfully, and exposes neither personal nor agent-private canaries. |
 | Memory detail and graph | User opens personal memory; Admin opens shared memory with redacted author fields. The final graph renders, carries the corrected privacy label, and excludes personal canaries. No console errors were observed in the final User/Admin screens. |
 
+The GitHub run also exposed a race in the human-access script's test stub: both sides of `oc create --dry-run | oc apply` accessed a partially written shared JSON file. The stub now emits its dry-run manifest through the pipe and persists it only in `apply`, matching the real command sequence. This test-only correction does not change the deployed application or deployment script.
+
 ## Selected deployment
 
 - Selected OpenShift build: `memoryhub-ui-7`, annotated with source commit `0f215c3`.
