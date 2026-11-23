@@ -69,8 +69,17 @@ services:
       MEMORYHUB_AUTH_SERVICE_URL: http://auth:8081
       MEMORYHUB_ADMIN_KEY: ${MEMORYHUB_ADMIN_KEY:-memoryhub-local-admin}
       MEMORYHUB_CORS_ORIGINS: http://localhost:3000
+      # Local development has no OpenShift OAuth proxy: the dashboard acts as
+      # one configured person and ignores identity headers. Switch role by
+      # listing the user in MEMORYHUB_UI_ALLOWED_USERS instead of the admins.
+      HOST: 0.0.0.0
+      MEMORYHUB_UI_TENANT_ID: ${MEMORYHUB_UI_TENANT_ID:-default}
+      MEMORYHUB_UI_AUTH_MODE: local
+      MEMORYHUB_UI_LOCAL_USER: ${MEMORYHUB_UI_LOCAL_USER:-local-admin}
+      MEMORYHUB_UI_ADMIN_USERS: ${MEMORYHUB_UI_ADMIN_USERS:-local-admin}
+      MEMORYHUB_UI_ALLOWED_USERS: ${MEMORYHUB_UI_ALLOWED_USERS:-}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
   # The auth service is part of the default local stack so API keys created in
   # the UI are accepted by the MCP server. OAuth SSO itself is not configured

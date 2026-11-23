@@ -30,6 +30,17 @@ FRONTEND_DIST = _default_dist if _default_dist.is_dir() else _local_dist
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # Say at startup how people are identified, so a misconfiguration shows in
+    # the pod log rather than as every request being refused.
+    admins, users = settings.human_access()
+    logger.info("Dashboard identity: mode=%s, %d admin(s), %d user(s), tenant=%s",
+                settings.ui_auth_mode, len(admins), len(users), settings.ui_tenant_id)
+    if settings.ui_auth_mode == "local":
+        logger.warning("LOCAL identity mode: every request acts as %r; never use this in a cluster",
+                       settings.ui_local_user)
+    problem = settings.identity_problem()
+    if problem:
+        logger.error("Dashboard cannot authenticate anyone: %s", problem)
     cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
     if not cors_origins:
         cors_origins = ["*"]

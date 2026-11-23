@@ -168,7 +168,7 @@ async def healthz():
 
 
 @router.get("/api/me", response_model=MeResponse)
-async def get_me(access: AccessDep, response: Response):
+async def get_me(access: AccessDep, settings: SettingsDep, response: Response):
     """Expose only the verified OAuth-proxy principal needed by the UI Shell."""
     response.headers["Cache-Control"] = "no-store"
     principal = access.principal
@@ -185,7 +185,7 @@ async def get_me(access: AccessDep, response: Response):
         name=principal.username,
         email=None,
         initials=principal.username[:2].upper(),
-        source="oauth-proxy",
+        source="local" if settings.ui_auth_mode == "local" else "oauth-proxy",
         role=principal.role,
         tenant_id=principal.tenant_id,
         write={"scopes": write_scopes, "project_ids": project_ids,

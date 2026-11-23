@@ -759,6 +759,9 @@ async def browse_memories(
     base = [MemoryNode.tenant_id == tenant]
     if access.principal.role == "user":
         base.append(_human_content_clause(access))
+    else:
+        # Admin rows are metadata of shared scopes only; personal memories are excluded (#667).
+        base.append(access.clause())
     filters = list(base)
     if tab == "current":
         filters.extend((MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
@@ -839,7 +842,8 @@ async def browse_memories(
     memories = [
         memory for memory in memories
         if memory.tenant_id == tenant and (
-            access.principal.role == "admin" or _human_can_see_content(access, memory)
+            access.can_read(memory) if access.principal.role == "admin"
+            else _human_can_see_content(access, memory)
         )
     ]
     ids = [memory.id for memory in memories]
