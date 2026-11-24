@@ -153,6 +153,33 @@ class _Clients:
         return []
 
 
+async def test_project_focus_requires_live_membership_without_hiding_shared_content(env):
+    http = env["http"]
+    shared = await env["seed"]("Shared deployment guide", owner="carol", actor="carol")
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ui_tenant_id=TENANT, valkey_url="redis://focus.test/0",
+    )
+    focus = AsyncMock()
+    focus.read_focus_history.return_value = [{"focus": "Current deployment work"}]
+    with patch("src.human_adapters._cached_valkey_client", return_value=focus) as valkey:
+        env["act_as"]("dana", "admin")
+        response = await http.get("/api/projects/atlas-p")
+        assert response.status_code == 200, response.text
+        assert response.json()["focus_history"] is None
+        assert response.json()["focus_available"] is False
+        assert len(response.json()["members_list"]) == 3
+        valkey.assert_not_called()
+
+        env["act_as"]("alice")
+        response = await http.get("/api/projects/atlas-p")
+        assert response.status_code == 200, response.text
+        assert response.json()["focus_history"] == [{"focus": "Current deployment work", "count": 1}]
+        assert response.json()["focus_available"] is True
+        memory = await http.get(f"/api/memory/{shared.id}")
+        assert memory.status_code == 200, memory.text
+        assert memory.json()["content"] == "Shared deployment guide"
+
+
 @pytest.mark.parametrize("action", ["block", "quarantine", "reject_with_pointer"])
 async def test_blocked_version_leaves_memory_and_audit_unchanged(env, action):
     http = env["http"]

@@ -264,10 +264,15 @@ async def project_detail(name: str, db: DbDep, settings: SettingsDep, access: Ac
     if access.principal.role == "user" and project.invite_only and not is_member:
         raise HTTPException(status_code=404, detail="Project not found")
     can_read_project_details = is_member or access.principal.role == "admin"
+    # Focus declarations contain project content. The tenant-wide Admin roster
+    # grant does not authorize reading them, and agent memberships do not count.
+    can_read_project_content = is_member and (
+        access.principal.role == "user" or "project" in access.moderation_scopes
+    )
     row = await _project_row(db, access, project)
     focus = None
     focus_available = False
-    if can_read_project_details and settings.valkey_url:
+    if can_read_project_content and settings.valkey_url:
         end = datetime.now(UTC).date()
         client = _cached_valkey_client(settings.valkey_url)
         try:

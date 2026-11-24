@@ -178,26 +178,51 @@ def test_project_detail_requires_membership_for_invite_only(client):
         assert response.json()["focus_available"] is False
 
 
-def test_project_focus_history_uses_project_member_grant(client):
-    http, db, _ = client
+@pytest.mark.parametrize("role,member,project_scope,invite_only,status,visible", [
+    ("user", True, False, True, 200, True),
+    ("admin", True, True, True, 200, True),
+    ("admin", True, False, True, 200, False),
+    ("user", False, False, False, 200, False),
+    ("user", False, False, True, 404, False),
+    ("admin", False, True, False, 200, False),
+    ("admin", False, True, True, 200, False),
+])
+def test_project_focus_history_uses_project_content_grants(client, role, member, project_scope,
+                                                        invite_only, status, visible):
+    http, db, set_access = client
+    set_access(access(
+        role, projects={"p"}, agents={"alice-agent"},
+        human_projects={"p"} if member else set(),
+        moderation_scopes={"project"} if project_scope else set(),
+    ))
     app.dependency_overrides[get_settings] = lambda: Settings(
         ui_tenant_id="tenant-a", valkey_url="redis://focus.test/0",
     )
-    project = SimpleNamespace(name="p", tenant_id="tenant-a", invite_only=False)
-    db.execute.side_effect = [result(project), result(items=[SimpleNamespace(role="member")])]
+    project = SimpleNamespace(name="p", tenant_id="tenant-a", invite_only=invite_only)
+    db.execute.side_effect = [
+        result(project), result(items=[SimpleNamespace(role="member")] if member else []),
+        result(items=[]),
+    ]
     focus = MagicMock()
     focus.read_focus_history = AsyncMock(return_value=[{"focus": "search"}, {"focus": "search"}, {"focus": "write"}])
     with patch("src.human_adapters._project_row", new_callable=AsyncMock,
                return_value={"name": "p"}), patch(
         "src.human_adapters.get_project_members", new_callable=AsyncMock, return_value=[],
-    ), patch("src.human_adapters._cached_valkey_client", return_value=focus):
+    ), patch("src.human_adapters._cached_valkey_client", return_value=focus) as valkey:
         response = http.get("/api/projects/p")
-        assert response.status_code == 200
+    assert response.status_code == status, response.text
+    if visible:
         assert response.json()["focus_available"] is True
         assert response.json()["focus_history"] == [
             {"focus": "search", "count": 2}, {"focus": "write", "count": 1},
         ]
         assert focus.read_focus_history.await_args.args[0] == "p"
+    else:
+        valkey.assert_not_called()
+        focus.read_focus_history.assert_not_awaited()
+        if status == 200:
+            assert response.json()["focus_available"] is False
+            assert response.json()["focus_history"] is None
 
 
 def test_admin_reads_tenant_project_members_without_management_grant(client):
