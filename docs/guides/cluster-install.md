@@ -178,7 +178,7 @@ MEMORYHUB_CONTEXT=mcp-rhoai make uninstall ARGS="--skip-models" # keep model dep
 MEMORYHUB_CONTEXT=mcp-rhoai make install ARGS="--skip-data --skip-migrations --skip-auth"
 ```
 
-**Reranker timeout with `--gpu-models`.** On single-GPU clusters, the embedding model takes the GPU. The reranker runs on CPU (with a GPU node toleration for scheduling). If the reranker times out, check for PVC contention -- the CPU model variant may still be running and holding the shared PVC. The deploy script scales down CPU models automatically, but leftover deployments from a prior install can interfere. Delete them manually with `oc delete deployment <cpu-model-name> --context mcp-rhoai -n reranker-model`.
+**GPU model pods remain Pending or a Route times out.** `--gpu-models` selects GPU manifests for both the embedding service and reranker, and each requests one NVIDIA GPU. If the cluster advertises only one schedulable GPU, only one pod can be scheduled at a time; the other remains Pending. Check GPU capacity and pod events before debugging the Route. Also check for CPU model deployments left from an earlier install: both variants use the same PVC names, and the deploy script scales CPU deployments down before applying GPU manifests. If a stale deployment still holds a claim, remove it only after confirming it is the old CPU variant: `oc delete deployment <cpu-model-name> --context mcp-rhoai -n <model-namespace>`.
 
 ## Partial deploys
 

@@ -10,6 +10,15 @@ applying the Kustomize workload manifests. Direct `helm upgrade --install`
 remains available when images, migrations, Secrets, ConfigMaps, and the
 OpenShift OAuthClient are managed separately.
 
+## Chart scope
+
+The current chart focuses mainly on infrastructure and deployment settings:
+images, resources, probes, namespaces, routes, and storage. Configuration of
+the memory-management surface—including retrieval, chunking,
+extraction/dreaming, isolation, retention policy, session settings, and tool
+profile—is being investigated and will be documented separately in
+[#736](https://github.com/redhat-ai-americas/memory-hub/issues/736).
+
 ## One-command OpenShift install
 
 The Make target provides a full-stack install experience like `make install`:
@@ -421,6 +430,9 @@ Kustomize installation to Helm is outside this fresh-install workflow.
 
 ## Configuration examples
 
+For every configurable chart value, its default, and a short description, see
+the [complete values reference](VALUES.md).
+
 Change a namespace, image, resource requests, PVC size, a probe setting, and
 the model variant:
 
@@ -597,13 +609,26 @@ Local validation completed for this chart change:
 - YAML parsing of both rendered outputs, including confirmation that every
   rendered PodSpec receives the pull Secret and the retention job follows the
   MCP image override
-- JSON schema parsing, shell syntax checks for both migration helpers, and
-  `git diff --check`
+- JSON schema parsing, shell syntax checks for the deployment and migration
+  helpers, and `git diff --check`
 
 GitHub Actions runs the same chart lint, render, and alignment script when the
 chart or its deployment sources change. Local Helm was v4.2.3; CI pins Helm
 3.18.4 to exercise the supported Helm 3 runtime.
 
-No live cluster install was performed. A fresh install still needs the
-namespace-local Secret provisioning, application image builds or publishing,
-local database migrations, and OpenShift OAuthClient setup described above.
+Manual validation was reported for `mcp-rhoai` on 2026-11-23 using
+`scripts/helm-install.sh` and `scripts/helm-uninstall.sh`:
+
+- Full-fresh install completed after deleting the MemoryHub namespaces; first-
+  install Secret generation and database bootstrap succeeded, and all pods
+  reached Ready.
+- Preserve-data uninstall retained the PostgreSQL and MinIO PVCs as Bound;
+  reinstall completed and all pods reached Ready. Default uninstall retention
+  and `--delete-namespaces --yes` cleanup were also confirmed.
+- The CPU embedding and reranker pods reached Ready. Live GPU scheduling was
+  not tested because the cluster had no GPU nodes; GPU manifests were checked
+  for the GPU requests, tolerations, and Granite model names.
+- S3-spilled content surviving the preserve-data cycle was not verified. The
+  running embedding model reports a 256-token input limit, so the large test
+  write is rejected before it can spill to S3. The test script's fallback
+  limit applies only when the embedding service is unavailable.

@@ -30,11 +30,13 @@ spec:
               command: [/bin/bash, -c]
               args:
                 - |
+                  set -euo pipefail
+
                   echo "=== MemoryHub test data cleanup ==="
                   echo "Target: ${PGHOST}:${PGPORT}/${PGDATABASE}"
 
                   BEFORE=$(psql -tA -c "SELECT count(*) FROM memory_nodes WHERE deleted_at IS NULL")
-                  TEST_COUNT=$(psql -tA -c "
+                  if ! TEST_COUNT=$(psql -tA -c "
                     SELECT count(*) FROM memory_nodes
                     WHERE deleted_at IS NULL
                     AND (
@@ -47,7 +49,15 @@ spec:
                         'seed-idempotency-user', 'multi-domain-user', 'e2e-test'
                       )
                     )
-                  ")
+                  "); then
+                    echo "ERROR: Failed to query test-data count; cleanup aborted." >&2
+                    exit 1
+                  fi
+
+                  if [[ ! "${TEST_COUNT}" =~ ^[0-9]+$ ]]; then
+                    echo "ERROR: Expected a numeric test-data count, got '${TEST_COUNT:-<empty>}'; cleanup aborted." >&2
+                    exit 1
+                  fi
 
                   echo "Active memories: ${BEFORE}"
                   echo "Test data found: ${TEST_COUNT}"

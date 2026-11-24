@@ -94,7 +94,8 @@ if [[ "$YES" != true ]]; then
     echo "External resources (OpenShift OAuthClient, RHOAI tile) will also be removed."
     echo ""
     read -r -p "Continue? [y/N] " reply
-    [[ "$(echo "$reply" | tr '[:upper:]' '[:lower:]')" == y ]] || { echo "Aborted."; exit 0; }
+    reply_lc=$(printf '%s' "$reply" | tr '[:upper:]' '[:lower:]')
+    [[ "$reply_lc" =~ ^(y|yes)$ ]] || { echo "Aborted."; exit 0; }
 fi
 
 echo "==> Reading Helm values before uninstall"

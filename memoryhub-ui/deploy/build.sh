@@ -50,7 +50,11 @@ if [[ "$BUILD_NAME" == "$PREVIOUS_BUILD_NAME" ]]; then
     exit 1
 fi
 
-BUILD_PHASE=$(oc get build "$BUILD_NAME" --context "$CONTEXT" -n "$NAMESPACE" -o jsonpath='{.status.phase}')
+for _ in $(seq 1 10); do
+    BUILD_PHASE=$(oc get build "$BUILD_NAME" --context "$CONTEXT" -n "$NAMESPACE" -o jsonpath='{.status.phase}')
+    [[ "$BUILD_PHASE" == "Complete" || "$BUILD_PHASE" == "Failed" || "$BUILD_PHASE" == "Error" || "$BUILD_PHASE" == "Cancelled" ]] && break
+    sleep 3
+done
 if [[ "$BUILD_PHASE" != "Complete" ]]; then
     echo "ERROR: UI image build $BUILD_NAME ended in phase '${BUILD_PHASE:-unknown}', not Complete." >&2
     echo "Inspect it with: oc describe build $BUILD_NAME --context $CONTEXT -n $NAMESPACE" >&2

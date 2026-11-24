@@ -292,17 +292,15 @@ PY
     fi
 }
 
-adopt_legacy_auth_rbac clusterrole memoryhub-auth-ns-reader namespace-reader
-adopt_legacy_auth_rbac clusterrolebinding memoryhub-auth-ns-reader namespace-reader
-adopt_legacy_auth_rbac clusterrolebinding memoryhub-auth-delegator auth-delegator
-
 check_resource_ownership() {
     local resource="$1" namespace="$2" object_json owner
     if ! object_json=$(oc get "$resource" -n "$namespace" --context "$CONTEXT" -o json 2>/dev/null); then
         return 0
     fi
     owner=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("metadata",{}).get("labels",{}).get("app.kubernetes.io/instance", ""))' <<<"$object_json")
-    if [[ "$RELEASE_EXISTS" == true && "$owner" == "$RELEASE" ]]; then
+    # Allow if already labeled for this release, even when helm-status shows no live release
+    # (e.g. a partial uninstall deleted the Helm release record but left labeled resources).
+    if [[ "$owner" == "$RELEASE" ]]; then
         return 0
     fi
     echo "Found existing $resource in namespace '$namespace' that is not owned by Helm release '$RELEASE'." >&2
@@ -347,6 +345,13 @@ if [[ "$RELEASE_EXISTS" == true ]] \
     exit 2
 fi
 
+# Complete the read-only ownership preflight before changing ownership metadata
+# on legacy cluster-scoped RBAC resources. A rejected install must leave them
+# untouched.
+adopt_legacy_auth_rbac clusterrole memoryhub-auth-ns-reader namespace-reader
+adopt_legacy_auth_rbac clusterrolebinding memoryhub-auth-ns-reader namespace-reader
+adopt_legacy_auth_rbac clusterrolebinding memoryhub-auth-delegator auth-delegator
+
 helm_stage() {
     local stage_values="$1"
     shift
@@ -361,7 +366,31 @@ helm_stage() {
         args+=(-f "$TEMP_DIR/runtime-values.yaml")
     fi
     args+=(-f "$stage_values")
-    helm "${args[@]}" --set namespaces.create=true "$@"
+
+    # helm --wait is silent while pods start, which can look like a freeze for
+    # the full-stack stage. Run helm in the background and emit a pod-status
+    # summary every 30 s so the operator can see that progress is happening.
+    helm "${args[@]}" --set namespaces.create=true "$@" &
+    local helm_pid=$!
+
+    (
+        while true; do
+            sleep 30
+            kill -0 "$helm_pid" 2>/dev/null || exit 0
+            echo "  [$(date +%H:%M:%S)] Waiting for pods to become ready..."
+            oc get pods -A --context "$CONTEXT" --no-headers 2>/dev/null \
+                | awk '$4 !~ /^Running$|^Completed$|^Succeeded$/ {
+                    printf "    %-30s %-45s %s\n", $1, $2, $4}' \
+                | head -15 || true
+        done
+    ) &
+    local watcher_pid=$!
+
+    local helm_exit=0
+    wait "$helm_pid" || helm_exit=$?
+    kill "$watcher_pid" 2>/dev/null || true
+    wait "$watcher_pid" 2>/dev/null || true
+    return "$helm_exit"
 }
 
 echo "MemoryHub Helm install"
@@ -463,9 +492,25 @@ remap_db_secret() {
 }
 
 random_secret_if_missing() {
-    local name="$1" namespace="$2" key="$3" value="$4" value_file
+    local name="$1" namespace="$2" key="$3" format="$4" value value_file
+
+    if "${oc_context[@]}" get secret "$name" -n "$namespace" >/dev/null 2>&1; then
+        echo "  Reusing Secret $namespace/$name"
+        return
+    fi
+
+    case "$format" in
+        hex) value=$(openssl rand -hex 32) ;;
+        base64) value=$(openssl rand -base64 32 | tr -d '\n') ;;
+        *)
+            echo "Error: Unsupported random secret format '$format'." >&2
+            return 2
+            ;;
+    esac
+
     value_file=$(write_secret_file "$name-$key" "$value")
     ensure_secret "$name" "$namespace" --from-file="$key=$value_file"
+    unset value
 }
 
 echo "==> Preparing database and storage credentials"
@@ -530,8 +575,8 @@ copy_secret memoryhub-pg-credentials memoryhub-db memoryhub-pg-credentials memor
 remap_db_secret "$NAMESPACE" memoryhub-db-credentials MEMORYHUB_DB_
 copy_secret memoryhub-minio-credentials memoryhub-storage memoryhub-minio-credentials "$NAMESPACE"
 
-random_secret_if_missing auth-admin-key memoryhub-auth AUTH_ADMIN_KEY "$(openssl rand -hex 32)"
-random_secret_if_missing auth-internal-service-key memoryhub-auth AUTH_INTERNAL_SERVICE_KEY "$(openssl rand -hex 32)"
+random_secret_if_missing auth-admin-key memoryhub-auth AUTH_ADMIN_KEY hex
+random_secret_if_missing auth-internal-service-key memoryhub-auth AUTH_INTERNAL_SERVICE_KEY hex
 copy_secret auth-internal-service-key memoryhub-auth auth-internal-service-key "$NAMESPACE"
 
 if ! "${oc_context[@]}" get secret auth-rsa-keys -n memoryhub-auth >/dev/null 2>&1; then
@@ -542,8 +587,7 @@ if ! "${oc_context[@]}" get secret auth-rsa-keys -n memoryhub-auth >/dev/null 2>
         --from-file=AUTH_RSA_PUBLIC_KEY_PEM="$TEMP_DIR/auth-public.pem" >/dev/null
 fi
 
-OAUTH_CLIENT_SECRET="$(openssl rand -base64 32 | tr -d '\n')"
-random_secret_if_missing openshift-oauth-client-secret memoryhub-auth AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET "$OAUTH_CLIENT_SECRET"
+random_secret_if_missing openshift-oauth-client-secret memoryhub-auth AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET base64
 OAUTH_CLIENT_SECRET="$(read_secret openshift-oauth-client-secret memoryhub-auth AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET)"
 OAUTH_CLIENT_SECRET_FILE=$(write_secret_file oauth-client-secret "$OAUTH_CLIENT_SECRET")
 ADMIN_KEY="$(read_secret auth-admin-key memoryhub-auth AUTH_ADMIN_KEY)"
@@ -553,7 +597,7 @@ ADMIN_KEY_FILE=$(write_secret_file ui-admin-key "$ADMIN_KEY")
 unset ADMIN_KEY
 remap_db_secret memoryhub-ui memoryhub-db-credentials MEMORYHUB_DB_
 if ! "${oc_context[@]}" get secret memoryhub-ui-proxy -n memoryhub-ui >/dev/null 2>&1; then
-    SESSION_SECRET_FILE=$(write_secret_file ui-session-secret "$(openssl rand -hex 32)")
+    SESSION_SECRET_FILE=$(write_secret_file ui-session-secret "$(openssl rand -base64 24)")
     "${oc_context[@]}" create secret generic memoryhub-ui-proxy -n memoryhub-ui \
         --from-file="session-secret=$SESSION_SECRET_FILE" >/dev/null
 fi

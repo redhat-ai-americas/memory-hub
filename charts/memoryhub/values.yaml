@@ -1,3 +1,4 @@
+# Full setting names, defaults, and descriptions are listed in VALUES.md.
 # The release namespace hosts MCP and maintenance jobs. The other component
 # namespaces match scripts/deploy-full.sh.
 namespaces:
@@ -32,10 +33,13 @@ openshift:
 ingress:
   enabled: false
   className: ""
+  # Applied to each generated Kubernetes Ingress.
   annotations: {}
   host: ""
   tls: []
 
+# PostgreSQL database. Storage, resource, and probe settings below are
+# independently configurable; existingClaim uses a PVC provisioned elsewhere.
 postgresql:
   enabled: true
   image: { repository: pgvector/pgvector, tag: 0.8.2-pg16, pullPolicy: IfNotPresent }
@@ -86,6 +90,8 @@ postgresql:
       failureThreshold: 3
   extraEnv: []
 
+# MinIO object storage. The default image is pinned by digest; clearing digest
+# makes the configured tag select the image instead.
 minio:
   enabled: true
   replicas: 1
@@ -122,6 +128,7 @@ minio:
       failureThreshold: 3
   extraEnv: []
 
+# Valkey cache. maxMemory should remain below the container memory limit.
 valkey:
   enabled: true
   replicas: 1
@@ -148,6 +155,7 @@ valkey:
       failureThreshold: 3
   extraEnv: []
 
+# MCP server and its service endpoints, routes, environment, and probes.
 mcp:
   enabled: true
   image: { repository: memory-hub-mcp, tag: latest, pullPolicy: Always }
@@ -198,6 +206,7 @@ mcp:
     MEMORYHUB_S3_SECURE: "false"
   extraEnv: []
 
+# Authentication service and its OpenShift OAuth/RBAC configuration.
 auth:
   enabled: true
   image: { repository: auth-server, tag: latest, pullPolicy: Always }
@@ -242,6 +251,7 @@ auth:
     enabled: false
     host: ""
 
+# Dashboard and OAuth proxy. proxyResources applies to the sidecar proxy.
 ui:
   enabled: true
   image: { repository: memoryhub-ui, tag: latest, pullPolicy: Always }
@@ -286,6 +296,8 @@ ui:
     host: ""
     servicePort: 8443
 
+# Embedding and reranker model servers. variant selects the CPU or GPU image,
+# model IDs, resource settings, probes, and GPU resource requests.
 models:
   enabled: true
   variant: cpu # cpu or gpu; the CPU manifests are the current deploy-full.sh defaults.
@@ -373,8 +385,8 @@ models:
           failureThreshold: 10
     extraEnv: []
     gpuResources:
-      requests: { cpu: "1", memory: 4Gi }
-      limits: { cpu: "4", memory: 8Gi }
+      requests: { cpu: "1", memory: 4Gi, nvidia.com/gpu: "1" }
+      limits: { cpu: "4", memory: 8Gi, nvidia.com/gpu: "1" }
     route:
       enabled: true
       host: ""
@@ -383,6 +395,8 @@ models:
       enabled: false
       host: ""
 
+# Scheduled maintenance jobs. Retention inherits mcp.image unless overridden;
+# cleanup is an optional test-data job and is disabled by default.
 maintenance:
   retention:
     enabled: true

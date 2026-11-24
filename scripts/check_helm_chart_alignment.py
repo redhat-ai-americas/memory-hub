@@ -50,6 +50,11 @@ EXPECTED_CHART_ONLY = {
     ("RoleBinding", "memoryhub-minio-anyuid", "memoryhub-storage"),
     ("RoleBinding", "memoryhub-valkey-anyuid", "memory-hub-mcp"),
 }
+EXPECTED_GPU_WORKLOADS = {
+    ("Deployment", "granite-embedding", "embedding-model"),
+    ("Deployment", "granite-reranker", "reranker-model"),
+}
+EXPECTED_GPU_COUNT = "1"
 DYNAMIC_ENV = {
     "AUTH_JWKS_URI",
     "AUTH_ISSUER",
@@ -280,6 +285,23 @@ def compare_workloads(source: dict, chart: dict) -> None:
             compare_env(left, right, key)
 
 
+def compare_gpu_resource_requests(chart: dict) -> None:
+    for key in EXPECTED_GPU_WORKLOADS:
+        if key not in chart:
+            fail(f"GPU model workload {key} is missing")
+        containers = all_containers(pod_spec(chart[key]))
+        if "tei" not in containers:
+            fail(f"GPU model workload {key} has no TEI container")
+        resources = containers["tei"].get("resources", {})
+        for resource_type in ("requests", "limits"):
+            count = resources.get(resource_type, {}).get("nvidia.com/gpu")
+            if count != EXPECTED_GPU_COUNT:
+                fail(
+                    f"{key} must set {resource_type}.nvidia.com/gpu to "
+                    f"{EXPECTED_GPU_COUNT!r}; got {count!r}"
+                )
+
+
 def workloads(resources: dict) -> list[tuple[tuple, dict[str, Any]]]:
     return [(key, item) for key, item in resources.items() if key[0] in {"Deployment", "StatefulSet"}]
 
@@ -486,6 +508,8 @@ def main() -> None:
         if variant == "cpu" and not is_openshift:
             compare_namespace_contract(chart)
         compare_workloads(source, chart)
+        if variant == "gpu":
+            compare_gpu_resource_requests(chart)
         compare_services(source, chart)
         compare_pvcs_and_configmaps(source, chart)
         compare_derived_connection_settings(chart, variant)

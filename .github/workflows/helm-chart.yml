@@ -11,8 +11,20 @@ on:
       - 'memoryhub-ui/openshift.yaml'
       - 'memoryhub-ui/openshift/oauth-proxy-sa.yaml'
       - 'scripts/deploy-full.sh'
+      - 'scripts/helm-install.sh'
+      - 'scripts/helm-uninstall.sh'
+      - 'scripts/run-migrations.sh'
+      - 'scripts/run-auth-migrations.sh'
+      - 'scripts/run-seed-oauth-clients.sh'
       - 'scripts/check-helm-chart.sh'
       - 'scripts/check_helm_chart_alignment.py'
+      - 'memory-hub-mcp/Containerfile'
+      - 'memory-hub-mcp/deploy/build-context.sh'
+      - 'memoryhub-auth/Containerfile'
+      - 'memoryhub-auth/build.sh'
+      - 'memoryhub-ui/Containerfile'
+      - 'memoryhub-ui/deploy/build-context.sh'
+      - 'memoryhub-ui/deploy/build.sh'
       - 'docs/ARCHITECTURE.md'
       - 'docs/SYSTEMS.md'
       - 'docs/guides/cluster-install.md'
@@ -29,8 +41,20 @@ on:
       - 'memoryhub-ui/openshift.yaml'
       - 'memoryhub-ui/openshift/oauth-proxy-sa.yaml'
       - 'scripts/deploy-full.sh'
+      - 'scripts/helm-install.sh'
+      - 'scripts/helm-uninstall.sh'
+      - 'scripts/run-migrations.sh'
+      - 'scripts/run-auth-migrations.sh'
+      - 'scripts/run-seed-oauth-clients.sh'
       - 'scripts/check-helm-chart.sh'
       - 'scripts/check_helm_chart_alignment.py'
+      - 'memory-hub-mcp/Containerfile'
+      - 'memory-hub-mcp/deploy/build-context.sh'
+      - 'memoryhub-auth/Containerfile'
+      - 'memoryhub-auth/build.sh'
+      - 'memoryhub-ui/Containerfile'
+      - 'memoryhub-ui/deploy/build-context.sh'
+      - 'memoryhub-ui/deploy/build.sh'
       - 'docs/ARCHITECTURE.md'
       - 'docs/SYSTEMS.md'
       - 'docs/guides/cluster-install.md'
@@ -63,6 +87,22 @@ jobs:
 
       - name: Install YAML parser
         run: python -m pip install PyYAML
+
+      - name: Check deployment shell syntax
+        run: |
+          for script in \
+            scripts/deploy-full.sh \
+            scripts/helm-install.sh \
+            scripts/helm-uninstall.sh \
+            scripts/run-migrations.sh \
+            scripts/run-auth-migrations.sh \
+            scripts/run-seed-oauth-clients.sh \
+            memory-hub-mcp/deploy/build-context.sh \
+            memoryhub-auth/build.sh \
+            memoryhub-ui/deploy/build-context.sh \
+            memoryhub-ui/deploy/build.sh; do
+            bash -n "$script"
+          done
 
       - name: Lint, render, and compare deployment paths
         run: bash scripts/check-helm-chart.sh
