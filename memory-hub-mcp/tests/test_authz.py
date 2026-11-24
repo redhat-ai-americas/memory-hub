@@ -276,8 +276,8 @@ def test_get_claims_jwt_path():
     assert "memory:write:user" in claims["scopes"]
 
 
-def test_get_claims_header_extraction():
-    """When get_access_token returns None, extract JWT from Authorization header."""
+def test_get_claims_does_not_decode_unverified_header():
+    """A Bearer header without a verified FastMCP token supplies no claims."""
     import jwt as pyjwt
 
     test_token = pyjwt.encode(
@@ -298,12 +298,9 @@ def test_get_claims_header_extraction():
         patch(
             "fastmcp.server.dependencies.get_http_request", return_value=mock_request
         ),
+        pytest.raises(AuthenticationError, match="not verified"),
     ):
-        claims = get_claims_from_context()
-
-    assert claims["sub"] == "curator"
-    assert claims["identity_type"] == "service"
-    assert "memory:read" in claims["scopes"]
+        get_claims_from_context()
 
 
 def test_get_claims_session_fallback():
@@ -324,7 +321,6 @@ def test_get_claims_session_fallback():
 
     with (
         patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-        patch("src.core.authz._extract_jwt_from_headers", return_value=None),
         patch("src.core.authz.get_current_user", return_value=session_user),
     ):
         claims = get_claims_from_context()
@@ -349,7 +345,6 @@ def test_get_claims_session_partial_scopes():
 
     with (
         patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-        patch("src.core.authz._extract_jwt_from_headers", return_value=None),
         patch("src.core.authz.get_current_user", return_value=session_user),
     ):
         claims = get_claims_from_context()
@@ -365,7 +360,6 @@ def test_get_claims_no_identity():
     """When neither JWT nor session exists, raise AuthenticationError."""
     with (
         patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-        patch("src.core.authz._extract_jwt_from_headers", return_value=None),
         patch("src.core.authz.get_current_user", return_value=None),
         pytest.raises(AuthenticationError),
     ):

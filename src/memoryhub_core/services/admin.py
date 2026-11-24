@@ -37,13 +37,14 @@ def _audit_event(
     decision: str = "permitted",
     state_before: dict | None = None,
     request_context: dict | None = None,
+    actor_type: str = "service",
 ) -> None:
     """Emit a structured admin audit event."""
     event = {
         "timestamp": datetime.now(UTC).isoformat(),
         "operation": operation,
         "actor_id": actor_id,
-        "actor_type": "service",
+        "actor_type": actor_type,
         "memory_id": memory_id,
         "tenant_id": tenant_id,
         "decision": decision,
@@ -70,6 +71,34 @@ def _memory_to_dict(node: MemoryNode) -> dict:
         "content_type": node.content_type,
         "domains": node.domains,
     }
+
+
+def record_moderation_audit(
+    operation: str,
+    *,
+    actor_id: str,
+    actor_type: str,
+    tenant_id: str,
+    memory_id: uuid.UUID,
+    previous_status: str,
+    reason: str,
+    incident_reference: str | None = None,
+) -> None:
+    """Emit a moderation event only after the enclosing transaction commits."""
+    if operation not in ("quarantine", "restore"):
+        raise ValueError("Unsupported moderation audit operation")
+    context = {"reason": reason}
+    if operation == "quarantine":
+        context["incident_reference"] = incident_reference
+    _audit_event(
+        operation=operation,
+        actor_id=actor_id,
+        actor_type=actor_type,
+        tenant_id=tenant_id,
+        memory_id=str(memory_id),
+        state_before={"status": previous_status},
+        request_context=context,
+    )
 
 
 async def search_memory_admin(
@@ -188,6 +217,8 @@ async def quarantine_memory(
     actor_id: str,
     reason: str,
     incident_reference: str | None = None,
+    commit: bool = True,
+    actor_type: str = "service",
 ) -> dict:
     """Set memory status to 'quarantined', hiding from non-admin queries.
 
@@ -207,21 +238,16 @@ async def quarantine_memory(
 
     previous_status = node.status
 
-    # Audit before mutation
-    _audit_event(
-        operation="quarantine",
-        actor_id=actor_id,
-        tenant_id=tenant_id,
-        memory_id=str(memory_id),
-        state_before={"status": previous_status},
-        request_context={
-            "reason": reason,
-            "incident_reference": incident_reference,
-        },
-    )
-
     node.status = "quarantined"
-    await session.commit()
+    if commit:
+        await session.commit()
+        record_moderation_audit(
+            "quarantine", actor_id=actor_id, actor_type=actor_type, tenant_id=tenant_id,
+            memory_id=memory_id, previous_status=previous_status, reason=reason,
+            incident_reference=incident_reference,
+        )
+    else:
+        await session.flush()
 
     return {
         "memory_id": str(memory_id),
@@ -239,6 +265,8 @@ async def restore_memory(
     tenant_id: str,
     actor_id: str,
     reason: str,
+    commit: bool = True,
+    actor_type: str = "service",
 ) -> dict:
     """Restore a quarantined memory to active status.
 
@@ -262,18 +290,15 @@ async def restore_memory(
             "current_status": node.status,
         }
 
-    # Audit before mutation
-    _audit_event(
-        operation="restore",
-        actor_id=actor_id,
-        tenant_id=tenant_id,
-        memory_id=str(memory_id),
-        state_before={"status": node.status},
-        request_context={"reason": reason},
-    )
-
     node.status = "active"
-    await session.commit()
+    if commit:
+        await session.commit()
+        record_moderation_audit(
+            "restore", actor_id=actor_id, actor_type=actor_type, tenant_id=tenant_id,
+            memory_id=memory_id, previous_status="quarantined", reason=reason,
+        )
+    else:
+        await session.flush()
 
     return {
         "memory_id": str(memory_id),

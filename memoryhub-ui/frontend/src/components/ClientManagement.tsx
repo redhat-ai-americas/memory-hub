@@ -34,10 +34,11 @@ import {
 } from '@/api/client';
 import { formatDate } from '@/utils/time';
 import SecretRevealModal from './SecretRevealModal';
-
-const AVAILABLE_SCOPES = ['memory:read', 'memory:write:user', 'memory:write', 'memory:admin'];
+import { useSession } from '@/context/SessionContext';
 
 const ClientManagement: React.FC = () => {
+  const session = useSession();
+  const policy = session.capabilities.clients;
   const [clients, setClients] = useState<ClientResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,9 +47,9 @@ const ClientManagement: React.FC = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [formClientId, setFormClientId] = useState('');
   const [formClientName, setFormClientName] = useState('');
-  const [formIdentityType, setFormIdentityType] = useState<'user' | 'service'>('user');
-  const [formTenantId, setFormTenantId] = useState('');
-  const [formScopes, setFormScopes] = useState<Set<string>>(new Set(['memory:read']));
+  const [formIdentityType, setFormIdentityType] = useState<'user' | 'service'>(policy.identity_types[0]);
+  const formTenantId = session.tenant_id;
+  const [formScopes, setFormScopes] = useState<Set<string>>(new Set(policy.default_scopes));
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -100,9 +101,8 @@ const ClientManagement: React.FC = () => {
   const resetForm = () => {
     setFormClientId('');
     setFormClientName('');
-    setFormIdentityType('user');
-    setFormTenantId('');
-    setFormScopes(new Set(['memory:read']));
+    setFormIdentityType(policy.identity_types[0]);
+    setFormScopes(new Set(policy.default_scopes));
     setCreateError(null);
   };
 
@@ -220,7 +220,7 @@ const ClientManagement: React.FC = () => {
       <Toolbar>
         <ToolbarContent>
           <ToolbarItem align={{ default: 'alignEnd' }}>
-            <Button variant="primary" onClick={() => setCreateModalOpen(true)}>
+            <Button variant="primary" isDisabled={!policy.can_create} onClick={() => setCreateModalOpen(true)}>
               Create Client
             </Button>
           </ToolbarItem>
@@ -317,15 +317,16 @@ const ClientManagement: React.FC = () => {
             </FormGroup>
             <FormGroup label="Identity Type" fieldId="identity-type">
               <FormSelect id="identity-type" value={formIdentityType} onChange={(_e, val) => setFormIdentityType(val as 'user' | 'service')}>
-                <FormSelectOption value="user" label="User" />
-                <FormSelectOption value="service" label="Service" />
+                {policy.identity_types.map((kind) => (
+                  <FormSelectOption key={kind} value={kind} label={kind === 'user' ? 'User' : 'Service'} />
+                ))}
               </FormSelect>
             </FormGroup>
             <FormGroup label="Tenant ID" isRequired fieldId="tenant-id">
-              <TextInput id="tenant-id" value={formTenantId} onChange={(_e, val) => setFormTenantId(val)} placeholder="e.g. default" />
+              <TextInput id="tenant-id" value={formTenantId} readOnly />
             </FormGroup>
             <FormGroup label="Scopes" fieldId="scopes">
-              {AVAILABLE_SCOPES.map((scope) => (
+              {policy.scopes.map((scope) => (
                 <Checkbox
                   key={scope}
                   id={`scope-${scope}`}
@@ -342,7 +343,7 @@ const ClientManagement: React.FC = () => {
           <Button
             variant="primary"
             onClick={handleCreate}
-            isDisabled={creating || !formClientId || !formClientName || !formTenantId}
+            isDisabled={!policy.can_create || creating || !formClientId || !formClientName || formScopes.size === 0}
             isLoading={creating}
           >
             Create

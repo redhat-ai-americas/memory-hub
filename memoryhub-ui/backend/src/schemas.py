@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GraphNode(BaseModel):
@@ -12,7 +12,7 @@ class GraphNode(BaseModel):
     scope: str
     weight: float
     branch_type: str | None
-    owner_id: str
+    owner_id: str | None
     version: int
     created_at: datetime
     updated_at: datetime
@@ -41,7 +41,7 @@ class RecentActivity(BaseModel):
     id: str
     stub: str
     scope: str
-    owner_id: str
+    owner_id: str | None  # None for admins: no individual activity (#667)
     updated_at: datetime
     action: str  # "created" or "updated"
 
@@ -60,7 +60,7 @@ class MemoryDetail(BaseModel):
     scope: str
     weight: float
     branch_type: str | None
-    owner_id: str
+    owner_id: str | None
     version: int
     is_current: bool
     parent_id: str | None
@@ -96,14 +96,18 @@ class SearchMatch(BaseModel):
 
 
 class CreateClientRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     client_id: str
     client_name: str
-    identity_type: str = "user"
+    identity_type: str = Field(default="user", pattern="^(user|service)$")
     tenant_id: str
-    default_scopes: list[str] = ["memory:read"]
+    default_scopes: list[str] = Field(default_factory=lambda: ["memory:read"])
 
 
 class UpdateClientRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     client_name: str | None = None
     active: bool | None = None
     default_scopes: list[str] | None = None
@@ -145,6 +149,37 @@ class PublicConfigResponse(BaseModel):
 
     mcp_url: str
     auth_url: str
+
+
+class MeResponse(BaseModel):
+    username: str
+    name: str
+    email: str | None
+    initials: str
+    source: str
+    role: str
+    tenant_id: str
+    access: dict | None = None
+    write: dict | None = None
+    labs: bool = False
+    capabilities: dict = Field(default_factory=dict)
+
+
+class AuthStatusResponse(BaseModel):
+    mode: str
+    authenticated: bool
+    api_key_login: bool
+    local_accounts: bool
+    user: str | None
+    role: str
+    cluster_domain: str | None
+    setup_required: bool
+    accounts_available: bool = False
+
+
+class NavCountsResponse(BaseModel):
+    memories: int
+    review_queue: int
 
 
 # --- Curation Rules ---
@@ -209,7 +244,7 @@ class ContradictionResponse(BaseModel):
     memory_id: str
     observed_behavior: str
     confidence: float
-    reporter: str
+    reporter: str | None
     created_at: datetime
     resolved: bool
     resolved_at: datetime | None

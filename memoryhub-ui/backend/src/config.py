@@ -4,7 +4,9 @@ Uses env_prefix="MEMORYHUB_" which matches the memoryhub-db-credentials Secret
 naming: MEMORYHUB_DB_HOST, MEMORYHUB_DB_PORT, etc.
 """
 
+import os
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,6 +24,7 @@ class Settings(BaseSettings):
     db_user: str = "memoryhub"
     db_password: str = ""
     embedding_url: str = ""
+    valkey_url: str = ""
     mcp_server_url: str = "http://memory-hub-mcp:8080/mcp/"
     auth_service_url: str = "http://auth-server.memoryhub-auth.svc:8081"
     admin_key: str = ""
@@ -44,6 +47,50 @@ class Settings(BaseSettings):
     # the authenticated user. Default is "default" to match the Phase 1
     # server_default on memory_nodes.tenant_id.
     ui_tenant_id: str = "default"
+    # Human role assignments are deployment-owned. OAuth proxy authenticates
+    # the username; a request header cannot assign an admin role.
+    #
+    # Transitional bootstrap (#667): these lists come from the
+    # `memoryhub-ui-human-access` Secret, which memoryhub-ui/deploy/deploy.sh
+    # provisions and annotates (who changed it, when). The replacement role
+    # resolver is tracked in #744: OpenShift RBAC grants for groups/users,
+    # with an OIDC follow-up off OpenShift. Principal/Access stay unchanged.
+    # See docs/ui/human-access.md.
+    ui_admin_users: str = ""
+    ui_allowed_users: str = ""
+    # How the dashboard learns who the person is:
+    # - "openshift" (default): the OAuth proxy sidecar authenticates and sets
+    #   X-Forwarded-User; only loopback peers (the sidecar) are accepted.
+    # - "local": local full-stack development without an OAuth proxy. Every
+    #   request acts as ``ui_local_user``; identity headers are ignored. Refused
+    #   inside a Kubernetes pod.
+    ui_auth_mode: Literal["openshift", "local"] = "openshift"
+    ui_local_user: str = ""
+    ui_admin_moderation_scopes: str = "project,campaign,role,organizational"
+    # Explicit grant for human Admin writes outside a project-admin membership.
+    # An Admin role alone is not a write capability.
+    ui_admin_write_scopes: str = ""
+
+    def human_access(self) -> tuple[set[str], set[str]]:
+        """(admins, users) from the deployment's bootstrap lists."""
+        admins = {item.strip() for item in self.ui_admin_users.split(",") if item.strip()}
+        users = {item.strip() for item in self.ui_allowed_users.split(",") if item.strip()}
+        return admins, users
+
+    def identity_problem(self) -> str | None:
+        """Why no request can be authenticated with this configuration, if so."""
+        if not self.ui_tenant_id.strip():
+            return "Dashboard tenant is not configured"
+        if self.ui_auth_mode == "local":
+            if os.environ.get("KUBERNETES_SERVICE_HOST"):
+                return "Local identity mode is refused inside a cluster; use the OAuth proxy"
+            if not self.ui_local_user.strip():
+                return "Local identity mode needs MEMORYHUB_UI_LOCAL_USER"
+        admins, users = self.human_access()
+        if not admins and not users:
+            return ("No dashboard users are configured: set MEMORYHUB_UI_ADMIN_USERS "
+                    "(see docs/ui/human-access.md)")
+        return None
 
     @property
     def database_url(self) -> str:

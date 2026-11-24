@@ -5,7 +5,7 @@ export interface GraphNode {
   scope: 'user' | 'project' | 'organizational' | 'enterprise';
   weight: number;
   branch_type: string | null;
-  owner_id: string;
+  owner_id: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -34,7 +34,7 @@ export interface RecentActivity {
   id: string;
   stub: string;
   scope: string;
-  owner_id: string;
+  owner_id: string | null; // null for admins (no individual activity)
   updated_at: string;
   action: string;
 }
@@ -53,7 +53,7 @@ export interface MemoryDetail {
   scope: string;
   weight: number;
   branch_type: string | null;
-  owner_id: string;
+  owner_id: string | null;
   version: number;
   is_current: boolean;
   parent_id: string | null;
@@ -123,6 +123,21 @@ export interface PublicConfig {
   auth_url: string;
 }
 
+export interface DashboardSession {
+  username: string;
+  role: 'user' | 'admin';
+  tenant_id: string;
+  capabilities: {
+    individual_activity: boolean;
+    clients: {
+      can_create: boolean;
+      identity_types: Array<'user' | 'service'>;
+      scopes: string[];
+      default_scopes: string[];
+    };
+  };
+}
+
 export interface CreateClientPayload {
   client_id: string;
   client_name: string;
@@ -141,7 +156,7 @@ export interface UserEntry {
   name: string;
   owner_id: string;
   identity_type: string;
-  memory_count: number;
+  memory_count: number | null; // null for admins (no individual activity)
   last_active: string | null;
 }
 
@@ -207,7 +222,7 @@ export interface ContradictionReport {
   memory_id: string;
   observed_behavior: string;
   confidence: number;
-  reporter: string;
+  reporter: string | null;
   created_at: string;
   resolved: boolean;
   resolved_at: string | null;

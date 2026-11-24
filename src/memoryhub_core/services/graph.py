@@ -192,11 +192,16 @@ async def invalidate_relationship(
 async def create_relationship(
     data: RelationshipCreate,
     session: AsyncSession,
+    *,
+    commit: bool = True,
 ) -> RelationshipRead:
     """Create a directed edge between two current memory nodes.
 
     Raises MemoryNotFoundError if either node is missing or not current.
     Raises ValueError on duplicate edges (unique constraint violation).
+
+    ``commit=False`` lets an existing caller stage several authorized edges
+    in one transaction; the default single-edge behavior is unchanged.
 
     Tenant isolation: source and target must share a tenant. The edge
     inherits ``tenant_id`` from the source (which equals target tenant by
@@ -228,7 +233,10 @@ async def create_relationship(
     session.add(rel)
 
     try:
-        await session.commit()
+        if commit:
+            await session.commit()
+        else:
+            await session.flush()
     except IntegrityError as exc:
         await session.rollback()
         raise ValueError(

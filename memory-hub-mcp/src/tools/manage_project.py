@@ -172,6 +172,12 @@ async def manage_project(
     tenant = get_tenant_filter(claims)
     caller = claims["sub"]
 
+    # These mutations correspond to Admin-only dashboard actions. A normal
+    # user-owned OAuth agent must not gain them through the MCP transport.
+    admin_mutation = action in ("create", "add_member") or (action == "remove_member" and user_id != caller)
+    if admin_mutation and "memory:admin" not in claims.get("scopes", []):
+        raise ToolError("Project administration requires memory:admin scope")
+
     gen = None
     try:
         session, gen = await get_db_session()
@@ -183,14 +189,14 @@ async def manage_project(
                 session, tenant, caller, project_name, description, invite_only,
             )
         elif action == "describe":
-            return await _handle_describe(session, tenant, project_name)
+            return await _handle_describe(session, tenant, caller, project_name)
         elif action == "add_member":
             return await _handle_add_member(
                 session, tenant, caller, project_name, user_id, role,
             )
         else:  # remove_member
             return await _handle_remove_member(
-                session, caller, project_name, user_id,
+                session, tenant, caller, project_name, user_id,
             )
 
     except ToolError:
@@ -256,14 +262,17 @@ async def _handle_create(
 
 
 async def _handle_describe(
-    session: Any, tenant: str, name: str,
+    session: Any, tenant: str, caller: str, name: str,
 ) -> dict[str, Any]:
     project = await get_project(session, name)
-    if project is None:
+    if project is None or project.tenant_id != tenant:
         raise ToolError(
             f"Project '{name}' not found. "
             "Use action='list' with filter='all' to see available projects."
         ) from None
+
+    if await _get_membership(session, name, caller) is None:
+        raise ToolError(f"You are not a member of project '{name}'.")
 
     members = await get_project_members(session, name)
     counts = await memory_counts(session, tenant, [name])
@@ -291,13 +300,14 @@ async def _handle_add_member(
     role: str,
 ) -> dict[str, Any]:
     project = await get_project(session, project_name)
-    if project is None:
+    if project is None or project.tenant_id != tenant:
         raise ToolError(
             f"Project '{project_name}' not found. "
             "Use action='list' with filter='all' to see available projects."
         ) from None
 
-    # Caller must be a member. Invite-only projects require admin role.
+    # Membership alone must not grant the power to enroll other identities.
+    # Open projects already support self-enrollment through project writes.
     caller_membership = await _get_membership(session, project_name, caller)
     if caller_membership is None:
         raise ToolError(
@@ -305,9 +315,9 @@ async def _handle_add_member(
             "Join the project first by writing a project-scoped memory, "
             "or ask an admin to add you."
         )
-    if project.invite_only and caller_membership.role != "admin":
+    if caller_membership.role != "admin":
         raise ToolError(
-            f"Only project admins can add members to invite-only project "
+            f"Only project admins can add members to project "
             f"'{project_name}'."
         )
 
@@ -338,10 +348,14 @@ async def _handle_add_member(
 
 async def _handle_remove_member(
     session: Any,
+    tenant: str,
     caller: str,
     project_name: str,
     target_user: str,
 ) -> dict[str, Any]:
+    project = await get_project(session, project_name)
+    if project is None or project.tenant_id != tenant:
+        raise ToolError(f"Project '{project_name}' not found.")
     # Authorization: self-removal is always allowed; otherwise require admin.
     if caller != target_user:
         caller_membership = await _get_membership(session, project_name, caller)

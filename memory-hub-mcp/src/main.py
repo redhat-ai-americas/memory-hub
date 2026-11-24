@@ -26,6 +26,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
+from src.core.http_auth import create_http_middleware
 from src.middleware.actionable_errors import ActionableToolErrorsMiddleware
 from src.tools.admin_memory import admin_memory
 from src.tools.delete_memory import delete_memory
@@ -162,6 +163,7 @@ def main():
             port=port,
             path=path,
             stateless_http=False,
+            middleware=create_http_middleware(),
         )
     else:
         mcp.run()

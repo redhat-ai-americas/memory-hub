@@ -146,6 +146,12 @@ parse_args() {
                 echo "  --gpu-models       Use GPU model manifests instead of CPU (default: CPU)"
                 echo "  --skip-smoke-test  Skip post-deploy write/search/read verification"
                 echo "  --restore-from F   Restore database from a pg_dump file after DB deploy"
+                echo ""
+                echo "Dashboard access (transitional, see docs/ui/human-access.md):"
+                echo "  MEMORYHUB_UI_ADMIN_USERS=a,b    OpenShift usernames who are dashboard Admins"
+                echo "  MEMORYHUB_UI_ALLOWED_USERS=c,d  OpenShift usernames who are dashboard Users"
+                echo "  Unset: an existing list is kept; on a clean install the deployer"
+                echo "  (oc whoami) becomes the first Admin."
                 exit 0
                 ;;
             *)
@@ -707,6 +713,16 @@ prepare_ui_infra() {
             --dry-run=client -o json | oc apply --context "$CONTEXT" -f - -n "$UI_NAMESPACE"
     else
         warn "auth-admin-key not found in $AUTH_PROJECT — skipping memoryhub-ui-admin-key (deploy auth first or re-run without --skip-auth)"
+    fi
+
+    # Dashboard human access lists (Secret memoryhub-ui-human-access) are
+    # provisioned by memoryhub-ui/deploy/deploy.sh via human-access.sh, so
+    # standalone UI deploys get them too. MEMORYHUB_UI_ADMIN_USERS and
+    # MEMORYHUB_UI_ALLOWED_USERS pass through from this environment.
+    if [ -n "${MEMORYHUB_UI_ADMIN_USERS+x}${MEMORYHUB_UI_ALLOWED_USERS+x}" ]; then
+        info "Dashboard human access lists will be set from MEMORYHUB_UI_ADMIN_USERS / MEMORYHUB_UI_ALLOWED_USERS"
+    else
+        info "Dashboard human access: keeping the existing list, or making $(oc whoami --context "$CONTEXT" 2>/dev/null || echo 'the deployer') the first Admin"
     fi
 
     echo -e "  ${GREEN}UI infrastructure ready${RESET}"

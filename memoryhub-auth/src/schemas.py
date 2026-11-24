@@ -11,6 +11,9 @@ class CreateClientRequest(BaseModel):
     default_scopes: list[str] = Field(default_factory=lambda: ["memory:read"])
     redirect_uris: list[str] | None = None
     public: bool = False
+    # Internal admin API only: BFF derives this from its verified principal.
+    # Auth persists the binding in the same transaction as the client.
+    owner: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class UpdateClientRequest(BaseModel):

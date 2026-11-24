@@ -125,10 +125,30 @@ notification development:
 podman compose --profile valkey -f compose.yaml up -d valkey
 ```
 
+The local dashboard uses a static, single-user development identity, not an
+interactive login: every request acts as `MEMORYHUB_UI_LOCAL_USER` (default
+`local-admin`). It ignores incoming identity headers. To test another role,
+change the configured user and access lists and restart the BFF. The
+`Principal`/`Access` authorization policy is shared with OpenShift; see
+[dashboard human access](../ui/human-access.md#local-development).
+
 ### Vite development mode
 
 For frontend development with hot reload, keep the local BFF running on port
-8080 and start Vite separately:
+8080 and start Vite separately.
+
+For a standalone BFF, set this in its environment **before starting or
+restarting the BFF** (alongside its database and local identity settings):
+
+```bash
+export MEMORYHUB_CORS_ORIGINS=http://localhost:3000
+```
+
+Compose already sets `MEMORYHUB_CORS_ORIGINS=http://localhost:3000` on the UI
+service. The explicit origin lets the CSRF guard accept state-changing
+requests proxied from Vite; without it those requests can return `403`.
+
+Then start the frontend in another terminal:
 
 ```bash
 cd memoryhub-ui/frontend

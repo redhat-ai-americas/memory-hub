@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.core.authz import (
+    AuthenticationError,
     authorize_read,
     authorize_write,
     build_authorized_scopes,
@@ -127,7 +128,6 @@ class TestClaimsIncludeProjectMemberships:
         }
         with (
             patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-            patch("src.core.authz._extract_jwt_from_headers", return_value=None),
             patch("src.core.authz.get_current_user", return_value=user),
         ):
             claims = get_claims_from_context()
@@ -144,7 +144,6 @@ class TestClaimsIncludeProjectMemberships:
         }
         with (
             patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-            patch("src.core.authz._extract_jwt_from_headers", return_value=None),
             patch("src.core.authz.get_current_user", return_value=user),
         ):
             claims = get_claims_from_context()
@@ -156,6 +155,7 @@ class TestClaimsIncludeProjectMemberships:
         token = MagicMock()
         token.claims = {
             "sub": "alice",
+            "tenant_id": "default",
             "project_memberships": ["jwt-proj-1"],
         }
         token.client_id = "alice"
@@ -169,7 +169,7 @@ class TestClaimsIncludeProjectMemberships:
     def test_jwt_path_missing_memberships(self):
         """JWT token without project_memberships defaults to empty list."""
         token = MagicMock()
-        token.claims = {"sub": "alice"}
+        token.claims = {"sub": "alice", "tenant_id": "default"}
         token.client_id = "alice"
         token.scopes = ["memory:read"]
 
@@ -178,22 +178,14 @@ class TestClaimsIncludeProjectMemberships:
 
         assert claims["project_memberships"] == []
 
-    def test_header_jwt_includes_memberships(self):
-        """JWT extracted from Authorization header includes memberships."""
-        jwt_claims = {
-            "sub": "alice",
-            "project_memberships": ["header-proj"],
-        }
+    def test_header_jwt_without_verifier_is_ignored(self):
+        """An unverified header cannot supply project memberships."""
         with (
             patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-            patch(
-                "src.core.authz._extract_jwt_from_headers",
-                return_value=jwt_claims,
-            ),
+            patch("src.core.authz.get_current_user", return_value=None),
+            pytest.raises(AuthenticationError),
         ):
-            claims = get_claims_from_context()
-
-        assert claims["project_memberships"] == ["header-proj"]
+            get_claims_from_context()
 
 
 # -- authorize_read/write with project memberships -------------------------
@@ -273,7 +265,6 @@ class TestClaimsToBuildAuthorizedScopes:
         }
         with (
             patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-            patch("src.core.authz._extract_jwt_from_headers", return_value=None),
             patch("src.core.authz.get_current_user", return_value=user),
         ):
             claims = get_claims_from_context()
@@ -292,7 +283,6 @@ class TestClaimsToBuildAuthorizedScopes:
         }
         with (
             patch("fastmcp.server.dependencies.get_access_token", return_value=None),
-            patch("src.core.authz._extract_jwt_from_headers", return_value=None),
             patch("src.core.authz.get_current_user", return_value=user),
         ):
             claims = get_claims_from_context()

@@ -7,6 +7,7 @@ import type {
   CreateClientPayload,
   CreateRulePayload,
   CurationRule,
+  DashboardSession,
   GraphResponse,
   MemoryDetail,
   PublicConfig,
@@ -29,6 +30,10 @@ async function apiFetch<T>(path: string): Promise<T> {
     throw new Error(`API error ${response.status}: ${detail}`);
   }
   return response.json() as Promise<T>;
+}
+
+export async function fetchMe(): Promise<DashboardSession> {
+  return apiFetch<DashboardSession>('/me');
 }
 
 export async function fetchGraph(scope?: string, owner?: string): Promise<GraphResponse> {

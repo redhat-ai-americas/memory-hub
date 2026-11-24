@@ -55,6 +55,7 @@ async def upsert_checkpoint(
             MemoryNode.branch_type == "checkpoint",
             MemoryNode.content == workflow_name,
             MemoryNode.scope == scope,
+            MemoryNode.scope_id == scope_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
             MemoryNode.tenant_id == tenant_id,
@@ -105,6 +106,7 @@ async def read_checkpoint(
     tenant_id: str,
     owner_id: str,
     scope: str = "user",
+    scope_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Read checkpoint state for a workflow.
 
@@ -125,6 +127,7 @@ async def read_checkpoint(
             MemoryNode.branch_type == "checkpoint",
             MemoryNode.content == workflow_name,
             MemoryNode.scope == scope,
+            MemoryNode.scope_id == scope_id,
             MemoryNode.is_current.is_(True),
             MemoryNode.deleted_at.is_(None),
             MemoryNode.tenant_id == tenant_id,

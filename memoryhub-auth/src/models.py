@@ -28,6 +28,16 @@ class OAuthClient(Base):
     api_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
 
 
+class AgentOwnerBinding(Base):
+    """Shared dashboard owner binding, committed with the OAuth client."""
+
+    __tablename__ = "memoryhub_ui_agent_owners"
+
+    tenant_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
 

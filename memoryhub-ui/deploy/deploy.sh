@@ -5,6 +5,7 @@
 #
 # Steps:
 #   1. Ensure namespace exists
+#   1b. Provision the human access lists (human-access.sh)
 #   2. Apply manifests (deployment, service, route)
 #   3. Re-apply manifest to re-resolve the ImageStream tag against the
 #      selected digest (resolve-names rewrites at apply time, not pod
@@ -50,6 +51,15 @@ else
     echo "Creating namespace: $NAMESPACE"
     oc create namespace "$NAMESPACE" --context "$CONTEXT"
 fi
+
+# Step 1b: Human access lists (who is an Admin, who is a User). The
+# dashboard refuses everyone without them, so a deploy always provisions
+# them: from MEMORYHUB_UI_ADMIN_USERS / MEMORYHUB_UI_ALLOWED_USERS when
+# given, otherwise the existing Secret, otherwise the deployer as first
+# Admin. Transitional; see docs/ui/human-access.md.
+echo ""
+echo "Provisioning dashboard human access..."
+bash "$SCRIPT_DIR/human-access.sh" --context "$CONTEXT" --namespace "$NAMESPACE"
 
 # Step 2: Apply manifests
 echo ""
@@ -178,7 +188,11 @@ elif oc get namespace "$RHOAI_NS" --context "$CONTEXT" &>/dev/null; then
         echo "  Re-run this script after the UI Service exists in $NAMESPACE."
     else
         echo "  UI Service ClusterIP: $UI_CLUSTER_IP"
-        cat <<PROXY_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
+        # Everything targets the OAuth proxy's TLS port 8443 on the real
+        # Service. Port 4180 is the proxy's loopback-only listener
+        # (--http-address=127.0.0.1:4180) and cannot be reached through a
+        # Service, so the old 4180/edge route never worked.
+        cat <<PROXY_EOF | oc apply --context "$CONTEXT" -f -
 apiVersion: v1
 kind: Service
 metadata:
@@ -186,9 +200,10 @@ metadata:
   namespace: $RHOAI_NS
 spec:
   ports:
-  - port: 8080
+  - name: proxy
+    port: 8443
     protocol: TCP
-    targetPort: 8080
+    targetPort: 8443
 ---
 apiVersion: v1
 kind: Endpoints
@@ -199,12 +214,23 @@ subsets:
 - addresses:
   - ip: $UI_CLUSTER_IP
   ports:
-  - port: 8080
+  - name: proxy
+    port: 8443
     protocol: TCP
 PROXY_EOF
-        # Create the Route only if it doesn't exist (idempotent).
-        if ! oc get route memoryhub-ui --context "$CONTEXT" -n "$RHOAI_NS" &>/dev/null; then
-            cat <<ROUTE_EOF | oc apply --context "$CONTEXT" -f - 2>/dev/null
+        # The proxy serves the service-CA certificate issued for
+        # memoryhub-ui.$NAMESPACE.svc. Reencrypt with that CA given
+        # explicitly: the router then checks the chain against it instead
+        # of expecting a certificate for memoryhub-ui.$RHOAI_NS.svc, which
+        # the proxy does not have.
+        SERVICE_CA=$(oc get configmap openshift-service-ca.crt --context "$CONTEXT" \
+            -n "$NAMESPACE" -o jsonpath='{.data.service-ca\.crt}' 2>/dev/null || echo "")
+        if [ -z "$SERVICE_CA" ]; then
+            echo "ERROR: configmap openshift-service-ca.crt not found in $NAMESPACE;"
+            echo "  cannot build the reencrypt route for the RHOAI dashboard."
+            exit 1
+        fi
+        oc apply --context "$CONTEXT" -f - <<ROUTE_EOF
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -215,12 +241,40 @@ spec:
     kind: Service
     name: memoryhub-ui
   port:
-    targetPort: 8080
+    targetPort: proxy
   tls:
-    termination: edge
+    termination: reencrypt
     insecureEdgeTerminationPolicy: Redirect
+    destinationCACertificate: |
+$(printf '%s\n' "$SERVICE_CA" | sed 's/^/      /')
 ROUTE_EOF
+        # Prove the route reaches the proxy: /healthz is the one path the
+        # proxy lets through without a sign-in (--skip-auth-regex).
+        RHOAI_HOST=$(oc get route memoryhub-ui --context "$CONTEXT" -n "$RHOAI_NS" \
+            -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+        if [ -z "$RHOAI_HOST" ]; then
+            echo "ERROR: could not resolve the RHOAI MemoryHub Route hostname."
+            exit 1
         fi
+        # OAuthRedirectReference resolves Routes in the ServiceAccount's own
+        # namespace only. Explicitly allow the callback on the dashboard's
+        # secondary Route as well, otherwise OAuth rejects its sign-in even
+        # though /healthz succeeds through that Route.
+        oc annotate serviceaccount memoryhub-ui --context "$CONTEXT" -n "$NAMESPACE" \
+            --overwrite \
+            "serviceaccounts.openshift.io/oauth-redirecturi.rhoai=https://$RHOAI_HOST/oauth/callback"
+        HEALTH_CODE=000
+        for _ in $(seq 1 12); do
+            HEALTH_CODE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \
+                "https://$RHOAI_HOST/healthz" || echo 000)
+            [ "$HEALTH_CODE" = "200" ] && break
+            sleep 5
+        done
+        if [ "$HEALTH_CODE" != "200" ]; then
+            echo "ERROR: https://$RHOAI_HOST/healthz returned $HEALTH_CODE through the RHOAI proxy route."
+            exit 1
+        fi
+        echo "  OK: https://$RHOAI_HOST/healthz returned 200 through the proxy route"
         echo "  Proxy route synced."
     fi
 

@@ -26,18 +26,25 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 8080
+            port: 8443
+            scheme: HTTPS
           initialDelaySeconds: 10
           periodSeconds: 30
         readinessProbe:
           httpGet:
             path: /healthz
-            port: 8080
+            port: 8443
+            scheme: HTTPS
           initialDelaySeconds: 5
           periodSeconds: 10
         envFrom:
         - secretRef:
             name: memoryhub-db-credentials
+        # Who is an Admin and who is a User (transitional bootstrap, #667).
+        # Provisioned by deploy/human-access.sh; required, so a pod never
+        # starts with empty lists that would refuse every person.
+        - secretRef:
+            name: memoryhub-ui-human-access
         env:
         - name: MEMORYHUB_MCP_SERVER_URL
           value: "http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/"
@@ -58,6 +65,8 @@ spec:
             secretKeyRef:
               name: memoryhub-ui-admin-key
               key: MEMORYHUB_ADMIN_KEY
+        # MEMORYHUB_UI_ADMIN_USERS / MEMORYHUB_UI_ALLOWED_USERS come from the
+        # memoryhub-ui-human-access Secret above (docs/ui/human-access.md).
         resources:
           limits:
             memory: "512Mi"
@@ -82,7 +91,8 @@ spec:
         - --tls-key=/etc/tls/private/tls.key
         - --cookie-secret-file=/etc/proxy/secrets/session-secret
         - --pass-basic-auth=false
-        - --pass-access-token=true
+        - --pass-user-headers=true
+        - --pass-access-token=false
         - --skip-auth-regex=^/healthz$
         volumeMounts:
         - name: proxy-tls
@@ -119,10 +129,6 @@ spec:
   - name: proxy
     port: 8443
     targetPort: 8443
-    protocol: TCP
-  - name: app
-    port: 8080
-    targetPort: 8080
     protocol: TCP
 ---
 apiVersion: route.openshift.io/v1
