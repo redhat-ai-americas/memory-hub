@@ -1,14 +1,19 @@
 # Dashboard human access
 
-Status: **transitional bootstrap** (#667). It stays in place until tenant
-role assignments replace it. Then this list and `human-access.sh` go away.
+Status: **transitional bootstrap** (#667). Replacing the username lists with
+OpenShift RBAC grants for groups and individual users is tracked in
+[#744](https://github.com/redhat-ai-americas/memory-hub/issues/744), including
+the OIDC/group-to-role follow-up for non-OpenShift deployments. Identity and
+role resolution produce a verified `Principal`; the shared `Access` policy
+enforces permissions. The future resolver replaces the list lookup without
+changing those policy interfaces or requiring UI refactoring.
 
 The MemoryHub dashboard has two human roles:
 
 | Role  | Sees and does |
 |-------|---------------|
 | User  | Their own personal memories, plus the shared memories their projects and teams can read. |
-| Admin | Tenant-wide shared memories (project, campaign, role, organizational and enterprise scope), moderation, users, clients and agents. **No personal (user-scope) data of anyone**, not even IDs, owners, timestamps or counts. See "Admin privacy" below. |
+| Admin | Tenant-wide metadata for project, campaign, role and organizational memories; content and actions require the configured scope and object grants. Manages users, clients and agents. **No personal (user-scope) data of anyone**, not even IDs, owners, timestamps or counts. Enterprise memories are unavailable to Admins in this release. See "Admin privacy" below. |
 
 ## Where roles come from
 
@@ -99,6 +104,17 @@ MEMORYHUB_UI_TENANT_ID=default
 refuses to run in local mode inside a cluster (`KUBERNETES_SERVICE_HOST`
 set) or without `MEMORYHUB_UI_LOCAL_USER`.
 
+Local mode is a **static, single-user development mode**. Every browser and
+API request acts as the configured user; it provides no interactive login,
+per-browser sessions or multi-user authentication. To test another user or
+role, change the local identity and lists and restart the BFF. Both local
+and OpenShift modes use the same `Principal`/`Access` authorization policy.
+
+When running Vite on `http://localhost:3000` with a standalone BFF on port
+8080, also set `MEMORYHUB_CORS_ORIGINS=http://localhost:3000` in the BFF
+environment and restart it. Compose already supplies this setting. See the
+[Vite instructions](../guides/local-development.md#vite-development-mode).
+
 The local MCP HTTP listener also verifies JWTs. Compose supplies its JWKS
 URL over the internal `auth:8081` connection, the same public issuer as the
 local Auth service, and the `memoryhub` audience. API-key registration
@@ -125,8 +141,8 @@ members retain access to shared memories and focus history.
 ## Admin privacy
 
 Admin queries are filtered at a single point in `authorization.py`
-(`clause()` / `can_read()`): only project, campaign, role, organizational
-and enterprise scopes are visible. User and entity scopes are excluded,
+(`clause()` / `can_read()`): only project, campaign, role and organizational
+scopes are visible. User, entity and enterprise scopes are excluded,
 including entity metadata derived from personal memories. This covers every Admin path:
 stats, nav counts, graph and graph search, browse, export, search,
 contradictions, detail, history, context and neighbourhood. The dashboard
@@ -165,14 +181,19 @@ site. The guard also refuses any `Origin` other than the requested host or
 
 ### Out of scope: exceptional access (break-glass)
 
-#667 also describes a super-admin exceptional-access workflow, which this
+#667 covers User/Admin enforcement. The super-admin exceptional-access
+workflow is tracked separately in
+[#741](https://github.com/redhat-ai-americas/memory-hub/issues/741), which this
 change does **not** implement. That workflow would add a separate privilege,
 require an incident reference and a justification, and write an enhanced
-audit record. It is tracked separately (see the follow-up issue linked from
-PR #710). Until it exists, nobody can see personal memories through the
+audit record. Until it exists, nobody can see personal memories through the
 dashboard except their owner.
 
 ## Not here
 
 - No central provisioning (#671). Lists are per deployment.
-- No group or role sync from OpenShift. Edit the lists and restart.
+- Group/user role provisioning via OpenShift RBAC and the OIDC role-source
+  follow-up: #744. For now, edit the lists and restart.
+- Enterprise content access, approval and moderation for Admins are not
+  implemented. Enterprise metadata is also excluded from their dashboard.
+  Ordinary Users retain the existing read access to enterprise policies.

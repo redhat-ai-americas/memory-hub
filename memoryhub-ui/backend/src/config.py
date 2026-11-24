@@ -52,9 +52,10 @@ class Settings(BaseSettings):
     #
     # Transitional bootstrap (#667): these lists come from the
     # `memoryhub-ui-human-access` Secret, which memoryhub-ui/deploy/deploy.sh
-    # provisions and annotates (who changed it, when). They are replaced by
-    # tenant role assignments once the tenant admin flow lands. See
-    # docs/ui/human-access.md.
+    # provisions and annotates (who changed it, when). The replacement role
+    # resolver is tracked in #744: OpenShift RBAC grants for groups/users,
+    # with an OIDC follow-up off OpenShift. Principal/Access stay unchanged.
+    # See docs/ui/human-access.md.
     ui_admin_users: str = ""
     ui_allowed_users: str = ""
     # How the dashboard learns who the person is:

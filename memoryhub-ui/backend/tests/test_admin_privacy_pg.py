@@ -226,19 +226,20 @@ async def test_bulk_delete_parent_after_a_branch_was_deleted(env):
     assert (await env["fetch"](removed.id)).deleted_at == original_deleted_at
 
 
-async def test_no_admin_path_reveals_a_personal_memory(env):
+async def test_no_admin_path_reveals_personal_or_unsupported_enterprise_memory(env):
     http, seed, act_as = env["http"], env["seed"], env["act_as"]
     personal = await seed("Dana private salary note", scope="user", owner="dana", actor="dana", weight=0.9)
     await env["new_version"](personal.id, "Dana private salary note, revised")
     shared = await seed("Atlas gripper torque limit is 11.5 Nm", weight=0.9)
     org = await seed("All deploys need a change ticket", scope="organizational", owner="admin", actor="admin")
+    enterprise = await seed("Unsupported enterprise salary policy", scope="enterprise", owner="admin", actor="admin")
     async with env["sessions"]() as db:
         private_entity, _ = await find_or_create_entity(
             "Dana private medical contact", "person", db, MockEmbeddingService(), tenant_id=TENANT, owner_id="dana",
         )
         db.add(MemoryRelationship(source_id=personal.id, target_id=private_entity.id,
                                   relationship_type="mentions", created_by="dana", tenant_id=TENANT))
-        for src, dst in ((personal.id, shared.id), (shared.id, org.id)):
+        for src, dst in ((personal.id, shared.id), (shared.id, org.id), (enterprise.id, shared.id)):
             db.add(MemoryRelationship(source_id=src, target_id=dst, relationship_type="related_to",
                                       created_by="dana", tenant_id=TENANT))
         # A personal curation rule: its name and pattern are personal data too.
@@ -248,7 +249,8 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
         await db.commit()
 
     act_as("admin", "admin")
-    leaks = (str(personal.id), str(private_entity.id), "dana", "Dana private")
+    leaks = (str(personal.id), str(private_entity.id), str(enterprise.id),
+             "dana", "Dana private", "Unsupported enterprise")
     checks = {
         "stats": await http.get("/api/stats"),
         "nav-counts": await http.get("/api/nav-counts"),
@@ -274,17 +276,25 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
 
     for path in (f"/api/memory/{personal.id}", f"/api/memory/{personal.id}/history",
                  f"/api/memory/{personal.id}/context", f"/api/graph/neighbourhood?focus={personal.id}",
-                 f"/api/memory/{private_entity.id}", f"/api/memory/{private_entity.id}/context"):
+                 f"/api/memory/{private_entity.id}", f"/api/memory/{private_entity.id}/context",
+                 f"/api/memory/{enterprise.id}", f"/api/memory/{enterprise.id}/history",
+                 f"/api/memory/{enterprise.id}/context", f"/api/graph/neighbourhood?focus={enterprise.id}"):
         response = await http.get(path)
         assert response.status_code == 404, path
         assert "dana" not in response.text
 
     stats = checks["stats"].json()
-    assert "user" not in {row["scope"] for row in stats["scope_counts"]}
+    assert not {"user", "enterprise"} & {row["scope"] for row in stats["scope_counts"]}
     assert stats["total_memories"] == 2
     graph = checks["graph"].json()
     assert {n["id"] for n in graph["nodes"]} == {str(shared.id), str(org.id)}
     assert all(str(personal.id) not in (e["source"], e["target"]) for e in graph["edges"])
+
+    assert (await http.delete(f"/api/memory/{enterprise.id}")).status_code == 403
+    assert (await http.post("/api/memories/bulk", json={
+        "action": "quarantine", "ids": [str(enterprise.id)],
+    })).status_code == 404
+    assert (await env["fetch"](enterprise.id)).status == "active"
 
     # The owner still sees it all.
     act_as("alice")
@@ -293,6 +303,7 @@ async def test_no_admin_path_reveals_a_personal_memory(env):
     mine = await http.get("/api/memories/browse", params={"tab": "all"})
     assert str(personal.id) in mine.text
     assert "dana-private-rule" in (await http.get("/api/rules")).text
+    assert (await http.get(f"/api/memory/{enterprise.id}")).json()["content"] == enterprise.content
 
 
 async def test_admin_sees_no_individual_activity(env):

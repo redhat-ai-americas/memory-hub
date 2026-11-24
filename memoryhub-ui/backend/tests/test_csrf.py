@@ -4,8 +4,10 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from src.config import Settings
 from src.csrf import CrossSiteRequestGuard
 from src.main import app as dashboard_app
+from src.main import create_app
 
 
 def _app(allowed=None) -> FastAPI:
@@ -63,6 +65,36 @@ async def test_forwarded_host_and_configured_origins_are_own():
     dev = {"origin": "http://localhost:5173"}
     assert (await _post(_app(["http://localhost:5173"]), dev, host="localhost:8080")).status_code == 200
     assert (await _post(_app(), dev, host="localhost:8080")).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_documented_vite_origin_uses_configured_csrf_allowlist(monkeypatch):
+    # Vite proxies /api to :8080; the browser's Origin is still :3000.
+    monkeypatch.setenv("MEMORYHUB_CORS_ORIGINS", "http://localhost:3000")
+    monkeypatch.setattr("src.main.get_settings", lambda: Settings())
+    app = create_app()
+
+    @app.post("/api/vite-csrf-test")
+    async def write():
+        return {"saved": True}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost:8080") as client:
+        allowed = await client.post("/api/vite-csrf-test", headers={
+            "origin": "http://localhost:3000", "sec-fetch-site": "same-origin",
+        })
+        refused = await client.post("/api/vite-csrf-test", headers={
+            "origin": "http://localhost:3001", "sec-fetch-site": "same-origin",
+        })
+    assert allowed.status_code == 200
+    assert allowed.json() == {"saved": True}
+    assert refused.status_code == 403
+
+    monkeypatch.setenv("MEMORYHUB_CORS_ORIGINS", "")
+    unconfigured = create_app()
+    response = await _post(unconfigured, {
+        "origin": "http://localhost:3000", "sec-fetch-site": "same-origin",
+    }, host="localhost:8080")
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

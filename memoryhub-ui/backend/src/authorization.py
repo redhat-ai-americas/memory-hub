@@ -27,7 +27,9 @@ from src.database import get_db
 logger = logging.getLogger(__name__)
 OwnerBase = declarative_base()
 ADMIN_MODERATION_SCOPES = frozenset({"project", "campaign", "role", "organizational"})
-ADMIN_VISIBLE_SCOPES = ADMIN_MODERATION_SCOPES | {"enterprise"}
+# Enterprise approval/moderation is not implemented in the human dashboard.
+# Keep its metadata out of Admin views as well as its content and mutations.
+ADMIN_VISIBLE_SCOPES = ADMIN_MODERATION_SCOPES
 
 
 class AgentOwner(OwnerBase):

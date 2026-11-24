@@ -163,6 +163,20 @@ def test_independent_memory_capabilities_and_tenant_boundary():
     assert not admin.can_delete(node(scope="user", owner="admin"))
 
 
+def test_enterprise_is_unavailable_to_admin_but_remains_readable_to_users():
+    enterprise = node(scope="enterprise", owner="alice")
+    admin = access(role="admin", username="alice")
+    assert not admin.can_read(enterprise)
+    assert admin.hides_content(enterprise)
+    assert not admin.can_write(enterprise)
+    assert not admin.can_delete(enterprise)
+    assert not admin.can_moderate(enterprise)
+    for clause in (admin.clause(), admin.content_clause()):
+        sql = str(clause.compile(compile_kwargs={"literal_binds": True}))
+        assert "enterprise" not in sql
+    assert access().can_read(enterprise)
+
+
 def test_agent_membership_is_not_human_project_or_role_authority():
     project = node(scope="project", owner="agent-a", scope_id="p1")
     role_memory = node(scope="role", owner="agent-a", scope_id="reviewer")
