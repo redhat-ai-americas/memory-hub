@@ -153,6 +153,52 @@ class _Clients:
         return []
 
 
+@pytest.mark.parametrize("action", ["block", "quarantine", "reject_with_pointer"])
+async def test_blocked_version_leaves_memory_and_audit_unchanged(env, action):
+    http = env["http"]
+    memory = await env["seed"]("Allowed original content", scope="user", owner="alice-agent")
+    async with env["sessions"]() as db:
+        db.add(CuratorRule(
+            name="owner-content-policy", trigger="on_write", tier="regex",
+            config={"pattern": "FORBIDDEN_CONTENT"}, action=action, layer="user",
+            owner_id="alice-agent", tenant_id=TENANT, priority=5,
+        ))
+        await db.commit()
+
+    response = await http.post(f"/api/memory/{memory.id}/versions", json={"content": "FORBIDDEN_CONTENT"})
+    assert response.status_code == 409, response.text
+    async with env["sessions"]() as db:
+        versions = (await db.execute(select(MemoryNode).where(
+            MemoryNode.tenant_id == TENANT, MemoryNode.logical_id == memory.logical_id,
+        ))).scalars().all()
+        assert len(versions) == 1
+        assert versions[0].content == "Allowed original content" and versions[0].is_current
+        audit = (await db.execute(select(AuditLog).where(
+            AuditLog.tenant_id == TENANT, AuditLog.event_type == "memory.update",
+        ))).scalars().all()
+        assert audit == []
+
+
+async def test_bulk_delete_parent_after_a_branch_was_deleted(env):
+    http = env["http"]
+    parent = await env["seed"]("Parent", scope="user", owner="alice")
+    removed = await env["seed"]("Removed evidence", scope="user", owner="alice",
+                                parent=parent.id, branch="evidence")
+    live = await env["seed"]("Live evidence", scope="user", owner="alice",
+                             parent=parent.id, branch="evidence")
+    response = await http.delete(f"/api/memory/{removed.id}")
+    assert response.status_code == 204, response.text
+    original_deleted_at = (await env["fetch"](removed.id)).deleted_at
+
+    response = await http.post("/api/memories/bulk", json={"action": "delete", "ids": [str(parent.id)]})
+    assert response.status_code == 200, response.text
+    assert response.json()["done"] == [str(parent.id)]
+    for node in (parent, live):
+        stored = await env["fetch"](node.id)
+        assert stored.deleted_at is not None and not stored.is_current
+    assert (await env["fetch"](removed.id)).deleted_at == original_deleted_at
+
+
 async def test_no_admin_path_reveals_a_personal_memory(env):
     http, seed, act_as = env["http"], env["seed"], env["act_as"]
     personal = await seed("Dana private salary note", scope="user", owner="dana", actor="dana", weight=0.9)

@@ -6,8 +6,10 @@ so pipeline tests with embeddings only verify the fallback path is clean.
 """
 
 import pytest
+from sqlalchemy import func, select
 
 import memoryhub_core.services.curation.pipeline as curation_pipeline
+from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.schemas import (
     CuratorRuleCreate,
     RuleAction,
@@ -108,6 +110,24 @@ async def test_seed_default_rules_idempotent(async_session):
     second = await seed_default_rules(async_session)
     assert first == 5
     assert second == 0  # Already seeded — nothing inserted
+
+
+async def test_pipeline_seeding_can_roll_back_with_the_callers_transaction(async_session):
+    tenant = "transactional-seed"
+    curation_pipeline._seeded_tenants.discard(tenant)
+    for _ in range(2):
+        result = await run_curation_pipeline(
+            content="My AWS key is AKIA1234567890ABCDEF", embedding=None,
+            owner_id="user-123", scope="user", session=async_session,
+            tenant_id=tenant, commit_seed=False,
+        )
+        assert result["blocked"] and result["reason"] == "secrets_scan"
+        assert tenant not in curation_pipeline._seeded_tenants
+        await async_session.rollback()
+        count = await async_session.scalar(select(func.count()).select_from(CuratorRule).where(
+            CuratorRule.tenant_id == tenant,
+        ))
+        assert count == 0
 
 
 # -- load_rules --
@@ -352,10 +372,10 @@ async def test_pipeline_skips_seed_on_second_call(async_session, reset_rules_see
     """seed_default_rules is called exactly once across multiple pipeline invocations."""
     call_count = 0
 
-    async def _counting_seed(session, *, tenant_id="default"):
+    async def _counting_seed(session, *, tenant_id="default", commit=True):
         nonlocal call_count
         call_count += 1
-        return await _svc_seed_default_rules(session, tenant_id=tenant_id)
+        return await _svc_seed_default_rules(session, tenant_id=tenant_id, commit=commit)
 
     monkeypatch.setattr(curation_pipeline, "seed_default_rules", _counting_seed)
 
