@@ -153,6 +153,63 @@ class _Clients:
         return []
 
 
+@pytest.mark.parametrize("bulk", [False, True])
+async def test_delete_capability_checks_other_authors_in_the_version_chain(env, bulk):
+    http = env["http"]
+    original = await env["seed"]("Carol's shared note", owner="carol", actor="carol")
+    edited = await http.post(f"/api/memory/{original.id}/versions", json={"content": "Alice's shared revision"})
+    assert edited.status_code == 201, edited.text
+    current = edited.json()["id"]
+    context = await http.get(f"/api/memory/{current}/context")
+    assert context.status_code == 200, context.text
+    assert context.json()["memory"]["can_delete"] is False
+    browse = await http.get("/api/memories/browse")
+    row = next(item for item in browse.json()["items"] if item["id"] == current)
+    assert row["can_delete"] is False
+
+    async def remove():
+        return (await http.post("/api/memories/bulk", json={"action": "delete", "ids": [current]})
+                if bulk else await http.delete(f"/api/memory/{current}"))
+
+    refused = await remove()
+    assert refused.status_code == 403, refused.text
+    assert (await env["fetch"](original.id)).deleted_at is None
+    assert (await env["fetch"](uuid.UUID(current))).deleted_at is None
+    env["act_as"]("carol")
+    context = await http.get(f"/api/memory/{current}/context")
+    assert context.json()["memory"]["can_delete"] is True
+    removed = await remove()
+    assert removed.status_code == (200 if bulk else 204), removed.text
+    assert (await env["fetch"](original.id)).deleted_at is not None
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+@pytest.mark.parametrize("depth", [1, 2])
+async def test_delete_capability_checks_live_descendants_and_ignores_deleted_ones(env, bulk, depth):
+    http = env["http"]
+    parent = await env["seed"]("Shared parent", owner="alice", actor="alice")
+    branch_parent = parent
+    if depth == 2:
+        branch_parent = await env["seed"]("Nested evidence", owner="alice", actor="alice",
+                                          parent=parent.id, branch="evidence")
+    child = await env["seed"]("Carol's branch", owner="carol", actor="carol",
+                              parent=branch_parent.id, branch="evidence")
+    context = await http.get(f"/api/memory/{parent.id}/context")
+    assert context.json()["memory"]["can_delete"] is False
+    env["act_as"]("carol")
+    removed = await http.delete(f"/api/memory/{child.id}")
+    assert removed.status_code == 204, removed.text
+    original_deleted_at = (await env["fetch"](child.id)).deleted_at
+    env["act_as"]("alice")
+    context = await http.get(f"/api/memory/{parent.id}/context")
+    assert context.json()["memory"]["can_delete"] is True
+    removed = (await http.post("/api/memories/bulk", json={"action": "delete", "ids": [str(parent.id)]})
+               if bulk else await http.delete(f"/api/memory/{parent.id}"))
+    assert removed.status_code == (200 if bulk else 204), removed.text
+    assert (await env["fetch"](parent.id)).deleted_at is not None
+    assert (await env["fetch"](child.id)).deleted_at == original_deleted_at
+
+
 async def test_project_focus_requires_live_membership_without_hiding_shared_content(env):
     http = env["http"]
     shared = await env["seed"]("Shared deployment guide", owner="carol", actor="carol")

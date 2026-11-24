@@ -122,6 +122,12 @@ configured `project` content grant. A tenant-wide Admin can still inspect
 the project roster without gaining access to its focus history. Authorized
 members retain access to shared memories and focus history.
 
+Delete capabilities cover the complete version chain and descendant branches.
+Writing a revision of someone else's shared memory does not grant permission
+to delete their earlier versions. Already deleted descendants do not block
+deleting the remaining authorized rows. The API rechecks permissions under
+lock when the deletion is submitted.
+
 ## Admin privacy
 
 Admin queries are filtered at a single point in `authorization.py`

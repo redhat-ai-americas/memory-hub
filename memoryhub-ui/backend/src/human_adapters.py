@@ -64,6 +64,7 @@ from sqlalchemy.orm import aliased
 from src.authorization import AccessDep, AgentOwner
 from src.config import Settings, get_settings
 from src.database import get_db
+from src.deletion import delete_capabilities
 
 router = APIRouter()
 DbDep = Annotated[AsyncSession, Depends(get_db)]
@@ -910,6 +911,7 @@ async def browse_memories(
                     "id": str(entity_id), "name": name,
                     "type": (kind or "").removeprefix("entity:"),
                 })
+    deletable = await delete_capabilities(db, access, memories)
     items = []
     for memory in memories:
         hidden = not _human_can_see_content(access, memory)
@@ -943,9 +945,7 @@ async def browse_memories(
             "entity_count": 0 if hidden else len(entities_by_memory.get(memory.id, [])),
             "redacted": hidden,
             "capabilities": {"write": writable, "moderate": moderatable},
-            "can_delete": access.can_delete(memory) and (
-                memory.scope != "project" or memory.scope_id in access.human_projects
-            ),
+            "can_delete": deletable[memory.id],
         })
     tabs = {}
     for name, condition in (

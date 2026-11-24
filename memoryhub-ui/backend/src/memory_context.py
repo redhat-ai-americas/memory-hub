@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import Access, AccessDep
 from src.database import get_db
+from src.deletion import delete_capabilities
 from src.human_adapters import _human_can_see_content
 
 router = APIRouter()
@@ -151,12 +152,13 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
         if parent is not None and _readable(access, parent):
             visible_parent = str(parent.id)
 
+    deletable = await delete_capabilities(db, access, [seed])
     memory = {
         **_brief(seed, access),
         "capabilities": {
             "write": access.can_write(seed), "moderate": access.can_moderate(seed),
         },
-        "can_delete": access.can_delete(seed),
+        "can_delete": deletable[seed.id],
         "content": "" if hidden else seed.content,
         "logical_id": str(seed.logical_id) if seed.logical_id else None,
         "parent_id": visible_parent, "branch_type": seed.branch_type,

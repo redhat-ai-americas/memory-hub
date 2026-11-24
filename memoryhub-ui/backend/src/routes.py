@@ -705,10 +705,11 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access
 
     found = await collect_delete_nodes(node, db, tenant_id, seed_locked=True)
     for related in found.values():
-        access.require_delete(related)
+        if related.deleted_at is None:
+            access.require_delete(related)
 
     now = datetime.now(UTC)
-    all_ids = set(found)
+    all_ids = {uid for uid, related in found.items() if related.deleted_at is None}
     _record_human_audit(
         db, access, "memory.delete", node.scope, node.owner_id, node.id,
         {"deleted_rows": len(all_ids)},

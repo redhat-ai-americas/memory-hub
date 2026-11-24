@@ -79,7 +79,7 @@ def test_context_rechecks_history_and_relationship_neighbor(client):
     db.execute.side_effect = [
         query_result(own), query_result(items=[own, foreign]), query_result(items=[]),
         query_result(items=[edge]), query_result(items=[foreign]),
-        query_result(items=[]), query_result(0),
+        query_result(items=[]), query_result(0), query_result(rows=[(own.id, own)]),
     ]
     with patch("src.memory_context.get_memory_history", new_callable=AsyncMock,
                return_value={"versions": [SimpleNamespace(id=own.id), SimpleNamespace(id=foreign.id)]}):
@@ -117,7 +117,7 @@ def test_context_filters_hidden_branches_and_similar_hits(client):
     db.execute.side_effect = [
         query_result(seed), query_result(items=[seed]), query_result(items=[foreign]),
         query_result(items=[]), query_result(items=[]),
-        query_result(items=[foreign, own_match]), query_result(0),
+        query_result(items=[foreign, own_match]), query_result(0), query_result(rows=[(seed.id, seed)]),
     ]
     with patch("src.memory_context.get_memory_history", new_callable=AsyncMock,
                return_value={"versions": [SimpleNamespace(id=seed.id)]}), patch(
