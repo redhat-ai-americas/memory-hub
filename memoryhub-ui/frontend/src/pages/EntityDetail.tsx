@@ -309,22 +309,26 @@ const MergeModal: React.FC<{ entity: EntityDetailT; onClose: () => void; onMerge
   const toast = useToast();
   const [q, setQ] = useState('');
   const [into, setInto] = useState<{ id: string; name: string } | null>(null);
-  const [preview, setPreview] = useState<EntityMergePreview | null>(null);
+  const [loadedPreview, setPreview] = useState<EntityMergePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const { data } = useApi<EntitiesResponse>(() => api.entities({ q: q || entity.name.slice(0, 3), per_page: 8 }), [q]);
   const options = (data?.items ?? []).filter((x) => x.id !== entity.id);
+  const preview = loadedPreview?.source.id === entity.id && loadedPreview.target.id === into?.id ? loadedPreview : null;
 
   useEffect(() => {
-    if (!into) {
-      setPreview(null);
-      return;
-    }
+    let cancelled = false;
+    setPreview(null);
+    if (!into) return;
     api
       .mergeEntity(entity.id, into.id, true)
-      .then(setPreview)
-      .catch((e) => toast(errorMessage(e), 'err'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [into?.id]);
+      .then((result) => {
+        if (!cancelled) setPreview(result);
+      })
+      .catch((e) => {
+        if (!cancelled) toast(errorMessage(e), 'err');
+      });
+    return () => { cancelled = true; };
+  }, [entity.id, into?.id, toast]);
 
   return (
     <Modal
@@ -337,10 +341,10 @@ const MergeModal: React.FC<{ entity: EntityDetailT; onClose: () => void; onMerge
             className="btn bp"
             disabled={!preview || busy}
             onClick={async () => {
-              if (!into) return;
+              if (!preview || busy) return;
               setBusy(true);
               try {
-                onMerged(await api.mergeEntity(entity.id, into.id, false));
+                onMerged(await api.mergeEntity(entity.id, preview.target.id, false));
               } catch (e) {
                 toast(errorMessage(e), 'err');
               } finally {
@@ -364,7 +368,7 @@ const MergeModal: React.FC<{ entity: EntityDetailT; onClose: () => void; onMerge
         {options.length === 0 && <span className="sm muted">No other entity matches.</span>}
         {options.map((o) => (
           <label key={o.id} className={`radio ${into?.id === o.id ? 'on' : ''}`}>
-            <input type="radio" name="into" checked={into?.id === o.id} onChange={() => setInto({ id: o.id, name: o.name })} />
+            <input type="radio" name="into" disabled={busy} checked={into?.id === o.id} onChange={() => setInto({ id: o.id, name: o.name })} />
             <span>
               <span className="sm b6">{o.name}</span>{' '}
               <span className="hint">

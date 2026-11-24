@@ -72,6 +72,11 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
     navigate('/memories', next, { replace: true });
   };
 
+  const clearFilters = (clearSearch = false) => setParams({
+    scope: [], actor: [], project: '', domain: [], minw: '', maxw: '', from: '', to: '', branch: '',
+    flag: [], entity: '', entityName: '', ...(clearSearch ? { q: '' } : {}),
+  });
+
   const params = browseParams(p);
   const key = JSON.stringify(params);
   const { data, error, loading, reload } = useApi<BrowseResponse>(
@@ -270,7 +275,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 type="button"
                 className="btn bl sm"
                 disabled={!chips.length}
-                onClick={() => setParams({ scope: [], actor: [], project: '', domain: [], minw: '', flag: [], entity: '', entityName: '' })}
+                onClick={() => clearFilters()}
               >
                 Clear all
               </button>
@@ -556,7 +561,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
                 title={state.q || chips.length ? 'No memories match' : state.tab === 'current' ? 'No current memories' : `Nothing ${state.tab === 'all' ? 'here' : state.tab}`}
                 action={
                   chips.length || state.q ? (
-                    <button type="button" className="btn bs" onClick={() => setParams({ q: '', scope: [], actor: [], project: '', domain: [], minw: '', flag: [], entity: '', entityName: '' })}>
+                    <button type="button" className="btn bs" onClick={() => clearFilters(true)}>
                       Clear search and filters
                     </button>
                   ) : undefined
