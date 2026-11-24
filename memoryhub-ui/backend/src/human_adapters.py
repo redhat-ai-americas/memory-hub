@@ -21,6 +21,7 @@ from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.schemas import MemoryNodeCreate, MemoryNodeUpdate, RelationshipCreate, RelationshipType
 from memoryhub_core.services.admin import quarantine_memory, record_moderation_audit, restore_memory
+from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 from memoryhub_core.services.embeddings import HttpEmbeddingService
 from memoryhub_core.services.entity import merge_entities, rename_entity
 from memoryhub_core.services.exceptions import (
@@ -263,10 +264,15 @@ async def project_detail(name: str, db: DbDep, settings: SettingsDep, access: Ac
     if access.principal.role == "user" and project.invite_only and not is_member:
         raise HTTPException(status_code=404, detail="Project not found")
     can_read_project_details = is_member or access.principal.role == "admin"
+    # Focus declarations contain project content. The tenant-wide Admin roster
+    # grant does not authorize reading them, and agent memberships do not count.
+    can_read_project_content = is_member and (
+        access.principal.role == "user" or "project" in access.moderation_scopes
+    )
     row = await _project_row(db, access, project)
     focus = None
     focus_available = False
-    if can_read_project_details and settings.valkey_url:
+    if can_read_project_content and settings.valkey_url:
         end = datetime.now(UTC).date()
         client = _cached_valkey_client(settings.valkey_url)
         try:
@@ -472,6 +478,16 @@ async def new_version(memory_id: uuid.UUID, body: VersionBody, db: DbDep, access
     node = await _node(db, access, memory_id, lock=True)
     await _require_write(db, access, node)
     await _mutation_neighbors(db, access, node)
+    if body.content is not None:
+        # Core update does not run curation. Enforce content rules for the
+        # memory's owner before any version or audit row is written. Duplicate
+        # gates apply to new memories, not revisions of an existing memory.
+        curation = await run_curation_pipeline(
+            content=body.content, embedding=None, owner_id=node.owner_id,
+            scope=node.scope, session=db, tenant_id=node.tenant_id, commit_seed=False,
+        )
+        if curation["blocked"]:
+            raise HTTPException(status_code=409, detail="Curation blocked write")
     _record_human_audit(db, access, "memory.update", node.scope, node.owner_id, node.id)
     try:
         version = await core_update_memory(
@@ -607,9 +623,9 @@ async def _bulk_delete(ids: list[uuid.UUID], db: AsyncSession, access: AccessDep
         except MemoryNotFoundError:
             raise HTTPException(status_code=404, detail="Memory not found") from None
         for member in related.values():
-            access.require_delete(member)
             if member.deleted_at is not None:
-                raise HTTPException(status_code=409, detail="Memory is already deleted")
+                continue
+            access.require_delete(member)
             closure[member.id] = member
     # Soft-delete does not mutate unrelated edge endpoints. A corrupt
     # cross-tenant edge is nevertheless a boundary failure, not a reason to

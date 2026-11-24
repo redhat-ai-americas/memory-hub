@@ -41,6 +41,7 @@ async def run_curation_pipeline(
     flag_threshold: float = 0.80,
     gate_threshold: float = 0.90,
     force: bool = False,
+    commit_seed: bool = True,
 ) -> dict:
     """Run the full inline curation pipeline on a pending memory write.
 
@@ -68,15 +69,20 @@ async def run_curation_pipeline(
 
     When blocked=True, the caller must not persist the memory.
 
+    Pass ``commit_seed=False`` when curation is part of an existing mutation
+    transaction. Default rules are flushed without releasing its row locks,
+    and uncommitted seeding is never cached because the caller may roll back.
+
     Tenant isolation: ``tenant_id`` is a required keyword argument.
     Curation rules, the seed step, and the similarity scan are all
     scoped to the caller's tenant -- a tenant-A write can never be
     blocked by a tenant-B rule, nor can it see a tenant-B near-duplicate
     in ``similar_count``/``nearest_id``. Phase 4 (#46).
     """
-    if tenant_id not in _seeded_tenants:
-        await seed_default_rules(session, tenant_id=tenant_id)
-        _seeded_tenants.add(tenant_id)
+    if not commit_seed or tenant_id not in _seeded_tenants:
+        await seed_default_rules(session, tenant_id=tenant_id, commit=commit_seed)
+        if commit_seed:
+            _seeded_tenants.add(tenant_id)
 
     flags: list[str] = []
     rules = await load_rules(

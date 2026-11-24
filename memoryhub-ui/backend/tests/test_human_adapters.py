@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from memoryhub_core.models.audit import AuditLog
+from memoryhub_core.models.curation import CuratorRule
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import Access, Principal, get_access
@@ -177,26 +178,51 @@ def test_project_detail_requires_membership_for_invite_only(client):
         assert response.json()["focus_available"] is False
 
 
-def test_project_focus_history_uses_project_member_grant(client):
-    http, db, _ = client
+@pytest.mark.parametrize("role,member,project_scope,invite_only,status,visible", [
+    ("user", True, False, True, 200, True),
+    ("admin", True, True, True, 200, True),
+    ("admin", True, False, True, 200, False),
+    ("user", False, False, False, 200, False),
+    ("user", False, False, True, 404, False),
+    ("admin", False, True, False, 200, False),
+    ("admin", False, True, True, 200, False),
+])
+def test_project_focus_history_uses_project_content_grants(client, role, member, project_scope,
+                                                        invite_only, status, visible):
+    http, db, set_access = client
+    set_access(access(
+        role, projects={"p"}, agents={"alice-agent"},
+        human_projects={"p"} if member else set(),
+        moderation_scopes={"project"} if project_scope else set(),
+    ))
     app.dependency_overrides[get_settings] = lambda: Settings(
         ui_tenant_id="tenant-a", valkey_url="redis://focus.test/0",
     )
-    project = SimpleNamespace(name="p", tenant_id="tenant-a", invite_only=False)
-    db.execute.side_effect = [result(project), result(items=[SimpleNamespace(role="member")])]
+    project = SimpleNamespace(name="p", tenant_id="tenant-a", invite_only=invite_only)
+    db.execute.side_effect = [
+        result(project), result(items=[SimpleNamespace(role="member")] if member else []),
+        result(items=[]),
+    ]
     focus = MagicMock()
     focus.read_focus_history = AsyncMock(return_value=[{"focus": "search"}, {"focus": "search"}, {"focus": "write"}])
     with patch("src.human_adapters._project_row", new_callable=AsyncMock,
                return_value={"name": "p"}), patch(
         "src.human_adapters.get_project_members", new_callable=AsyncMock, return_value=[],
-    ), patch("src.human_adapters._cached_valkey_client", return_value=focus):
+    ), patch("src.human_adapters._cached_valkey_client", return_value=focus) as valkey:
         response = http.get("/api/projects/p")
-        assert response.status_code == 200
+    assert response.status_code == status, response.text
+    if visible:
         assert response.json()["focus_available"] is True
         assert response.json()["focus_history"] == [
             {"focus": "search", "count": 2}, {"focus": "write", "count": 1},
         ]
         assert focus.read_focus_history.await_args.args[0] == "p"
+    else:
+        valkey.assert_not_called()
+        focus.read_focus_history.assert_not_awaited()
+        if status == 200:
+            assert response.json()["focus_available"] is False
+            assert response.json()["focus_history"] is None
 
 
 def test_admin_reads_tenant_project_members_without_management_grant(client):
@@ -307,7 +333,9 @@ def test_version_preflights_all_affected_nodes(client):
         update.assert_not_awaited()
     db.execute.side_effect = [result(own), result(items=[]), result(items=[])]
     with patch("src.human_adapters.core_update_memory", new_callable=AsyncMock,
-               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update:
+               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update, patch(
+        "src.human_adapters.run_curation_pipeline", new_callable=AsyncMock, return_value={"blocked": False},
+    ):
         response = http.post(f"/api/memory/{own.id}/versions", json={"content": "new"})
         assert response.status_code == 201
         assert response.json()["version"] == 2
@@ -326,10 +354,48 @@ def test_version_preserves_authorized_entity_mention(client):
         result(own), result(items=[]), result(items=[mention]), result(items=[entity]),
     ]
     with patch("src.human_adapters.core_update_memory", new_callable=AsyncMock,
-               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update:
+               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update, patch(
+        "src.human_adapters.run_curation_pipeline", new_callable=AsyncMock, return_value={"blocked": False},
+    ):
         response = http.post(f"/api/memory/{own.id}/versions", json={"content": "new"})
         assert response.status_code == 201
         update.assert_awaited_once()
+
+
+@pytest.mark.parametrize("action", ["block", "quarantine", "reject_with_pointer"])
+def test_version_applies_content_rules_for_the_memory_owner(client, action):
+    http, db, set_access = client
+    own = node(owner_id="alice-agent")
+    set_access(access(agents={"alice-agent"}))
+    policy = CuratorRule(
+        name="personal-policy", tier="regex", config={"pattern": "FORBIDDEN_CONTENT"}, action=action,
+    )
+    db.execute.side_effect = [result(own), result(items=[]), result(items=[])]
+    with patch("memoryhub_core.services.curation.pipeline.seed_default_rules", new_callable=AsyncMock), patch(
+        "memoryhub_core.services.curation.pipeline.load_rules", new_callable=AsyncMock, return_value=[policy],
+    ) as load, patch("src.human_adapters.core_update_memory", new_callable=AsyncMock) as update:
+        response = http.post(f"/api/memory/{own.id}/versions", json={"content": "FORBIDDEN_CONTENT"})
+    assert response.status_code == 409, response.text
+    update.assert_not_awaited()
+    db.commit.assert_not_awaited()
+    assert load.await_args.kwargs["owner_id"] == "alice-agent"
+    assert load.await_args.kwargs["tenant_id"] == "tenant-a"
+
+
+def test_version_allows_clean_content_without_a_duplicate_gate(client):
+    http, db, _ = client
+    own = node()
+    db.execute.side_effect = [result(own), result(items=[]), result(items=[])]
+    with patch("memoryhub_core.services.curation.pipeline.seed_default_rules", new_callable=AsyncMock), patch(
+        "memoryhub_core.services.curation.pipeline.load_rules", new_callable=AsyncMock, return_value=[],
+    ), patch("memoryhub_core.services.curation.pipeline.check_similarity", new_callable=AsyncMock) as similarity, patch(
+        "src.human_adapters.core_update_memory", new_callable=AsyncMock,
+        return_value=SimpleNamespace(id=uuid.uuid4(), version=2),
+    ) as update:
+        response = http.post(f"/api/memory/{own.id}/versions", json={"content": "Clean revised content"})
+    assert response.status_code == 201, response.text
+    update.assert_awaited_once()
+    similarity.assert_not_awaited()
 
 
 def test_branch_inherits_parent_boundary(client):

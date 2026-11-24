@@ -382,6 +382,40 @@ async def test_bulk_delete_rejects_foreign_cascade_before_update():
 
 
 @pytest.mark.asyncio
+async def test_bulk_delete_skips_deleted_descendants_but_authorizes_live_ones():
+    from src.human_adapters import _bulk_delete
+
+    db = MagicMock(spec=AsyncSession)
+    db.execute = AsyncMock(return_value=query_result(items=[]))
+    db.commit = AsyncMock()
+    own = node()
+    deleted = node(owner_id="bob", deleted_at=datetime.now(UTC), status="quarantined")
+    live = node()
+    with patch("src.human_adapters._node", new_callable=AsyncMock, return_value=own), patch(
+        "src.human_adapters.collect_delete_nodes", new_callable=AsyncMock,
+        return_value={own.id: own, deleted.id: deleted, live.id: live},
+    ):
+        response = await _bulk_delete([own.id], db, access())
+    assert response["done"] == [str(own.id)]
+    db.commit.assert_awaited_once()
+    update_ids = db.execute.await_args.args[0].compile().params["id_1"]
+    assert set(update_ids) == {own.id, live.id}
+
+    db.execute.reset_mock()
+    db.commit.reset_mock()
+    live.owner_id = "bob"
+    with patch("src.human_adapters._node", new_callable=AsyncMock, return_value=own), patch(
+        "src.human_adapters.collect_delete_nodes", new_callable=AsyncMock,
+        return_value={own.id: own, deleted.id: deleted, live.id: live},
+    ):
+        with pytest.raises(HTTPException) as error:
+            await _bulk_delete([own.id], db, access())
+    assert error.value.status_code == 403
+    db.execute.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_bulk_relate_rolls_back_on_later_core_error():
     from src.human_adapters import _bulk_relate
 

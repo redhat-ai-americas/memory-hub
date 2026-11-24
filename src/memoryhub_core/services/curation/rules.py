@@ -142,6 +142,7 @@ async def seed_default_rules(
     session: AsyncSession,
     *,
     tenant_id: str = "default",
+    commit: bool = True,
 ) -> int:
     """Seed default system rules for ``tenant_id`` if not already present.
 
@@ -155,6 +156,9 @@ async def seed_default_rules(
     compatibility with callers that predate the tenant parameter,
     including the integration harness that seeds rules before any
     per-tenant activity occurs.
+
+    With ``commit=False``, flush the rules into the caller's transaction
+    without committing its pending changes or releasing its row locks.
     """
     stmt = (
         select(CuratorRule)
@@ -263,5 +267,8 @@ async def seed_default_rules(
     ]
 
     session.add_all(defaults)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     return len(defaults)

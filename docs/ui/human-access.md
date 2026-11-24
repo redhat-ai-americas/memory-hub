@@ -116,6 +116,12 @@ Rule history uses the human session and the same visibility checks as rule
 detail. Every returned version is authorized separately. A technical
 service key is not required by the browser.
 
+Project focus history contains shared project content. Reading it requires
+a current, direct human project membership; Admins additionally need the
+configured `project` content grant. A tenant-wide Admin can still inspect
+the project roster without gaining access to its focus history. Authorized
+members retain access to shared memories and focus history.
+
 ## Admin privacy
 
 Admin queries are filtered at a single point in `authorization.py`
