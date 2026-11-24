@@ -355,12 +355,18 @@ The SDK classifies errors by message prefix into typed exceptions:
 
 | Message pattern (case-insensitive) | SDK exception |
 |--------|--------------|
-| contains `"invalid api key"` or `"no authenticated session"` | `AuthenticationError` |
+| contains `"authentication"`, `"invalid api key"`, or `"no authenticated session"` | `AuthenticationError` |
 | starts with `"curation rule blocked"` | `CurationVetoError` |
 | contains `"not found"` | `NotFoundError` |
 | contains `"not authorized"` or starts with `"access denied:"` | `PermissionDeniedError` |
 | contains `"already exists"` or `"already deleted"` | `ConflictError` |
 | starts with `"invalid "`, or contains `" must be "` or `"cannot be empty"` | `ValidationError` |
+
+Error responses also include structured `error` and `next_action` fields. The
+SDK exposes the suggested recovery step as `.next_action` on `MemoryHubError`
+subclasses. For example, authentication errors recommend running
+`memoryhub doctor`; connection errors recommend checking the URL, credentials,
+and network access.
 
 See [`planning/tool-error-standardization.md`](../planning/archive/tool-error-standardization.md)
 for the full design note.

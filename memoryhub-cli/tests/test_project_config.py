@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -222,6 +224,13 @@ def test_rule_file_warns_against_hand_editing():
     out = render_rule_file(cfg)
     assert "Do not hand-edit" in out
     assert "memoryhub config regenerate" in out
+
+
+@pytest.mark.parametrize("pattern", ["eager", "lazy", "lazy_with_rebias", "jit"])
+def test_rule_file_treats_unavailable_warning_as_hook_failure(pattern):
+    out = render_rule_file(build_project_config(_choices(pattern=pattern)))
+    assert "⚠️ MemoryHub unavailable:" in out
+    assert "loaded no memories" in out
 
 
 def test_rule_file_includes_campaign_block_when_enrolled():
@@ -574,6 +583,81 @@ def test_write_hook_script_creates_executable(tmp_path: Path):
     assert hook_path.is_file()
     mode = hook_path.stat().st_mode
     assert mode & stat.S_IXUSR, "hook script should be owner-executable"
+
+
+def _run_generated_hook(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
+    hook_path = write_hook_script(tmp_path)
+    return subprocess.run(
+        [str(hook_path)],
+        cwd=tmp_path,
+        env={**os.environ, "HOME": str(tmp_path), **env},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("env", "warning"),
+    [
+        ({"PATH": ""}, "No API key found."),
+        ({"PATH": "", "MEMORYHUB_API_KEY": "test-key"}, "No MemoryHub URL found."),
+        (
+            {"PATH": "", "MEMORYHUB_API_KEY": "test-key", "MEMORYHUB_URL": "https://example.test/mcp/"},
+            "MemoryHub CLI not found.",
+        ),
+    ],
+)
+def test_generated_hook_warns_for_missing_configuration(tmp_path, env, warning):
+    result = _run_generated_hook(tmp_path, env)
+    assert result.returncode == 0
+    assert "<memoryhub-context>" in result.stdout
+    assert f"⚠️ MemoryHub unavailable: {warning}" in result.stdout
+    assert "memoryhub doctor" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("status", "warning"),
+    [(3, "Authentication failed."), (2, "Could not connect to MemoryHub or load memories.")],
+)
+def test_generated_hook_warns_for_search_failures(tmp_path, status, warning):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    cli = bin_dir / "memoryhub"
+    cli.write_text(f"#!/bin/bash\necho private-detail >&2\nexit {status}\n")
+    cli.chmod(0o755)
+
+    result = _run_generated_hook(
+        tmp_path,
+        {
+            "PATH": f"{bin_dir}:{os.defpath}",
+            "MEMORYHUB_API_KEY": "test-key",
+            "MEMORYHUB_URL": "https://example.test/mcp/",
+        },
+    )
+    assert result.returncode == 0
+    assert f"⚠️ MemoryHub unavailable: {warning}" in result.stdout
+    assert "private-detail" not in result.stdout
+    assert "private-detail" not in result.stderr
+
+
+def test_generated_hook_emits_successful_search_output(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    cli = bin_dir / "memoryhub"
+    cli.write_text("#!/bin/bash\nprintf 'loaded memory\\n'\n")
+    cli.chmod(0o755)
+
+    result = _run_generated_hook(
+        tmp_path,
+        {
+            "PATH": f"{bin_dir}:{os.defpath}",
+            "MEMORYHUB_API_KEY": "test-key",
+            "MEMORYHUB_URL": "https://example.test/mcp/",
+        },
+    )
+    assert result.returncode == 0
+    assert result.stdout == "loaded memory\n"
 
 
 def test_merge_settings_hooks_creates_settings_json(tmp_path: Path):
