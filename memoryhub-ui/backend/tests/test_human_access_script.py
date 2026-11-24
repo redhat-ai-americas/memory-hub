@@ -94,6 +94,15 @@ def test_admins_only_with_empty_users(oc):
     assert secret == {"MEMORYHUB_UI_ADMIN_USERS": "alice", "MEMORYHUB_UI_ALLOWED_USERS": ""}
 
 
+def test_explicit_context_is_used_on_both_sides_of_the_pipe_and_follow_up_writes(oc):
+    done, _, calls = oc({"MEMORYHUB_UI_ADMIN_USERS": "alice"})
+    assert done.returncode == 0, done.stderr
+    for command in ("create", "apply", "label", "annotate"):
+        call = next(call for call in calls if command in call)
+        assert call[:3] == ["--context", "ctx", command], call
+        assert call[call.index("-n") + 1] == "ns", call
+
+
 def test_lists_are_trimmed_and_deduplicated(oc):
     done, secret, _ = oc({"MEMORYHUB_UI_ADMIN_USERS": " alice, bob@corp.com ,alice,",
                           "MEMORYHUB_UI_ALLOWED_USERS": "carol"})
