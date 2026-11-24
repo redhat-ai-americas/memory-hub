@@ -28,10 +28,10 @@ STUB = textwrap.dedent("""\
     args = sys.argv[1:]
     with open(state + ".log", "a") as log:
         log.write(json.dumps(args) + "\\n")
-    secret = json.load(open(state)) if os.path.exists(state) else None
     if "whoami" in args:
         print(os.environ.get("OC_WHO", "katya")); sys.exit(0)
     if args[:2] == ["get", "secret"] or (len(args) > 3 and args[2:4] == ["get", "secret"]):
+        secret = json.load(open(state)) if os.path.exists(state) else None
         if secret is None:
             sys.exit(1)
         path = next((a for a in args if a.startswith("jsonpath=")), "")
@@ -41,10 +41,14 @@ STUB = textwrap.dedent("""\
         sys.exit(0)
     if "create" in args:
         data = dict(a.split("=", 1)[1].split("=", 1) for a in args if a.startswith("--from-literal="))
-        json.dump(data, open(state, "w"))
-        print("kind: Secret"); sys.exit(0)
+        # Dry-run creation only emits a manifest; apply persists it after reading
+        # the pipe. Sharing a state file between both processes creates a race.
+        print(json.dumps(data)); sys.exit(0)
     if "apply" in args:
-        sys.stdin.read(); sys.exit(0)
+        data = json.load(sys.stdin)
+        with open(state, "w") as output:
+            json.dump(data, output)
+        sys.exit(0)
     sys.exit(0)
     """)
 
