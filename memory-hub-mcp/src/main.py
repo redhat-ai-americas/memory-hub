@@ -27,6 +27,7 @@ from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
 from src.core.http_auth import create_http_middleware
+from src.middleware.actionable_errors import ActionableToolErrorsMiddleware
 from src.tools.admin_memory import admin_memory
 from src.tools.delete_memory import delete_memory
 from src.tools.list_memory import list_memory
@@ -133,7 +134,13 @@ async def lifespan(server):
     yield {}
 
 
-mcp = FastMCP("MemoryHub", instructions=instructions, lifespan=lifespan)
+mcp = FastMCP(
+    "MemoryHub",
+    instructions=instructions,
+    lifespan=lifespan,
+    mask_error_details=True,
+)
+mcp.add_middleware(ActionableToolErrorsMiddleware())
 
 for tool_fn in tools:
     mcp.add_tool(tool_fn)

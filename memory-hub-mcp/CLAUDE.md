@@ -168,12 +168,12 @@ def my_prompt(
 ### Middleware (`src/middleware/`)
 
 ```python
-from fastmcp.server.middleware import Middleware
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 class MyMiddleware(Middleware):
-    async def on_call_tool(self, context, request, next_handler):
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
         # Pre-execution
-        result = await next_handler(context, request)
+        result = await call_next(context)
         # Post-execution
         return result
 ```

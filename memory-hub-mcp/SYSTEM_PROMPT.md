@@ -26,13 +26,13 @@ Large memories (S3-backed) may arrive truncated. Check `content_truncated` and `
 
 ## Hook-injected context
 
-If a `<memoryhub-context>` block is present in your conversation context, a SessionStart hook has already loaded project and user memories for you. Use these as your working set:
+If a `<memoryhub-context>` block is present in your conversation context and its first content line does **not** begin with `⚠️ MemoryHub unavailable:`, a SessionStart hook has loaded project and user memories for you. Use these as your working set:
 
 - **Do not** call `register_session` or `search` redundantly -- the hook already did this.
 - **Do** call `register_session` when you need to write, update, or delete memories (write operations require an active session).
 - **Do** call `memory(action="search", ...)` when the conversation pivots to a new topic not covered by the pre-loaded set.
 
-If no `<memoryhub-context>` block is present, fall back to the manual flow: register, then search.
+If the first content line in the block begins with `⚠️ MemoryHub unavailable:`, surface the warning and its suggested action to the user. No memories were loaded. Follow the manual flow only if you need memory: register, then search. If no block is present, use the same manual flow when needed.
 
 ## Writing memories
 
