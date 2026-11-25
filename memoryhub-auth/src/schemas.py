@@ -63,3 +63,23 @@ class ValidateApiKeyResponse(BaseModel):
     identity_type: str
     tenant_id: str
     scopes: list[str]
+
+
+class EndSessionsRequest(BaseModel):
+    """Explicit end of a person's sessions (compromise, offboarding, block)."""
+
+    tenant_id: str
+    # Also revoke the refresh tokens of agents the person owns.
+    include_agents: bool = False
+    # Block the person: a disabled profile is refused by the dashboard, the
+    # broker, refresh and every personal agent until re-enabled.
+    disable: bool = False
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class EndSessionsResponse(BaseModel):
+    username: str
+    sessions_revoked: int
+    agent_tokens_revoked: int
+    disabled: bool
+    profile_found: bool

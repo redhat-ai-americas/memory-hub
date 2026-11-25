@@ -2,6 +2,7 @@ import hashlib
 import logging
 import os
 import secrets
+import uuid
 from datetime import UTC, datetime
 
 import bcrypt
@@ -10,13 +11,19 @@ from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.database import get_session
-from src.models import AgentOwnerBinding, OAuthClient
+from src.entitlements import EntitlementUnavailableError
+from src.models import AgentOwnerBinding, HumanIdentity, OAuthClient, RefreshToken
+from src.people import IdentityChanged, current_uid
+from src.routes.token import revoke_person_sessions, revoke_tokens
 from src.schemas import (
     ApiKeyRotatedResponse,
     ClientCreatedResponse,
     ClientResponse,
     CreateClientRequest,
+    EndSessionsRequest,
+    EndSessionsResponse,
     SecretRotatedResponse,
     UpdateClientRequest,
 )
@@ -261,3 +268,62 @@ async def rotate_api_key(
 
     log.info("Rotated API key for client %s", client_id)
     return ApiKeyRotatedResponse(client_id=client.client_id, api_key=api_key)
+
+
+# --- People: explicit end of sessions and blocking (#744) -------------------
+
+
+@router.post("/people/{username}/end-sessions", response_model=EndSessionsResponse,
+             dependencies=[Depends(require_admin_key)])
+async def end_sessions(username: str, body: EndSessionsRequest,
+                       session: AsyncSession = Depends(get_session)) -> EndSessionsResponse:
+    """Revoke a person's refresh-token families; optionally their agents' and block them.
+
+    Revocation is final: a new sign-in is required even if access is later
+    restored. Access tokens already issued stay valid until they expire
+    (AUTH_ACCESS_TOKEN_TTL).
+    """
+    sessions = await revoke_person_sessions(session, body.tenant_id, username)
+    agents = 0
+    if body.include_agents:
+        owned = select(AgentOwnerBinding.client_id).where(
+            AgentOwnerBinding.tenant_id == body.tenant_id, AgentOwnerBinding.owner == username)
+        agents = await revoke_tokens(session, RefreshToken.client_id.in_(owned))
+    profile = (await session.execute(select(HumanIdentity).where(
+        HumanIdentity.tenant_id == body.tenant_id, HumanIdentity.username == username,
+    ))).scalar_one_or_none()
+    disabled = False
+    if body.disable:
+        if profile is None:
+            # Never signed in: record a blocked profile for the current account.
+            try:
+                uid = await current_uid(username)
+            except (IdentityChanged, EntitlementUnavailableError):
+                uid = None
+            if uid:
+                profile = HumanIdentity(id=str(uuid.uuid4()), tenant_id=body.tenant_id,
+                                        issuer=settings.verified_issuer(), subject=uid, username=username)
+                session.add(profile)
+        if profile is not None:
+            profile.disabled_at = datetime.now(UTC)
+            disabled = True
+    await session.commit()
+    log.warning("Sessions of %r ended by admin (%s): %d session token(s), %d agent token(s), disabled=%s",
+                username, body.reason, sessions, agents, disabled)
+    return EndSessionsResponse(username=username, sessions_revoked=sessions, agent_tokens_revoked=agents,
+                               disabled=disabled, profile_found=profile is not None)
+
+
+@router.post("/people/{username}/enable", dependencies=[Depends(require_admin_key)])
+async def enable_person(username: str, tenant_id: str = Query(...),
+                        session: AsyncSession = Depends(get_session)) -> dict:
+    """Lift a block. Revoked sessions stay revoked: the person signs in again."""
+    profile = (await session.execute(select(HumanIdentity).where(
+        HumanIdentity.tenant_id == tenant_id, HumanIdentity.username == username,
+    ))).scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No profile for this username")
+    profile.disabled_at = None
+    await session.commit()
+    log.warning("Profile of %r re-enabled by admin", username)
+    return {"username": username, "disabled": False}

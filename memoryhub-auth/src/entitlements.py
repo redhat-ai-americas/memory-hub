@@ -7,8 +7,11 @@ namespace (``AUTH_ENTITLEMENT_NAMESPACE``). Two ways to ask:
 * ``person_may_use(token)``: at sign-in, with the person's own OpenShift
   token (``SelfSubjectAccessReview``, scope ``user:check-access``).
 * ``subject_may_use(username)``: later, without their token (refresh,
-  owned agents). The auth service resolves the person's OpenShift Groups and
-  asks a ``SubjectAccessReview`` for the user and those groups.
+  owned agents). A SubjectAccessReview does not look groups up by itself,
+  so the auth service reads the person's *current* OpenShift Group
+  memberships (ClusterRole: groups list) and asks a SubjectAccessReview for
+  the user and those groups. Groups remembered from sign-in are never used.
+  Who the username belongs to is checked separately (``src.people``).
 
 Neither ever answers "yes" when OpenShift cannot be asked:
 ``EntitlementUnavailableError`` is raised instead.
@@ -20,6 +23,7 @@ import base64
 import logging
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
@@ -75,7 +79,8 @@ def _attributes(verb: str = "use") -> dict:
             "resource": "dashboard", "verb": verb}
 
 
-async def _call(method: str, path: str, token: str, body: dict | None = None) -> dict:
+async def _call(method: str, path: str, token: str, body: dict | None = None,
+                *, missing_ok: bool = False) -> dict | None:
     url = f"{settings.k8s_api_server.rstrip('/')}{path}"
     try:
         async with _http() as client:
@@ -83,6 +88,8 @@ async def _call(method: str, path: str, token: str, body: dict | None = None) ->
     except httpx.HTTPError as exc:
         log.error("Entitlement check %s %s failed: %s", method, path, type(exc).__name__)
         raise EntitlementUnavailableError(type(exc).__name__) from exc
+    if missing_ok and resp.status_code == 404:
+        return None
     if resp.status_code not in (200, 201):
         log.error("Entitlement check %s %s answered %d", method, path, resp.status_code)
         raise EntitlementUnavailableError(f"HTTP {resp.status_code}")
@@ -99,6 +106,17 @@ async def person_may_use(opaque_token: str) -> bool:
         "spec": {"resourceAttributes": _attributes()},
     })
     return bool(data.get("status", {}).get("allowed"))
+
+
+async def openshift_user(username: str) -> dict | None:
+    """The OpenShift User object for ``username``; None if it does not exist.
+
+    Read with the auth service account (ClusterRole: users get). Its
+    ``metadata.uid`` is the person's durable key; a deleted and recreated
+    User has a new uid.
+    """
+    return await _call("GET", f"/apis/user.openshift.io/v1/users/{quote(username, safe='')}",
+                       _sa_token(), missing_ok=True)
 
 
 async def groups_of(username: str) -> list[str]:

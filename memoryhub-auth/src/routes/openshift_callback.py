@@ -24,6 +24,7 @@ from src.entitlements import EntitlementUnavailableError, decode_group_member, p
 from src.entitlements import enabled as entitlements_enabled
 from src.errors import OAuthError
 from src.models import AuthSession
+from src.people import IdentityChanged, verify_person
 
 log = logging.getLogger("memoryhub-auth.routes.openshift_callback")
 
@@ -199,6 +200,7 @@ async def openshift_callback(
     log.info("Resolved OpenShift user: %s for session %s", username, state[:8])
 
     # --- enforce entitlement: the same RBAC rule as the dashboard ---
+    subject_uid = None
     if entitlements_enabled():
         try:
             allowed = await person_may_use(opaque_token)
@@ -209,6 +211,22 @@ async def openshift_callback(
         if not allowed:
             log.warning("User %s may not use MemoryHub (no dashboard binding)", username)
             raise OAuthError(403, "access_denied", "User is not allowed to use MemoryHub")
+        # Bind the session to this account (uid), so a deleted and recreated
+        # account with the same name is caught at refresh; refuse names that
+        # belong to another account, renamed accounts and disabled profiles.
+        try:
+            subject_uid = await verify_person(
+                session, settings.default_tenant_id, username,
+                expected_uid=None, require_profile=False, create_profile=True,
+            )
+        except EntitlementUnavailableError:
+            raise OAuthError(
+                503, "temporarily_unavailable", "Access to MemoryHub cannot be verified right now"
+            ) from None
+        except IdentityChanged as changed:
+            log.warning("Sign-in refused: %s", changed)
+            raise OAuthError(403, "access_denied", "This account cannot use MemoryHub; ask an administrator") \
+                from None
     else:
         # Legacy: a single OpenShift group (AUTH_OPENSHIFT_ALLOWED_GROUP).
         await _check_group_membership(opaque_token, username)
@@ -221,6 +239,7 @@ async def openshift_callback(
     # --- update session to ready ---
     auth_session.code_hash = code_hash
     auth_session.subject = username
+    auth_session.subject_uid = subject_uid
     auth_session.identity_type = "user"
     auth_session.tenant_id = settings.default_tenant_id
     auth_session.scopes = settings.default_human_scopes

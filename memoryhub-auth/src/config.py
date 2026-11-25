@@ -52,6 +52,17 @@ class AuthSettings(BaseSettings):
     # openshift_allowed_group check (Compose, tests).
     entitlement_mode: str = "off"
     entitlement_namespace: str = "memoryhub-ui"
+    # What a missing role does to a person's sessions: "refuse" (refresh
+    # fails while the role is missing; restoring the role restores it) or
+    # "revoke" (the sessions end; a new sign-in is required). Identity
+    # changes, blocking and token reuse always revoke.
+    entitlement_denial: str = "refuse"
+    # Issuer of verified OpenShift identities; must equal the dashboard's
+    # MEMORYHUB_UI_IDENTITY_ISSUER. Default: "openshift:<k8s_api_server>".
+    identity_issuer: str = ""
+    # Absolute lifetime of a refresh-token family (a sign-in), whatever the
+    # rotations: after it, a new sign-in is required. 7 days.
+    session_max_age: int = 604800
 
     # Broker defaults for human users
     default_tenant_id: str = "default"
@@ -67,6 +78,9 @@ class AuthSettings(BaseSettings):
     # Session TTLs
     auth_session_pending_ttl: int = 300  # 5 minutes
     auth_session_ready_ttl: int = 600  # 10 minutes
+
+    def verified_issuer(self) -> str:
+        return self.identity_issuer.strip() or f"openshift:{self.k8s_api_server.rstrip('/')}"
 
     @property
     def async_db_url(self) -> str:

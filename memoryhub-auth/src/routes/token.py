@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -14,6 +15,7 @@ from src.entitlements import EntitlementUnavailableError, subject_may_use
 from src.entitlements import enabled as entitlements_enabled
 from src.errors import OAuthError
 from src.models import AgentOwnerBinding, AuthSession, OAuthClient, RefreshToken
+from src.people import IdentityChanged, verify_person
 from src.token_exchange import (
     lookup_exchange_client,
     parse_service_account,
@@ -27,6 +29,46 @@ log = logging.getLogger("memoryhub-auth.routes.token")
 router = APIRouter()
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _aware(value: datetime) -> datetime:
+    """SQLite drops tzinfo; PostgreSQL keeps it."""
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _new_refresh(*, client_id: str, subject: str, scopes: list, tenant_id: str, origin: str,
+                 family_id: str | None = None, family_started_at: datetime | None = None,
+                 subject_uid: str | None = None) -> tuple[str, RefreshToken]:
+    """A refresh token in a rotation family that never outlives session_max_age."""
+    raw, digest = create_refresh_token()
+    now = _now()
+    started = _aware(family_started_at) if family_started_at else now
+    expires = min(now + timedelta(seconds=settings.refresh_token_ttl),
+                  started + timedelta(seconds=settings.session_max_age))
+    return raw, RefreshToken(
+        token_hash=digest, client_id=client_id, subject=subject, scopes=scopes, tenant_id=tenant_id,
+        origin=origin, family_id=family_id or str(uuid.uuid4()), family_started_at=started,
+        subject_uid=subject_uid, expires_at=expires,
+    )
+
+
+async def revoke_tokens(session: AsyncSession, *conditions) -> int:
+    """Revoke every live refresh token matching ``conditions``; caller commits."""
+    result = await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.revoked == False, *conditions)  # noqa: E712
+        .values(revoked=True, revoked_at=_now())
+    )
+    return result.rowcount or 0
+
+
+async def revoke_person_sessions(session: AsyncSession, tenant_id: str, username: str) -> int:
+    return await revoke_tokens(session, RefreshToken.tenant_id == tenant_id,
+                               RefreshToken.subject == username, RefreshToken.origin == "broker")
+
+
 async def _owner_of(client: OAuthClient, session: AsyncSession) -> str | None:
     """The person a personal agent acts for, if any (dashboard owner binding)."""
     result = await session.execute(select(AgentOwnerBinding.owner).where(
@@ -36,34 +78,76 @@ async def _owner_of(client: OAuthClient, session: AsyncSession) -> str | None:
     return result.scalar_one_or_none()
 
 
-async def _require_entitlement(username: str, *, for_agent: bool) -> None:
-    """Refuse a token when the responsible person may no longer use MemoryHub.
+def _unavailable() -> OAuthError:
+    # OpenShift could not be asked: a temporary error. Nothing is revoked.
+    return OAuthError(503, "temporarily_unavailable", "Access to MemoryHub cannot be verified right now")
 
-    Service agents have no responsible person and are not checked here.
-    Nothing is revoked: every issuance is checked, so restoring the person's
-    access restores issuance, and a misconfigured check cannot destroy
-    sessions. OpenShift being unreachable is never treated as an answer.
+
+async def _verify_person_session(session: AsyncSession, rt: RefreshToken) -> None:
+    """Refresh of a person's own session (origin "broker").
+
+    Identity changed (User deleted or recreated, username taken by another
+    account, renamed, profile disabled) or a session from before identity
+    binding: every session of the username is revoked. Role missing: refused,
+    or revoked with AUTH_ENTITLEMENT_DENIAL=revoke.
     """
     try:
-        allowed = await subject_may_use(username)
+        if not rt.subject_uid:
+            raise IdentityChanged(rt.subject, "session predates identity binding")
+        await verify_person(session, rt.tenant_id, rt.subject, expected_uid=rt.subject_uid,
+                            require_profile=True, create_profile=False)
+        allowed = await subject_may_use(rt.subject)
     except EntitlementUnavailableError:
-        raise OAuthError(
-            503, "temporarily_unavailable", "Access to MemoryHub cannot be verified right now"
-        ) from None
+        raise _unavailable() from None
+    except IdentityChanged as changed:
+        revoked = await revoke_person_sessions(session, rt.tenant_id, rt.subject)
+        await session.commit()
+        log.warning("Sessions of %r revoked (%d): %s", rt.subject, revoked, changed.reason)
+        raise OAuthError(401, "invalid_grant", "Session ended; sign in again") from None
     if not allowed:
-        if for_agent:
-            log.warning("Token refused: owner %r of this agent may no longer use MemoryHub", username)
-            raise OAuthError(403, "access_denied", "The owner of this agent may no longer use MemoryHub")
-        log.warning("Refresh refused: %r may no longer use MemoryHub", username)
+        if settings.entitlement_denial == "revoke":
+            revoked = await revoke_person_sessions(session, rt.tenant_id, rt.subject)
+            await session.commit()
+            log.warning("Sessions of %r revoked (%d): no MemoryHub role", rt.subject, revoked)
+        else:
+            log.warning("Refresh refused: %r may no longer use MemoryHub", rt.subject)
         raise OAuthError(401, "invalid_grant", "Access to MemoryHub has been revoked")
 
 
-async def _require_owner_entitlement(client: OAuthClient, session: AsyncSession) -> None:
-    if not entitlements_enabled():
+async def _require_responsible_person(client: OAuthClient, session: AsyncSession) -> None:
+    """Every token for an agent needs a responsible party.
+
+    ``service`` clients are team-owned and created only through the admin
+    API (the dashboard lets only Admins create them). Every other client is
+    personal: it must have an owner binding, and the owner must still be the
+    same verified, entitled person. A missing binding is refused, so a person
+    cannot escape offboarding through a client without an owner.
+    """
+    if not entitlements_enabled() or client.identity_type == "service":
         return
     owner = await _owner_of(client, session)
-    if owner:
-        await _require_entitlement(owner, for_agent=True)
+    if not owner:
+        log.warning("Token refused: personal client %r has no owner binding", client.client_id)
+        raise OAuthError(403, "access_denied", "This personal agent has no verified owner; "
+                                               "an administrator must bind it or make it a service agent")
+    try:
+        await verify_person(session, client.tenant_id, owner, expected_uid=None,
+                            require_profile=True, create_profile=False)
+        allowed = await subject_may_use(owner)
+    except EntitlementUnavailableError:
+        raise _unavailable() from None
+    except IdentityChanged as changed:
+        revoked = await revoke_tokens(session, RefreshToken.client_id == client.client_id)
+        await session.commit()
+        log.warning("Agent %r refused, %d token(s) revoked: owner %s", client.client_id, revoked, changed)
+        raise OAuthError(403, "access_denied", "The owner of this agent is no longer a verified MemoryHub user") \
+            from None
+    if not allowed:
+        if settings.entitlement_denial == "revoke":
+            await revoke_tokens(session, RefreshToken.client_id == client.client_id)
+            await session.commit()
+        log.warning("Token refused: owner %r of agent %r may no longer use MemoryHub", owner, client.client_id)
+        raise OAuthError(403, "access_denied", "The owner of this agent may no longer use MemoryHub")
 
 
 async def _authenticate_client(
@@ -181,7 +265,7 @@ async def _handle_client_credentials(
 
     client = await _authenticate_client(client_id, client_secret, session)
     scopes = _resolve_scopes(scope, client)
-    await _require_owner_entitlement(client, session)
+    await _require_responsible_person(client, session)
 
     access_token = create_access_token(
         subject=client.client_id,
@@ -190,17 +274,8 @@ async def _handle_client_credentials(
         scopes=scopes,
     )
 
-    raw_refresh, refresh_hash = create_refresh_token()
-    rt = RefreshToken(
-        token_hash=refresh_hash,
-        client_id=client.client_id,
-        subject=client.client_id,
-        scopes=scopes,
-        tenant_id=client.tenant_id,
-        origin="client",
-        expires_at=datetime.now(UTC)
-        + timedelta(seconds=settings.refresh_token_ttl),
-    )
+    raw_refresh, rt = _new_refresh(client_id=client.client_id, subject=client.client_id, scopes=scopes,
+                                   tenant_id=client.tenant_id, origin="client")
     session.add(rt)
     await session.commit()
 
@@ -236,33 +311,37 @@ async def _handle_refresh_token(
             raise OAuthError(401, "invalid_client", "Invalid client secret")
 
     token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
-    result = await session.execute(
-        select(RefreshToken).where(
-            RefreshToken.token_hash == token_hash,
-            RefreshToken.revoked == False,  # noqa: E712
-            RefreshToken.expires_at > datetime.now(UTC),
-        )
-    )
-    stored_rt = result.scalar_one_or_none()
-    if stored_rt is None:
-        raise OAuthError(
-            401, "invalid_grant", "Invalid, expired, or revoked refresh token"
-        )
+    stored_rt = (await session.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    )).scalar_one_or_none()
+    if stored_rt is None or stored_rt.client_id != client.client_id:
+        raise OAuthError(401, "invalid_grant", "Invalid, expired, or revoked refresh token")
 
-    # Verify the refresh token belongs to the authenticated client
-    if stored_rt.client_id != client.client_id:
-        raise OAuthError(401, "invalid_grant", "Refresh token does not belong to this client")
+    if stored_rt.revoked:
+        # Reuse of a rotated or revoked token (RFC 9700 4.14): someone else may
+        # hold this family. End the whole family; the owner signs in again.
+        revoked = await revoke_tokens(session, RefreshToken.family_id == stored_rt.family_id)
+        await session.commit()
+        log.warning("Refresh token reuse: family %s of client %s (subject %r) revoked, %d live token(s)",
+                    stored_rt.family_id, client.client_id, stored_rt.subject, revoked)
+        raise OAuthError(401, "invalid_grant", "Invalid, expired, or revoked refresh token")
 
-    # The person behind this token must still be allowed to use MemoryHub.
+    now = _now()
+    if _aware(stored_rt.expires_at) <= now:
+        raise OAuthError(401, "invalid_grant", "Invalid, expired, or revoked refresh token")
+    if _aware(stored_rt.family_started_at) + timedelta(seconds=settings.session_max_age) <= now:
+        raise OAuthError(401, "invalid_grant", "Session reached its maximum age; sign in again")
+
+    # The person behind this token must still be the same, allowed person.
     if entitlements_enabled():
         if stored_rt.origin == "broker":
-            await _require_entitlement(stored_rt.subject, for_agent=False)
+            await _verify_person_session(session, stored_rt)
         else:
-            await _require_owner_entitlement(client, session)
+            await _require_responsible_person(client, session)
 
     # Revoke old token, issue new pair — single transaction
     stored_rt.revoked = True
-    stored_rt.revoked_at = datetime.now(UTC)
+    stored_rt.revoked_at = now
 
     scopes = stored_rt.scopes
     access_token = create_access_token(
@@ -272,16 +351,10 @@ async def _handle_refresh_token(
         scopes=scopes,
     )
 
-    raw_refresh_new, refresh_hash_new = create_refresh_token()
-    new_rt = RefreshToken(
-        token_hash=refresh_hash_new,
-        client_id=client.client_id,
-        subject=stored_rt.subject,
-        scopes=scopes,
-        tenant_id=stored_rt.tenant_id,
-        origin=stored_rt.origin,
-        expires_at=datetime.now(UTC)
-        + timedelta(seconds=settings.refresh_token_ttl),
+    raw_refresh_new, new_rt = _new_refresh(
+        client_id=client.client_id, subject=stored_rt.subject, scopes=scopes, tenant_id=stored_rt.tenant_id,
+        origin=stored_rt.origin, family_id=stored_rt.family_id, family_started_at=stored_rt.family_started_at,
+        subject_uid=stored_rt.subject_uid,
     )
     session.add(new_rt)
     await session.commit()
@@ -364,17 +437,9 @@ async def _handle_authorization_code(
         scopes=scopes,
     )
 
-    raw_refresh, refresh_hash = create_refresh_token()
-    rt = RefreshToken(
-        token_hash=refresh_hash,
-        client_id=client_id,
-        subject=auth_session.subject,
-        scopes=scopes,
-        tenant_id=auth_session.tenant_id,
-        origin="broker",
-        expires_at=datetime.now(UTC)
-        + timedelta(seconds=settings.refresh_token_ttl),
-    )
+    raw_refresh, rt = _new_refresh(client_id=client_id, subject=auth_session.subject, scopes=scopes,
+                                   tenant_id=auth_session.tenant_id, origin="broker",
+                                   subject_uid=auth_session.subject_uid)
     session.add(rt)
     await session.commit()
 
@@ -418,7 +483,7 @@ async def _handle_token_exchange(
 
     client = await lookup_exchange_client(client_id, session)
     scopes = _resolve_scopes(scope, client)
-    await _require_owner_entitlement(client, session)
+    await _require_responsible_person(client, session)
 
     subject = token_info["username"]
     access_token = create_access_token(
