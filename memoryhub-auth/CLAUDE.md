@@ -57,6 +57,10 @@ The admin API at `/admin/clients` manages OAuth client registrations. All OAuthC
 
 ### E2e tests are mandatory for OpenShift API changes
 
+The entitlement checks (`src/entitlements.py`) call OpenShift APIs too: run
+section C of `docs/auth/role-resolution-cluster-verification.md` before
+merging changes to them.
+
 Any change that touches the OpenShift OAuth redirect chain or calls an OpenShift API (groups, users, tokens) **must** be validated with `tests/integration/test_pkce_e2e.py` against the live cluster before merging. Unit tests with mocked HTTP responses cannot catch encoding conventions, permission models, or response shape surprises from the real APIs. Three bugs were invisible to unit tests but caught by e2e:
 
 1. Wrong user-info URL (returned HTML instead of JSON)
@@ -72,6 +76,7 @@ Any change that touches the OpenShift OAuth redirect chain or calls an OpenShift
 | `src/routes/authorize.py` | GET /authorize (PKCE broker entry) |
 | `src/routes/openshift_callback.py` | GET /oauth/openshift/callback |
 | `src/routes/admin.py` | Client management CRUD |
+| `src/entitlements.py` | Who may use MemoryHub: dashboard RBAC check at sign-in, refresh and owned-agent tokens (#744) |
 | `src/config.py` | AuthSettings (all env vars prefixed AUTH_) |
 | `src/tokens.py` | JWT minting and refresh token creation |
 | `deploy.sh` | Full deployment script |

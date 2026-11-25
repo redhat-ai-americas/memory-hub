@@ -149,6 +149,12 @@ Not yet published.
 
 - OAuth 2.1 authorization server with PKCE, JWT issuance, LibreChat-compatible
   metadata endpoints.
+- **RBAC entitlement (#744)**: with `AUTH_ENTITLEMENT_MODE=openshift-rbac`
+  the broker admits only people with the dashboard `use` Role, asks
+  OpenShift for `user:info user:check-access` only, and re-checks the person
+  at every refresh and for every token of an agent they own. Denials refuse
+  without revoking; an unreachable API answers `503`. Refresh tokens record
+  their `origin` (migration 003).
 
 ## memoryhub-ui
 
@@ -158,3 +164,10 @@ Dashboard UI (React frontend + FastAPI backend). Lives in
 ### [Unreleased]
 
 - BFF walker, dashboard views, memory inspector.
+- **OpenShift RBAC roles (#744)**: dashboard User/Admin come from the
+  `memoryhub-dashboard-user` / `-admin` Roles instead of username lists,
+  verified with the person's forwarded OpenShift token, cached 30 s and
+  failing closed. `dashboard-access.sh` grants, revokes, lists, migrates and
+  bootstraps; Admins see assignments read-only. Admitted people get a
+  durable `user_id` (`human_identities`, core migration 034); username reuse
+  is refused. `MEMORYHUB_UI_ROLE_SOURCE=lists` remains as rollback.
