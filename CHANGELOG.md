@@ -134,7 +134,8 @@ memory-hub-mcp and memoryhub-auth; not published as a standalone package.
 - Centralized human memory, graph, entity, rule and identity queries and policies
   in Core for dashboard adapters and shared services (#738). Read-only deletion
   capabilities and mutation preflight use the same recursive closure.
-
+- Subscriber shutdown honors pending cancellation even when a dependency
+  swallows `CancelledError` during a Python 3.11 `wait_for` race (#738).
 
 - **Fixed (#553)**: `find_related` wrote each neighbor's stub to the opposite end of the edge, so `RelationshipRead.source_stub` and `target_stub` were inverted in the returned paths. Pre-existing; only observable once #553 began returning these edges through the API.
 - **Procedural retrieval (#553)**: `find_related` requires `tenant_id` and applies it in SQL on the start node, every edge, and every neighbor. Each result hop carries direction and role. `resolve_procedure_entry` uses `metadata_.procedure.entry_step_id` when it names a live in-tenant step, and otherwise the single step with no incoming `precedes` edge.
