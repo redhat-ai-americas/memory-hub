@@ -5,7 +5,6 @@ token, resolves the OpenShift username, mints a MemoryHub authorization code,
 and redirects the user back to the original client (e.g., LibreChat).
 """
 
-import base64
 import hashlib
 import logging
 import os
@@ -21,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.database import get_session
+from src.entitlements import EntitlementUnavailableError, decode_group_member, person_may_use
+from src.entitlements import enabled as entitlements_enabled
 from src.errors import OAuthError
 from src.models import AuthSession
 
@@ -112,19 +113,7 @@ async def _resolve_openshift_user(opaque_token: str) -> str:
     return username
 
 
-def _decode_group_member(entry: str) -> str:
-    """Decode an OpenShift group member entry.
-
-    OpenShift encodes usernames containing ':' with a ``b64:`` prefix in
-    the Group ``.users`` list (e.g. ``b64:a3ViZTphZG1pbg==`` for
-    ``kube:admin``).  Plain usernames are returned as-is.
-    """
-    if entry.startswith("b64:"):
-        try:
-            return base64.b64decode(entry[4:]).decode("utf-8")
-        except Exception:
-            return entry
-    return entry
+_decode_group_member = decode_group_member
 
 
 def _user_in_group_members(username: str, members: list[str]) -> bool:
@@ -209,8 +198,20 @@ async def openshift_callback(
 
     log.info("Resolved OpenShift user: %s for session %s", username, state[:8])
 
-    # --- enforce group membership (if configured) ---
-    await _check_group_membership(opaque_token, username)
+    # --- enforce entitlement: the same RBAC rule as the dashboard ---
+    if entitlements_enabled():
+        try:
+            allowed = await person_may_use(opaque_token)
+        except EntitlementUnavailableError:
+            raise OAuthError(
+                503, "temporarily_unavailable", "Access to MemoryHub cannot be verified right now"
+            ) from None
+        if not allowed:
+            log.warning("User %s may not use MemoryHub (no dashboard binding)", username)
+            raise OAuthError(403, "access_denied", "User is not allowed to use MemoryHub")
+    else:
+        # Legacy: a single OpenShift group (AUTH_OPENSHIFT_ALLOWED_GROUP).
+        await _check_group_membership(opaque_token, username)
     # opaque_token goes out of scope here — NEVER persisted
 
     # --- mint MemoryHub authorization code ---

@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.database import get_session
+from src.entitlements import EntitlementUnavailableError, subject_may_use
+from src.entitlements import enabled as entitlements_enabled
 from src.errors import OAuthError
-from src.models import AuthSession, OAuthClient, RefreshToken
+from src.models import AgentOwnerBinding, AuthSession, OAuthClient, RefreshToken
 from src.token_exchange import (
     lookup_exchange_client,
     parse_service_account,
@@ -23,6 +25,45 @@ from src.tokens import create_access_token, create_refresh_token
 log = logging.getLogger("memoryhub-auth.routes.token")
 
 router = APIRouter()
+
+
+async def _owner_of(client: OAuthClient, session: AsyncSession) -> str | None:
+    """The person a personal agent acts for, if any (dashboard owner binding)."""
+    result = await session.execute(select(AgentOwnerBinding.owner).where(
+        AgentOwnerBinding.tenant_id == client.tenant_id,
+        AgentOwnerBinding.client_id == client.client_id,
+    ))
+    return result.scalar_one_or_none()
+
+
+async def _require_entitlement(username: str, *, for_agent: bool) -> None:
+    """Refuse a token when the responsible person may no longer use MemoryHub.
+
+    Service agents have no responsible person and are not checked here.
+    Nothing is revoked: every issuance is checked, so restoring the person's
+    access restores issuance, and a misconfigured check cannot destroy
+    sessions. OpenShift being unreachable is never treated as an answer.
+    """
+    try:
+        allowed = await subject_may_use(username)
+    except EntitlementUnavailableError:
+        raise OAuthError(
+            503, "temporarily_unavailable", "Access to MemoryHub cannot be verified right now"
+        ) from None
+    if not allowed:
+        if for_agent:
+            log.warning("Token refused: owner %r of this agent may no longer use MemoryHub", username)
+            raise OAuthError(403, "access_denied", "The owner of this agent may no longer use MemoryHub")
+        log.warning("Refresh refused: %r may no longer use MemoryHub", username)
+        raise OAuthError(401, "invalid_grant", "Access to MemoryHub has been revoked")
+
+
+async def _require_owner_entitlement(client: OAuthClient, session: AsyncSession) -> None:
+    if not entitlements_enabled():
+        return
+    owner = await _owner_of(client, session)
+    if owner:
+        await _require_entitlement(owner, for_agent=True)
 
 
 async def _authenticate_client(
@@ -140,6 +181,7 @@ async def _handle_client_credentials(
 
     client = await _authenticate_client(client_id, client_secret, session)
     scopes = _resolve_scopes(scope, client)
+    await _require_owner_entitlement(client, session)
 
     access_token = create_access_token(
         subject=client.client_id,
@@ -155,6 +197,7 @@ async def _handle_client_credentials(
         subject=client.client_id,
         scopes=scopes,
         tenant_id=client.tenant_id,
+        origin="client",
         expires_at=datetime.now(UTC)
         + timedelta(seconds=settings.refresh_token_ttl),
     )
@@ -210,6 +253,13 @@ async def _handle_refresh_token(
     if stored_rt.client_id != client.client_id:
         raise OAuthError(401, "invalid_grant", "Refresh token does not belong to this client")
 
+    # The person behind this token must still be allowed to use MemoryHub.
+    if entitlements_enabled():
+        if stored_rt.origin == "broker":
+            await _require_entitlement(stored_rt.subject, for_agent=False)
+        else:
+            await _require_owner_entitlement(client, session)
+
     # Revoke old token, issue new pair — single transaction
     stored_rt.revoked = True
     stored_rt.revoked_at = datetime.now(UTC)
@@ -229,6 +279,7 @@ async def _handle_refresh_token(
         subject=stored_rt.subject,
         scopes=scopes,
         tenant_id=stored_rt.tenant_id,
+        origin=stored_rt.origin,
         expires_at=datetime.now(UTC)
         + timedelta(seconds=settings.refresh_token_ttl),
     )
@@ -320,6 +371,7 @@ async def _handle_authorization_code(
         subject=auth_session.subject,
         scopes=scopes,
         tenant_id=auth_session.tenant_id,
+        origin="broker",
         expires_at=datetime.now(UTC)
         + timedelta(seconds=settings.refresh_token_ttl),
     )
@@ -366,6 +418,7 @@ async def _handle_token_exchange(
 
     client = await lookup_exchange_client(client_id, session)
     scopes = _resolve_scopes(scope, client)
+    await _require_owner_entitlement(client, session)
 
     subject = token_info["username"]
     access_token = create_access_token(

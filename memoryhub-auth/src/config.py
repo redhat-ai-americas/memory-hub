@@ -45,6 +45,14 @@ class AuthSettings(BaseSettings):
     openshift_tls_verify: bool = True  # set False only for dev/debug
     openshift_ca_bundle: str = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
+    # Entitlement (docs/auth/human-role-resolution.md): "openshift-rbac"
+    # requires the "use" verb on memoryhub.io/dashboard in
+    # entitlement_namespace at sign-in, at every refresh, and for every token
+    # issued to an agent owned by a person. "off" keeps the legacy
+    # openshift_allowed_group check (Compose, tests).
+    entitlement_mode: str = "off"
+    entitlement_namespace: str = "memoryhub-ui"
+
     # Broker defaults for human users
     default_tenant_id: str = "default"
     default_human_scopes: list[str] = ["memory:read:user", "memory:write:user"]

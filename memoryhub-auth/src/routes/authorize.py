@@ -128,14 +128,16 @@ async def authorize_endpoint(
 
     # --- 302 to OpenShift OAuth ---
     broker_callback = f"{settings.issuer}/oauth/openshift/callback"
-    qs = urlencode(
-        {
-            "response_type": "code",
-            "client_id": settings.openshift_oauth_client_id,
-            "redirect_uri": broker_callback,
-            "state": session_id,
-        }
-    )
+    params = {
+        "response_type": "code",
+        "client_id": settings.openshift_oauth_client_id,
+        "redirect_uri": broker_callback,
+        "state": session_id,
+    }
+    if settings.entitlement_mode == "openshift-rbac":
+        # Enough to read the person's own user and check their own access.
+        params["scope"] = "user:info user:check-access"
+    qs = urlencode(params)
     return RedirectResponse(
         url=f"{settings.openshift_oauth_authorize_url}?{qs}",
         status_code=302,

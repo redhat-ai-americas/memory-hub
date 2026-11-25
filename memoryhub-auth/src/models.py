@@ -49,6 +49,9 @@ class RefreshToken(Base):
     subject: Mapped[str] = mapped_column(String(255), nullable=False)
     scopes: Mapped[list] = mapped_column(JSON, nullable=False)
     tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # "broker": a person signed in through the OpenShift broker (subject is
+    # their username); "client": an OAuth client (agent or service).
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, server_default=sa.text("'client'"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa.text("false"))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

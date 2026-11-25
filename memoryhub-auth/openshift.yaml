@@ -43,6 +43,12 @@ rules:
 - apiGroups: [""]
   resources: ["namespaces"]
   verbs: ["get"]
+# Entitlement re-checks at refresh (docs/auth/human-role-resolution.md):
+# the person's OpenShift token is never stored, so their Groups are read to
+# ask a SubjectAccessReview (allowed by the system:auth-delegator binding).
+- apiGroups: ["user.openshift.io"]
+  resources: ["groups"]
+  verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -168,8 +174,14 @@ spec:
           value: "true"
         - name: AUTH_OPENSHIFT_CA_BUNDLE
           value: "/etc/pki/combined-ca/ca-bundle.crt"
-        # Group-based access control — leave empty to allow all
-        # authenticated OpenShift users, or set to a group name to restrict.
+        # Who may use MemoryHub: the dashboard's OpenShift RBAC Roles ("use"
+        # on memoryhub.io/dashboard in AUTH_ENTITLEMENT_NAMESPACE), checked at
+        # sign-in, at every refresh and for agents owned by a person.
+        - name: AUTH_ENTITLEMENT_MODE
+          value: "openshift-rbac"
+        - name: AUTH_ENTITLEMENT_NAMESPACE
+          value: "__ENTITLEMENT_NAMESPACE__"
+        # Legacy single-group check, used only with AUTH_ENTITLEMENT_MODE=off.
         - name: AUTH_OPENSHIFT_ALLOWED_GROUP
           value: "memoryhub-users"
         - name: AUTH_OPENSHIFT_OAUTH_CLIENT_ID
@@ -243,6 +255,10 @@ spec:
           value: "true"
         - name: AUTH_OPENSHIFT_CA_BUNDLE
           value: "/etc/pki/combined-ca/ca-bundle.crt"
+        - name: AUTH_ENTITLEMENT_MODE
+          value: "openshift-rbac"
+        - name: AUTH_ENTITLEMENT_NAMESPACE
+          value: "__ENTITLEMENT_NAMESPACE__"
         - name: AUTH_OPENSHIFT_ALLOWED_GROUP
           value: "memoryhub-users"
         - name: AUTH_OPENSHIFT_OAUTH_CLIENT_ID

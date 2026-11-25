@@ -15,8 +15,11 @@ CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
 # apply time.  Rewriting to the full registry path defeats the annotation
 # and causes #88 digest mismatches.
 apply_manifest() {
+    # The dashboard namespace holds the Roles that decide who may use
+    # MemoryHub (docs/auth/human-role-resolution.md).
     sed "s|__AUTH_ISSUER__|${AUTH_ISSUER_URL}|g; \
-         s|__OAUTH_AUTHORIZE_URL__|${OAUTH_AUTHORIZE_URL}|g" openshift.yaml | \
+         s|__OAUTH_AUTHORIZE_URL__|${OAUTH_AUTHORIZE_URL}|g; \
+         s|__ENTITLEMENT_NAMESPACE__|${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}|g" openshift.yaml | \
         oc apply --context "$CONTEXT" -f - -n "$PROJECT"
 }
 

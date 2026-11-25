@@ -58,7 +58,7 @@ Deploy with `AUTH_ENTITLEMENT_MODE=openshift-rbac`:
 |---|---|---|---|
 | C1 | `tests/integration/test_pkce_e2e.py` as an entitled user | passes | |
 | C2 | Same with an unentitled user | `access_denied` at the callback | |
-| C3 | Refresh after the person's binding is deleted | `invalid_grant`; every refresh token of the subject revoked | |
+| C3 | Refresh after the person's binding is deleted | `401 invalid_grant`; token not rotated; works again after re-granting | |
 | C4 | Refresh with the API unreachable | `503 temporarily_unavailable`, no new tokens | |
 | C5 | `client_credentials` for a personal agent whose owner lost access | refused; client still exists | |
 | C6 | `client_credentials` for a service agent | unaffected | |

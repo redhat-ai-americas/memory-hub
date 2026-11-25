@@ -158,7 +158,7 @@ delay, and they add up.
 
 | Event | Dashboard | New/refreshed human tokens (`memoryhub-auth`) | Access tokens already issued | Personal agents of the person |
 |---|---|---|---|---|
-| RoleBinding deleted | ≤ cache TTL (30 s) | refused at the next refresh | valid until expiry (≤ 15 min) | token issuance refused at next request |
+| RoleBinding deleted | ≤ cache TTL (30 s) | refused at the next refresh (not revoked) | valid until expiry (≤ 15 min) | token issuance refused at next request |
 | person removed from an OpenShift `Group` directly | ≤ cache TTL, if the platform re-reads group membership per request (verified in phase 1) | refused at the next refresh | ≤ 15 min | as above |
 | person removed from a corporate group (LDAP, AD, Keycloak) | after the change reaches OpenShift **plus** the above | same | same | same |
 
@@ -193,16 +193,28 @@ Agents have different lifecycles, so they get different rules:
   not use the dashboard gets no MemoryHub token either.
 - The refresh handler re-checks the person before rotating. The OpenShift
   token is never stored, so this check is delegated: the auth service
-  reads the person's `Group` memberships and creates a
-  `SubjectAccessReview` for the user and those groups. Denied: every
-  refresh token of that subject is revoked and the call fails with
-  `invalid_grant`. API unavailable: `503 temporarily_unavailable`; nothing
-  is issued.
+  reads the person's `Group` memberships (ClusterRole `groups` get/list)
+  and creates a `SubjectAccessReview` for the user, those groups and the
+  implicit `system:authenticated` groups. Denied: `401 invalid_grant`,
+  nothing is rotated. API unavailable: `503 temporarily_unavailable`;
+  nothing is issued.
+- Denial **refuses, it does not revoke**. Every issuance is checked, so
+  refusing is as strong as revoking, and two things go better: restoring a
+  person's access restores their session, and a misconfiguration (for
+  example the dashboard Roles not existing yet while `deploy-full.sh`
+  deploys auth before the UI) cannot destroy every session at once.
+- `client_credentials`, `refresh_token` and token exchange for a client
+  with an owner binding check the owner the same way (`403 access_denied`).
+  Clients without an owner are service agents and are not checked.
 - Refresh tokens record where they came from (`origin`: `broker` or
-  `client`), so the re-check applies to human sessions and owned agents,
-  not to service clients.
-- `AUTH_ENTITLEMENT_MODE=off|openshift-rbac`. `off` keeps today's
-  behaviour for Compose and tests.
+  `client`; migration 003 backfills `broker` where `subject <> client_id`),
+  so the person check applies to human sessions.
+- With `openshift-rbac`, `/authorize` asks OpenShift only for
+  `user:info user:check-access`.
+- `AUTH_ENTITLEMENT_MODE=off|openshift-rbac` (`off` keeps the legacy
+  `AUTH_OPENSHIFT_ALLOWED_GROUP` check for Compose and tests);
+  `AUTH_ENTITLEMENT_NAMESPACE` is the dashboard namespace, filled in by
+  `memoryhub-auth/deploy.sh` from `MEMORYHUB_UI_NAMESPACE`.
 
 ## Stable identity
 
@@ -301,4 +313,4 @@ Unit tests cover these against a fake Kubernetes API. The live checks on
 | `MEMORYHUB_KUBE_API_URL` | `https://kubernetes.default.svc` | API server |
 | `MEMORYHUB_KUBE_CA_PATH` | service account CA | CA bundle |
 | `AUTH_ENTITLEMENT_MODE` | `off` | `off` or `openshift-rbac` |
-| `AUTH_ENTITLEMENT_NAMESPACE` | `memoryhub-ui` | namespace of the dashboard Roles |
+| `AUTH_ENTITLEMENT_NAMESPACE` | `memoryhub-ui` | namespace of the dashboard Roles (manifest: from `MEMORYHUB_UI_NAMESPACE`) |
