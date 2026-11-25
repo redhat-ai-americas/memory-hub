@@ -20,6 +20,19 @@ The tools are designed around the tree-based memory model: memories are nodes wi
 
 ## Error Handling Contract
 
+### Shared mutation invariants (#738)
+
+- Existing `update_memory` parameters and success responses are unchanged.
+  Core checks content rules before creating a revision. A veto raises
+  `ToolError` with the existing `Curation rule blocked` prefix; the caller
+  must revise the content before retrying. Weight-only changes do not run
+  content rules or duplicate gates.
+- Existing `delete_memory` parameters and success responses are unchanged.
+  Core prepares and stages the same live deletion set for MCP and HTTP.
+  Deleted intermediates remain traversable, retain their deletion timestamps,
+  and are excluded from authorization of mutations and deletion counts.
+  An invalid cross-tenant relationship fails before any deletion is staged.
+
 All 15 tools raise `fastmcp.exceptions.ToolError` for every failure. No tool returns `{"error": True}` dicts — errors always set `is_error` on the MCP wire so the consuming agent's harness knows the call failed.
 
 The SDK classifies `ToolError` messages into typed exceptions by prefix:

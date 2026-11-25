@@ -1,6 +1,6 @@
 """Project lookup and human project summaries shared by Core clients."""
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.authorization.human import Access
@@ -33,65 +33,77 @@ async def human_membership(db: AsyncSession, access: Access, name: str, *, admin
     return any(row.role == "admin" for row in rows) if admin else bool(rows)
 
 
+async def select_projects(db: AsyncSession, tenant: str, user_id: str | None, *, visibility="member"):
+    """One tenant-bound project selection for human and agent transports."""
+    memberships = select(ProjectMembership.project_id).where(ProjectMembership.user_id == user_id)
+    stmt = select(Project).where(Project.tenant_id == tenant)
+    if visibility == "member":
+        if user_id is None:
+            return []
+        stmt = stmt.where(Project.name.in_(memberships))
+    elif visibility == "open":
+        stmt = stmt.where(or_(Project.invite_only.is_(False), Project.name.in_(memberships)))
+    elif visibility != "all":
+        raise ValueError("Invalid project visibility")
+    return (await db.execute(stmt.order_by(Project.name))).scalars().all()
+
+
+async def project_member_stats(db: AsyncSession, names: list[str], user_id: str | None):
+    if not names:
+        return {}
+    rows = (await db.execute(
+        select(ProjectMembership.project_id, func.count(), func.max(case(
+            (ProjectMembership.user_id == user_id, ProjectMembership.role), else_=None,
+        )))
+        .where(ProjectMembership.project_id.in_(names))
+        .group_by(ProjectMembership.project_id)
+    )).all()
+    return {name: (count, role) for name, count, role in rows}
+
+
+async def project_memory_stats(db: AsyncSession, tenant: str, names: list[str]):
+    """Batch current, undeleted counts and last-write times in one query."""
+    if not names:
+        return {}
+    rows = (await db.execute(
+        select(MemoryNode.scope_id, func.count(MemoryNode.id), func.max(MemoryNode.updated_at))
+        .where(
+            MemoryNode.tenant_id == tenant, MemoryNode.scope == "project",
+            MemoryNode.scope_id.in_(names), MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
+        )
+        .group_by(MemoryNode.scope_id)
+    )).all()
+    return {name: (count, last_write) for name, count, last_write in rows}
+
+
+async def project_summaries(db: AsyncSession, access: Access, projects: list[Project]):
+    """Batch UI-only enrichment over the same selection and aggregates as MCP."""
+    names = [project.name for project in projects]
+    if not names:
+        return {}
+    members = await project_member_stats(db, names, access.principal.username)
+    memories = await project_memory_stats(db, access.principal.tenant_id, names)
+    rows = (await db.execute(
+        select(CampaignMembership.project_id, Campaign)
+        .join(Campaign, Campaign.id == CampaignMembership.campaign_id)
+        .where(Campaign.tenant_id == access.principal.tenant_id, CampaignMembership.project_id.in_(names))
+    )).all()
+    campaigns = {name: [] for name in names}
+    for name, campaign in rows:
+        campaigns[name].append(campaign)
+    return {name: (
+        members.get(name, (0, None))[0], memories.get(name, (0, None)),
+        campaigns[name], members.get(name, (0, None))[1],
+    ) for name in names}
+
+
 async def project_summary(db: AsyncSession, access: Access, project: Project):
-    tenant = access.principal.tenant_id
-    member_count = (
-        await db.execute(
-            select(func.count())
-            .select_from(ProjectMembership)
-            .where(
-                ProjectMembership.project_id == project.name,
-            )
-        )
-    ).scalar_one()
-    memory_info = (
-        await db.execute(
-            select(func.count(MemoryNode.id), func.max(MemoryNode.updated_at)).where(
-                MemoryNode.tenant_id == tenant,
-                MemoryNode.scope == "project",
-                MemoryNode.scope_id == project.name,
-                MemoryNode.deleted_at.is_(None),
-                MemoryNode.is_current.is_(True),
-            )
-        )
-    ).one()
-    campaigns = (
-        (
-            await db.execute(
-                select(Campaign)
-                .join(
-                    CampaignMembership,
-                    CampaignMembership.campaign_id == Campaign.id,
-                )
-                .where(Campaign.tenant_id == tenant, CampaignMembership.project_id == project.name)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    my_role = (
-        await db.execute(
-            select(ProjectMembership.role).where(
-                ProjectMembership.project_id == project.name,
-                ProjectMembership.user_id == access.principal.username,
-            )
-        )
-    ).scalar_one_or_none()
-    return member_count, memory_info, campaigns, my_role
+    return (await project_summaries(db, access, [project]))[project.name]
 
 
 async def visible_projects(db: AsyncSession, access: Access, *, mine=False):
-    tenant = access.principal.tenant_id
-    my_projects = select(ProjectMembership.project_id).where(
-        ProjectMembership.user_id == access.principal.username,
-    )
-    stmt = select(Project).where(Project.tenant_id == tenant)
-    if mine:
-        stmt = stmt.where(Project.name.in_(my_projects))
-    elif access.principal.role == "user":
-        stmt = stmt.where(or_(Project.name.in_(my_projects), Project.invite_only.is_(False)))
-    projects = (await db.execute(stmt.order_by(Project.name))).scalars().all()
-    return projects
+    visibility = "member" if mine else "all" if access.principal.role == "admin" else "open"
+    return await select_projects(db, access.principal.tenant_id, access.principal.username, visibility=visibility)
 
 
 async def writable_by_human(db: AsyncSession, access: Access, node):

@@ -26,11 +26,11 @@ from memoryhub_core.queries import projects as project_queries
 from memoryhub_core.queries.filters import MemoryFilters
 from memoryhub_core.services.admin import quarantine_memory, record_moderation_audit, restore_memory
 from memoryhub_core.services.audit import stage_event
-from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 from memoryhub_core.services.embeddings import HttpEmbeddingService
 from memoryhub_core.services.entity import merge_entities, rename_entity
 from memoryhub_core.services.exceptions import (
     CrossTenantRelationshipError,
+    CurationBlockedError,
     LastAdminError,
     MembershipNotFoundError,
     MemoryAccessDeniedError,
@@ -41,14 +41,12 @@ from memoryhub_core.services.exceptions import (
 )
 from memoryhub_core.services.graph import create_relationship
 from memoryhub_core.services.memory import (
-    collect_delete_nodes,
-)
-from memoryhub_core.services.memory import (
     create_memory as core_create_memory,
 )
 from memoryhub_core.services.memory import (
     report_contradiction as core_report_contradiction,
 )
+from memoryhub_core.services.memory import stage_memory_delete
 from memoryhub_core.services.memory import (
     update_memory as core_update_memory,
 )
@@ -67,7 +65,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.authorization import AccessDep
 from src.config import Settings, get_settings
 from src.database import get_db
-from src.deletion import delete_capabilities
+from src.deletion import delete_capabilities, prepare_human_delete
 
 router = APIRouter()
 DbDep = Annotated[AsyncSession, Depends(get_db)]
@@ -193,8 +191,10 @@ async def _known_member(db: AsyncSession, settings: Settings, tenant: str, user_
     return await identity_queries.owner_binding_exists(db, user_id, tenant)
 
 
-async def _project_row(db: AsyncSession, access: AccessDep, project: Project) -> dict:
-    member_count, memory_info, campaigns, my_role = await project_queries.project_summary(db, access, project)
+async def _project_row(db: AsyncSession, access: AccessDep, project: Project, *, summary=None) -> dict:
+    if summary is None:
+        summary = await project_queries.project_summary(db, access, project)
+    member_count, memory_info, campaigns, my_role = summary
     return {
         "name": project.name,
         "description": project.description,
@@ -213,7 +213,8 @@ async def _project_row(db: AsyncSession, access: AccessDep, project: Project) ->
 @router.get("/api/projects")
 async def list_projects(db: DbDep, access: AccessDep, mine: bool = Query(False)):
     projects = await project_queries.visible_projects(db, access, mine=mine)
-    items = [await _project_row(db, access, p) for p in projects]
+    summaries = await project_queries.project_summaries(db, access, projects)
+    items = [await _project_row(db, access, p, summary=summaries[p.name]) for p in projects]
     return {
         "items": items,
         "total": len(items),
@@ -399,22 +400,14 @@ async def new_version(memory_id: uuid.UUID, body: VersionBody, db: DbDep, access
     node = await _node(db, access, memory_id, lock=True)
     await _require_write(db, access, node)
     await _mutation_neighbors(db, access, node)
-    if body.content is not None:
-        # Core update does not run curation. Enforce content rules for the
-        # memory's owner before any version or audit row is written. Duplicate
-        # gates apply to new memories, not revisions of an existing memory.
-        curation = await run_curation_pipeline(
-            content=body.content, embedding=None, owner_id=node.owner_id,
-            scope=node.scope, session=db, tenant_id=node.tenant_id, commit_seed=False,
-        )
-        if curation["blocked"]:
-            raise HTTPException(status_code=409, detail="Curation blocked write")
     _record_human_audit(db, access, "memory.update", node.scope, node.owner_id, node.id)
     try:
         version = await core_update_memory(
             memory_id, MemoryNodeUpdate(**body.model_dump(exclude_unset=True)), db, embedding,
             actor_id=access.principal.username, driver_id=access.principal.username,
         )
+    except CurationBlockedError:
+        raise HTTPException(status_code=409, detail="Curation blocked write") from None
     except MemoryNotFoundError:
         raise HTTPException(status_code=404, detail="Memory not found") from None
     except MemoryNotCurrentError:
@@ -529,42 +522,18 @@ async def moderate_bulk(body: BulkBody, db: DbDep, access: AccessDep):
 
 
 async def _bulk_delete(ids: list[uuid.UUID], db: AsyncSession, access: AccessDep) -> dict:
-    """Use the Core delete closure; update all rows in one transaction."""
-    tenant = access.principal.tenant_id
-    roots = []
-    closure: dict[uuid.UUID, MemoryNode] = {}
-    for memory_id in sorted(ids):
-        node = await _node(db, access, memory_id, lock=True)
-        access.require_delete(node)
-        if node.deleted_at is not None:
-            raise HTTPException(status_code=409, detail="Memory is already deleted")
-        roots.append(node)
-        try:
-            related = await collect_delete_nodes(node, db, tenant, seed_locked=True)
-        except MemoryNotFoundError:
-            raise HTTPException(status_code=404, detail="Memory not found") from None
-        for member in related.values():
-            if member.deleted_at is not None:
-                continue
-            access.require_delete(member)
-            closure[member.id] = member
-    # Soft-delete does not mutate unrelated edge endpoints. A corrupt
-    # cross-tenant edge is nevertheless a boundary failure, not a reason to
-    # proceed with a partially visible graph.
-    edges = await mutation_queries.mutation_edges(db, closure)
-    if any(edge.tenant_id != tenant for edge in edges):
-        raise HTTPException(status_code=409, detail="Memory relationship boundary invalid")
-    now = datetime.now(UTC)
-    for node in roots:
+    """Authorize through Core preflight, then commit one audited transaction."""
+    plan = await prepare_human_delete(db, access, ids)
+    for node in plan.roots:
         _record_human_audit(db, access, "memory.delete", node.scope, node.owner_id, node.id,
-                            {"deleted_rows": len(closure), "bulk": True})
+                            {"deleted_rows": len(plan.nodes), "bulk": True})
     try:
-        await memory_queries.mark_deleted(db, closure, tenant, now)
+        await stage_memory_delete(plan, db)
         await db.commit()
     except Exception:
         await db.rollback()
         raise
-    return {"done": [str(node.id) for node in roots], "errors": []}
+    return {"done": [str(node.id) for node in plan.roots], "errors": []}
 
 
 async def _bulk_relate(ids: list[uuid.UUID], target_id: uuid.UUID,

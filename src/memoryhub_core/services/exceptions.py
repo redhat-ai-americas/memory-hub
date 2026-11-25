@@ -3,6 +3,14 @@
 import uuid
 
 
+class CurationBlockedError(Exception):
+    """A shared content rule vetoed a mutation before persistence."""
+
+    def __init__(self, reason: str | None = None) -> None:
+        self.reason = reason
+        super().__init__("Curation rule blocked write")
+
+
 class MemoryNotFoundError(Exception):
     """Raised when a memory node does not exist."""
 

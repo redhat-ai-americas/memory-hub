@@ -39,7 +39,7 @@ def node(**changes):
         "content_type": "experiential", "source": "agent",
         "upstream_trust_level": "trusted", "relevant_until": None,
         "created_at": stamp, "updated_at": stamp, "expires_at": None,
-        "embedding": None,
+        "embedding": None, "storage_type": "inline", "content_ref": None,
     }
     values.update(changes)
     return SimpleNamespace(**values)
@@ -348,11 +348,11 @@ async def test_bulk_delete_preflights_closure_and_commits_once():
     db.rollback = AsyncMock()
     first, second = node(), node()
 
-    async def fetch(_db, _access, uid, **_kwargs):
-        return {first.id: first, second.id: second}[uid]
+    db.execute.side_effect = [*(query_result(n) for n in sorted([first, second], key=lambda n: n.id)),
+                              query_result(items=[]), query_result(None)]
 
-    with patch("src.human_adapters._node", side_effect=fetch), patch(
-        "src.human_adapters.collect_delete_nodes", new_callable=AsyncMock,
+    with patch(
+        "memoryhub_core.services.memory.collect_delete_nodes", new_callable=AsyncMock,
         side_effect=lambda current, *_args, **_kwargs: {current.id: current},
     ):
         response = await _bulk_delete([first.id, second.id], db, access())
@@ -370,14 +370,15 @@ async def test_bulk_delete_rejects_foreign_cascade_before_update():
     db.execute = AsyncMock()
     db.commit = AsyncMock()
     own, foreign = node(), node(owner_id="bob")
-    with patch("src.human_adapters._node", new_callable=AsyncMock, return_value=own), patch(
-        "src.human_adapters.collect_delete_nodes", new_callable=AsyncMock,
+    db.execute.return_value = query_result(own)
+    with patch(
+        "memoryhub_core.services.memory.collect_delete_nodes", new_callable=AsyncMock,
         return_value={own.id: own, foreign.id: foreign},
     ):
         with pytest.raises(HTTPException) as error:
             await _bulk_delete([own.id], db, access())
     assert error.value.status_code == 403
-    db.execute.assert_not_awaited()
+    assert all(not call.args[0].is_update for call in db.execute.await_args_list)
     db.commit.assert_not_awaited()
 
 
@@ -391,8 +392,9 @@ async def test_bulk_delete_skips_deleted_descendants_but_authorizes_live_ones():
     own = node()
     deleted = node(owner_id="bob", deleted_at=datetime.now(UTC), status="quarantined")
     live = node()
-    with patch("src.human_adapters._node", new_callable=AsyncMock, return_value=own), patch(
-        "src.human_adapters.collect_delete_nodes", new_callable=AsyncMock,
+    db.execute.side_effect = [query_result(own), query_result(items=[]), query_result()]
+    with patch(
+        "memoryhub_core.services.memory.collect_delete_nodes", new_callable=AsyncMock,
         return_value={own.id: own, deleted.id: deleted, live.id: live},
     ):
         response = await _bulk_delete([own.id], db, access())
@@ -404,14 +406,15 @@ async def test_bulk_delete_skips_deleted_descendants_but_authorizes_live_ones():
     db.execute.reset_mock()
     db.commit.reset_mock()
     live.owner_id = "bob"
-    with patch("src.human_adapters._node", new_callable=AsyncMock, return_value=own), patch(
-        "src.human_adapters.collect_delete_nodes", new_callable=AsyncMock,
+    db.execute.side_effect = [query_result(own)]
+    with patch(
+        "memoryhub_core.services.memory.collect_delete_nodes", new_callable=AsyncMock,
         return_value={own.id: own, deleted.id: deleted, live.id: live},
     ):
         with pytest.raises(HTTPException) as error:
             await _bulk_delete([own.id], db, access())
     assert error.value.status_code == 403
-    db.execute.assert_not_awaited()
+    assert all(not call.args[0].is_update for call in db.execute.await_args_list)
     db.commit.assert_not_awaited()
 
 
@@ -451,21 +454,20 @@ async def test_bulk_delete_mixed_tenant_and_db_failure_never_partially_commit():
     db.rollback = AsyncMock()
     own, cross_tenant = node(), node(tenant_id="tenant-b")
 
-    async def fetch(_db, _access, uid, **_kwargs):
-        return {own.id: own, cross_tenant.id: cross_tenant}[uid]
+    db.execute.side_effect = [query_result(n) for n in sorted([own, cross_tenant], key=lambda n: n.id)]
 
-    with patch("src.human_adapters._node", side_effect=fetch), patch(
-        "src.human_adapters.collect_delete_nodes", new_callable=AsyncMock,
+    with patch(
+        "memoryhub_core.services.memory.collect_delete_nodes", new_callable=AsyncMock,
         side_effect=lambda current, *_args, **_kwargs: {current.id: current},
     ):
         with pytest.raises(HTTPException):
             await _bulk_delete([own.id, cross_tenant.id], db, access())
     db.commit.assert_not_awaited()
-    db.execute.assert_not_awaited()
+    assert all(not call.args[0].is_update for call in db.execute.await_args_list)
 
-    db.execute.side_effect = [query_result(items=[]), RuntimeError("database write failed")]
-    with patch("src.human_adapters._node", new_callable=AsyncMock, return_value=own), patch(
-        "src.human_adapters.collect_delete_nodes", new_callable=AsyncMock,
+    db.execute.side_effect = [query_result(own), query_result(items=[]), RuntimeError("database write failed")]
+    with patch(
+        "memoryhub_core.services.memory.collect_delete_nodes", new_callable=AsyncMock,
         return_value={own.id: own},
     ):
         with pytest.raises(RuntimeError, match="database write failed"):

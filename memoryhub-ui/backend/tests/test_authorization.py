@@ -21,7 +21,7 @@ def node(*, scope="user", owner="alice", tenant="tenant-a", scope_id=None, paren
         weight=0.8, branch_type=None, version=1, is_current=True,
         parent_id=parent_id, previous_version_id=None, metadata_={"secret": "value"},
         created_at=datetime(2026, 1, 1, tzinfo=UTC), updated_at=datetime(2026, 1, 2, tzinfo=UTC),
-        expires_at=None, deleted_at=None,
+        expires_at=None, deleted_at=None, storage_type="inline", content_ref=None,
     )
 
 
@@ -411,14 +411,14 @@ async def test_delete_walks_nested_branches_before_single_update():
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[
         result(scalar=root), result(items=[child, grandchild]),
-        result(items=[child, grandchild]), result(),
+        result(items=[child, grandchild]), result(), result(),
     ])
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_access] = lambda: access()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.delete(f"/api/memory/{root.id}")
     assert response.status_code == 204
-    assert db.execute.await_count == 4
+    assert db.execute.await_count == 5
     update_params = db.execute.await_args.args[0].compile().params
     selected_ids = next(value for value in update_params.values() if isinstance(value, list))
     assert set(selected_ids) == {root.id, child.id, grandchild.id}

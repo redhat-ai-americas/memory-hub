@@ -11,10 +11,21 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
+from src.core.app import mcp
+from src.core.authz import (
+    AuthenticationError,
+    authorize_write,
+    get_claims_from_context,
+    get_tenant_filter,
+)
+from src.tools._audit_helpers import record_audit_event
+from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session, resolve_driver_id
+from src.tools._push_helpers import broadcast_after_write
 
 from memoryhub_core.models.schemas import MemoryNodeUpdate
 from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import (
+    CurationBlockedError,
     EmbeddingContentTooLargeError,
     EmbeddingServiceError,
     EmbeddingServiceUnavailableError,
@@ -27,16 +38,6 @@ from memoryhub_core.services.memory import update_memory as svc_update_memory
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.push_broadcast import build_uri_only_notification
 from memoryhub_core.services.role import get_roles_for_user
-from src.core.app import mcp
-from src.core.authz import (
-    AuthenticationError,
-    authorize_write,
-    get_claims_from_context,
-    get_tenant_filter,
-)
-from src.tools._audit_helpers import record_audit_event
-from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session, resolve_driver_id
-from src.tools._push_helpers import broadcast_after_write
 
 
 @mcp.tool(
@@ -230,6 +231,8 @@ async def update_memory(
         result["previous_version_id"] = str(new_version.previous_version_id)
         return result
 
+    except CurationBlockedError:
+        raise ToolError("Curation rule blocked this update. Revise the content before retrying.") from None
     except MemoryNotFoundError:
         raise ToolError(f"Memory {memory_id} not found.") from None
     except MemoryNotCurrentError as exc:

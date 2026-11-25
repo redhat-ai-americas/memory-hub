@@ -36,6 +36,30 @@ The `src.authorization.Principal` and `Access` imports remain available to
 the BFF. Its `Access` subclass only maps Core policy denials to HTTP errors;
 the replacement role resolver in #744 can keep this interface.
 
+## Shared mutation and project operations
+
+Core `update_memory` runs content-rule curation before creating a revision.
+HTTP, MCP and direct Core callers share that invariant. Revision checks
+skip duplicate gates and weight-only updates, and seed rules without
+committing the caller's transaction. A veto raises `CurationBlockedError`;
+the HTTP adapter maps it to 409 and MCP uses its existing curation-veto
+error prefix. Adapters do not run a parallel curation pipeline.
+
+`prepare_memory_delete` and `stage_memory_delete` are the common preflight
+and persistence operations for single HTTP, bulk HTTP and Core/MCP deletion.
+Preflight locks the full closure, checks relationship integrity, and accepts
+the caller's authorization predicate. Already deleted intermediates remain
+in the traversal but are excluded from mutation, authorization of changes,
+counts and S3 cleanup. Staging does not commit; required audit rows and all
+bulk changes commit together. Core's single-delete wrapper retains external
+storage cleanup after commit when an S3 adapter is supplied.
+
+Project lists use one Core selection with explicit member/open/all visibility
+and common batched membership and memory aggregates. UI enriches the result
+with campaigns and member totals, without per-project database calls. The UI
+list uses four SELECTs and the Core/MCP list three, independent of list size.
+Both exclude already deleted memories from project counts.
+
 ## Shared selection and preflight
 
 `MemoryFilters` and `memory_conditions` define the selection used by browse,
@@ -95,3 +119,6 @@ files are removed when the health check exits.
 - Stubbed deployment tests cover default/env/CLI context selection and TLS
   trust selection, failures and temporary-file cleanup without cluster writes.
 - Core query changes trigger the MCP suite as well as the BFF tests in CI.
+- Cross-path tests cover curation vetoes, retained deletion timestamps,
+  invalid relationships, rollback and batch project-query counts. MCP tests
+  verify the public error contract and suppress notifications on failure.

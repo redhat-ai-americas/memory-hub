@@ -21,11 +21,13 @@ from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import (
     get_memory_history as get_memory_history_service,
 )
+from memoryhub_core.services.memory import stage_memory_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import AccessDep, Principal, get_principal
 from src.config import Settings, get_settings
 from src.database import get_db
+from src.deletion import prepare_human_delete
 from src.human_adapters import _record_human_audit
 from src.schemas import (
     ApiKeyRotatedResponse,
@@ -520,36 +522,19 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access
     pathological cross-tenant reparenting from escalating into a cross-
     tenant delete. Cross-tenant delete attempts 404.
     """
-    tenant_id = settings.ui_tenant_id
-
     try:
         parsed_id = uuid.UUID(memory_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}") from None
 
-    node = await memory_queries.get_memory_row(db, parsed_id, tenant_id, lock=True)
-    if node is None:
-        raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
-    if node.deleted_at is not None:
-        raise HTTPException(status_code=409, detail=f"Memory {memory_id!r} is already deleted")
-    access.require_delete(node)
-
-    # Use the same closure as the Core delete path, then authorize every row.
-    from memoryhub_core.services.memory import collect_delete_nodes
-
-    found = await collect_delete_nodes(node, db, tenant_id, seed_locked=True)
-    for related in found.values():
-        if related.deleted_at is None:
-            access.require_delete(related)
-
-    now = datetime.now(UTC)
-    all_ids = {uid for uid, related in found.items() if related.deleted_at is None}
+    plan = await prepare_human_delete(db, access, [parsed_id])
+    node = plan.roots[0]
     _record_human_audit(
         db, access, "memory.delete", node.scope, node.owner_id, node.id,
-        {"deleted_rows": len(all_ids)},
+        {"deleted_rows": len(plan.nodes)},
     )
 
-    await memory_queries.mark_deleted(db, list(all_ids), tenant_id, now)
+    await stage_memory_delete(plan, db)
     await db.commit()
 
 

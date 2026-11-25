@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from memoryhub_core.models.audit import AuditLog
-from memoryhub_core.models.curation import CuratorRule
+from memoryhub_core.services.exceptions import CurationBlockedError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import Access, Principal, get_access
@@ -41,7 +41,7 @@ def node(**changes):
         "content": "Entity", "stub": "Memory stub", "branch_type": None,
         "metadata_": None, "version": 1,
         "driver_id": None, "domains": [], "content_type": "experiential",
-        "relevant_until": None,
+        "relevant_until": None, "storage_type": "inline", "content_ref": None,
         "created_at": datetime(2026, 1, 1, tzinfo=UTC),
         "updated_at": datetime(2026, 1, 2, tzinfo=UTC),
     }
@@ -147,7 +147,10 @@ def test_project_list_filters_user_visibility_and_admin_tenant(client):
     project = SimpleNamespace(name="p", tenant_id="tenant-a")
     db.execute.side_effect = [result(items=[project])]
     with patch("src.human_adapters._project_row", new_callable=AsyncMock,
-               return_value={"name": "p", "campaigns": [], "members": 1}):
+               return_value={"name": "p", "campaigns": [], "members": 1}), patch(
+        "src.human_adapters.project_queries.project_summaries", new_callable=AsyncMock,
+        return_value={"p": (1, (0, None), [], None)},
+    ):
         response = http.get("/api/projects?mine=false")
         assert response.status_code == 200 and response.json()["total"] == 1
         assert response.json()["can_create"] is False
@@ -333,9 +336,7 @@ def test_version_preflights_all_affected_nodes(client):
         update.assert_not_awaited()
     db.execute.side_effect = [result(own), result(items=[]), result(items=[])]
     with patch("src.human_adapters.core_update_memory", new_callable=AsyncMock,
-               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update, patch(
-        "src.human_adapters.run_curation_pipeline", new_callable=AsyncMock, return_value={"blocked": False},
-    ):
+               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update:
         response = http.post(f"/api/memory/{own.id}/versions", json={"content": "new"})
         assert response.status_code == 201
         assert response.json()["version"] == 2
@@ -354,32 +355,22 @@ def test_version_preserves_authorized_entity_mention(client):
         result(own), result(items=[]), result(items=[mention]), result(items=[entity]),
     ]
     with patch("src.human_adapters.core_update_memory", new_callable=AsyncMock,
-               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update, patch(
-        "src.human_adapters.run_curation_pipeline", new_callable=AsyncMock, return_value={"blocked": False},
-    ):
+               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update:
         response = http.post(f"/api/memory/{own.id}/versions", json={"content": "new"})
         assert response.status_code == 201
         update.assert_awaited_once()
 
 
-@pytest.mark.parametrize("action", ["block", "quarantine", "reject_with_pointer"])
-def test_version_applies_content_rules_for_the_memory_owner(client, action):
-    http, db, set_access = client
-    own = node(owner_id="alice-agent")
-    set_access(access(agents={"alice-agent"}))
-    policy = CuratorRule(
-        name="personal-policy", tier="regex", config={"pattern": "FORBIDDEN_CONTENT"}, action=action,
-    )
+def test_version_maps_shared_core_curation_veto(client):
+    http, db, _ = client
+    own = node()
     db.execute.side_effect = [result(own), result(items=[]), result(items=[])]
-    with patch("memoryhub_core.services.curation.pipeline.seed_default_rules", new_callable=AsyncMock), patch(
-        "memoryhub_core.services.curation.pipeline.load_rules", new_callable=AsyncMock, return_value=[policy],
-    ) as load, patch("src.human_adapters.core_update_memory", new_callable=AsyncMock) as update:
+    with patch("src.human_adapters.core_update_memory", new_callable=AsyncMock,
+               side_effect=CurationBlockedError("protected-content")) as update:
         response = http.post(f"/api/memory/{own.id}/versions", json={"content": "FORBIDDEN_CONTENT"})
     assert response.status_code == 409, response.text
-    update.assert_not_awaited()
+    update.assert_awaited_once()
     db.commit.assert_not_awaited()
-    assert load.await_args.kwargs["owner_id"] == "alice-agent"
-    assert load.await_args.kwargs["tenant_id"] == "tenant-a"
 
 
 def test_version_allows_clean_content_without_a_duplicate_gate(client):

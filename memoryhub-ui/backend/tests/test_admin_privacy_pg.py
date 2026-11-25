@@ -33,10 +33,13 @@ from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.schemas import MemoryNodeCreate, MemoryNodeUpdate
+from memoryhub_core.queries.mutations import RelationshipBoundaryError
 from memoryhub_core.services.embeddings import MockEmbeddingService
 from memoryhub_core.services.entity import find_or_create_entity
-from memoryhub_core.services.memory import create_memory, update_memory
-from sqlalchemy import select, text
+from memoryhub_core.services.exceptions import CurationBlockedError
+from memoryhub_core.services.memory import create_memory, delete_memory, update_memory
+from memoryhub_core.services.project import create_project, list_projects_for_tenant
+from sqlalchemy import delete, event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -302,6 +305,8 @@ async def test_blocked_version_leaves_memory_and_audit_unchanged(env, action):
 
     response = await http.post(f"/api/memory/{memory.id}/versions", json={"content": "FORBIDDEN_CONTENT"})
     assert response.status_code == 409, response.text
+    with pytest.raises(CurationBlockedError):
+        await env["new_version"](memory.id, "FORBIDDEN_CONTENT")
     async with env["sessions"]() as db:
         versions = (await db.execute(select(MemoryNode).where(
             MemoryNode.tenant_id == TENANT, MemoryNode.logical_id == memory.logical_id,
@@ -312,6 +317,93 @@ async def test_blocked_version_leaves_memory_and_audit_unchanged(env, action):
             AuditLog.tenant_id == TENANT, AuditLog.event_type == "memory.update",
         ))).scalars().all()
         assert audit == []
+
+
+@pytest.mark.parametrize("mode", ["single", "bulk", "core"])
+async def test_all_delete_paths_preserve_deleted_bridges_and_reach_live_descendants(env, mode):
+    root = await env["seed"]("Shared root", scope="user", actor="alice")
+    bridge = await env["seed"]("Deleted bridge", scope="user", owner="carol", parent=root.id, branch="evidence")
+    leaf = await env["seed"]("Live leaf", scope="user", parent=bridge.id, branch="evidence")
+    original = datetime(2020, 1, 1, tzinfo=UTC)
+    async with env["sessions"]() as db:
+        retired = await db.get(MemoryNode, bridge.id)
+        retired.deleted_at, retired.is_current = original, False
+        await db.commit()
+    if mode == "core":
+        async with env["sessions"]() as db:
+            result = await delete_memory(root.id, db, tenant_id=TENANT)
+            assert result["total_deleted"] == 2
+    elif mode == "single":
+        response = await env["http"].delete(f"/api/memory/{root.id}")
+        assert response.status_code == 204, response.text
+    else:
+        response = await env["http"].post("/api/memories/bulk", json={"action": "delete", "ids": [str(root.id)]})
+        assert response.status_code == 200, response.text
+    assert (await env["fetch"](bridge.id)).deleted_at == original
+    assert (await env["fetch"](root.id)).deleted_at is not None
+    assert (await env["fetch"](leaf.id)).deleted_at is not None
+
+
+@pytest.mark.parametrize("mode", ["single", "bulk", "core"])
+async def test_all_delete_paths_reject_invalid_relationships_without_changes(env, mode):
+    root = await env["seed"]("Shared root", scope="user", actor="alice")
+    target = await env["seed"]("Shared target", scope="user", actor="alice")
+    async with env["sessions"]() as db:
+        db.add(MemoryRelationship(
+            source_id=root.id, target_id=target.id, relationship_type="related_to",
+            tenant_id="corrupt-other-tenant", created_by="alice",
+        ))
+        await db.commit()
+    if mode == "core":
+        async with env["sessions"]() as db:
+            with pytest.raises(RelationshipBoundaryError):
+                await delete_memory(root.id, db, tenant_id=TENANT)
+    elif mode == "single":
+        response = await env["http"].delete(f"/api/memory/{root.id}")
+        assert response.status_code == 409, response.text
+    else:
+        response = await env["http"].post("/api/memories/bulk", json={"action": "delete", "ids": [str(root.id)]})
+        assert response.status_code == 409, response.text
+    assert (await env["fetch"](root.id)).deleted_at is None
+
+
+@pytest.mark.parametrize("size", [1, 10])
+async def test_project_lists_share_counts_and_query_count_does_not_grow_with_projects(env, size):
+    names = [f"batch-{uuid.uuid4().hex[:12]}" for _ in range(size)]
+    await env["seed"]("Current shared note")
+    hidden = await env["seed"]("Already deleted shared note")
+    async with env["sessions"]() as db:
+        retired = await db.get(MemoryNode, hidden.id)
+        retired.deleted_at = datetime.now(UTC)
+        # Even legacy rows retaining is_current must be excluded consistently.
+        for name in names:
+            await create_project(db, name, TENANT, "alice")
+        await db.commit()
+    statements = []
+
+    def count(_conn, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    engine = env["sessions"].kw["bind"]
+    event.listen(engine.sync_engine, "before_cursor_execute", count)
+    try:
+        http = await env["http"].get("/api/projects")
+        assert http.status_code == 200, http.text
+        assert len(statements) == 4
+        statements.clear()
+        async with env["sessions"]() as db:
+            core = await list_projects_for_tenant(db, TENANT, "alice", include_all_open=True)
+        assert len(statements) == 3
+        human_counts = {row["name"]: row["memories"] for row in http.json()["items"]}
+        assert human_counts == {row["name"]: row["memory_count"] for row in core}
+        assert human_counts["atlas-p"] == 1
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count)
+        async with env["sessions"]() as db:
+            await db.execute(delete(ProjectMembership).where(ProjectMembership.project_id.in_(names)))
+            await db.execute(delete(Project).where(Project.name.in_(names)))
+            await db.commit()
 
 
 async def test_bulk_delete_parent_after_a_branch_was_deleted(env):
