@@ -153,6 +153,8 @@ class PublicConfigResponse(BaseModel):
 
 class MeResponse(BaseModel):
     username: str
+    # Durable MemoryHub id of the person (OpenShift RBAC mode); None otherwise.
+    user_id: str | None = None
     name: str
     email: str | None
     initials: str

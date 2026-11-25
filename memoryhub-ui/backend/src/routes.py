@@ -182,6 +182,7 @@ async def get_me(access: AccessDep, settings: SettingsDep, response: Response):
         project_ids = sorted(access.human_project_admins)
     return MeResponse(
         username=principal.username,
+        user_id=principal.user_id,
         name=principal.username,
         email=None,
         initials=principal.username[:2].upper(),

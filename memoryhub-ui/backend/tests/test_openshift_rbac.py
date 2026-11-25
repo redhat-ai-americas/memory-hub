@@ -298,8 +298,8 @@ def http_app(fake, monkeypatch):
     settings = _settings()
     adapter = OpenShiftRbac(settings, kube=client, clock=Clock())
     monkeypatch.setattr(identity, "rbac_adapter_for", lambda _settings: adapter)
-    recorded = AsyncMock()
-    monkeypatch.setattr(authorization, "record_profile", recorded)
+    recorded = AsyncMock(side_effect=lambda db, tenant, ident, refresh: MagicMock(id=f"uid-of-{ident.username}"))
+    monkeypatch.setattr(authorization, "profile_for", recorded)
     db = AsyncMock()
     result = MagicMock()
     result.scalars.return_value.all.return_value = []
@@ -324,12 +324,14 @@ async def test_http_roles_profile_and_no_token_in_logs(http_app, caplog):
         forged = await http.get("/api/me", headers={"x-forwarded-user": "bob",
                                                    "x-forwarded-access-token": "tok-alice", "x-role": "admin"})
     assert admin.status_code == 200 and admin.json()["role"] == "admin"
+    assert admin.json()["user_id"] == "uid-of-bob"
     assert again.status_code == 200
     assert user.json()["role"] == "user"
     assert denied.status_code == 403
     assert forged.status_code == 401
-    # One profile write per fresh verification, none for cached decisions or denials.
-    assert [call.args[2].username for call in http_app.await_args_list] == ["bob", "alice"]
+    # The profile is refreshed on a fresh verification and only read otherwise; denials never reach it.
+    calls = [(call.args[2].username, call.kwargs["refresh"]) for call in http_app.await_args_list]
+    assert calls == [("bob", True), ("bob", False), ("alice", True)]
     assert all("tok-" not in record.getMessage() for record in caplog.records)
 
 

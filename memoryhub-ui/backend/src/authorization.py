@@ -24,7 +24,7 @@ from sqlalchemy.orm import declarative_base
 
 from src.config import Settings, get_settings
 from src.database import get_db
-from src.human_identity import record_profile
+from src.human_identity import profile_for
 from src.identity import entitlement_resolver_for, identity_provider_for
 
 logger = logging.getLogger(__name__)
@@ -48,9 +48,12 @@ class AgentOwner(OwnerBase):
 
 @dataclass(frozen=True)
 class Principal:
-    username: str
+    username: str  # display name; ownership and memberships still use it
     role: str
     tenant_id: str
+    # Durable internal id (human_identities.id) when roles come from OpenShift
+    # RBAC; None in the lists and local modes, which have no durable subject.
+    user_id: str | None = None
 
 
 async def get_principal(
@@ -66,14 +69,18 @@ async def get_principal(
     role = await entitlement_resolver_for(settings).resolve(authn)
     if role not in ("user", "admin"):
         raise HTTPException(status_code=403, detail="Unsupported dashboard role")
-    if settings.ui_role_source == "openshift-rbac" and authn.fresh:
-        # Just-in-time profile of a person who has already been admitted.
+    user_id = None
+    if settings.ui_role_source == "openshift-rbac":
+        # Just-in-time profile of a person who has already been admitted;
+        # refused when the username belongs to a different account.
         try:
-            await record_profile(db, settings.ui_tenant_id, authn.identity)
+            profile = await profile_for(db, settings.ui_tenant_id, authn.identity, refresh=authn.fresh)
         except SQLAlchemyError:
-            logger.exception("Could not record the dashboard profile of %r", authn.identity.username)
+            logger.exception("Could not read the dashboard profile of %r", authn.identity.username)
             raise HTTPException(status_code=503, detail="Profile store unavailable") from None
-    return Principal(username=authn.identity.username, role=role, tenant_id=settings.ui_tenant_id)
+        user_id = profile.id
+    return Principal(username=authn.identity.username, role=role, tenant_id=settings.ui_tenant_id,
+                     user_id=user_id)
 
 
 @dataclass

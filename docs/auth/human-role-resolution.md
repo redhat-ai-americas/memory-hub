@@ -241,8 +241,12 @@ The table `human_identities` (`id` = `user_id`, `tenant_id`, `issuer`,
 - **Username reuse.** If a username arrives with an `(issuer, subject)`
   different from the one recorded, the sign-in is refused (`403`, logged).
   A recreated account therefore never inherits the old account's personal
-  memories. Linking or merging accounts is a separate, controlled
-  procedure for an operator.
+  memories. A known `(issuer, subject)` arriving with a new username is
+  refused too: following the rename would free the old name, and whoever
+  got it next would inherit the memories. Linking accounts is a controlled
+  operator procedure (`docs/ui/human-access.md`).
+- **Disabled profiles** (`disabled_at` set) are refused even with a valid
+  RBAC grant.
 - **Ownership.** `owner_id`, memberships and the audit log still store
   usernames. Moving them to `user_id` is a separate migration; replacing
   `Principal.username` in place would break every ownership check.

@@ -99,6 +99,37 @@ CI and GitOps must use 1 or 3. Bootstrap records itself on the admin Role
 removing every binding is treated as a deliberate revocation: a later
 deploy only warns.
 
+## Durable identity and username reuse
+
+In OpenShift RBAC mode every admitted person has a profile in
+`human_identities`: `id` is their durable MemoryHub `user_id` (shown as
+`user_id` in `/api/me`), keyed by the OpenShift API issuer and the `User`
+object's `uid`. Memories, memberships and the audit log still record the
+username, so the dashboard refuses (`403`) two cases instead of guessing:
+
+- **A username arrives with a different `uid`**: the account was deleted
+  and recreated, or a freed name went to someone else. The newcomer would
+  otherwise inherit the old account's personal memories.
+- **A known `uid` arrives with a different username**: following the rename
+  would cut the person off from their memories and free the old name.
+
+The refusal is logged with the profile id. An operator resolves it in the
+database (port-forward to `memoryhub-pg`), after confirming who the person
+is out of band:
+
+```sql
+-- Same person, account recreated: link the profile to the new uid.
+UPDATE human_identities SET subject = '<new uid>'
+ WHERE tenant_id = '<tenant>' AND username = '<username>';
+
+-- Keep someone out of the dashboard without touching RBAC.
+UPDATE human_identities SET disabled_at = now() WHERE id = '<profile id>';
+```
+
+A renamed person, or a different person who should get a freed name, needs
+the ownership migration from username to `user_id`, which is planned
+separately. Until then give them a different username.
+
 ## Audit trail
 
 Every grant is a RoleBinding labelled `memoryhub.io/dashboard-access` and
