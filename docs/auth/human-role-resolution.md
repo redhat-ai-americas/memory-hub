@@ -1,6 +1,10 @@
 # Human role resolution: OpenShift RBAC for dashboard and broker access
 
-Status: **in progress** on branch `oauth` (#744).
+Status: **implemented on branch `oauth`, integration not verified** (#744).
+The live OpenShift checks in
+[`role-resolution-cluster-verification.md`](role-resolution-cluster-verification.md)
+and the PostgreSQL test suites have not been run yet; nothing here is
+confirmed on a cluster.
 Replaces the transitional username lists from #667
 ([`docs/ui/human-access.md`](../ui/human-access.md)).
 
@@ -187,36 +191,93 @@ Agents have different lifecycles, so they get different rules:
 
 ## memoryhub-auth (browser broker and refresh)
 
-- The broker callback checks entitlement with the person's OpenShift token
-  (`self` check, scope `user:info user:check-access` requested from
-  OpenShift) instead of `AUTH_OPENSHIFT_ALLOWED_GROUP`. A person who may
-  not use the dashboard gets no MemoryHub token either.
-- The refresh handler re-checks the person before rotating. The OpenShift
-  token is never stored, so this check is delegated: the auth service
-  reads the person's `Group` memberships (ClusterRole `groups` get/list)
-  and creates a `SubjectAccessReview` for the user, those groups and the
-  implicit `system:authenticated` groups. Denied: `401 invalid_grant`,
-  nothing is rotated. API unavailable: `503 temporarily_unavailable`;
-  nothing is issued.
-- Denial **refuses, it does not revoke**. Every issuance is checked, so
-  refusing is as strong as revoking, and two things go better: restoring a
-  person's access restores their session, and a misconfiguration (for
-  example the dashboard Roles not existing yet while `deploy-full.sh`
-  deploys auth before the UI) cannot destroy every session at once.
-- `client_credentials`, `refresh_token` and token exchange for a client
-  with an owner binding check the owner the same way (`403 access_denied`).
-  Clients without an owner are service agents and are not checked.
-- Refresh tokens record where they came from (`origin`: `broker` or
-  `client`; migration 003 backfills `broker` where `subject <> client_id`),
-  so the person check applies to human sessions.
-- With `openshift-rbac`, `/authorize` asks OpenShift only for
-  `user:info user:check-access`.
-- `AUTH_ENTITLEMENT_MODE=off|openshift-rbac` (`off` keeps the legacy
-  `AUTH_OPENSHIFT_ALLOWED_GROUP` check for Compose and tests);
-  `AUTH_ENTITLEMENT_NAMESPACE` is the dashboard namespace, filled in by
-  `memoryhub-auth/deploy.sh` from `MEMORYHUB_UI_NAMESPACE`.
+The dashboard and the auth service share the **entitlement model** (the
+Roles above) but obtain the **verified identity** differently: the BFF has
+the person's OpenShift token on every request; the auth service has it only
+at sign-in.
+
+### Sign-in (broker callback)
+
+1. OpenShift is asked only for `user:info user:check-access`.
+2. `SelfSubjectAccessReview` with the person's token: `use` allowed?
+3. The auth service reads the OpenShift `User` (service account, ClusterRole
+   `users get`) and records its `uid` on the session (`subject_uid`).
+4. The shared `human_identities` registry is checked and, if needed,
+   written (same rules as the dashboard: a name recorded for another
+   account, a renamed account and a disabled profile are refused).
+5. The OpenShift token is dropped; it is never stored.
+
+### Refresh of a person's session, and every token of a personal agent
+
+Without the person's token the auth service must establish two facts on its
+own, at every issuance:
+
+| Fact | How | Privilege of the auth service account |
+|---|---|---|
+| The username still denotes the same account | `GET users/<name>`: the `uid` must equal the `subject_uid` recorded at sign-in (agents: the registry row of the owner), and the registry row must match and not be disabled | `users get` |
+| That person may use MemoryHub now | read the person's **current** `Group` memberships (`groups list`, `b64:` names decoded), then `SubjectAccessReview` for the user, those groups and `system:authenticated`, `system:authenticated:oauth` | `groups list`; `subjectaccessreviews create` (via `system:auth-delegator`) |
+
+A `SubjectAccessReview` never looks groups up by itself, and groups
+remembered from sign-in are never used, so removing someone from a Group
+takes effect at the next issuance. Groups that exist only as claims in a
+token and are not synced to OpenShift `Group` objects are not seen; OIDC
+group sync and LDAP sync both create `Group` objects.
+
+### What each event does to sessions
+
+| Event | Person's sessions | Personal agent tokens |
+|---|---|---|
+| OpenShift API unreachable, timeout, 5xx | `503 temporarily_unavailable`; nothing changes | same |
+| Role missing (binding or group removed) | refused (`401 invalid_grant`); restoring the role restores the session. With `AUTH_ENTITLEMENT_DENIAL=revoke` every session of the person is revoked instead | refused (`403`); revoked with `revoke` |
+| User deleted, recreated (new `uid`), name taken by another account, account renamed, profile disabled, or a session from before identity binding | every refresh token of that username revoked; a new sign-in is required | every refresh token of the agent revoked |
+| Revoked or rotated refresh token presented again (reuse, RFC 9700 4.14) | the whole rotation family revoked | same |
+| Family older than `AUTH_SESSION_MAX_AGE` (default 7 days) | refused; rotated tokens never outlive it | same |
+| Explicit end: compromise, offboarding (`POST /admin/people/{name}/end-sessions`) | revoked; optionally the agents' tokens too, and the profile disabled (blocked everywhere: dashboard, sign-in, refresh, agents) until `POST /admin/people/{name}/enable` | revoked with `include_agents` |
+
+Refusing is **not** equivalent to revoking. A refused session comes back
+when the role is restored; if its refresh token was stolen, the thief's copy
+comes back too. That is why everything that signals a compromise or a
+different person revokes, why reuse revokes the family, why sessions have
+an absolute age, and why `revoke` is available as the policy for a missing
+role. `refuse` is the default only for the case where the role was removed
+by mistake or temporarily.
+
+Already issued access tokens are JWTs verified by signature; they stay
+valid until they expire (`AUTH_ACCESS_TOKEN_TTL`, 15 minutes).
+
+### Agents: explicit lifecycle
+
+- `service` clients are team-owned. Only the admin API creates them; in the
+  dashboard only Admins can, and a User cannot.
+- Every other client is **personal**: it needs an owner binding, and the
+  owner must pass both checks above. A missing or broken binding is
+  refused, so a person cannot escape offboarding through a client without an
+  owner. Existing unbound `user` clients stop working when entitlements are
+  switched on; an operator binds them or recreates them as service clients
+  (inventory in the verification page).
+
+### Configuration and ordering
+
+- `AUTH_ENTITLEMENT_MODE=off|openshift-rbac` comes from the same switch as
+  the dashboard (`MEMORYHUB_UI_ROLE_SOURCE`) in `memoryhub-auth/deploy.sh`;
+  `AUTH_ENTITLEMENT_NAMESPACE` from `MEMORYHUB_UI_NAMESPACE`.
+- RBAC is installed before the checks are switched on: `deploy-full.sh`
+  bootstraps the dashboard Roles before deploying auth, and the auth
+  deploy refuses to switch checks on when the Roles are missing.
+- `AUTH_IDENTITY_ISSUER` must equal the dashboard's
+  `MEMORYHUB_UI_IDENTITY_ISSUER` (both default to
+  `openshift:https://kubernetes.default.svc`), and `AUTH_DEFAULT_TENANT_ID`
+  the dashboard's `MEMORYHUB_UI_TENANT_ID`, or the shared registry will not
+  match.
+- Existing person refresh tokens have no `subject_uid`; they end at their
+  next refresh after migration 004 (one new sign-in).
 
 ## Stable identity
+
+**Status: a registry of external identities and protection against username
+conflicts on every path (dashboard, broker sign-in, refresh, personal agent
+tokens). Moving ownership and authorization from usernames to the internal
+`user_id` remains separate work.**
 
 `Principal.username` is a display name, not a durable key. A username can
 change, or later belong to a different person. The durable key is:
@@ -261,6 +322,11 @@ The table `human_identities` (`id` = `user_id`, `tenant_id`, `issuer`,
 - Bootstrap runs once. The Roles carry the annotation
   `memoryhub.io/bootstrapped-at`. Once it is set, removing every binding is
   treated as a deliberate revocation, and a later deploy only warns.
+- Rollback is one switch for the whole chain, never automatic:
+  `dashboard-access.sh export-lists`, then
+  `MEMORYHUB_UI_ROLE_SOURCE=lists` for the UI deploy (BFF lists, no proxy
+  access check) and the auth deploy (`AUTH_ENTITLEMENT_MODE=off`); see
+  `docs/ui/human-access.md`.
 - `dashboard-access.sh migrate` turns the old lists into RoleBindings for the
   same users and marks the Secret as migrated. It does not delete the
   Secret; the operator removes it after verifying sign-in.
@@ -316,5 +382,8 @@ Unit tests cover these against a fake Kubernetes API. The live checks on
 | `MEMORYHUB_UI_RBAC_DENY_TTL` | `5` | seconds a deny decision is reused |
 | `MEMORYHUB_KUBE_API_URL` | `https://kubernetes.default.svc` | API server |
 | `MEMORYHUB_KUBE_CA_PATH` | service account CA | CA bundle |
-| `AUTH_ENTITLEMENT_MODE` | `off` | `off` or `openshift-rbac` |
+| `AUTH_ENTITLEMENT_MODE` | `off` | `off` or `openshift-rbac` (deploy: from `MEMORYHUB_UI_ROLE_SOURCE`) |
+| `AUTH_ENTITLEMENT_DENIAL` | `refuse` | what a missing role does to sessions: `refuse` or `revoke` |
+| `AUTH_SESSION_MAX_AGE` | `604800` | absolute lifetime of a sign-in, in seconds |
+| `AUTH_IDENTITY_ISSUER` | `openshift:<k8s API>` | must equal `MEMORYHUB_UI_IDENTITY_ISSUER` |
 | `AUTH_ENTITLEMENT_NAMESPACE` | `memoryhub-ui` | namespace of the dashboard Roles (manifest: from `MEMORYHUB_UI_NAMESPACE`) |

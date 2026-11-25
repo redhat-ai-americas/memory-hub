@@ -1,6 +1,7 @@
 # Dashboard human access
 
-Status: **OpenShift RBAC** (#744). The design, trust boundaries and
+Status: **OpenShift RBAC** (#744), implemented; cluster verification
+pending (`docs/auth/role-resolution-cluster-verification.md`). The design, trust boundaries and
 revocation timings are in
 [`docs/auth/human-role-resolution.md`](../auth/human-role-resolution.md).
 The username lists from #667 remain only as a rollback mode
@@ -140,12 +141,28 @@ refused identity, never a token.
 
 ## Rollback: transitional username lists
 
-`MEMORYHUB_UI_ROLE_SOURCE=lists memoryhub-ui/deploy/deploy.sh` switches back
-to the #667 lists: `human-access.sh` provisions the Secret
-`memoryhub-ui-human-access` (`MEMORYHUB_UI_ADMIN_USERS`,
-`MEMORYHUB_UI_ALLOWED_USERS`), the proxy's access check is dropped, and the
-BFF reads the lists at start. Changes need a restart. One source never falls
-back to the other automatically.
+One switch for the whole chain; nothing falls back on its own when the API
+fails. In order:
+
+1. Snapshot the current assignments into the lists Secret (groups are
+   expanded to their members at this moment; review the printed lists):
+   ```bash
+   memoryhub-ui/deploy/dashboard-access.sh --context mcp-rhoai --namespace memoryhub-ui export-lists
+   ```
+2. Deploy with the lists, all components at once:
+   ```bash
+   MEMORYHUB_UI_ROLE_SOURCE=lists scripts/deploy-full.sh
+   ```
+   or per component: `MEMORYHUB_UI_ROLE_SOURCE=lists memoryhub-ui/deploy/deploy.sh`
+   (BFF reads the lists; the proxy's access check is removed) and
+   `MEMORYHUB_UI_ROLE_SOURCE=lists make -C memoryhub-auth deploy`
+   (`AUTH_ENTITLEMENT_MODE=off`: no role check at sign-in or refresh;
+   rotation families, reuse detection and the session age still apply).
+3. Check that an Admin and a User from the snapshot can sign in.
+
+The lists are a snapshot: later group changes are not seen, and changes need
+a restart. To go forward again, deploy with `openshift-rbac`; the bindings
+were never removed and bootstrap does not run twice.
 
 ## Local development
 
