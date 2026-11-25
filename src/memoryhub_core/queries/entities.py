@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from memoryhub_core.authorization.human import Access
+from memoryhub_core.exceptions import MemoryAccessDeniedError
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.queries.projects import writable_by_human
-from memoryhub_core.services.exceptions import MemoryAccessDeniedError
 
 
 class EntityBoundaryError(ValueError):

@@ -23,6 +23,9 @@ flowchart LR
 - `memoryhub_core.queries` owns SQL construction and execution, tenant
   predicates, joins, pagination and authorized aggregates. Queries return
   domain rows and aggregates; they do not import BFF schemas or HTTP types.
+- Shared domain errors live in `memoryhub_core.exceptions`. Queries do not
+  import the service package; legacy service error imports re-export the
+  same classes. Fresh-process import tests guard this dependency direction.
 - Core services own shared persistence and transaction-sensitive operations.
   Existing MCP services use the same row, project, entity-mention, child,
   curation-visibility and deletion queries as the human adapters.

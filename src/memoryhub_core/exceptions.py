@@ -1,0 +1,239 @@
+"""Domain errors shared by Core queries, services and transports."""
+
+import uuid
+
+
+class CurationBlockedError(Exception):
+    """A shared content rule vetoed a mutation before persistence."""
+
+    def __init__(self, reason: str | None = None) -> None:
+        self.reason = reason
+        super().__init__("Curation rule blocked write")
+
+
+class MemoryNotFoundError(Exception):
+    """Raised when a memory node does not exist."""
+
+    def __init__(self, memory_id: uuid.UUID) -> None:
+        self.memory_id = memory_id
+        super().__init__(f"Memory node {memory_id} not found")
+
+
+class GuidanceAccessDeniedError(Exception):
+    """The caller cannot read the current step of a guidance request.
+
+    Neighbors the caller cannot read are omitted instead. The current
+    step is the subject of the guidance, so a denial here stops the call.
+    """
+
+    def __init__(self, node_id: uuid.UUID) -> None:
+        self.node_id = node_id
+        super().__init__(f"Not authorized to read memory {node_id}.")
+
+
+class EntryStepResolutionError(Exception):
+    """Raised when a procedure has no single step to enter on.
+
+    ``candidates`` is empty when nothing qualifies (a cycle, or a
+    procedure with no steps) and lists every qualifying step when more
+    than one does. The caller passes ``current_step_id``; this error
+    never picks a step.
+    """
+
+    def __init__(
+        self,
+        procedure_id: uuid.UUID,
+        candidates: list[uuid.UUID],
+        *,
+        detail: str | None = None,
+    ) -> None:
+        self.procedure_id = procedure_id
+        self.candidates = list(candidates)
+        self.detail = detail
+        if detail is not None:
+            message = detail
+        elif not self.candidates:
+            message = (
+                f"Procedure {procedure_id} has no unambiguous entry step: "
+                "no step lacks an incoming precedes edge. "
+                "Pass current_step_id explicitly."
+            )
+        else:
+            listed = ", ".join(str(candidate) for candidate in self.candidates)
+            message = (
+                f"Procedure {procedure_id} has {len(self.candidates)} steps with "
+                f"no incoming precedes edge: {listed}. "
+                "Pass current_step_id explicitly."
+            )
+        super().__init__(message)
+
+
+class MemoryNotCurrentError(Exception):
+    """Raised when attempting to update a non-current memory version."""
+
+    def __init__(self, memory_id: uuid.UUID, current_id: uuid.UUID) -> None:
+        self.memory_id = memory_id
+        self.current_id = current_id
+        super().__init__(f"Memory node {memory_id} is not the current version; current is {current_id}")
+
+
+class MemoryAccessDeniedError(Exception):
+    """Raised when access to a memory node is denied."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"Access denied: {reason}")
+
+
+class ContradictionNotFoundError(Exception):
+    """Raised when a contradiction report cannot be found."""
+
+    def __init__(self, contradiction_id: uuid.UUID) -> None:
+        self.contradiction_id = contradiction_id
+        super().__init__(f"Contradiction report {contradiction_id} not found")
+
+
+class MemoryAlreadyDeletedError(Exception):
+    """Raised when attempting to delete an already-deleted memory."""
+
+    def __init__(self, memory_id: uuid.UUID) -> None:
+        self.memory_id = memory_id
+        super().__init__(f"Memory node {memory_id} is already deleted")
+
+
+class RelationshipNotFoundError(Exception):
+    """Raised when a graph relationship cannot be found."""
+
+    def __init__(self, relationship_id: uuid.UUID) -> None:
+        self.relationship_id = relationship_id
+        super().__init__(f"Relationship {relationship_id} not found")
+
+
+class ProjectInviteOnlyError(Exception):
+    """Raised when a user attempts to join an invite-only project."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Project '{project_id}' requires an invitation. Contact a project admin to be added.")
+
+
+class ProjectNotFoundError(Exception):
+    """Raised when a project does not exist."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Project '{project_id}' not found")
+
+
+class ProjectAlreadyExistsError(Exception):
+    """Raised when creating a project that already exists."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Project '{project_id}' already exists")
+
+
+class MembershipNotFoundError(Exception):
+    """Raised when a project membership does not exist."""
+
+    def __init__(self, project_id: str, user_id: str) -> None:
+        self.project_id = project_id
+        self.user_id = user_id
+        super().__init__(f"User '{user_id}' is not a member of project '{project_id}'")
+
+
+class LastAdminError(Exception):
+    """Raised when attempting to remove the last admin from a project."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Cannot remove the last admin from project '{project_id}'")
+
+
+class EmbeddingServiceError(Exception):
+    """Base class for embedding service failures."""
+
+
+class EmbeddingContentTooLargeError(EmbeddingServiceError):
+    """Raised when content exceeds the embedding model's input limit."""
+
+    def __init__(self, content_length: int, detail: str = "") -> None:
+        self.content_length = content_length
+        msg = f"Content too large for embedding ({content_length} chars)"
+        if detail:
+            msg += f": {detail}"
+        super().__init__(msg)
+
+
+class EmbeddingServiceUnavailableError(EmbeddingServiceError):
+    """Raised when the embedding service is unreachable or timed out."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"Embedding service unavailable: {reason}")
+
+
+class LLMExtractionServiceError(Exception):
+    """Base class for LLM extraction service failures."""
+
+
+class LLMExtractionServiceUnavailableError(LLMExtractionServiceError):
+    """Raised when the LLM extraction service is unreachable or timed out."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"LLM extraction service unavailable: {reason}")
+
+
+class CrossTenantRelationshipError(Exception):
+    """Raised when a relationship would span two different tenants.
+
+    Defense in depth: under normal operation the tool-layer authorize_read
+    check already prevents a caller from loading memories from two different
+    tenants in the same session, so this error should never reach users.
+    It exists to catch bugs in higher layers (e.g., an internal service
+    path that bypasses authorize_read) before they poison the graph with
+    cross-tenant edges.
+    """
+
+    def __init__(
+        self,
+        source_id: uuid.UUID,
+        source_tenant: str,
+        target_id: uuid.UUID,
+        target_tenant: str,
+    ) -> None:
+        self.source_id = source_id
+        self.source_tenant = source_tenant
+        self.target_id = target_id
+        self.target_tenant = target_tenant
+        super().__init__(
+            f"Cross-tenant relationship rejected: source {source_id} "
+            f"(tenant={source_tenant!r}) and target {target_id} "
+            f"(tenant={target_tenant!r}) must share a tenant."
+        )
+
+
+class ThreadNotFoundError(Exception):
+    """Raised when a conversation thread does not exist or is in another tenant."""
+
+    def __init__(self, thread_id: uuid.UUID) -> None:
+        self.thread_id = thread_id
+        super().__init__(f"Conversation thread {thread_id} not found")
+
+
+class ThreadNotActiveError(Exception):
+    """Raised when an operation requires an active thread but it is archived or deleted."""
+
+    def __init__(self, thread_id: uuid.UUID, status: str) -> None:
+        self.thread_id = thread_id
+        self.status = status
+        super().__init__(f"Thread {thread_id} is {status}; operation requires active status")
+
+
+class ThreadAccessDeniedError(Exception):
+    """Raised when the caller lacks permission for a thread operation."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"Thread access denied: {reason}")

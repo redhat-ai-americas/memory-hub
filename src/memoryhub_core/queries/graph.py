@@ -5,10 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from memoryhub_core.authorization.human import Access
+from memoryhub_core.exceptions import MemoryNotFoundError
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.queries.filters import MemoryFilters, QueryValidationError, memory_conditions
 from memoryhub_core.queries.memories import relationships_touching
-from memoryhub_core.services.exceptions import MemoryNotFoundError
 
 
 async def graph_page(db: AsyncSession, access: Access, query: MemoryFilters, *, max_nodes=300, prefer="connected"):
