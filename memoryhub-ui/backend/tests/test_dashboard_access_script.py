@@ -56,7 +56,15 @@ STUB = textwrap.dedent("""\
                 state["roles"][name] = item
             elif item["kind"] == "RoleBinding":
                 state["rolebindings"][name] = item
+            elif item["kind"] == "Secret":
+                old = state["secret"] or {}
+                state["secret"] = {**item["data"], "annotations": old.get("annotations", {})}
         save(); sys.exit(0)
+    if args[0] == "create" and args[1] == "secret":
+        data = dict(a.split("=", 1)[1].split("=", 1) for a in args if a.startswith("--from-literal="))
+        print(json.dumps({"kind": "Secret", "metadata": {"name": args[3]}, "data": data})); sys.exit(0)
+    if args[0] == "label":
+        sys.exit(0)
     if args[0] == "create" and args[1] == "clusterrolebinding":
         print("kind: ClusterRoleBinding"); sys.exit(0)
     if args[0] == "delete":
@@ -76,12 +84,16 @@ STUB = textwrap.dedent("""\
         kind = args[1]
         if kind == "rolebindings":
             for name, rb in sorted(state["rolebindings"].items()):
-                subjects = "".join(f"{s['kind']}:{s['name']} " for s in rb["subjects"])
+                subjects = "".join(f"{s['kind']}:{s['name']}|" for s in rb["subjects"])
                 print(f"{rb['roleRef']['name']}\\t{name}\\t{subjects}")
             sys.exit(0)
         name = args[2]
         if kind == "rolebinding":
             sys.exit(0 if name in state["rolebindings"] else 1)
+        if kind == "group":
+            for member in state.get("groups", {}).get(name, []):
+                print(member)
+            sys.exit(0)
         if kind == "role":
             if name not in state["roles"]:
                 sys.exit(1)
@@ -254,3 +266,24 @@ def test_every_call_uses_the_explicit_context(oc, tmp_path):
     calls = [json.loads(line) for line in (tmp_path / "state.json.log").read_text().splitlines()]
     assert calls and all(call[:2] == ["--context", "ctx"] for call in calls)
 
+
+
+def test_export_lists_snapshots_bindings_for_a_rollback(oc):
+    oc("grant", "--admin", "--person", "alice")
+    oc("grant", "--user", "--group", "Data Science")
+    oc("grant", "--user", "--person", "alice")
+    _, state = oc("list")
+    state["groups"] = {"Data Science": ["bob", "b64:a3ViZTphZG1pbg==", "bad name"]}
+    done, state = oc("export-lists", state=state)
+    assert done.returncode == 0, done.stderr
+    assert state["secret"]["MEMORYHUB_UI_ADMIN_USERS"] == "alice"
+    assert state["secret"]["MEMORYHUB_UI_ALLOWED_USERS"] == "bob,kube:admin"
+    assert state["secret"]["annotations"]["memoryhub.io/human-access-source"] == "rbac-export"
+    assert "snapshot" in done.stdout and "skipping 'bad name'" in done.stdout
+
+
+def test_export_lists_refuses_to_lock_out_every_admin(oc):
+    oc("grant", "--user", "--person", "bob")
+    done, state = oc("export-lists")
+    assert done.returncode != 0 and "no Admin" in done.stderr
+    assert state.get("secret") is None

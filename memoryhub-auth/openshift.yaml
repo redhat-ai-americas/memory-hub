@@ -183,7 +183,7 @@ spec:
         # on memoryhub.io/dashboard in AUTH_ENTITLEMENT_NAMESPACE), checked at
         # sign-in, at every refresh and for agents owned by a person.
         - name: AUTH_ENTITLEMENT_MODE
-          value: "openshift-rbac"
+          value: "__ENTITLEMENT_MODE__"
         - name: AUTH_ENTITLEMENT_NAMESPACE
           value: "__ENTITLEMENT_NAMESPACE__"
         # Legacy single-group check, used only with AUTH_ENTITLEMENT_MODE=off.
@@ -261,7 +261,7 @@ spec:
         - name: AUTH_OPENSHIFT_CA_BUNDLE
           value: "/etc/pki/combined-ca/ca-bundle.crt"
         - name: AUTH_ENTITLEMENT_MODE
-          value: "openshift-rbac"
+          value: "__ENTITLEMENT_MODE__"
         - name: AUTH_ENTITLEMENT_NAMESPACE
           value: "__ENTITLEMENT_NAMESPACE__"
         - name: AUTH_OPENSHIFT_ALLOWED_GROUP

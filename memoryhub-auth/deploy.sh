@@ -8,6 +8,14 @@ set -euo pipefail
 
 PROJECT="${1:-memoryhub-auth}"
 CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null)}"
+# One switch for the whole chain (docs/ui/human-access.md, "Rollback"):
+# openshift-rbac -> AUTH_ENTITLEMENT_MODE=openshift-rbac; lists -> off.
+UI_NAMESPACE="${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}"
+case "${MEMORYHUB_UI_ROLE_SOURCE:-openshift-rbac}" in
+    openshift-rbac) ENTITLEMENT_MODE="openshift-rbac" ;;
+    lists) ENTITLEMENT_MODE="off" ;;
+    *) echo "Error: MEMORYHUB_UI_ROLE_SOURCE must be openshift-rbac or lists"; exit 1 ;;
+esac
 
 # Manifest is rewritten through sed to embed cluster-specific URLs.
 # The image reference stays as the short imagestream tag (auth-server:latest)
@@ -19,9 +27,20 @@ apply_manifest() {
     # MemoryHub (docs/auth/human-role-resolution.md).
     sed "s|__AUTH_ISSUER__|${AUTH_ISSUER_URL}|g; \
          s|__OAUTH_AUTHORIZE_URL__|${OAUTH_AUTHORIZE_URL}|g; \
-         s|__ENTITLEMENT_NAMESPACE__|${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}|g" openshift.yaml | \
+         s|__ENTITLEMENT_NAMESPACE__|${UI_NAMESPACE}|g; \
+         s|__ENTITLEMENT_MODE__|${ENTITLEMENT_MODE}|g" openshift.yaml | \
         oc apply --context "$CONTEXT" -f - -n "$PROJECT"
 }
+
+# RBAC must exist before the checks are switched on: without the dashboard
+# Roles nobody would be entitled, and every sign-in would be refused.
+if [ "$ENTITLEMENT_MODE" = "openshift-rbac" ] && \
+   ! oc get role memoryhub-dashboard-user -n "$UI_NAMESPACE" --context "$CONTEXT" &>/dev/null; then
+    echo "Error: dashboard Roles are missing in $UI_NAMESPACE; entitlement checks would refuse everyone."
+    echo "  Run: memoryhub-ui/deploy/dashboard-access.sh --context $CONTEXT --namespace $UI_NAMESPACE bootstrap"
+    echo "  (scripts/deploy-full.sh does this before deploying auth)"
+    exit 1
+fi
 
 echo "========================================="
 echo "MemoryHub Auth — Deployment to OpenShift"

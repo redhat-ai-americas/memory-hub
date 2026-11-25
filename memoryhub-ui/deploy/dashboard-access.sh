@@ -24,6 +24,9 @@
 #                 expanded list of effective users)
 #   migrate       turn the transitional username lists (#667 Secret) into
 #                 RoleBindings; the Secret is kept and marked as migrated
+#   export-lists  write the current assignments into the lists Secret, for a
+#                 rollback to MEMORYHUB_UI_ROLE_SOURCE=lists (groups are
+#                 expanded to their current members: a snapshot)
 #
 # Environment:
 #   MEMORYHUB_UI_ADMIN_GROUPS, MEMORYHUB_UI_USER_GROUPS
@@ -156,9 +159,9 @@ revoke() {
 }
 
 bindings() {
-    # bindings [ROLE]: "role<TAB>binding<TAB>Kind:name ..." for our Roles
+    # bindings [ROLE]: "role<TAB>binding<TAB>Kind:name|Kind:name|" for our Roles
     oc_ get rolebindings -n "$NAMESPACE" -o \
-        jsonpath='{range .items[*]}{.roleRef.name}{"\t"}{.metadata.name}{"\t"}{range .subjects[*]}{.kind}:{.name}{" "}{end}{"\n"}{end}' \
+        jsonpath='{range .items[*]}{.roleRef.name}{"\t"}{.metadata.name}{"\t"}{range .subjects[*]}{.kind}:{.name}{"|"}{end}{"\n"}{end}' \
         | awk -F'\t' -v only="${1:-}" -v a="$ADMIN_ROLE" -v u="$USER_ROLE" \
             '($1 == a || $1 == u) && (only == "" || $1 == only)'
 }
@@ -251,6 +254,76 @@ bootstrap() {
     echo "  Dashboard access: bootstrapped by $ACTOR ($source)."
 }
 
+csv_add() {
+    # csv_add LIST ITEM -> LIST with ITEM appended once
+    case ",$1," in *",$2,"*) printf '%s' "$1" ;; *) printf '%s' "${1:+$1,}$2" ;; esac
+}
+
+members_of() {
+    # One username per line; OpenShift stores names containing ':' as b64:...
+    local m
+    oc_ get group "$1" -o jsonpath='{range .users[*]}{@}{"\n"}{end}' 2>/dev/null | while IFS= read -r m; do
+        case "$m" in
+            b64:*) printf '%s' "${m#b64:}" | base64 --decode 2>/dev/null; echo ;;
+            "") ;;
+            *) echo "$m" ;;
+        esac
+    done
+}
+
+export_lists() {
+    # Snapshot the RBAC assignments into the transitional lists (rollback).
+    local admins="" users="" role subjects subj name person target people
+    while IFS="$(printf '\t')" read -r role _rb subjects; do
+        [ -n "$role" ] || continue
+        while [ -n "$subjects" ]; do
+            subj="${subjects%%|*}"
+            case "$subjects" in *"|"*) subjects="${subjects#*|}" ;; *) subjects="" ;; esac
+            [ -n "$subj" ] || continue
+            name="${subj#*:}"
+            case "$subj" in
+                User:*) people="$name" ;;
+                Group:*)
+                    people="$(members_of "$name" | tr '\n' ',')"
+                    echo "  NOTE: group '$name' expanded to its current members (a snapshot)."
+                    ;;
+                *) continue ;;
+            esac
+            local rest="$people"
+            while [ -n "$rest" ]; do
+                person="${rest%%,*}"; [ "$rest" = "$person" ] && rest="" || rest="${rest#*,}"
+                [ -n "$person" ] || continue
+                if ! printf '%s' "$person" | grep -Eq "$NAME_RE"; then
+                    echo "  WARNING: skipping '$person' (not valid in the lists)."; continue
+                fi
+                if [ "$role" = "$ADMIN_ROLE" ]; then admins="$(csv_add "$admins" "$person")"
+                else users="$(csv_add "$users" "$person")"; fi
+            done
+        done
+    done <<EOF
+$(bindings)
+EOF
+    # An Admin is not listed again as a User.
+    target=""
+    local rest="$users"
+    while [ -n "$rest" ]; do
+        person="${rest%%,*}"; [ "$rest" = "$person" ] && rest="" || rest="${rest#*,}"
+        case ",$admins," in *",$person,"*) ;; *) target="$(csv_add "$target" "$person")" ;; esac
+    done
+    users="$target"
+    [ -n "$admins" ] || die "no Admin in the current bindings; the lists would lock every Admin out"
+    oc_ create secret generic "$LEGACY_SECRET" -n "$NAMESPACE" \
+        --from-literal=MEMORYHUB_UI_ADMIN_USERS="$admins" \
+        --from-literal=MEMORYHUB_UI_ALLOWED_USERS="$users" \
+        --dry-run=client -o json | oc_ apply -n "$NAMESPACE" -f - >/dev/null
+    oc_ label secret "$LEGACY_SECRET" -n "$NAMESPACE" --overwrite \
+        app.kubernetes.io/part-of=memoryhub memoryhub.io/transitional=true >/dev/null
+    oc_ annotate secret "$LEGACY_SECRET" -n "$NAMESPACE" --overwrite \
+        memoryhub.io/human-access-source=rbac-export memoryhub.io/human-access-updated-by="$ACTOR" \
+        memoryhub.io/human-access-updated-at="$NOW" >/dev/null
+    echo "  Dashboard access: exported to $LEGACY_SECRET for rollback: admins=$admins users=${users:-<none>}"
+}
+
 subject_args() {
     # subject_args ARGS... -> "role kind name" or exit
     local role="" kind="" name=""
@@ -280,8 +353,10 @@ case "$COMMAND" in
     list)
         echo "Bindings to $ADMIN_ROLE and $USER_ROLE in $NAMESPACE (assignments; group members and"
         echo "cluster-wide grants such as cluster-admin are not expanded):"
-        bindings | awk -F'\t' '{ role = ($1 ~ /admin$/) ? "admin" : "user"; printf "  %-6s %-50s %s\n", role, $2, $3 }'
+        bindings | awk -F'\t' '{ role = ($1 ~ /admin$/) ? "admin" : "user"; s = $3; gsub(/\|/, " ", s);
+                                  printf "  %-6s %-50s %s\n", role, $2, s }'
         ;;
     migrate) migrate ;;
-    *) sed -n '2,38p' "$0"; [ -z "$COMMAND" ] && exit 1; die "unknown command: $COMMAND" ;;
+    export-lists) export_lists ;;
+    *) sed -n '2,41p' "$0"; [ -z "$COMMAND" ] && exit 1; die "unknown command: $COMMAND" ;;
 esac

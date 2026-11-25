@@ -724,7 +724,14 @@ prepare_ui_infra() {
     if [ "${MEMORYHUB_UI_ROLE_SOURCE:-openshift-rbac}" = "lists" ]; then
         info "Dashboard access: transitional username lists (MEMORYHUB_UI_ROLE_SOURCE=lists)"
     else
+        # Before auth: the auth service checks these Roles at every sign-in
+        # and refresh, so they and the first Admin must exist first.
         info "Dashboard access: OpenShift RBAC Roles in $UI_NAMESPACE (see docs/ui/human-access.md)"
+        if ! MEMORYHUB_UI_RBAC_CHECK="${MEMORYHUB_UI_RBAC_CHECK:-self}" bash \
+                "$REPO_ROOT/memoryhub-ui/deploy/dashboard-access.sh" \
+                --context "$CONTEXT" --namespace "$UI_NAMESPACE" bootstrap; then
+            die "Dashboard access bootstrap failed (see above)"
+        fi
     fi
 
     echo -e "  ${GREEN}UI infrastructure ready${RESET}"
