@@ -77,6 +77,7 @@ Any change that touches the OpenShift OAuth redirect chain or calls an OpenShift
 | `src/routes/openshift_callback.py` | GET /oauth/openshift/callback |
 | `src/routes/admin.py` | Client management CRUD |
 | `src/entitlements.py` | Who may use MemoryHub: dashboard RBAC check at sign-in, refresh and owned-agent tokens (#744) |
+| `src/people.py` | Is a username still the same person: OpenShift uid and the shared `human_identities` registry (#744) |
 | `src/config.py` | AuthSettings (all env vars prefixed AUTH_) |
 | `src/tokens.py` | JWT minting and refresh token creation |
 | `deploy.sh` | Full deployment script |

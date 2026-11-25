@@ -155,6 +155,12 @@ Not yet published.
   at every refresh and for every token of an agent they own. Denials refuse
   without revoking; an unreachable API answers `503`. Refresh tokens record
   their `origin` (migration 003).
+- **Session integrity (#744)**: refresh and personal-agent tokens verify the
+  person's OpenShift `uid` and the shared identity registry; identity
+  changes revoke. Refresh-token families with reuse detection (RFC 9700)
+  and an absolute session age (`AUTH_SESSION_MAX_AGE`, migration 004).
+  Non-service clients need a verified owner. Admin endpoints end a person's
+  sessions and block or re-enable them.
 
 ## memoryhub-ui
 
