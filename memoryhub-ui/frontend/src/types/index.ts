@@ -160,6 +160,24 @@ export interface UserEntry {
   last_active: string | null;
 }
 
+// --- Dashboard access (read-only, Admins) ---
+
+export interface AccessAssignment {
+  role: 'admin' | 'user';
+  kind: string;
+  name: string;
+  binding: string | null;
+  granted_by: string | null;
+  granted_at: string | null;
+}
+
+export interface AccessAssignments {
+  source: 'openshift-rbac' | 'lists';
+  namespace: string | null;
+  assignments: AccessAssignment[];
+  note: string;
+}
+
 // --- Curation Rules ---
 
 export interface CurationRule {

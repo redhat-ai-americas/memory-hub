@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.access_admin import router as access_admin_router
 from src.config import get_settings
 from src.csrf import CrossSiteRequestGuard
 from src.export_adapter import router as export_router
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(graph_router)
     app.include_router(search_router)
     app.include_router(export_router)
+    app.include_router(access_admin_router)
 
     # Serve the compiled frontend if dist/ exists (single-container deployment)
     if FRONTEND_DIST.is_dir():

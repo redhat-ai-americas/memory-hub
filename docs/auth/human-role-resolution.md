@@ -245,14 +245,15 @@ The table `human_identities` (`id` = `user_id`, `tenant_id`, `issuer`,
 - Bootstrap runs once. The Roles carry the annotation
   `memoryhub.io/bootstrapped-at`. Once it is set, removing every binding is
   treated as a deliberate revocation, and a later deploy only warns.
-- `human-access.sh migrate` turns the old lists into RoleBindings for the
+- `dashboard-access.sh migrate` turns the old lists into RoleBindings for the
   same users and marks the Secret as migrated. It does not delete the
   Secret; the operator removes it after verifying sign-in.
 
 ## Administration surface
 
-- `human-access.sh grant|revoke --admin|--user --group G|--person U`,
-  `list`, `bootstrap`, `migrate`. Every change is a RoleBinding change, so
+- `dashboard-access.sh grant|revoke --admin|--user --group G|--person U`,
+  `list`, `bootstrap`, `migrate`, `apply-roles`. `human-access.sh` stays
+  only for the `lists` rollback mode. Every change is a RoleBinding change, so
   the cluster audit log records who made it.
 - `GET /api/admin/access` (Admin only, read-only) lists the RoleBindings to
   the two Roles. It shows **assignments**, not the full list of effective

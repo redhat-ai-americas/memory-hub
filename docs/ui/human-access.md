@@ -1,12 +1,12 @@
 # Dashboard human access
 
-Status: **transitional bootstrap** (#667). Replacing the username lists with
-OpenShift RBAC grants for groups and individual users is tracked in
-[#744](https://github.com/redhat-ai-americas/memory-hub/issues/744), including
-the OIDC/group-to-role follow-up for non-OpenShift deployments. Identity and
-role resolution produce a verified `Principal`; the shared `Access` policy
-enforces permissions. The future resolver replaces the list lookup without
-changing those policy interfaces or requiring UI refactoring.
+Status: **OpenShift RBAC** (#744). The design, trust boundaries and
+revocation timings are in
+[`docs/auth/human-role-resolution.md`](../auth/human-role-resolution.md).
+The username lists from #667 remain only as a rollback mode
+(`MEMORYHUB_UI_ROLE_SOURCE=lists`, below). Identity and role resolution
+produce a verified `Principal`; the shared `Access` policy enforces
+permissions. Neither changed.
 
 The MemoryHub dashboard has two human roles:
 
@@ -15,77 +15,106 @@ The MemoryHub dashboard has two human roles:
 | User  | Their own personal memories, plus the shared memories their projects and teams can read. |
 | Admin | Tenant-wide metadata for project, campaign, role and organizational memories; content and actions require the configured scope and object grants. Manages users, clients and agents. **No personal (user-scope) data of anyone**, not even IDs, owners, timestamps or counts. Enterprise memories are unavailable to Admins in this release. See "Admin privacy" below. |
 
+The dashboard Admin role is not a technical scope: it never grants
+`memory:admin` and never widens the scopes of clients or agents.
+
 ## Where roles come from
 
-The dashboard reads two comma-separated lists of OpenShift usernames:
+Two namespaced Roles in the dashboard namespace, on the virtual resource
+`memoryhub.io/dashboard`:
 
-- `MEMORYHUB_UI_ADMIN_USERS`: Admins
-- `MEMORYHUB_UI_ALLOWED_USERS`: Users
+| Role | Verbs | Dashboard role |
+|------|-------|----------------|
+| `memoryhub-dashboard-user` | `use` | User |
+| `memoryhub-dashboard-admin` | `use`, `admin` | Admin |
 
-On OpenShift both lists live in the Secret `memoryhub-ui-human-access` in
-the UI namespace. The Deployment mounts it as required, so a pod never starts
-without it. A person on neither list gets `403`. If both lists are empty the
-API answers `503` with the fix, and the BFF logs an error at startup. It does
-not quietly refuse everyone.
+`admin` allowed → Admin; else `use` allowed → User; else `403`. Anyone with
+wildcard RBAC, such as `cluster-admin`, passes `admin` and is therefore an
+Admin; see the trust boundary in the design.
 
-The username is the one the OpenShift OAuth proxy sends in
-`X-Forwarded-User`. The BFF accepts that header only from the proxy on
-loopback. It refuses a request that has no such header or more than one.
+How a request is checked:
 
-## Provisioning
+1. `oauth-proxy` signs the person in (scopes `user:info user:check-access`),
+   refuses anyone without `use` (`--openshift-sar`), and forwards
+   `X-Forwarded-User` and the person's token (`X-Forwarded-Access-Token`)
+   on loopback.
+2. The BFF accepts identity headers only from loopback, exactly one of each,
+   reads `users/~` with the token and requires the name to match.
+3. It checks `admin`, then `use` with a `SelfSubjectAccessReview`
+   (`MEMORYHUB_UI_RBAC_CHECK=self`) or, if the cluster needs it, a
+   `TokenReview` plus `SubjectAccessReview` by its service account
+   (`delegated`, which also binds `system:auth-delegator`).
+4. Decisions are cached 30 s per token (denials 5 s). If the API cannot be
+   reached the answer is `503`, never an old allow. Invalid identity is
+   `401`, no entitlement `403`.
 
-`memoryhub-ui/deploy/deploy.sh` always runs `memoryhub-ui/deploy/human-access.sh`.
-`scripts/deploy-full.sh` calls `deploy.sh`. `human-access.sh` can also be run
-on its own:
+The token is never logged, returned to the browser, or sent to MCP or the
+auth service.
+
+## Granting and revoking access
+
+Bind groups wherever possible; MemoryHub manages its own RoleBindings and
+never changes group membership.
 
 ```bash
-# Set the lists (replaces both)
-MEMORYHUB_UI_ADMIN_USERS=alice,bob MEMORYHUB_UI_ALLOWED_USERS=carol,dan \
-  memoryhub-ui/deploy/human-access.sh --context <ctx> --namespace memoryhub-ui
-
-# Restart to pick up the change (env vars are read at start)
-oc rollout restart deployment/memoryhub-ui -n memoryhub-ui
+S=memoryhub-ui/deploy/dashboard-access.sh
+$S --context mcp-rhoai --namespace memoryhub-ui grant  --user  --group data-science
+$S --context mcp-rhoai --namespace memoryhub-ui grant  --admin --person alice
+$S --context mcp-rhoai --namespace memoryhub-ui revoke --admin --person alice
+$S --context mcp-rhoai --namespace memoryhub-ui list
 ```
 
-What the script does:
+A change takes effect within 30 s, without a restart. Plain `oc` works too
+(`oc adm policy add-role-to-group memoryhub-dashboard-user data-science
+--role-namespace=memoryhub-ui -n memoryhub-ui`); `list` shows those
+bindings as well. Admins see the same assignments, read-only, under
+*Users & Agents → Dashboard access* (`GET /api/admin/access`). It lists
+assignments, not effective users: group members and cluster-wide grants
+are not expanded.
 
-| Input | Existing Secret | Result |
-|-------|-----------------|--------|
-| either variable set | any | Secret written with exactly these lists |
-| none | yes | Secret left as it is; counts printed, with a warning if there is no Admin |
-| none | no | the deployer (`oc whoami`) becomes the first Admin; the script fails if the deployer is a service account |
+How a new person gets access: they exist in the cluster's identity
+provider (OpenShift creates their `User` at first sign-in), and they are in
+a bound group or are bound directly. On their first successful sign-in the
+dashboard records a profile (`human_identities`) keyed by the OpenShift
+user's `uid`. The profile grants nothing.
 
-The script runs on the macOS system shell (Bash 3.2). Its scenarios are
-tested against a stub `oc` in
-`memoryhub-ui/backend/tests/test_human_access_script.py`. On a Mac, run them
-with `HUMAN_ACCESS_BASH=/bin/bash`.
+## Provisioning and bootstrap
 
-Names are trimmed, de-duplicated and checked against
-`^[A-Za-z0-9._@:+-]{1,255}$`. The script refuses to write two empty lists.
+`memoryhub-ui/deploy/deploy.sh` runs `dashboard-access.sh bootstrap`,
+which applies the Roles, binds `MEMORYHUB_UI_ADMIN_GROUPS` and
+`MEMORYHUB_UI_USER_GROUPS` (comma-separated), and makes the first Admin
+**once**, from the first of:
+
+1. `MEMORYHUB_UI_INITIAL_ADMIN_GROUP` or `MEMORYHUB_UI_INITIAL_ADMIN_USER`;
+2. the old lists, if `memoryhub-ui-human-access` exists and was not
+   migrated (each listed name becomes a binding; the Secret is annotated
+   `memoryhub.io/migrated-to-rbac-at` and kept; delete it after verifying
+   sign-in);
+3. `MEMORYHUB_UI_ADMIN_GROUPS`, if set;
+4. the deployer (`oc whoami`), only from a terminal or with
+   `MEMORYHUB_UI_BOOTSTRAP_DEPLOYER=1`, never a service account.
+
+CI and GitOps must use 1 or 3. Bootstrap records itself on the admin Role
+(`memoryhub.io/bootstrapped-at`, `-by`, `bootstrap-source`). After that,
+removing every binding is treated as a deliberate revocation: a later
+deploy only warns.
 
 ## Audit trail
 
-Each write sets these annotations on the Secret:
+Every grant is a RoleBinding labelled `memoryhub.io/dashboard-access` and
+annotated `memoryhub.io/granted-by` / `granted-at`. The cluster API audit
+log records every change to bindings and Roles, including changes made with
+plain `oc`. The BFF logs each fresh decision (`username -> role`) and each
+refused identity, never a token.
 
-- `memoryhub.io/human-access-updated-by`: `oc whoami` of the person who ran it
-- `memoryhub.io/human-access-updated-at`: UTC timestamp
-- `memoryhub.io/human-access-source`: `deploy-input` or `bootstrap-deployer`
+## Rollback: transitional username lists
 
-The Secret also carries the label `memoryhub.io/transitional=true`. The
-cluster's API audit log records every change to the Secret, including edits
-made without the script.
-
-To see the current state:
-
-```bash
-oc get secret memoryhub-ui-human-access -n memoryhub-ui \
-  -o jsonpath='{.metadata.annotations}{"\n"}'
-oc get secret memoryhub-ui-human-access -n memoryhub-ui \
-  -o go-template='{{range $k,$v := .data}}{{$k}}={{$v|base64decode}}{{"\n"}}{{end}}'
-```
-
-At startup the BFF logs the identity mode and the size of each list. It
-does not log the names. Each refused sign-in is logged with its username.
+`MEMORYHUB_UI_ROLE_SOURCE=lists memoryhub-ui/deploy/deploy.sh` switches back
+to the #667 lists: `human-access.sh` provisions the Secret
+`memoryhub-ui-human-access` (`MEMORYHUB_UI_ADMIN_USERS`,
+`MEMORYHUB_UI_ALLOWED_USERS`), the proxy's access check is dropped, and the
+BFF reads the lists at start. Changes need a restart. One source never falls
+back to the other automatically.
 
 ## Local development
 
@@ -192,8 +221,9 @@ dashboard except their owner.
 ## Not here
 
 - No central provisioning (#671). Lists are per deployment.
-- Group/user role provisioning via OpenShift RBAC and the OIDC role-source
-  follow-up: #744. For now, edit the lists and restart.
+- Corporate OIDC (for example Red Hat build of Keycloak) as an identity and
+  role source: a second adapter pair behind the same interfaces (#744
+  follow-up).
 - Enterprise content access, approval and moderation for Admins are not
   implemented. Enterprise metadata is also excluded from their dashboard.
   Ordinary Users retain the existing read access to enterprise policies.

@@ -13,13 +13,15 @@ import type { UserEntry } from '@/types';
 import { fetchUsers } from '@/api/client';
 import { useSession } from '@/context/SessionContext';
 import { formatRelativeTime } from '@/utils/time';
+import DashboardAccess from '@/components/DashboardAccess';
 
 interface UsersAgentsProps {
   onNavigateToGraph?: (ownerId: string) => void;
 }
 
 const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
-  const showIndividualActivity = useSession().capabilities.individual_activity;
+  const session = useSession();
+  const showIndividualActivity = session.capabilities.individual_activity;
   const navigateToGraph = showIndividualActivity ? onNavigateToGraph : undefined;
   const [users, setUsers] = useState<UserEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,6 +126,7 @@ const UsersAgents: React.FC<UsersAgentsProps> = ({ onNavigateToGraph }) => {
         </Tbody>
       </Table>
       </div>
+      {session.role === 'admin' && <DashboardAccess />}
     </div>
   );
 };

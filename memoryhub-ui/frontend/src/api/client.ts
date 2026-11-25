@@ -19,6 +19,7 @@ import type {
   UpdateRulePayload,
   UserEntry,
   VersionEntry,
+  AccessAssignments,
 } from '@/types';
 
 const BASE = '/api';
@@ -121,6 +122,10 @@ export async function rotateApiKey(clientId: string): Promise<ApiKeyRotatedRespo
 
 export async function fetchUsers(): Promise<UserEntry[]> {
   return apiFetch<UserEntry[]>('/users');
+}
+
+export async function fetchAccessAssignments(): Promise<AccessAssignments> {
+  return apiFetch<AccessAssignments>('/admin/access');
 }
 
 // --- Curation Rules ---
