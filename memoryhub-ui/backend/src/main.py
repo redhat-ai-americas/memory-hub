@@ -33,9 +33,14 @@ def create_app() -> FastAPI:
     settings = get_settings()
     # Say at startup how people are identified, so a misconfiguration shows in
     # the pod log rather than as every request being refused.
-    admins, users = settings.human_access()
-    logger.info("Dashboard identity: mode=%s, %d admin(s), %d user(s), tenant=%s",
-                settings.ui_auth_mode, len(admins), len(users), settings.ui_tenant_id)
+    if settings.ui_role_source == "openshift-rbac":
+        logger.info("Dashboard identity: mode=%s, roles=openshift-rbac (%s check, namespace %s), tenant=%s",
+                    settings.ui_auth_mode, settings.ui_rbac_check, settings.rbac_namespace(),
+                    settings.ui_tenant_id)
+    else:
+        admins, users = settings.human_access()
+        logger.info("Dashboard identity: mode=%s, roles=lists, %d admin(s), %d user(s), tenant=%s",
+                    settings.ui_auth_mode, len(admins), len(users), settings.ui_tenant_id)
     if settings.ui_auth_mode == "local":
         logger.warning("LOCAL identity mode: every request acts as %r; never use this in a cluster",
                        settings.ui_local_user)

@@ -19,12 +19,16 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import logging
+import time
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from fastapi import HTTPException, Request
 
 from src.config import Settings
+from src.kube import KubeClient, KubeUnauthenticated, KubeUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +60,9 @@ class Authentication:
 
     identity: VerifiedIdentity
     credential: str | None = field(default=None, repr=False, compare=False)
+    # True when the identity was just verified against its source rather
+    # than taken from a cached decision; used to refresh the profile.
+    fresh: bool = field(default=False, compare=False)
 
     @property
     def credential_digest(self) -> str | None:
@@ -148,12 +155,177 @@ class ListEntitlements:
         raise forbidden()
 
 
+def unavailable() -> HTTPException:
+    return HTTPException(status_code=503, detail="Access cannot be verified right now; try again shortly")
+
+
+@dataclass
+class _Decision:
+    identity: VerifiedIdentity
+    role: str | None  # None: verified identity, no entitlement
+    expires_at: float
+
+
+@dataclass
+class _Review:
+    uid: str | None
+    groups: list[str]
+
+
+class OpenShiftRbac:
+    """Identity from the person's OpenShift token, role from OpenShift RBAC.
+
+    Identity: the proxy forwards the token (``--pass-access-token``); the
+    BFF reads ``users/~`` with it (``self``) or reviews it with its service
+    account (``delegated``) and requires the name to match
+    ``X-Forwarded-User``.
+
+    Entitlement: ``admin`` allowed on ``memoryhub.io/dashboard`` in the
+    dashboard namespace → Admin; else ``use`` allowed → User; else 403.
+
+    Decisions are cached per token digest, tenant and namespace. An expired
+    decision is never extended when the API cannot be reached.
+    """
+
+    MAX_ENTRIES = 1024
+
+    def __init__(self, settings: Settings, kube: KubeClient | None = None,
+                 clock: Callable[[], float] = time.monotonic):
+        self.mode = settings.ui_rbac_check
+        self.namespace = settings.rbac_namespace()
+        self.tenant = settings.ui_tenant_id
+        self.issuer = settings.identity_issuer()
+        self.allow_ttl = settings.ui_rbac_cache_ttl
+        self.deny_ttl = settings.ui_rbac_deny_ttl
+        self.kube = kube or KubeClient(settings.kube_api_url, settings.kube_ca_path, settings.kube_token_path)
+        self.clock = clock
+        self._decisions: OrderedDict[tuple[str, str, str], _Decision] = OrderedDict()
+        self._reviews: dict[str, _Review] = {}
+
+    def _key(self, digest: str) -> tuple[str, str, str]:
+        return (digest, self.tenant, self.namespace)
+
+    def _cached(self, digest: str) -> _Decision | None:
+        key = self._key(digest)
+        decision = self._decisions.get(key)
+        if decision is None:
+            return None
+        if decision.expires_at <= self.clock():
+            del self._decisions[key]
+            return None
+        self._decisions.move_to_end(key)
+        return decision
+
+    def _remember(self, digest: str, decision: _Decision) -> None:
+        key = self._key(digest)
+        self._decisions[key] = decision
+        self._decisions.move_to_end(key)
+        while len(self._decisions) > self.MAX_ENTRIES:
+            self._decisions.popitem(last=False)
+
+    async def authenticate(self, request: Request) -> Authentication:
+        require_loopback_peer(request)
+        username = single_header(request, "x-forwarded-user")
+        token = single_header(request, "x-forwarded-access-token", max_len=8192)
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        cached = self._cached(digest)
+        if cached is not None:
+            if cached.identity.username != username:
+                logger.warning("Dashboard identity mismatch: proxy user does not own the forwarded token")
+                raise unauthenticated()
+            return Authentication(cached.identity, credential=token)
+        identity = await self._verify(token, digest, username)
+        return Authentication(identity, credential=token, fresh=True)
+
+    async def _verify(self, token: str, digest: str, username: str) -> VerifiedIdentity:
+        try:
+            if self.mode == "delegated":
+                user = await self.kube.token_review(token)
+                name, uid = user.get("username") or "", user.get("uid")
+                self._reviews[digest] = _Review(uid=uid, groups=list(user.get("groups") or []))
+                display = None
+            else:
+                user = await self.kube.current_user(token)
+                meta = user.get("metadata") or {}
+                name, uid = meta.get("name") or "", meta.get("uid")
+                display = user.get("fullName") or None
+        except KubeUnauthenticated:
+            raise unauthenticated() from None
+        except KubeUnavailable:
+            raise unavailable() from None
+        if not name or name != username:
+            logger.warning("Dashboard identity mismatch: proxy user does not own the forwarded token")
+            raise unauthenticated()
+        if not uid:
+            logger.error("OpenShift returned no uid for %r; refusing an identity without a durable key", name)
+            raise unavailable()
+        return VerifiedIdentity(username=name, issuer=self.issuer, subject=uid, display_name=display)
+
+    async def _allowed(self, authn: Authentication, verb: str) -> bool:
+        if self.mode == "delegated":
+            review = self._reviews.get(authn.credential_digest or "")
+            if review is None:
+                # The cached identity expired between authenticate and resolve.
+                user = await self.kube.token_review(authn.credential or "")
+                if user.get("username") != authn.identity.username:
+                    raise KubeUnauthenticated()
+                review = _Review(uid=user.get("uid"), groups=list(user.get("groups") or []))
+            return await self.kube.access_review(authn.identity.username, review.uid, review.groups,
+                                                 self.namespace, verb)
+        return await self.kube.self_access(authn.credential or "", self.namespace, verb)
+
+    async def resolve(self, authn: Authentication) -> str:
+        digest = authn.credential_digest
+        if digest is None:
+            raise unauthenticated()
+        cached = self._cached(digest)
+        if cached is None or authn.fresh:
+            try:
+                if await self._allowed(authn, "admin"):
+                    role = "admin"
+                elif await self._allowed(authn, "use"):
+                    role = "user"
+                else:
+                    role = None
+            except KubeUnauthenticated:
+                raise unauthenticated() from None
+            except KubeUnavailable:
+                raise unavailable() from None
+            finally:
+                self._reviews.pop(digest, None)
+            ttl = self.allow_ttl if role else self.deny_ttl
+            cached = _Decision(authn.identity, role, self.clock() + ttl)
+            self._remember(digest, cached)
+            logger.info("Dashboard entitlement: %r -> %s", authn.identity.username, role or "denied")
+        if cached.role is None:
+            raise forbidden()
+        return cached.role
+
+
+_RBAC_ADAPTERS: dict[tuple, OpenShiftRbac] = {}
+
+
+def rbac_adapter_for(settings: Settings) -> OpenShiftRbac:
+    """One adapter per configuration, so its decision cache outlives a request."""
+    key = (settings.ui_rbac_check, settings.rbac_namespace(), settings.ui_tenant_id, settings.identity_issuer(),
+           settings.ui_rbac_cache_ttl, settings.ui_rbac_deny_ttl, settings.kube_api_url,
+           settings.kube_ca_path, settings.kube_token_path)
+    adapter = _RBAC_ADAPTERS.get(key)
+    if adapter is None:
+        adapter = _RBAC_ADAPTERS[key] = OpenShiftRbac(settings)
+    return adapter
+
+
 def identity_provider_for(settings: Settings) -> IdentityProvider:
+    if settings.ui_role_source == "openshift-rbac":
+        return rbac_adapter_for(settings)
     if settings.ui_auth_mode == "local":
         return LocalIdentity(settings.ui_local_user)
     return ProxyHeaderIdentity()
 
 
 def entitlement_resolver_for(settings: Settings) -> EntitlementResolver:
+    if settings.ui_role_source == "openshift-rbac":
+        return rbac_adapter_for(settings)
     admins, users = settings.human_access()
     return ListEntitlements(admins, users)

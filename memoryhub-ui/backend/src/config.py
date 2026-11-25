@@ -66,6 +66,27 @@ class Settings(BaseSettings):
     #   inside a Kubernetes pod.
     ui_auth_mode: Literal["openshift", "local"] = "openshift"
     ui_local_user: str = ""
+    # Where a person's dashboard role comes from (docs/auth/human-role-resolution.md):
+    # - "lists" (transitional, #667): the two username lists above.
+    # - "openshift-rbac" (#744): OpenShift RBAC on memoryhub.io/dashboard in
+    #   the dashboard namespace; verb "admin" -> Admin, "use" -> User.
+    # Explicit configuration only: one source never falls back to the other.
+    ui_role_source: Literal["lists", "openshift-rbac"] = "lists"
+    # How RBAC is checked: "self" = SelfSubjectAccessReview with the person's
+    # token (no extra privileges); "delegated" = TokenReview + SubjectAccessReview
+    # by the dashboard service account (needs system:auth-delegator).
+    ui_rbac_check: Literal["self", "delegated"] = "self"
+    # Namespace holding the dashboard Roles; defaults to the pod's namespace.
+    ui_rbac_namespace: str = ""
+    ui_rbac_cache_ttl: float = 30.0
+    ui_rbac_deny_ttl: float = 5.0
+    # Issuer recorded for verified OpenShift identities; defaults to
+    # "openshift:<kube_api_url>". Set it per cluster for a durable key.
+    ui_identity_issuer: str = ""
+    kube_api_url: str = "https://kubernetes.default.svc"
+    kube_ca_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    kube_token_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    kube_namespace_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
     ui_admin_moderation_scopes: str = "project,campaign,role,organizational"
     # Explicit grant for human Admin writes outside a project-admin membership.
     # An Admin role alone is not a write capability.
@@ -86,11 +107,27 @@ class Settings(BaseSettings):
                 return "Local identity mode is refused inside a cluster; use the OAuth proxy"
             if not self.ui_local_user.strip():
                 return "Local identity mode needs MEMORYHUB_UI_LOCAL_USER"
+        if self.ui_role_source == "openshift-rbac":
+            if self.ui_auth_mode == "local":
+                return "OpenShift RBAC roles need the OAuth proxy; local identity mode uses the lists"
+            return None
         admins, users = self.human_access()
         if not admins and not users:
             return ("No dashboard users are configured: set MEMORYHUB_UI_ADMIN_USERS "
                     "(see docs/ui/human-access.md)")
         return None
+
+    def rbac_namespace(self) -> str:
+        if self.ui_rbac_namespace.strip():
+            return self.ui_rbac_namespace.strip()
+        try:
+            with open(self.kube_namespace_path) as handle:
+                return handle.read().strip() or "memoryhub-ui"
+        except OSError:
+            return "memoryhub-ui"
+
+    def identity_issuer(self) -> str:
+        return self.ui_identity_issuer.strip() or f"openshift:{self.kube_api_url.rstrip('/')}"
 
     @property
     def database_url(self) -> str:

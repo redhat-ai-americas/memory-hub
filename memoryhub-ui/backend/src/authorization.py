@@ -18,11 +18,13 @@ from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.role import RoleAssignment
 from sqlalchemy import Column, Index, String, and_, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import declarative_base
 
 from src.config import Settings, get_settings
 from src.database import get_db
+from src.human_identity import record_profile
 from src.identity import entitlement_resolver_for, identity_provider_for
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,11 @@ class Principal:
     tenant_id: str
 
 
-async def get_principal(request: Request, settings: Annotated[Settings, Depends(get_settings)]) -> Principal:
+async def get_principal(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Principal:
     """Identity first, then entitlement; data access is decided later by ``Access``."""
     problem = settings.identity_problem()
     if problem:
@@ -60,6 +66,13 @@ async def get_principal(request: Request, settings: Annotated[Settings, Depends(
     role = await entitlement_resolver_for(settings).resolve(authn)
     if role not in ("user", "admin"):
         raise HTTPException(status_code=403, detail="Unsupported dashboard role")
+    if settings.ui_role_source == "openshift-rbac" and authn.fresh:
+        # Just-in-time profile of a person who has already been admitted.
+        try:
+            await record_profile(db, settings.ui_tenant_id, authn.identity)
+        except SQLAlchemyError:
+            logger.exception("Could not record the dashboard profile of %r", authn.identity.username)
+            raise HTTPException(status_code=503, detail="Profile store unavailable") from None
     return Principal(username=authn.identity.username, role=role, tenant_id=settings.ui_tenant_id)
 
 
