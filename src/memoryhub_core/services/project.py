@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.models.project import Project, ProjectMembership
+from memoryhub_core.queries.projects import project_by_name
 from memoryhub_core.services.exceptions import (
     LastAdminError,
     MembershipNotFoundError,
@@ -91,9 +92,7 @@ async def get_project(
     project_name: str,
 ) -> Project | None:
     """Fetch a project by name, or None if it doesn't exist."""
-    stmt = select(Project).where(Project.name == project_name)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return await project_by_name(session, project_name)
 
 
 async def ensure_project_membership(

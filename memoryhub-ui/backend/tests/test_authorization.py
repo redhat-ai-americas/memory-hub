@@ -393,7 +393,7 @@ async def test_delete_checks_entire_closure_before_bulk_update():
     root = node()
     child = node(owner="bob", parent_id=root.id)
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[result(scalar=root), result(items=[child]), result(items=[])])
+    db.execute = AsyncMock(side_effect=[result(scalar=root), result(items=[child]), result(items=[child])])
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_access] = lambda: access()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -410,15 +410,15 @@ async def test_delete_walks_nested_branches_before_single_update():
     grandchild = node(parent_id=child.id)
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[
-        result(scalar=root), result(items=[child]), result(items=[grandchild]),
-        result(items=[]), result(),
+        result(scalar=root), result(items=[child, grandchild]),
+        result(items=[child, grandchild]), result(),
     ])
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_access] = lambda: access()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.delete(f"/api/memory/{root.id}")
     assert response.status_code == 204
-    assert db.execute.await_count == 5
+    assert db.execute.await_count == 4
     update_params = db.execute.await_args.args[0].compile().params
     selected_ids = next(value for value in update_params.values() if isinstance(value, list))
     assert set(selected_ids) == {root.id, child.id, grandchild.id}

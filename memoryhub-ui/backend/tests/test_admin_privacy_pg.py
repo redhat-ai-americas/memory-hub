@@ -14,6 +14,9 @@ localhost:15433) and skips when it is not reachable:
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import json
 import os
 import subprocess
 import sys
@@ -497,3 +500,40 @@ async def test_parent_versioning_skips_retired_and_deleted_branches(env):
     browse = await http.get("/api/memories/browse", params={"tab": "all"})
     old = next(item for item in browse.json()["items"] if item["id"] == str(parent.id))
     assert old["branch_count"] == 0
+
+
+@pytest.mark.parametrize("role", ["user", "admin"])
+@pytest.mark.parametrize("filters, selected", [
+    ({"domain": "robotics"}, {"project", "personal", "org"}),
+    ({"min_weight": "0.8"}, {"project", "personal"}),
+    ({"q": "gripper", "mode": "text"}, {"project", "personal"}),
+])
+async def test_browse_graph_and_export_share_authorized_selection(env, role, filters, selected):
+    rows = {
+        "project": await env["seed"]("Gripper calibration", actor="alice", weight=0.9),
+        "personal": await env["seed"]("Private gripper preference", scope="user", owner="alice", weight=0.8),
+        "org": await env["seed"]("Deployment policy", scope="organizational", owner="admin", weight=0.7),
+        "hidden": await env["seed"]("Dana private gripper preference", scope="user", owner="dana", weight=0.95),
+    }
+    async with env["sessions"]() as db:
+        for row in rows.values():
+            node = await db.get(MemoryNode, row.id)
+            node.domains = ["robotics"]
+        await db.commit()
+    env["act_as"]("alice" if role == "user" else "admin", role)
+    expected = {str(rows[key].id) for key in selected if key != "personal" or role == "user"}
+    http = env["http"]
+    params = {"tab": "current", **filters}
+    browse = await http.get("/api/memories/browse", params=params)
+    graph = await http.get("/api/graph/all", params=params)
+    exported = await http.get("/api/memories/export", params=params)
+    for response in (browse, graph, exported):
+        assert response.status_code == 200, response.text
+        assert str(rows["hidden"].id) not in response.text
+    assert {item["id"] for item in browse.json()["items"]} == expected
+    assert browse.json()["total"] == len(expected)
+    assert {item["id"] for item in graph.json()["nodes"]} == expected
+    assert graph.json()["total"] == len(expected)
+    export_rows = (list(csv.DictReader(io.StringIO(exported.text))) if role == "admin"
+                   else [json.loads(line) for line in exported.text.splitlines()])
+    assert {item["id"] for item in export_rows} == expected

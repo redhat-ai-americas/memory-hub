@@ -131,6 +131,11 @@ memory-hub-mcp and memoryhub-auth; not published as a standalone package.
 
 ### [Unreleased]
 
+- Centralized human memory, graph, entity, rule and identity queries and policies
+  in Core for dashboard adapters and shared services (#738). Read-only deletion
+  capabilities and mutation preflight use the same recursive closure.
+
+
 - **Fixed (#553)**: `find_related` wrote each neighbor's stub to the opposite end of the edge, so `RelationshipRead.source_stub` and `target_stub` were inverted in the returned paths. Pre-existing; only observable once #553 began returning these edges through the API.
 - **Procedural retrieval (#553)**: `find_related` requires `tenant_id` and applies it in SQL on the start node, every edge, and every neighbor. Each result hop carries direction and role. `resolve_procedure_entry` uses `metadata_.procedure.entry_step_id` when it names a live in-tenant step, and otherwise the single step with no incoming `precedes` edge.
 - **Procedural guidance (#553)**: `build_localized_subgraph`, `generate_guidance`, and `localized_guidance` turn that neighborhood into prose via the Stage-3 LLM settings (`llm_extraction_url` / `llm_extraction_model` / `llm_extraction_timeout`) and `prompts/procedural_guidance.yaml`. `localized_guidance` is what `search_memory` and `manage_graph` both call. Decisions 5a and 5b were signed off on 2026-09-21: short-circuit when `current_step_id` is set, flat ranked list when it is absent. See [planning/procedural-graph-retrieval.md](planning/procedural-graph-retrieval.md).
@@ -156,5 +161,13 @@ Dashboard UI (React frontend + FastAPI backend). Lives in
 [`memoryhub-ui/`](memoryhub-ui/). Not yet published.
 
 ### [Unreleased]
+
+- Connected the redesigned dashboard to verified User/Admin capabilities,
+  preserving personal-data and individual-activity privacy (#710, #738).
+- Fixed stale entity merge previews, complete filter reset and whole-chain
+  delete capabilities. Added User/Admin browser regression coverage (#738).
+- Deployment helpers use an explicit OpenShift context (default `mcp-rhoai`)
+  and verify Route TLS with the ingress CA or `MEMORYHUB_ROUTE_CA_FILE` (#738).
+
 
 - BFF walker, dashboard views, memory inspector.

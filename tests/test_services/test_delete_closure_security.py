@@ -56,3 +56,58 @@ async def test_delete_requires_exact_authorized_closure_and_reaches_nested_branc
     rows = (await async_session.execute(select(MemoryNode).where(MemoryNode.id.in_(expected)))).scalars().all()
     assert len(rows) == 4
     assert all(row.deleted_at is not None for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_capability_and_mutation_share_cycles_deleted_bridges_and_tenant_boundary(async_session):
+    from memoryhub_core.authorization.human import Access, Principal
+    from memoryhub_core.queries.deletion import delete_capabilities
+
+    root = _node("alice")
+    bridge = _node("alice", parent_id=root.id)
+    nested = _node("bob", parent_id=bridge.id)
+    foreign = _node("alice", parent_id=root.id)
+    foreign.tenant_id = "tenant-b"
+    async_session.add_all([root, bridge, nested, foreign])
+    await async_session.flush()
+    # Corrupt version cycles must terminate, and a deleted intermediate branch
+    # must not hide its live descendant from either permission or deletion.
+    root.previous_version_id = nested.id
+    nested.previous_version_id = root.id
+    from datetime import UTC, datetime
+    bridge.deleted_at = datetime.now(UTC)
+    await async_session.commit()
+
+    policy = Access(Principal("alice", "user", "tenant-a"))
+    found = await collect_delete_nodes(root, async_session, "tenant-a")
+    assert set(found) == {root.id, bridge.id, nested.id}
+    capabilities = await delete_capabilities(async_session, policy, [root, foreign])
+    assert capabilities == {root.id: False, foreign.id: False}
+    assert capabilities[root.id] == all(policy.can_delete(row) for row in found.values() if row.deleted_at is None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["added", "removed"])
+async def test_locked_closure_rechecks_rows_that_change_while_waiting(changed):
+    from unittest.mock import AsyncMock, MagicMock
+
+    root = _node("alice")
+    child = _node("alice", parent_id=root.id)
+    grandchild = _node("alice", parent_id=child.id)
+
+    def rows(nodes):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = nodes
+        return result
+
+    initial = [root, child]
+    # A recursive SELECT has one snapshot. Once all discovered rows have been
+    # locked, the next snapshot must include a committed child or drop a row
+    # moved away before its lock was acquired. A growing-only union is unsafe.
+    final = [root, child, grandchild] if changed == "added" else [root]
+    session = AsyncMock()
+    session.execute.side_effect = [rows(initial), rows(final), rows(final)]
+    found = await collect_delete_nodes(root, session, "tenant-a", seed_locked=True)
+    assert set(found) == {row.id for row in final}
+    assert session.execute.await_count == 3
+    session.commit.assert_not_awaited()

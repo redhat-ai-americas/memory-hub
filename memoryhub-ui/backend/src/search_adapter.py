@@ -8,10 +8,9 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from memoryhub_core.models.memory import MemoryNode
+from memoryhub_core.queries.memories import memory_rows
 from memoryhub_core.services.memory import search_memories, search_memories_with_focus
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import Access, AccessDep
@@ -42,28 +41,7 @@ class SearchBody(BaseModel):
 
 
 def _authorized_scopes(access: Access) -> tuple[dict, set[str], set[str], set[str]]:
-    """Map direct human grants to Core filters, independent of MCP scopes."""
-    scopes: dict = {}
-    if access.principal.role == "user":
-        scopes["user"] = sorted(access.identities)
-        scopes["organizational"] = None
-        scopes["enterprise"] = None
-        projects = access.human_projects
-        roles = access.human_roles
-        campaigns = access.human_campaigns
-    else:
-        projects = access.human_projects if "project" in access.moderation_scopes else set()
-        roles = access.human_roles if "role" in access.moderation_scopes else set()
-        campaigns = access.human_campaigns if "campaign" in access.moderation_scopes else set()
-        if "organizational" in access.moderation_scopes:
-            scopes["organizational"] = None
-    if projects:
-        scopes["project"] = sorted(projects)
-    if roles:
-        scopes["role"] = None
-    if campaigns:
-        scopes["campaign"] = None
-    return scopes, projects, roles, campaigns
+    return access.search_grants()
 
 
 def _token_estimate(value: str) -> int:
@@ -110,12 +88,7 @@ async def human_search(body: SearchBody, db: DbDep, access: AccessDep,
         hits = []
     elapsed_ms = round((time.monotonic() - start) * 1000, 2)
     ids = [item.id for item, _score in hits]
-    rows = (await db.execute(select(MemoryNode).where(
-        MemoryNode.id.in_(ids),
-        MemoryNode.tenant_id == access.principal.tenant_id,
-        MemoryNode.deleted_at.is_(None),
-        access.content_clause(),
-    ))).scalars().all() if ids else []
+    rows = await memory_rows(db, ids, access.principal.tenant_id, access=access, content=True) if ids else []
     allowed = {node.id: node for node in rows if _human_can_see_content(access, node)}
     now = datetime.now(UTC)
     results = []

@@ -2,11 +2,12 @@
 
 import uuid
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.schemas import CuratorRuleCreate
+from memoryhub_core.queries.curation import rule_visibility
 
 # Layer precedence: higher index = higher layer (can protect with override=True)
 _LAYER_ORDER = {"system": 0, "organizational": 1, "user": 2}
@@ -39,25 +40,10 @@ async def load_rules(
     now also takes a tenant_id so first-write-per-tenant seeds the
     system rules into the caller's tenant.
     """
-    stmt = (
-        select(CuratorRule)
-        .where(
-            and_(
-                CuratorRule.enabled.is_(True),
-                CuratorRule.is_current.is_(True),
-                CuratorRule.trigger == trigger,
-                CuratorRule.tenant_id == tenant_id,
-                or_(
-                    CuratorRule.layer.in_(["system", "organizational"]),
-                    and_(
-                        CuratorRule.layer == "user",
-                        CuratorRule.owner_id == owner_id,
-                    ),
-                ),
-            )
-        )
-        .order_by(CuratorRule.tier, CuratorRule.priority)
-    )
+    stmt = select(CuratorRule).where(
+        CuratorRule.enabled.is_(True), CuratorRule.is_current.is_(True),
+        CuratorRule.trigger == trigger, rule_visibility(tenant_id, owner_id),
+    ).order_by(CuratorRule.tier, CuratorRule.priority)
     result = await session.execute(stmt)
     all_rules: list[CuratorRule] = list(result.scalars().all())
 
@@ -114,28 +100,50 @@ async def create_rule(
     layer must resolve the caller's tenant from JWT claims (via
     ``get_tenant_filter``) and pass it here.
     """
+    return await insert_rule(session, data.model_dump(), tenant_id=tenant_id)
+
+
+_RULE_FIELDS = (
+    "name", "description", "trigger", "tier", "config", "action", "scope_filter",
+    "layer", "owner_id", "override", "enabled", "priority",
+)
+
+
+async def insert_rule(session, values: dict, *, tenant_id: str, edited_by: str | None = None):
+    """Create one rule through the same writer for human and MCP callers."""
     rule = CuratorRule(
-        id=uuid.uuid4(),
-        name=data.name,
-        description=data.description,
-        trigger=data.trigger,
-        tier=data.tier,
-        config=data.config,
-        action=data.action,
-        scope_filter=data.scope_filter,
-        layer=data.layer,
-        owner_id=data.owner_id,
-        tenant_id=tenant_id,
-        override=data.override,
-        enabled=data.enabled,
-        priority=data.priority,
-        version=1,
-        is_current=True,
+        id=uuid.uuid4(), tenant_id=tenant_id,
+        **{key: value for key, value in values.items() if key in _RULE_FIELDS},
+        version=1, is_current=True, edited_by=edited_by,
     )
     session.add(rule)
     await session.commit()
     await session.refresh(rule)
     return rule
+
+
+async def revise_rule(session, old_rule: CuratorRule, changes: dict, *, edited_by: str):
+    """Copy-on-write persistence, after the caller authorizes the locked rule."""
+    values = {key: changes.get(key, getattr(old_rule, key)) for key in _RULE_FIELDS}
+    rule = CuratorRule(
+        tenant_id=old_rule.tenant_id, **values,
+        version=old_rule.version + 1, previous_version_id=old_rule.id,
+        is_current=True, edited_by=edited_by,
+    )
+    old_rule.is_current = False
+    session.add(rule)
+    await session.commit()
+    await session.refresh(rule)
+    return rule
+
+
+async def delete_current_rule(session, rule: CuratorRule):
+    """Retain historical rows; only remove the authorized current row."""
+    if not rule.is_current:
+        raise ValueError("Only a current rule can be deleted")
+    await session.delete(rule)
+    await session.commit()
+
 
 
 async def seed_default_rules(

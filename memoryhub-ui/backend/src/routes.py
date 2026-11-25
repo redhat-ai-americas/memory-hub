@@ -9,18 +9,19 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from memoryhub_core.models.contradiction import ContradictionReport
-from memoryhub_core.models.conversation import ConversationThread
 from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
-from memoryhub_core.models.project import Project, ProjectMembership
-from memoryhub_core.models.role import RoleAssignment
+from memoryhub_core.queries import contradictions as contradiction_queries
+from memoryhub_core.queries import curation as rule_queries
+from memoryhub_core.queries import identities as identity_queries
+from memoryhub_core.queries import memories as memory_queries
+from memoryhub_core.queries import summaries as summary_queries
+from memoryhub_core.services.curation.rules import delete_current_rule, insert_rule, revise_rule
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import (
     get_memory_history as get_memory_history_service,
 )
-from sqlalchemy import and_, any_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, contains_eager
 
 from src.authorization import AccessDep, Principal, get_principal
 from src.config import Settings, get_settings
@@ -223,29 +224,7 @@ async def auth_logout(_principal: Annotated[Principal, Depends(get_principal)]):
 @router.get("/api/nav-counts", response_model=NavCountsResponse)
 async def nav_counts(db: DbDep, access: AccessDep):
     """Count only memories and review items visible to this human principal."""
-    tenant = access.principal.tenant_id
-    memories = (await db.execute(select(func.count()).select_from(MemoryNode).where(
-        MemoryNode.tenant_id == tenant,
-        MemoryNode.is_current.is_(True),
-        MemoryNode.deleted_at.is_(None),
-        access.clause(),
-    ))).scalar_one()
-    review_queue = 0
-    if access.principal.role == "admin" and access.human_project_admins and "project" in access.moderation_scopes:
-        review_queue = (await db.execute(select(func.count()).select_from(ContradictionReport).join(
-            MemoryNode, ContradictionReport.memory_id == MemoryNode.id,
-        ).where(
-            ContradictionReport.tenant_id == tenant,
-            ContradictionReport.resolved.is_(False),
-            MemoryNode.tenant_id == tenant,
-            MemoryNode.deleted_at.is_(None),
-            MemoryNode.scope == "project",
-            MemoryNode.scope_id.in_(access.human_project_admins),
-            ~ContradictionReport.reporter.in_(access.identities),
-            ~MemoryNode.owner_id.in_(access.identities),
-            or_(MemoryNode.actor_id.is_(None), ~MemoryNode.actor_id.in_(access.identities)),
-            or_(MemoryNode.driver_id.is_(None), ~MemoryNode.driver_id.in_(access.identities)),
-        ))).scalar_one()
+    memories, review_queue = await summary_queries.navigation_counts(db, access)
     return NavCountsResponse(memories=memories, review_queue=review_queue)
 
 
@@ -295,19 +274,7 @@ async def get_graph(
     """
     access.forbid_person_filter(owner_id)
     tenant_id = settings.ui_tenant_id
-    stmt = select(MemoryNode).where(
-        MemoryNode.tenant_id == tenant_id,
-        MemoryNode.is_current.is_(True),
-        MemoryNode.deleted_at.is_(None),
-        access.clause(),
-    )
-    if scope:
-        stmt = stmt.where(MemoryNode.scope == scope)
-    if owner_id:
-        stmt = stmt.where(MemoryNode.owner_id == owner_id)
-
-    result = await db.execute(stmt)
-    nodes = [n for n in result.scalars().all() if access.can_read(n)]
+    nodes = await summary_queries.current_memories(db, access, scope=scope, owner_id=owner_id)
 
     node_ids = {node.id for node in nodes}
     graph_nodes = [_node_to_graph_node(n, access) for n in nodes]
@@ -336,15 +303,7 @@ async def get_graph(
     # suspenders for defence-in-depth and to keep this query readable
     # without cross-referencing upstream filters.
     if node_ids:
-        node_id_list = list(node_ids)
-        rel_stmt = select(MemoryRelationship).where(
-            MemoryRelationship.tenant_id == tenant_id,
-            MemoryRelationship.valid_until.is_(None),
-            MemoryRelationship.source_id.in_(node_id_list),
-            MemoryRelationship.target_id.in_(node_id_list),
-        )
-        rel_result = await db.execute(rel_stmt)
-        relationships = rel_result.scalars().all()
+        relationships = await memory_queries.relationships_between(db, node_ids, tenant_id)
         edges.extend(_rel_to_edge(r) for r in relationships)
 
     return GraphResponse(nodes=graph_nodes, edges=edges)
@@ -366,41 +325,13 @@ async def search_graph(
 
     Filters strictly by ``settings.ui_tenant_id`` (Phase 6 / issue #46).
     """
-    tenant_id = settings.ui_tenant_id
     embedding = await _get_embedding(q, settings.embedding_url)
 
     if embedding is not None:
-        distance = MemoryNode.embedding.cosine_distance(embedding)
-        stmt = (
-            select(MemoryNode.id, (1 - distance).label("score"))
-            .where(
-                MemoryNode.tenant_id == tenant_id,
-                MemoryNode.is_current.is_(True),
-                MemoryNode.deleted_at.is_(None),
-                access.content_clause(),
-            )
-            .order_by(distance)
-            .limit(20)
-        )
-        result = await db.execute(stmt)
-        rows = result.fetchall()
+        rows = await summary_queries.semantic_graph_matches(db, access, embedding)
         return [SearchMatch(id=row[0], score=float(row[1])) for row in rows]
 
-    # Text fallback
-    pattern = f"%{q}%"
-    stmt = (
-        select(MemoryNode)
-        .where(
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.is_current.is_(True),
-            MemoryNode.deleted_at.is_(None),
-            access.content_clause(),
-            (MemoryNode.content.ilike(pattern) | MemoryNode.stub.ilike(pattern)),
-        )
-        .limit(20)
-    )
-    result = await db.execute(stmt)
-    nodes = [n for n in result.scalars().all() if access.can_read(n)]
+    nodes = await summary_queries.text_graph_matches(db, access, q)
     return [SearchMatch(id=str(n.id), score=1.0) for n in nodes]
 
 
@@ -417,47 +348,9 @@ async def get_stats(db: DbDep, settings: SettingsDep, access: AccessDep):
     issue #46) -- the dashboard never surfaces totals or recent activity
     from other tenants.
     """
-    tenant_id = settings.ui_tenant_id
 
-    # Total current memories
-    total_result = await db.execute(
-        select(func.count())
-        .select_from(MemoryNode)
-        .where(
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.is_current.is_(True),
-            MemoryNode.deleted_at.is_(None),
-            access.clause(),
-        )
-    )
-    total = total_result.scalar_one()
-
-    # Count by scope
-    scope_result = await db.execute(
-        select(MemoryNode.scope, func.count().label("cnt"))
-        .where(
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.is_current.is_(True),
-            MemoryNode.deleted_at.is_(None),
-            access.clause(),
-        )
-        .group_by(MemoryNode.scope)
-    )
-    scope_counts = [ScopeCount(scope=row[0], count=row[1]) for row in scope_result.fetchall()]
-
-    # 10 most recently touched nodes
-    recent_result = await db.execute(
-        select(MemoryNode)
-        .where(
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.is_current.is_(True),
-            MemoryNode.deleted_at.is_(None),
-            access.clause(),
-        )
-        .order_by(MemoryNode.updated_at.desc())
-        .limit(10)
-    )
-    recent_nodes = recent_result.scalars().all()
+    total, scope_rows, recent_nodes = await summary_queries.memory_statistics(db, access)
+    scope_counts = [ScopeCount(scope=row[0], count=row[1]) for row in scope_rows]
     recent_activity = [
         RecentActivity(
             id=str(n.id),
@@ -507,63 +400,18 @@ async def get_memory(memory_id: str, db: DbDep, settings: SettingsDep, access: A
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}") from None
 
-    result = await db.execute(
-        select(MemoryNode).where(
-            MemoryNode.id == parsed_id,
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.deleted_at.is_(None),
-            access.clause(),
-        )
-    )
-    node = result.scalar_one_or_none()
+    node = await memory_queries.get_memory_row(db, parsed_id, tenant_id, live=True, access=access)
     if node is None:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
     access.require_read(node)
 
-    # Count current, undeleted children rather than historical versions.
-    count_result = await db.execute(
-        select(func.count())
-        .select_from(MemoryNode)
-        .where(
-            MemoryNode.parent_id == parsed_id,
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.deleted_at.is_(None),
-            MemoryNode.is_current.is_(True),
-            access.clause(),
-        )
-    )
-    children_count = count_result.scalar_one()
-
-    # Relationships (both incoming and outgoing)
-    source = aliased(MemoryNode)
-    target = aliased(MemoryNode)
-    rel_result = await db.execute(
-        select(MemoryRelationship)
-        .join(source, source.id == MemoryRelationship.source_id)
-        .join(target, target.id == MemoryRelationship.target_id)
-        .where(
-            MemoryRelationship.tenant_id == tenant_id,
-            MemoryRelationship.valid_until.is_(None),
-            access.clause(source),
-            access.clause(target),
-            source.deleted_at.is_(None),
-            target.deleted_at.is_(None),
-            (
-                (MemoryRelationship.source_id == parsed_id)
-                | (MemoryRelationship.target_id == parsed_id)
-            ),
-        )
-    )
-    relationships = rel_result.scalars().all()
+    children_count = await memory_queries.visible_child_count(db, parsed_id, tenant_id, access)
+    relationships = await memory_queries.visible_relationships(db, parsed_id, tenant_id, access)
     edges = [_rel_to_edge(r) for r in relationships]
 
     visible_parent_id = None
     if node.parent_id:
-        parent = (await db.execute(select(MemoryNode.id).where(
-            MemoryNode.id == node.parent_id,
-            MemoryNode.deleted_at.is_(None),
-            access.clause(),
-        ))).scalar_one_or_none()
+        parent = await memory_queries.visible_parent_id(db, node.parent_id, access)
         visible_parent_id = str(parent) if parent else None
 
     return MemoryDetail(
@@ -611,12 +459,9 @@ async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep, a
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}") from None
 
-    seed = (await db.execute(select(MemoryNode).where(
-        MemoryNode.id == parsed_id,
-        MemoryNode.tenant_id == access.principal.tenant_id,
-        MemoryNode.deleted_at.is_(None),
-        access.clause(),
-    ))).scalar_one_or_none()
+    seed = await memory_queries.get_memory_row(
+        db, parsed_id, access.principal.tenant_id, live=True, access=access,
+    )
     if seed is None:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
     access.require_read(seed)
@@ -640,12 +485,9 @@ async def get_memory_history(memory_id: str, db: DbDep, settings: SettingsDep, a
     versions = result["versions"]
     visible_rows = {}
     if versions:
-        version_rows = (await db.execute(select(MemoryNode).where(
-            MemoryNode.id.in_([version.id for version in versions]),
-            MemoryNode.tenant_id == access.principal.tenant_id,
-            MemoryNode.deleted_at.is_(None),
-            access.clause(),
-        ))).scalars().all()
+        version_rows = await memory_queries.memory_rows(
+            db, [version.id for version in versions], access.principal.tenant_id, access=access,
+        )
         visible_rows = {row.id: row for row in version_rows
                         if row.deleted_at is None and access.can_read(row)}
 
@@ -678,8 +520,6 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access
     pathological cross-tenant reparenting from escalating into a cross-
     tenant delete. Cross-tenant delete attempts 404.
     """
-    from sqlalchemy import update as sa_update
-
     tenant_id = settings.ui_tenant_id
 
     try:
@@ -687,13 +527,7 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {memory_id!r}") from None
 
-    result = await db.execute(
-        select(MemoryNode).where(
-            MemoryNode.id == parsed_id,
-            MemoryNode.tenant_id == tenant_id,
-        ).with_for_update()
-    )
-    node = result.scalar_one_or_none()
+    node = await memory_queries.get_memory_row(db, parsed_id, tenant_id, lock=True)
     if node is None:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id!r} not found")
     if node.deleted_at is not None:
@@ -715,15 +549,7 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep, access
         {"deleted_rows": len(all_ids)},
     )
 
-    # Bulk soft-delete
-    await db.execute(
-        sa_update(MemoryNode)
-        .where(
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.id.in_(list(all_ids)),
-        )
-        .values(deleted_at=now, is_current=False)
-    )
+    await memory_queries.mark_deleted(db, list(all_ids), tenant_id, now)
     await db.commit()
 
 
@@ -803,31 +629,7 @@ async def _reject_existing_identity_claim(
     }
     if not client_id or client_id in human_names:
         raise HTTPException(status_code=409, detail="Client ID is reserved by an existing identity")
-    occupied = or_(
-        select(MemoryNode.id).where(
-            MemoryNode.tenant_id == tenant_id,
-            or_(MemoryNode.owner_id == client_id, MemoryNode.actor_id == client_id,
-                MemoryNode.driver_id == client_id),
-        ).exists(),
-        select(ProjectMembership.id).join(Project, Project.name == ProjectMembership.project_id).where(
-            Project.tenant_id == tenant_id, ProjectMembership.user_id == client_id,
-        ).exists(),
-        select(RoleAssignment.id).where(
-            RoleAssignment.tenant_id == tenant_id, RoleAssignment.user_id == client_id,
-        ).exists(),
-        select(CuratorRule.id).where(
-            CuratorRule.tenant_id == tenant_id, CuratorRule.layer == "user",
-            CuratorRule.owner_id == client_id,
-        ).exists(),
-        select(ConversationThread.id).where(
-            ConversationThread.tenant_id == tenant_id,
-            or_(ConversationThread.owner_id == client_id,
-                ConversationThread.actor_id == client_id,
-                ConversationThread.driver_id == client_id,
-                client_id == any_(ConversationThread.participant_ids)),
-        ).exists(),
-    )
-    if (await db.execute(select(occupied))).scalar_one():
+    if await identity_queries.identity_in_use(db, client_id, tenant_id):
         raise HTTPException(status_code=409, detail="Client ID is reserved by an existing identity")
 
 
@@ -934,31 +736,7 @@ async def list_users(db: DbDep, settings: SettingsDep, access: AccessDep):
     """
     tenant_id = access.principal.tenant_id
 
-    # Get memory stats per owner from DB
-    stats_query = (
-        select(
-            MemoryNode.owner_id,
-            func.count().label("memory_count"),
-            func.max(MemoryNode.updated_at).label("last_active"),
-        )
-        .where(
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.is_current.is_(True),
-            MemoryNode.deleted_at.is_(None),
-            access.clause(),
-        )
-        .group_by(MemoryNode.owner_id)
-    )
-    if access.principal.role == "user":
-        stats_query = stats_query.where(MemoryNode.owner_id.in_(access.identities))
-    if access.sees_individual_activity:
-        result = await db.execute(stats_query)
-        owner_stats = {
-            row[0]: {"memory_count": row[1], "last_active": row[2]}
-            for row in result.fetchall()
-        }
-    else:
-        owner_stats = {}
+    owner_stats = await summary_queries.individual_activity(db, access)
 
     # The roster must not masquerade as complete when Auth is unavailable.
     resp = await _admin_request(
@@ -1041,21 +819,11 @@ def _rule_to_response(rule: CuratorRule, access: AccessDep) -> CurationRuleRespo
 
 
 def _can_read_rule(access: AccessDep, rule: CuratorRule) -> bool:
-    if rule.tenant_id != access.principal.tenant_id:
-        return False
-    if rule.layer in ("system", "organizational"):
-        return True
-    # Personal rules (their names and patterns) belong to their owner only;
-    # an Admin sees no personal data (#667, PR 710 review).
-    return rule.layer == "user" and rule.owner_id == access.principal.username
+    return access.can_read_rule(rule)
 
 
 def _can_change_rule(access: AccessDep, rule: CuratorRule) -> bool:
-    if rule.tenant_id != access.principal.tenant_id:
-        return False
-    if rule.layer == "user":
-        return rule.owner_id == access.principal.username
-    return access.principal.role == "admin" and rule.layer == "organizational"
+    return access.can_change_rule(rule)
 
 
 @router.get("/api/rules", response_model=list[CurationRuleResponse])
@@ -1073,25 +841,7 @@ async def list_rules(
     tenant maintains its own rule set -- default rules are seeded per
     tenant at the service layer.
     """
-    tenant_id = access.principal.tenant_id
-    visible_user_rules = and_(CuratorRule.layer == "user", CuratorRule.owner_id == access.principal.username)
-    stmt = (
-        select(CuratorRule)
-        .where(CuratorRule.tenant_id == tenant_id, CuratorRule.is_current.is_(True))
-        .where(or_(
-            CuratorRule.layer.in_(("system", "organizational")),
-            visible_user_rules,
-        ))
-        .order_by(CuratorRule.priority)
-    )
-    if tier:
-        stmt = stmt.where(CuratorRule.tier == tier)
-    if enabled is not None:
-        stmt = stmt.where(CuratorRule.enabled == enabled)
-    if layer:
-        stmt = stmt.where(CuratorRule.layer == layer)
-    result = await db.execute(stmt)
-    rules = result.scalars().all()
+    rules = await rule_queries.visible_rules(db, access, tier=tier, enabled=enabled, layer=layer)
     return [_rule_to_response(r, access) for r in rules if _can_read_rule(access, r)]
 
 
@@ -1113,27 +863,9 @@ async def create_rule(body: CreateRuleRequest, db: DbDep, settings: SettingsDep,
         raise HTTPException(status_code=403, detail="Organizational rule cannot have a personal owner")
     if access.principal.role == "user" and body.override:
         raise HTTPException(status_code=403, detail="Personal override forbidden")
-    rule = CuratorRule(
-        tenant_id=access.principal.tenant_id,
-        name=body.name,
-        description=body.description,
-        trigger=body.trigger,
-        tier=body.tier,
-        config=body.config,
-        action=body.action,
-        scope_filter=body.scope_filter,
-        layer=body.layer,
-        owner_id=access.principal.username if body.layer == "user" else None,
-        override=body.override,
-        enabled=body.enabled,
-        priority=body.priority,
-        version=1,
-        is_current=True,
-        edited_by=access.principal.username,
-    )
-    db.add(rule)
-    await db.commit()
-    await db.refresh(rule)
+    values = body.model_dump()
+    values["owner_id"] = access.principal.username if body.layer == "user" else None
+    rule = await insert_rule(db, values, tenant_id=access.principal.tenant_id, edited_by=access.principal.username)
     return _rule_to_response(rule, access)
 
 
@@ -1148,13 +880,7 @@ async def get_rule(rule_id: str, db: DbDep, settings: SettingsDep, access: Acces
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}") from None
-    result = await db.execute(
-        select(CuratorRule).where(
-            CuratorRule.id == parsed_id,
-            CuratorRule.tenant_id == tenant_id,
-        )
-    )
-    rule = result.scalar_one_or_none()
+    rule = await rule_queries.rule_row(db, parsed_id, tenant_id, lock=False)
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
     if not _can_read_rule(access, rule):
@@ -1183,13 +909,7 @@ async def update_rule(
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}") from None
-    result = await db.execute(
-        select(CuratorRule).where(
-            CuratorRule.id == parsed_id,
-            CuratorRule.tenant_id == tenant_id,
-        ).with_for_update()
-    )
-    old_rule = result.scalar_one_or_none()
+    old_rule = await rule_queries.rule_row(db, parsed_id, tenant_id, lock=True)
     if old_rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
     if not _can_change_rule(access, old_rule):
@@ -1211,30 +931,7 @@ async def update_rule(
     if not update_data:
         return _rule_to_response(old_rule, access)
 
-    new_rule = CuratorRule(
-        tenant_id=tenant_id,
-        name=update_data.get("name", old_rule.name),
-        description=update_data.get("description", old_rule.description),
-        trigger=update_data.get("trigger", old_rule.trigger),
-        tier=update_data.get("tier", old_rule.tier),
-        config=update_data.get("config", old_rule.config),
-        action=update_data.get("action", old_rule.action),
-        scope_filter=update_data.get("scope_filter", old_rule.scope_filter),
-        layer=update_data.get("layer", old_rule.layer),
-        owner_id=update_data.get("owner_id", old_rule.owner_id),
-        override=update_data.get("override", old_rule.override),
-        enabled=update_data.get("enabled", old_rule.enabled),
-        priority=update_data.get("priority", old_rule.priority),
-        version=old_rule.version + 1,
-        previous_version_id=old_rule.id,
-        is_current=True,
-        edited_by=access.principal.username,
-    )
-
-    old_rule.is_current = False
-    db.add(new_rule)
-    await db.commit()
-    await db.refresh(new_rule)
+    new_rule = await revise_rule(db, old_rule, update_data, edited_by=access.principal.username)
     return _rule_to_response(new_rule, access)
 
 
@@ -1254,44 +951,11 @@ async def get_rule_history(rule_id: str, db: DbDep, access: AccessDep):
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}") from None
 
     # 404 check — also gates the CTE below to this tenant's data
-    seed_result = await db.execute(
-        select(CuratorRule).where(
-            CuratorRule.id == parsed_id,
-            CuratorRule.tenant_id == tenant_id,
-        )
-    )
-    seed = seed_result.scalar_one_or_none()
+    seed = await rule_queries.rule_row(db, parsed_id, tenant_id, lock=False)
     if seed is None or not _can_read_rule(access, seed):
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
 
-    # Single recursive CTE: walk backward to the oldest ancestor, then forward
-    # through all descendants — replaces the previous O(N) per-version loop.
-    chain_result = await db.execute(
-        text("""
-            WITH RECURSIVE
-              ancestors(id, previous_version_id) AS (
-                SELECT id, previous_version_id FROM curator_rules WHERE id = :seed_id AND tenant_id = :tenant_id
-                UNION
-                SELECT r.id, r.previous_version_id FROM curator_rules r
-                JOIN ancestors a ON r.id = a.previous_version_id WHERE r.tenant_id = :tenant_id
-              ),
-              root AS (SELECT id FROM ancestors WHERE previous_version_id IS NULL),
-              chain AS (
-                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at,
-                       r.tenant_id, r.layer, r.owner_id
-                FROM curator_rules r JOIN root ON r.id = root.id WHERE r.tenant_id = :tenant_id
-                UNION
-                SELECT r.id, r.version, r.is_current, r.name, r.edited_by, r.created_at,
-                       r.tenant_id, r.layer, r.owner_id
-                FROM curator_rules r
-                JOIN chain c ON r.previous_version_id = c.id WHERE r.tenant_id = :tenant_id
-              )
-            SELECT id, version, is_current, name, edited_by, created_at, tenant_id, layer, owner_id
-            FROM chain
-            ORDER BY version DESC
-        """),
-        {"seed_id": parsed_id, "tenant_id": tenant_id},
-    )
+    chain_rows = await rule_queries.history_rows(db, parsed_id, tenant_id)
     return [
         RuleVersionEntry(
             id=str(row.id),
@@ -1301,7 +965,7 @@ async def get_rule_history(rule_id: str, db: DbDep, access: AccessDep):
             edited_by=access.visible_identity(row.edited_by),
             created_at=row.created_at,
         )
-        for row in chain_result.fetchall() if _can_read_rule(access, row)
+        for row in chain_rows if _can_read_rule(access, row)
     ]
 
 
@@ -1323,13 +987,7 @@ async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep, access: Ac
         parsed_id = uuid.UUID(rule_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {rule_id!r}") from None
-    result = await db.execute(
-        select(CuratorRule).where(
-            CuratorRule.id == parsed_id,
-            CuratorRule.tenant_id == tenant_id,
-        )
-    )
-    rule = result.scalar_one_or_none()
+    rule = await rule_queries.rule_row(db, parsed_id, tenant_id, lock=False)
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
     if not _can_change_rule(access, rule):
@@ -1339,67 +997,12 @@ async def delete_rule(rule_id: str, db: DbDep, settings: SettingsDep, access: Ac
             status_code=409,
             detail=f"Rule {rule_id!r} is not the current version; only current rules can be deleted",
         )
-    await db.delete(rule)
-    await db.commit()
+    await delete_current_rule(db, rule)
 
 
 # ---------------------------------------------------------------------------
 # Contradiction Log
 # ---------------------------------------------------------------------------
-
-
-def _live_contradictions(tenant_id: str, access: AccessDep):
-    """Build a base SELECT for ContradictionReport joined to non-deleted memories.
-
-    Reports whose target memory has been soft-deleted are excluded from
-    every list/count/stats response. The MCP report_contradiction tool
-    already prevents new reports from being created against deleted
-    memories, but historical reports against memories that were later
-    deleted still exist in the table and need to be filtered out here.
-
-    Phase 6 (#46): filters both the report table and the joined memory
-    table by ``tenant_id``. Tenant consistency across report and memory
-    is already enforced at report creation time (Phase 3's
-    report_contradiction inherits tenant from the memory), so filtering
-    the report table alone would be sufficient -- filtering both is
-    belt-and-suspenders defence-in-depth.
-    """
-    stmt = (
-        select(ContradictionReport)
-        .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
-        .options(contains_eager(ContradictionReport.memory))
-        .where(
-            ContradictionReport.tenant_id == tenant_id,
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.deleted_at.is_(None),
-            access.content_clause(),
-        )
-    )
-    if access.principal.role == "admin":
-        stmt = stmt.where(MemoryNode.scope.in_(access.moderation_scopes))
-    return stmt
-
-
-def _live_contradiction_count(tenant_id: str, access: AccessDep):
-    """Count of contradictions whose target memory still exists.
-
-    Phase 6 (#46): tenant-scoped via both the report and memory joined
-    rows, matching _live_contradictions above.
-    """
-    stmt = (
-        select(func.count())
-        .select_from(ContradictionReport)
-        .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
-        .where(
-            ContradictionReport.tenant_id == tenant_id,
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.deleted_at.is_(None),
-            access.content_clause(),
-        )
-    )
-    if access.principal.role == "admin":
-        stmt = stmt.where(MemoryNode.scope.in_(access.moderation_scopes))
-    return stmt
 
 
 def _contradiction_to_response(
@@ -1436,16 +1039,9 @@ async def list_contradictions(
     Reports whose target memory has been soft-deleted are excluded.
     Phase 6 (#46): tenant-scoped to ``settings.ui_tenant_id``.
     """
-    tenant_id = settings.ui_tenant_id
-    stmt = _live_contradictions(tenant_id, access).order_by(ContradictionReport.created_at.desc())
-    if resolved is not None:
-        stmt = stmt.where(ContradictionReport.resolved == resolved)
-    if min_confidence is not None:
-        stmt = stmt.where(ContradictionReport.confidence >= min_confidence)
-    if max_confidence is not None:
-        stmt = stmt.where(ContradictionReport.confidence <= max_confidence)
-    result = await db.execute(stmt)
-    reports = result.scalars().all()
+    reports = await contradiction_queries.list_reports(
+        db, access, resolved=resolved, min_confidence=min_confidence, max_confidence=max_confidence,
+    )
     return [_contradiction_to_response(r, access) for r in reports]
 
 
@@ -1456,32 +1052,8 @@ async def contradiction_stats(db: DbDep, settings: SettingsDep, access: AccessDe
     All counts exclude reports whose target memory has been soft-deleted.
     Phase 6 (#46): tenant-scoped to ``settings.ui_tenant_id``.
     """
-    tenant_id = settings.ui_tenant_id
 
-    total_result = await db.execute(_live_contradiction_count(tenant_id, access))
-    total = total_result.scalar_one()
-
-    unresolved_result = await db.execute(
-        _live_contradiction_count(tenant_id, access).where(ContradictionReport.resolved.is_(False))
-    )
-    unresolved = unresolved_result.scalar_one()
-
-    high_result = await db.execute(
-        _live_contradiction_count(tenant_id, access).where(ContradictionReport.confidence > 0.8)
-    )
-    high = high_result.scalar_one()
-
-    medium_result = await db.execute(
-        _live_contradiction_count(tenant_id, access).where(
-            ContradictionReport.confidence.between(0.5, 0.8)
-        )
-    )
-    medium = medium_result.scalar_one()
-
-    low_result = await db.execute(
-        _live_contradiction_count(tenant_id, access).where(ContradictionReport.confidence < 0.5)
-    )
-    low = low_result.scalar_one()
+    total, unresolved, high, medium, low = await contradiction_queries.statistics(db, access)
 
     return ContradictionStatsResponse(
         total=total,
@@ -1513,18 +1085,7 @@ async def update_contradiction(
         parsed_id = uuid.UUID(report_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {report_id!r}") from None
-    result = await db.execute(
-        select(ContradictionReport, MemoryNode)
-        .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
-        .where(
-            ContradictionReport.id == parsed_id,
-            ContradictionReport.tenant_id == tenant_id,
-            MemoryNode.tenant_id == tenant_id,
-            MemoryNode.deleted_at.is_(None),
-        )
-        .with_for_update()
-    )
-    row = result.one_or_none()
+    row = await contradiction_queries.review_row(db, parsed_id, tenant_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
     report, memory = row

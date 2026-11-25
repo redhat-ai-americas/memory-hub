@@ -66,6 +66,7 @@ jobs:
           filters: |
             mcp:
               - 'memory-hub-mcp/**'
+              - 'src/memoryhub_core/**'
 
       - name: Set up Python 3.11
         if: github.event_name != 'pull_request' || steps.mcp-changes.outputs.mcp == 'true'
@@ -238,6 +239,10 @@ jobs:
           MEMORYHUB_DB_NAME: memoryhub
           MEMORYHUB_REQUIRE_PG: "1"
         run: cd memoryhub-ui/backend && pytest tests/ -v --tb=short
+
+      - name: Run shared Core query and service regressions
+        if: github.event_name != 'pull_request' || steps.ui-changes.outputs.ui == 'true'
+        run: pytest tests/test_services -q --tb=short
 
   integration-tests:
     name: Integration Tests

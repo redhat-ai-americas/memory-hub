@@ -27,6 +27,8 @@ from memoryhub_core.models.schemas import (
     MemoryVersionInfo,
 )
 from memoryhub_core.models.utils import generate_stub
+from memoryhub_core.queries.deletion import delete_closure
+from memoryhub_core.queries.memories import current_children, mark_deleted, memory_by_id
 from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 from memoryhub_core.services.embeddings import EmbeddingService
 from memoryhub_core.services.exceptions import (
@@ -428,13 +430,8 @@ async def read_memory(
     callers can never distinguish "does not exist" from "exists in
     another tenant." This mirrors the authz layer's per-row behavior.
     """
-    stmt = select(MemoryNode).where(
-        MemoryNode.id == memory_id,
-        MemoryNode.deleted_at.is_(None),
-        MemoryNode.tenant_id == tenant_id,
-        # Non-admin read: only active memories are visible.
-        # Quarantined and soft_deleted require admin_memory tool.
-        MemoryNode.status == "active",
+    stmt = memory_by_id(memory_id, tenant_id).where(
+        MemoryNode.deleted_at.is_(None), MemoryNode.status == "active",
     )
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
@@ -645,13 +642,7 @@ async def update_memory(
     # Deep-copy one level of child branches from old node to new node.
     # Chunk branches are skipped when content changed (they reflect old
     # content and will be replaced by fresh chunks below).
-    children_stmt = select(MemoryNode).where(
-        MemoryNode.parent_id == old_node.id,
-        MemoryNode.is_current.is_(True),
-        MemoryNode.deleted_at.is_(None),
-    )
-    children_result = await session.execute(children_stmt)
-    old_children = children_result.scalars().all()
+    old_children = await current_children(session, [old_node.id], None)
 
     copied_count = 0
     for child in old_children:
@@ -757,7 +748,7 @@ async def delete_memory(
     Raises MemoryNotFoundError if the node doesn't exist, or
     MemoryAlreadyDeletedError if already soft-deleted.
     """
-    stmt = select(MemoryNode).where(MemoryNode.id == memory_id).with_for_update()
+    stmt = memory_by_id(memory_id, tenant_id, lock=True, unscoped=tenant_id is None)
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
 
@@ -793,12 +784,7 @@ async def delete_memory(
         s3_result = await session.execute(s3_refs_stmt)
         s3_refs = [row[0] for row in s3_result.all()]
 
-    # Bulk soft-delete
-    await session.execute(
-        update(MemoryNode)
-        .where(MemoryNode.id.in_(list(all_ids)), MemoryNode.tenant_id == effective_tenant)
-        .values(deleted_at=now, is_current=False)
-    )
+    await mark_deleted(session, list(all_ids), effective_tenant, now)
 
     await session.commit()
 
@@ -824,36 +810,22 @@ async def collect_delete_nodes(
     """Collect versions and descendants to any depth for BFF and Core deletes."""
     node_id = node.id
     if not seed_locked:
-        node = (await session.execute(
-            select(MemoryNode).where(
-                MemoryNode.id == node_id, MemoryNode.tenant_id == tenant_id,
-            ).with_for_update()
-        )).scalar_one_or_none()
+        node = (await session.execute(memory_by_id(node_id, tenant_id, lock=True))).scalar_one_or_none()
     if node is None or node.tenant_id != tenant_id:
         raise MemoryNotFoundError(node_id)
     found = {node.id: node}
-    frontier = {node.id}
-    while frontier:
-        previous_ids = {
-            found[i].previous_version_id
-            for i in frontier if found[i].previous_version_id
-        }
-        related = (await session.execute(
-            select(MemoryNode).where(
-                MemoryNode.tenant_id == tenant_id,
-                or_(
-                    MemoryNode.id.in_(previous_ids),
-                    MemoryNode.previous_version_id.in_(frontier),
-                    MemoryNode.parent_id.in_(frontier),
-                ),
-            ).with_for_update()
-        )).scalars().all()
-        frontier = set()
-        for member in related:
-            if member.id not in found:
-                found[member.id] = member
-                frontier.add(member.id)
-    return found
+    while True:
+        closure = delete_closure({node.id}, tenant_id)
+        rows = (await session.execute(select(MemoryNode).join(
+            closure, closure.c.node_id == MemoryNode.id,
+        ).where(MemoryNode.tenant_id == tenant_id).with_for_update(of=MemoryNode))).scalars().all()
+        current = {member.id: member for member in [node, *rows]}
+        if current.keys() == found.keys():
+            return current
+        found = current
+        # A CTE has one statement snapshot. A child can commit while this
+        # statement waits for a descendant lock. Re-read after taking all
+        # discovered locks so such children cannot escape the mutation.
 
 
 def _build_search_filters(

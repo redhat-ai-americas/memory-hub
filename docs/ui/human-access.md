@@ -146,7 +146,7 @@ lock when the deletion is submitted.
 
 ## Admin privacy
 
-Admin queries are filtered at a single point in `authorization.py`
+Admin queries are filtered by `memoryhub_core.authorization.human.Access`
 (`clause()` / `can_read()`): only project, campaign, role and organizational
 scopes are visible. User, entity and enterprise scopes are excluded,
 including entity metadata derived from personal memories. This covers every Admin path:
@@ -175,6 +175,11 @@ memory counts or last-active times. `tests/test_admin_privacy_pg.py`
 checks all of this end to end on Postgres. CI runs it with
 `MEMORYHUB_REQUIRE_PG=1`, so a missing database fails the job instead of
 skipping the test.
+
+Reusable SQL and mutation preflight are in `memoryhub_core.queries`, shared
+with Core services. The BFF keeps HTTP/session handling and response shaping.
+See [query boundary](query-boundary.md) for selection, transaction and
+deployment-trust details.
 
 ## Cross-site requests
 
