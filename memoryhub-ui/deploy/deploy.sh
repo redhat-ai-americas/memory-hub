@@ -5,7 +5,8 @@
 #
 # Steps:
 #   1. Ensure namespace exists
-#   1b. Provision the human access lists (human-access.sh)
+#   1b. Provision dashboard access: OpenShift RBAC Roles and bindings
+#       (dashboard-access.sh), or the transitional lists (human-access.sh)
 #   2. Apply manifests (deployment, service, route)
 #   3. Re-apply manifest to re-resolve the ImageStream tag against the
 #      selected digest (resolve-names rewrites at apply time, not pod
@@ -21,6 +22,10 @@ NAMESPACE="${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}"
 DEPLOYMENT="memoryhub-ui"
 IMAGESTREAM="memoryhub-ui"
 CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
+# Where dashboard roles come from (docs/auth/human-role-resolution.md):
+# openshift-rbac (default) or lists (transitional rollback, #667).
+ROLE_SOURCE="${MEMORYHUB_UI_ROLE_SOURCE:-openshift-rbac}"
+RBAC_CHECK="${MEMORYHUB_UI_RBAC_CHECK:-self}"
 RHOAI_NS="redhat-ods-applications"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -52,19 +57,39 @@ else
     oc create namespace "$NAMESPACE" --context "$CONTEXT"
 fi
 
-# Step 1b: Human access lists (who is an Admin, who is a User). The
-# dashboard refuses everyone without them, so a deploy always provisions
-# them: from MEMORYHUB_UI_ADMIN_USERS / MEMORYHUB_UI_ALLOWED_USERS when
-# given, otherwise the existing Secret, otherwise the deployer as first
-# Admin. Transitional; see docs/ui/human-access.md.
+# Step 1b: Dashboard access. With OpenShift RBAC, dashboard-access.sh
+# applies the two Roles, binds MEMORYHUB_UI_ADMIN_GROUPS /
+# MEMORYHUB_UI_USER_GROUPS, and bootstraps the first Admin exactly once
+# (MEMORYHUB_UI_INITIAL_ADMIN_GROUP / _USER, the legacy lists if present, or
+# the interactive deployer). With lists, human-access.sh keeps the Secret.
 echo ""
-echo "Provisioning dashboard human access..."
-bash "$SCRIPT_DIR/human-access.sh" --context "$CONTEXT" --namespace "$NAMESPACE"
+case "$ROLE_SOURCE" in
+    openshift-rbac)
+        echo "Provisioning dashboard access (OpenShift RBAC, $RBAC_CHECK check)..."
+        MEMORYHUB_UI_RBAC_CHECK="$RBAC_CHECK" bash "$SCRIPT_DIR/dashboard-access.sh" \
+            --context "$CONTEXT" --namespace "$NAMESPACE" bootstrap
+        ;;
+    lists)
+        echo "Provisioning dashboard human access lists (transitional)..."
+        bash "$SCRIPT_DIR/human-access.sh" --context "$CONTEXT" --namespace "$NAMESPACE"
+        ;;
+    *) echo "Error: MEMORYHUB_UI_ROLE_SOURCE must be openshift-rbac or lists"; exit 1 ;;
+esac
+
+# The manifest names the dashboard namespace in the proxy's access check;
+# the lists mode has no Roles to check, so the check is dropped there.
+render_manifest() {
+    if [ "$ROLE_SOURCE" = "lists" ]; then
+        grep -v -- '--openshift-sar=' "$PROJECT_ROOT/openshift.yaml"
+    else
+        sed "s/\"namespace\":\"memoryhub-ui\"/\"namespace\":\"$NAMESPACE\"/" "$PROJECT_ROOT/openshift.yaml"
+    fi
+}
 
 # Step 2: Apply manifests
 echo ""
 echo "Applying manifests..."
-oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
+render_manifest | oc apply --context "$CONTEXT" -f - -n "$NAMESPACE"
 
 # Step 3: Re-apply manifest to re-resolve the :latest ImageStream tag
 # against the selected digest. The Deployment carries
@@ -74,7 +99,9 @@ oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
 # the digest :latest pointed at *before* the build (retro #18 / #83 / #88).
 echo ""
 echo "Re-applying manifest to re-resolve image digest..."
-oc apply --context "$CONTEXT" -f "$PROJECT_ROOT/openshift.yaml" -n "$NAMESPACE"
+render_manifest | oc apply --context "$CONTEXT" -f - -n "$NAMESPACE"
+oc set env "deployment/$DEPLOYMENT" --context "$CONTEXT" -n "$NAMESPACE" --containers="$DEPLOYMENT" \
+    "MEMORYHUB_UI_ROLE_SOURCE=$ROLE_SOURCE" "MEMORYHUB_UI_RBAC_CHECK=$RBAC_CHECK" >/dev/null
 
 # Step 3b: Populate the public-facing route URLs used by the Client
 # Management welcome-email renderer. The openshift.yaml manifest ships

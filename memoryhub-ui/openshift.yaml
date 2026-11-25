@@ -40,11 +40,12 @@ spec:
         envFrom:
         - secretRef:
             name: memoryhub-db-credentials
-        # Who is an Admin and who is a User (transitional bootstrap, #667).
-        # Provisioned by deploy/human-access.sh; required, so a pod never
-        # starts with empty lists that would refuse every person.
+        # Transitional username lists (#667), used only when
+        # MEMORYHUB_UI_ROLE_SOURCE=lists (rollback path). Optional: with
+        # OpenShift RBAC roles (#744) the Secret is not read.
         - secretRef:
             name: memoryhub-ui-human-access
+            optional: true
         env:
         - name: MEMORYHUB_MCP_SERVER_URL
           value: "http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/"
@@ -65,8 +66,13 @@ spec:
             secretKeyRef:
               name: memoryhub-ui-admin-key
               key: MEMORYHUB_ADMIN_KEY
-        # MEMORYHUB_UI_ADMIN_USERS / MEMORYHUB_UI_ALLOWED_USERS come from the
-        # memoryhub-ui-human-access Secret above (docs/ui/human-access.md).
+        # Dashboard roles come from OpenShift RBAC on memoryhub.io/dashboard
+        # in this namespace (docs/auth/human-role-resolution.md). deploy.sh
+        # overrides both from MEMORYHUB_UI_ROLE_SOURCE / MEMORYHUB_UI_RBAC_CHECK.
+        - name: MEMORYHUB_UI_ROLE_SOURCE
+          value: "openshift-rbac"
+        - name: MEMORYHUB_UI_RBAC_CHECK
+          value: "self"
         resources:
           limits:
             memory: "512Mi"
@@ -92,7 +98,15 @@ spec:
         - --cookie-secret-file=/etc/proxy/secrets/session-secret
         - --pass-basic-auth=false
         - --pass-user-headers=true
-        - --pass-access-token=false
+        # The person's token reaches the BFF on loopback only, so it can
+        # verify who they are and check their dashboard Role. The scopes limit
+        # it to reading their own user and checking their own access.
+        - --pass-access-token=true
+        - '--scope=user:info user:check-access'
+        # Entry barrier: nobody without the "use" verb reaches the BFF. The
+        # BFF still decides the role itself. deploy.sh rewrites the namespace
+        # and drops this line in the lists rollback mode.
+        - '--openshift-sar={"namespace":"memoryhub-ui","resourceAPIGroup":"memoryhub.io","resource":"dashboard","verb":"use"}'
         - --skip-auth-regex=^/healthz$
         volumeMounts:
         - name: proxy-tls

@@ -147,11 +147,14 @@ parse_args() {
                 echo "  --skip-smoke-test  Skip post-deploy write/search/read verification"
                 echo "  --restore-from F   Restore database from a pg_dump file after DB deploy"
                 echo ""
-                echo "Dashboard access (transitional, see docs/ui/human-access.md):"
-                echo "  MEMORYHUB_UI_ADMIN_USERS=a,b    OpenShift usernames who are dashboard Admins"
-                echo "  MEMORYHUB_UI_ALLOWED_USERS=c,d  OpenShift usernames who are dashboard Users"
-                echo "  Unset: an existing list is kept; on a clean install the deployer"
-                echo "  (oc whoami) becomes the first Admin."
+                echo "Dashboard access (OpenShift RBAC, see docs/ui/human-access.md):"
+                echo "  MEMORYHUB_UI_ADMIN_GROUPS=g1,g2       groups bound as dashboard Admins"
+                echo "  MEMORYHUB_UI_USER_GROUPS=g3           groups bound as dashboard Users"
+                echo "  MEMORYHUB_UI_INITIAL_ADMIN_GROUP=g    first Admin (or ..._INITIAL_ADMIN_USER=name);"
+                echo "                                        required without a terminal (CI, GitOps)"
+                echo "  Unset on a first install: existing lists are migrated, otherwise the"
+                echo "  interactive deployer (oc whoami) becomes the first Admin. Runs once."
+                echo "  MEMORYHUB_UI_ROLE_SOURCE=lists        rollback to the transitional lists"
                 exit 0
                 ;;
             *)
@@ -715,14 +718,13 @@ prepare_ui_infra() {
         warn "auth-admin-key not found in $AUTH_PROJECT — skipping memoryhub-ui-admin-key (deploy auth first or re-run without --skip-auth)"
     fi
 
-    # Dashboard human access lists (Secret memoryhub-ui-human-access) are
-    # provisioned by memoryhub-ui/deploy/deploy.sh via human-access.sh, so
-    # standalone UI deploys get them too. MEMORYHUB_UI_ADMIN_USERS and
-    # MEMORYHUB_UI_ALLOWED_USERS pass through from this environment.
-    if [ -n "${MEMORYHUB_UI_ADMIN_USERS+x}${MEMORYHUB_UI_ALLOWED_USERS+x}" ]; then
-        info "Dashboard human access lists will be set from MEMORYHUB_UI_ADMIN_USERS / MEMORYHUB_UI_ALLOWED_USERS"
+    # Dashboard access is provisioned by memoryhub-ui/deploy/deploy.sh
+    # (dashboard-access.sh bootstrap), so standalone UI deploys get it too.
+    # MEMORYHUB_UI_* access variables pass through from this environment.
+    if [ "${MEMORYHUB_UI_ROLE_SOURCE:-openshift-rbac}" = "lists" ]; then
+        info "Dashboard access: transitional username lists (MEMORYHUB_UI_ROLE_SOURCE=lists)"
     else
-        info "Dashboard human access: keeping the existing list, or making $(oc whoami --context "$CONTEXT" 2>/dev/null || echo 'the deployer') the first Admin"
+        info "Dashboard access: OpenShift RBAC Roles in $UI_NAMESPACE (see docs/ui/human-access.md)"
     fi
 
     echo -e "  ${GREEN}UI infrastructure ready${RESET}"
