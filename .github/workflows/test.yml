@@ -242,7 +242,7 @@ jobs:
 
       - name: Run shared Core query and service regressions
         if: github.event_name != 'pull_request' || steps.ui-changes.outputs.ui == 'true'
-        run: pytest tests/test_services -q --tb=short
+        run: pytest tests/test_services -v --tb=short --timeout=120 --timeout-method=signal
 
   integration-tests:
     name: Integration Tests
