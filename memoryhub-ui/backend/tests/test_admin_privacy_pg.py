@@ -156,6 +156,54 @@ class _Clients:
         return []
 
 
+@pytest.mark.parametrize("actor", ["alice-agent", None])
+async def test_writer_facet_and_filter_share_actual_author_with_legacy_fallback(env, actor):
+    note = await env["seed"]("Written through a client", owner="alice", actor=actor)
+    http = env["http"]
+    writer = actor or "alice"
+    browsed = await http.get("/api/memories/browse")
+    assert browsed.status_code == 200, browsed.text
+    assert browsed.json()["facets"]["writers"] == [{"value": writer, "count": 1}]
+    for path, field in (("/api/memories/browse", "items"), ("/api/graph/all", "nodes")):
+        filtered = await http.get(path, params={"actor": writer})
+        assert filtered.status_code == 200, filtered.text
+        assert {row["id"] for row in filtered.json()[field]} == {str(note.id)}
+    exported = await http.get("/api/memories/export", params={"actor": writer})
+    assert exported.status_code == 200, exported.text
+    assert {json.loads(line)["id"] for line in exported.text.splitlines()} == {str(note.id)}
+    if actor:
+        by_owner = await http.get("/api/memories/browse", params={"actor": "alice"})
+        assert by_owner.json()["total"] == 0
+
+
+async def test_graph_write_capabilities_match_node_policy_for_users_and_project_admins(env):
+    org = await env["seed"]("Read-only organization policy", scope="organizational")
+    original = await env["seed"]("Original project guidance")
+    revised = await env["new_version"](original.id, "Revised project guidance")
+    target = await env["seed"]("Relationship target")
+    http = env["http"]
+    expected = {str(org.id): False, str(original.id): False, str(revised.id): True, str(target.id): True}
+    for name, role in (("alice", "user"), ("bob", "admin")):
+        env["act_as"](name, role)
+        graph = await http.get("/api/graph/all", params={"tab": "all"})
+        assert graph.status_code == 200, graph.text
+        assert {node["id"]: node["capabilities"]["write"] for node in graph.json()["nodes"]} == expected
+        for node_id, writable in expected.items():
+            hood = await http.get("/api/graph/neighbourhood", params={"focus": node_id, "tab": "all"})
+            assert hood.status_code == 200, hood.text
+            assert hood.json()["focus"]["capabilities"]["write"] is writable
+    # The administrator advertised as writable above really can create a link.
+    linked = await http.post("/api/relationships", json={
+        "source_id": str(revised.id), "target_id": str(target.id), "relationship_type": "related_to",
+    })
+    assert linked.status_code == 201, linked.text
+    env["act_as"]("alice")
+    refused = await http.post("/api/relationships", json={
+        "source_id": str(org.id), "target_id": str(target.id), "relationship_type": "related_to",
+    })
+    assert refused.status_code == 404, refused.text
+
+
 @pytest.mark.parametrize("bulk", [False, True])
 async def test_delete_capability_checks_other_authors_in_the_version_chain(env, bulk):
     http = env["http"]

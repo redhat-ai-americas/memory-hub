@@ -346,6 +346,7 @@ export interface NodeBrief {
   created_at: string;
   updated_at: string;
   redacted?: boolean;
+  capabilities?: { write: boolean; moderate: boolean };
 }
 
 export interface MemoryContext {

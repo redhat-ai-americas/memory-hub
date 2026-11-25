@@ -430,10 +430,9 @@ const MemoryGraph: React.FC<{
             onClick={() => {
               setTypes(new Set(EDGE_TYPES));
               setShowOrphans(true);
-              setSuperseded(false);
               setLabels(true);
               setFade(true);
-              setParams({ gfocus: '', focus: undefined, depth: '', layout: '', color: '', glimit: '', gprefer: '', sel: '' }, false);
+              setParams({ tab: 'current', page: '', gfocus: '', focus: undefined, depth: '', layout: '', color: '', glimit: '', gprefer: '', sel: '' }, false);
             }}
           >
             Reset
@@ -836,7 +835,7 @@ const MemoryGraph: React.FC<{
             provenance={focusNode && focusNode.id === sel.id ? (data as GraphNeighbourhood).provenance : []}
             recency={colorBy === 'recency' ? recencyColor(recency(sel)) : undefined}
             focused={focusMode === 'memory' && focusId === sel.id}
-            canWrite={role !== 'admin'}
+            canWrite={sel.capabilities?.write === true}
             onSelect={setSelected}
             onClose={() => setSelected(null)}
             onFocus={() => (focusMode === 'memory' && focusId === sel.id ? setFocus('all') : setFocus('memory', sel.id))}
@@ -857,8 +856,9 @@ const MemoryGraph: React.FC<{
           />
         </Modal>
       )}
-      {relate && sel && (
+      {relate && sel?.capabilities?.write && (
         <RelationshipModal
+          key={sel.id}
           sourceIds={[sel.id]}
           onClose={() => setRelate(false)}
           onDone={() => {

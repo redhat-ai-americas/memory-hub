@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import String, and_, cast, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.orm import aliased
 
 from memoryhub_core.authorization.human import Access
@@ -89,6 +89,11 @@ def has_contradictions(tenant: str):
     )
 
 
+def memory_writer(node=MemoryNode):
+    """The actual writer, falling back to the owner on legacy rows."""
+    return func.coalesce(node.actor_id, node.owner_id)
+
+
 def memory_conditions(access: Access, filters: MemoryFilters) -> list:
     if filters.min_weight is not None and filters.max_weight is not None and filters.min_weight > filters.max_weight:
         raise QueryValidationError("Invalid weight range")
@@ -103,7 +108,7 @@ def memory_conditions(access: Access, filters: MemoryFilters) -> list:
     if filters.scope:
         where.append(MemoryNode.scope.in_(filters.scope))
     if filters.actor:
-        where.append(MemoryNode.actor_id.in_(filters.actor))
+        where.append(memory_writer().in_(filters.actor))
     if filters.project:
         where += [MemoryNode.scope == "project", MemoryNode.scope_id == filters.project]
     if filters.domain:

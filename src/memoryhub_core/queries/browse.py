@@ -16,6 +16,7 @@ from memoryhub_core.queries.filters import (
     has_children,
     has_contradictions,
     memory_conditions,
+    memory_writer,
 )
 
 
@@ -139,7 +140,7 @@ async def browse_facets(db: AsyncSession, access: Access):
     for name, column, extra in (
         ("scopes", MemoryNode.scope, ()),
         # Memories per person is individual activity: not an admin facet (#667).
-        *((("writers", MemoryNode.owner_id, ()),) if access.sees_individual_activity else ()),
+        *((("writers", memory_writer(), ()),) if access.sees_individual_activity else ()),
         ("projects", MemoryNode.scope_id, (MemoryNode.scope == "project",)),
     ):
         rows = (

@@ -221,6 +221,7 @@ const brief = (id: string, stub: string) => ({
   status: 'active',
   created_at: now,
   updated_at: now,
+  capabilities: { write: true, moderate: false },
 });
 
 const context = (role: Role) => ({

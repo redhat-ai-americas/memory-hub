@@ -79,16 +79,18 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
 
   const params = browseParams(p);
   const key = JSON.stringify(params);
-  const { data, error, loading, reload } = useApi<BrowseResponse>(
-    () => (view === 'table' ? api.browse(params) : Promise.resolve(null as unknown as BrowseResponse)),
+  const { data: loaded, error, loading, reload } = useApi<{ key: string; response: BrowseResponse } | null>(
+    async () => (view === 'table' ? { key, response: await api.browse(params) } : null),
     [key, view],
     standby && view === 'table' ? 5000 : null,
   );
+  // A retained response belongs only to the query that produced it.
+  const data = loaded?.key === key && view === 'table' ? loaded.response : null;
 
   const [query, setQuery] = useState(state.q);
   useEffect(() => setQuery(state.q), [state.q]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  useEffect(() => setSelected(new Set()), [key]);
+  useEffect(() => setSelected(new Set()), [key, error]);
   const [columns, setColumns] = useState<Column[]>(() => readCols(isAdmin));
   const [moreWriters, setMoreWriters] = useState(false);
   const [moreDomains, setMoreDomains] = useState(false);
@@ -108,7 +110,7 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
 
   const facets = data?.facets;
   const tabCounts = data?.tab_counts;
-  const items = data?.items ?? [];
+  const items = error ? [] : data?.items ?? [];
   const allSelected = items.length > 0 && items.every((i) => selected.has(i.id));
   const ids = [...selected];
   const selectedItems = items.filter((item) => selected.has(item.id));
@@ -533,7 +535,9 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
               </div>
             )}
 
-            {standby ? (
+            {error ? (
+              <ErrorState error={error} onRetry={reload} />
+            ) : standby ? (
               <Standby
                 compact={false}
                 title="No memories yet"
@@ -552,8 +556,6 @@ const Memories: React.FC<{ route: HashRoute }> = ({ route }) => {
               >
                 Memories appear here, with scope, owner, weight and version, as soon as an agent calls write_memory.
               </Standby>
-            ) : error && !data ? (
-              <ErrorState error={error} onRetry={reload} />
             ) : loading && !data ? (
               <SkTable rows={8} cols={6} />
             ) : items.length === 0 ? (

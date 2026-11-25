@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { BrowseResponse, EntitiesResponse, EntityMergePreview } from '../src/types';
-import { entityId, mockBff, type Role } from './fixtures';
+import type { BrowseResponse, EntitiesResponse, EntityMergePreview, GraphAll, GraphNeighbourhood } from '../src/types';
+import { entityId, memoryId, mockBff, type Role } from './fixtures';
 
 const filters = {
   scope: 'project', actor: 'mchen', project: 'atlas-planner', domain: 'robotics',
@@ -11,6 +11,80 @@ const apiFilters = [
   'scope', 'actor', 'project', 'domain', 'min_weight', 'max_weight',
   'created_from', 'created_to', 'branch_type', 'flag', 'entity',
 ];
+
+test('a failed new filter cannot display or select the previous query results', async ({ page }) => {
+  await mockBff(page, 'user');
+  const pending: Route[] = [];
+  await page.route('**/api/memories/browse?**', async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (params.get('min_weight') === '0.5' && params.get('max_weight') === '0.1') pending.push(route);
+    else await route.fallback();
+  });
+  await page.goto('/#/memories');
+  await expect(page.getByRole('table')).toBeVisible();
+  await page.evaluate(() => { window.location.hash = '/memories?minw=0.5&maxw=0.1'; });
+  await expect.poll(() => pending.length).toBe(1);
+  await expect(page.getByRole('table')).toHaveCount(0);
+  await pending[0].fulfill({ status: 422, json: { detail: 'Invalid weight range' } });
+  await expect(page.getByText('Invalid weight range', { exact: true })).toBeVisible();
+  await expect(page.getByRole('table')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add relationship', exact: true })).toHaveCount(0);
+
+  await page.evaluate(() => { window.location.hash = '/memories'; });
+  await expect(page.getByRole('table')).toBeVisible();
+  await expect(page.getByText('Invalid weight range', { exact: true })).toHaveCount(0);
+});
+
+test('graph Reset restores current versions and keeps browse filters', async ({ page }) => {
+  await mockBff(page, 'user');
+  await page.goto('/#/memories?view=graph&tab=all&depth=3&scope=project&minw=0.2');
+  const settings = page.getByRole('complementary', { name: 'Graph settings' });
+  const request = page.waitForRequest((r) => {
+    const url = new URL(r.url());
+    return url.pathname === '/api/graph/all' && url.searchParams.get('tab') === 'current';
+  });
+  await settings.getByRole('button', { name: 'Reset', exact: true }).click();
+  const reset = new URL((await request).url()).searchParams;
+  expect(reset.get('tab')).toBe('current');
+  expect(reset.get('scope')).toBe('project');
+  expect(reset.get('min_weight')).toBe('0.2');
+  const params = new URLSearchParams(new URL(page.url()).hash.split('?')[1]);
+  expect(params.get('tab')).toBe('current');
+  expect(params.has('depth')).toBe(false);
+});
+
+for (const role of ['user', 'admin'] satisfies Role[]) {
+  for (const writable of [false, true]) {
+    for (const focused of [false, true]) {
+      test(`${role}: ${focused ? 'focused' : 'all'} graph relationship action follows write=${writable}`, async ({ page }) => {
+        await mockBff(page, role, (key, payload) => {
+          const capabilities = { write: writable, moderate: false };
+          if (key === 'GET /api/graph/all') {
+            const graph = payload as GraphAll;
+            return { ...graph, nodes: graph.nodes.map((node) => ({ ...node, capabilities })) };
+          }
+          if (key === 'GET /api/graph/neighbourhood') {
+            const graph = payload as GraphNeighbourhood;
+            return { ...graph, focus: { ...graph.focus, capabilities },
+              nodes: graph.nodes.map((node) => ({ ...node, capabilities })) };
+          }
+          return payload;
+        });
+        const focus = focused ? `&gfocus=memory&focus=${memoryId}` : '';
+        await page.goto(`/#/memories?view=graph&sel=${memoryId}${focus}`);
+        const panel = page.getByRole('complementary', { name: 'Selected memory' });
+        await expect(panel.getByRole('link', { name: 'Open memory', exact: true })).toBeVisible();
+        const action = panel.getByRole('button', { name: 'Relationship', exact: true });
+        if (writable) {
+          await action.click();
+          await expect(page.getByRole('dialog', { name: 'Add relationship' })).toBeVisible();
+        } else {
+          await expect(action).toHaveCount(0);
+        }
+      });
+    }
+  }
+}
 
 for (const role of ['user', 'admin'] satisfies Role[]) {
   for (const empty of [false, true]) {

@@ -46,6 +46,7 @@ def _brief(node: MemoryNode, access: Access) -> dict:
         "is_current": node.is_current, "status": node.status,
         "created_at": node.created_at, "updated_at": node.updated_at,
         "redacted": hidden,
+        "capabilities": {"write": access.can_write(node), "moderate": access.can_moderate(node)},
     }
 
 

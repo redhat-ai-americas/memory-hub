@@ -167,6 +167,9 @@ Dashboard UI (React frontend + FastAPI backend). Lives in
   preserving personal-data and individual-activity privacy (#710, #738).
 - Fixed stale entity merge previews, complete filter reset and whole-chain
   delete capabilities. Added User/Admin browser regression coverage (#738).
+- Browse errors replace stale results, writer filters use the actual author,
+  graph actions follow per-memory capabilities, and graph reset restores
+  current versions (#738).
 - Deployment helpers use an explicit OpenShift context (default `mcp-rhoai`)
   and verify Route TLS with the ingress CA or `MEMORYHUB_ROUTE_CA_FILE` (#738).
 
