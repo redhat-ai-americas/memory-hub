@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.audit import record_event as record_event_stub
 
 from memoryhub_core.services.audit import record_event as record_event_db
+from memoryhub_core.services.audit import stage_event
 
 
 async def record_audit_event(
@@ -68,5 +69,44 @@ async def record_audit_event(
         owner_id=owner_id,
         memory_id=str(memory_id) if memory_id else None,
         decision=decision,
+        metadata=metadata,
+    )
+
+
+def stage_required_audit_event(
+    session,
+    *,
+    event_type: str,
+    actor_id: str,
+    driver_id: str,
+    scope: str,
+    owner_id: str,
+    memory_id: uuid.UUID | str | None,
+    tenant_id: str,
+    metadata: dict | None = None,
+) -> None:
+    """Stage a required audit event in the caller's transaction.
+
+    Unlike ``record_audit_event``, persistence failures are not swallowed. The
+    caller must roll back the associated mutation when this raises.
+    """
+    stage_event(
+        session,
+        actor_id=actor_id,
+        tenant_id=tenant_id,
+        event_type=event_type,
+        scope=scope,
+        owner_id=owner_id,
+        memory_id=memory_id,
+        metadata=metadata,
+    )
+    record_event_stub(
+        event_type=event_type,
+        actor_id=actor_id,
+        driver_id=driver_id,
+        scope=scope,
+        owner_id=owner_id,
+        memory_id=str(memory_id) if memory_id else None,
+        decision="allowed",
         metadata=metadata,
     )

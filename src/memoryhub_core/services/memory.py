@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import Integer, and_, func, or_, select, update
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from memoryhub_core.config import AppSettings
 from memoryhub_core.models.contradiction import ContradictionReport
@@ -2176,6 +2177,63 @@ VALID_RESOLUTION_ACTIONS = frozenset({
 })
 
 
+async def review_contradiction(
+    contradiction_id: uuid.UUID,
+    session: AsyncSession,
+    *,
+    resolved: bool,
+    resolution_action: str | None = None,
+    actor_id: str | None = None,
+    tenant_id: str | None = None,
+    commit: bool = True,
+) -> ContradictionReport:
+    """Apply a contradiction review transition in the caller's transaction.
+
+    ``commit=False`` is used by transports that need to stage an audit event
+    alongside the mutation.  The service always flushes the transition, so
+    domain validation and database constraints run before the caller commits.
+    The target memory is eagerly loaded for callers that need audit context;
+    transport-specific authorization remains outside this service.
+    """
+    if resolved and resolution_action is not None and resolution_action not in VALID_RESOLUTION_ACTIONS:
+        raise ValueError(
+            f"Invalid resolution_action '{resolution_action}'. "
+            f"Must be one of: {', '.join(sorted(VALID_RESOLUTION_ACTIONS))}"
+        )
+    if not resolved and resolution_action is not None:
+        raise ValueError("resolution_action is only valid when resolving a contradiction")
+
+    stmt = (
+        select(ContradictionReport)
+        .options(selectinload(ContradictionReport.memory))
+        .where(ContradictionReport.id == contradiction_id)
+        .with_for_update()
+    )
+    if tenant_id is not None:
+        stmt = stmt.join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id).where(
+            ContradictionReport.tenant_id == tenant_id,
+            MemoryNode.tenant_id == tenant_id,
+        )
+    report = (await session.execute(stmt)).scalar_one_or_none()
+    if report is None:
+        raise ContradictionNotFoundError(contradiction_id)
+
+    if report.resolved == resolved:
+        state = "resolved" if resolved else "unresolved"
+        raise ValueError(f"Contradiction {contradiction_id} is already {state}")
+    if resolved and actor_id is not None and report.reporter == actor_id:
+        raise ValueError("Cannot resolve one's own contradiction report")
+
+    report.resolved = resolved
+    report.resolved_at = datetime.now(UTC) if resolved else None
+    report.resolution_action = resolution_action if resolved else None
+    report.resolved_by = actor_id if resolved else None
+    await session.flush()
+    if commit:
+        await session.commit()
+    return report
+
+
 async def resolve_contradiction(
     contradiction_id: uuid.UUID,
     session: AsyncSession,
@@ -2183,6 +2241,7 @@ async def resolve_contradiction(
     resolution_action: str | None = None,
     actor_id: str | None = None,
     tenant_id: str | None = None,
+    commit: bool = True,
 ) -> ContradictionReport:
     """Mark a contradiction report as resolved with an optional disposition.
 
@@ -2197,36 +2256,15 @@ async def resolve_contradiction(
     if the ID doesn't exist, or ValueError if already resolved or if
     resolution_action is invalid.
     """
-    if resolution_action is not None and resolution_action not in VALID_RESOLUTION_ACTIONS:
-        raise ValueError(
-            f"Invalid resolution_action '{resolution_action}'. "
-            f"Must be one of: {', '.join(sorted(VALID_RESOLUTION_ACTIONS))}"
-        )
-
-    stmt = select(ContradictionReport).where(ContradictionReport.id == contradiction_id)
-    if tenant_id is not None:
-        stmt = stmt.join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id).where(
-            ContradictionReport.tenant_id == tenant_id,
-            MemoryNode.tenant_id == tenant_id,
-        )
-    result = await session.execute(stmt)
-    report = result.scalar_one_or_none()
-
-    if report is None:
-        raise ContradictionNotFoundError(contradiction_id)
-
-    if report.resolved:
-        raise ValueError(f"Contradiction {contradiction_id} is already resolved")
-    if actor_id is not None and report.reporter == actor_id:
-        raise ValueError("Cannot resolve one's own contradiction report")
-
-    report.resolved = True
-    report.resolved_at = datetime.now(UTC)
-    report.resolution_action = resolution_action
-    report.resolved_by = actor_id
-
-    await session.commit()
-    return report
+    return await review_contradiction(
+        contradiction_id,
+        session,
+        resolved=True,
+        resolution_action=resolution_action,
+        actor_id=actor_id,
+        tenant_id=tenant_id,
+        commit=commit,
+    )
 
 
 # -- Internal helpers --

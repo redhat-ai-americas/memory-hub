@@ -18,8 +18,8 @@ import csv
 import io
 import json
 import os
+import shutil
 import subprocess
-import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -79,7 +79,9 @@ def database():
         pytest.skip("Integration PostgreSQL (localhost:15433) is not running")
     env = {**os.environ, "MEMORYHUB_DB_PORT": os.environ.get("MEMORYHUB_DB_PORT", "15433"),
            "MEMORYHUB_DB_PASSWORD": os.environ.get("MEMORYHUB_DB_PASSWORD", "memoryhub-test")}
-    migrated = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=REPO, env=env,
+    alembic = shutil.which("alembic")
+    assert alembic, "alembic executable is required for PostgreSQL integration tests"
+    migrated = subprocess.run([alembic, "upgrade", "head"], cwd=REPO, env=env,
                               capture_output=True, text=True)
     assert migrated.returncode == 0, migrated.stderr
     yield engine
@@ -600,6 +602,79 @@ async def test_report_capabilities_match_mutations_with_redacted_authors(env):
         assert mutation.status_code == (200 if allowed else 403), mutation.text
         if allowed:
             assert mutation.json()["can_resolve"] is True
+
+
+async def test_contradiction_mutation_and_audit_are_atomic(env):
+    memory = await env["seed"]("Contradiction audit atomicity")
+    async with env["sessions"]() as db:
+        resolved_report = ContradictionReport(
+            memory_id=memory.id,
+            observed_behavior="The operator used Docker",
+            confidence=0.9,
+            reporter="carol",
+            tenant_id=TENANT,
+        )
+        failed_report = ContradictionReport(
+            memory_id=memory.id,
+            observed_behavior="The operator used another image",
+            confidence=0.8,
+            reporter="carol",
+            tenant_id=TENANT,
+        )
+        db.add_all([resolved_report, failed_report])
+        await db.commit()
+
+    env["act_as"]("admin", "admin")
+    http = env["http"]
+    response = await http.patch(f"/api/contradictions/{resolved_report.id}", json={"resolved": True})
+    assert response.status_code == 200, response.text
+
+    async with env["sessions"]() as db:
+        persisted = await db.get(ContradictionReport, resolved_report.id)
+        audit = (await db.execute(select(AuditLog).where(
+            AuditLog.memory_id == memory.id,
+            AuditLog.event_type == "memory.contradiction_resolved",
+        ))).scalars().all()
+        assert persisted.resolved is True
+        assert len(audit) == 1
+
+    with patch("src.human_adapters.stage_event", side_effect=RuntimeError("audit insert failed")):
+        with pytest.raises(RuntimeError, match="audit insert failed"):
+            await http.patch(f"/api/contradictions/{failed_report.id}", json={"resolved": True})
+
+    async with env["sessions"]() as db:
+        persisted = await db.get(ContradictionReport, failed_report.id)
+        audit = (await db.execute(select(AuditLog).where(
+            AuditLog.memory_id == memory.id,
+            AuditLog.event_type == "memory.contradiction_resolved",
+        ))).scalars().all()
+        assert persisted.resolved is False
+        assert all(row.event_metadata.get("report_id") != str(failed_report.id) for row in audit)
+
+
+async def test_http_contradiction_review_rejects_soft_deleted_memory(env):
+    memory = await env["seed"]("Deleted contradiction target")
+    async with env["sessions"]() as db:
+        report = ContradictionReport(
+            memory_id=memory.id,
+            observed_behavior="The operator used another image",
+            confidence=0.8,
+            reporter="carol",
+            tenant_id=TENANT,
+        )
+        db.add(report)
+        target = await db.get(MemoryNode, memory.id)
+        target.deleted_at = datetime.now(UTC)
+        await db.commit()
+        report_id = report.id
+
+    env["act_as"]("admin", "admin")
+    response = await env["http"].patch(f"/api/contradictions/{report_id}", json={"resolved": True})
+    assert response.status_code == 404, response.text
+
+    async with env["sessions"]() as db:
+        persisted = await db.get(ContradictionReport, report_id)
+        assert persisted.resolved is False
 
 
 async def test_parent_versioning_skips_retired_and_deleted_branches(env):

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
+from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.memory import MemoryRelationship
 
 from memoryhub_core.models.schemas import (
@@ -26,6 +27,7 @@ from memoryhub_core.services.memory import (
     node_to_read,
     report_contradiction,
     resolve_contradiction,
+    review_contradiction,
 )
 from memoryhub_core.services.memory import (
     count_search_matches as _svc_count_search_matches,
@@ -870,6 +872,37 @@ async def test_resolve_contradiction_already_resolved(async_session, embedding_s
 
     with pytest.raises(ValueError, match="already resolved"):
         await resolve_contradiction(report.id, async_session)
+
+
+async def test_review_contradiction_reopens_without_committing(async_session, embedding_service):
+    node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
+    await report_contradiction(
+        node.id, "user ran docker build", 0.8, "test-agent", async_session,
+    )
+
+    report = (await async_session.execute(
+        select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
+    )).scalar_one()
+    report_id = report.id
+    await resolve_contradiction(report_id, async_session)
+
+    reopened = await review_contradiction(
+        report_id,
+        async_session,
+        resolved=False,
+        actor_id="reviewer",
+        tenant_id="default",
+        commit=False,
+    )
+    assert reopened.resolved is False
+    assert reopened.resolved_at is None
+    assert reopened.resolution_action is None
+    await async_session.rollback()
+
+    persisted = (await async_session.execute(
+        select(ContradictionReport).where(ContradictionReport.id == report_id)
+    )).scalar_one()
+    assert persisted.resolved is True
 
 
 # -- search_memories --

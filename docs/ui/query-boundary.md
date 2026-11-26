@@ -35,6 +35,26 @@ flowchart LR
   its own database engine. The Core session factory supplies the common
   connection/session configuration.
 
+### Ownership rules
+
+The boundary is defined by responsibility, not by a blanket ban on
+SQLAlchemy in one directory:
+
+- Query modules own reusable reads, filters, joins, CTEs, tenant predicates,
+  visibility predicates, pagination and sorting helpers where applicable.
+- Core services own business workflows, domain invariants and complex
+  transactional commands. A service may use SQLAlchemy when the persistence
+  is specific to that command and does not duplicate an existing shared
+  query operation.
+- Every shared operation has one owner. HTTP and MCP use that same Core
+  operation when they promise identical behavior.
+- Transport adapters may pass authorization context or policy callbacks, but
+  Core services retain domain invariants such as valid state transitions,
+  tenant consistency and mutation preconditions.
+- Exceptions to shared query or predicate helpers must be explicit and
+  justified; helpers must not be applied mechanically where their semantics
+  do not fit.
+
 The `src.authorization.Principal` and `Access` imports remain available to
 the BFF. Its `Access` subclass only maps Core policy denials to HTTP errors;
 the replacement role resolver in #744 can keep this interface.
@@ -86,6 +106,21 @@ query and row policy. A mutation additionally rechecks live project
 membership under lock. Missing or cross-tenant source relationships are
 rejected instead of being silently removed from the affected set.
 
+### Transaction semantics
+
+Core mutations flush their changes and leave commit/rollback to the owning
+transport or application transaction boundary when the operation is composed
+with other writes. They must not perform a hidden commit in that mode. A
+required audit event is staged in the same transaction as the mutation:
+
+1. the Core operation validates invariants and flushes the mutation;
+2. the transport stages the required audit event;
+3. one commit persists both writes;
+4. an audit failure or commit failure rolls back the mutation as well.
+
+Regression tests cover both the successful atomic commit and the failure path
+where the audit write causes the mutation to be rolled back.
+
 ## Deployment context and Route trust
 
 `human-access.sh` defaults to `mcp-rhoai`; `MEMORYHUB_CONTEXT` or `--context`
@@ -123,5 +158,6 @@ files are removed when the health check exits.
   trust selection, failures and temporary-file cleanup without cluster writes.
 - Core query changes trigger the MCP suite as well as the BFF tests in CI.
 - Cross-path tests cover curation vetoes, retained deletion timestamps,
-  invalid relationships, rollback and batch project-query counts. MCP tests
-  verify the public error contract and suppress notifications on failure.
+  invalid relationships, domain-invalid transitions, audit atomicity and
+  rollback, and batch project-query counts. MCP tests verify the public error
+  contract and suppress notifications on failure.

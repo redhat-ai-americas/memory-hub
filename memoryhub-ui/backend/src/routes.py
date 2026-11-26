@@ -2,7 +2,6 @@
 
 import logging
 import uuid
-from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import quote
 
@@ -17,11 +16,14 @@ from memoryhub_core.queries import identities as identity_queries
 from memoryhub_core.queries import memories as memory_queries
 from memoryhub_core.queries import summaries as summary_queries
 from memoryhub_core.services.curation.rules import delete_current_rule, insert_rule, revise_rule
-from memoryhub_core.services.exceptions import MemoryNotFoundError
+from memoryhub_core.services.exceptions import ContradictionNotFoundError, MemoryNotFoundError
 from memoryhub_core.services.memory import (
     get_memory_history as get_memory_history_service,
 )
-from memoryhub_core.services.memory import stage_memory_delete
+from memoryhub_core.services.memory import (
+    review_contradiction,
+    stage_memory_delete,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import AccessDep, Principal, get_principal
@@ -1078,15 +1080,30 @@ async def update_contradiction(
         raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
     if not access.can_resolve_report(memory, report.reporter):
         raise HTTPException(status_code=403, detail="Self review forbidden")
-    report.resolved = body.resolved
-    report.resolved_at = datetime.now(UTC) if body.resolved else None
-    report.resolved_by = access.principal.username if body.resolved else None
-    _record_human_audit(
-        db, access,
-        "memory.contradiction_resolved" if body.resolved else "memory.contradiction_reopened",
-        memory.scope, memory.owner_id, memory.id,
-        {"report_id": str(report.id), "resolved": body.resolved},
-    )
-    await db.commit()
+    try:
+        report = await review_contradiction(
+            parsed_id,
+            db,
+            resolved=body.resolved,
+            actor_id=access.principal.username,
+            tenant_id=tenant_id,
+            commit=False,
+        )
+        _record_human_audit(
+            db, access,
+            "memory.contradiction_resolved" if body.resolved else "memory.contradiction_reopened",
+            memory.scope, memory.owner_id, memory.id,
+            {"report_id": str(report.id), "resolved": body.resolved},
+        )
+        await db.commit()
+    except ContradictionNotFoundError:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found") from None
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        await db.rollback()
+        raise
     await db.refresh(report)
     return _contradiction_to_response(report, access, memory)

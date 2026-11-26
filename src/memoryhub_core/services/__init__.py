@@ -15,6 +15,7 @@ from memoryhub_core.services.memory import (
     read_memory,
     report_contradiction,
     resolve_contradiction,
+    review_contradiction,
     search_memories,
     update_memory,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "ContradictionNotFoundError",
     "VALID_RESOLUTION_ACTIONS",
     "report_contradiction",
+    "review_contradiction",
     "resolve_contradiction",
     "search_memories",
     "update_memory",
