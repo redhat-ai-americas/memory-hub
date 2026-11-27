@@ -30,6 +30,7 @@ from memoryhub.exceptions import (
 from rich.table import Table
 
 from memoryhub_cli.admin import admin_app
+from memoryhub_cli.activity import format_hook_output, process_activity_hook
 from memoryhub_cli.config import (
     get_api_key,
     get_connection_params,
@@ -1104,7 +1105,7 @@ def config_init(
     ),
 ):
     """Walk through project setup and write `.memoryhub.yaml` + the
-    generated `.claude/rules/memoryhub-loading.md` rule file."""
+    generated agent instructions and host hook configuration."""
     project_dir = project_dir.resolve()
     console.print(f"[bold]Configuring MemoryHub for[/bold] {project_dir}\n")  # noqa: T201
 
@@ -1194,6 +1195,12 @@ def config_init(
             "rule_path": str(result.rule_path) if result.rule_path else None,
             "hook_path": str(result.hook_path) if result.hook_path else None,
             "settings_path": str(result.settings_path) if result.settings_path else None,
+            "activity_hook_path": (
+                str(result.activity_hook_path) if result.activity_hook_path else None
+            ),
+            "codex_hooks_path": (
+                str(result.codex_hooks_path) if result.codex_hooks_path else None
+            ),
             "legacy_backup": str(result.legacy_backup) if result.legacy_backup else None,
             "instruction_format": instruction_format,
         })
@@ -1204,6 +1211,10 @@ def config_init(
     # For non-claude-code formats, print instructions to stdout.
     if instruction_format != "claude-code":
         console.print(f"\n[green]Wrote {result.yaml_path}[/green]")  # noqa: T201
+        if result.activity_hook_path:
+            console.print(f"[green]Wrote {result.activity_hook_path}[/green]")  # noqa: T201
+        if result.codex_hooks_path:
+            console.print(f"[green]Updated {result.codex_hooks_path}[/green]")  # noqa: T201
         console.print(  # noqa: T201
             f"\n[bold]Instructions ({instruction_format}):[/bold]\n"
         )
@@ -1215,6 +1226,10 @@ def config_init(
             console.print(f"[green]Wrote {result.hook_path}[/green]")  # noqa: T201
         if result.settings_path:
             console.print(f"[green]Updated {result.settings_path}[/green]")  # noqa: T201
+        if result.activity_hook_path:
+            console.print(f"[green]Wrote {result.activity_hook_path}[/green]")  # noqa: T201
+        if result.codex_hooks_path:
+            console.print(f"[green]Updated {result.codex_hooks_path}[/green]")  # noqa: T201
         if result.legacy_backup is not None:
             console.print(  # noqa: T201
                 f"[yellow]Backed up legacy rule to {result.legacy_backup}.[/yellow]\n"
@@ -3234,6 +3249,48 @@ async def _run_dream(model, url, api_key, thread_id, dry_run, output):
         )
 
 
+# ── Activity hooks ───────────────────────────────────────────────────────────
+
+
+@app.command("activity-hook", hidden=True)
+def activity_hook(
+    event: str = typer.Option(
+        ...,
+        "--event",
+        help="Internal host hook event name.",
+    ),
+):
+    """Record host hook activity and emit concise context for the agent."""
+    if sys.stdin.isatty():
+        raise typer.Exit(0)
+    try:
+        payload = json.loads(sys.stdin.read())
+    except (json.JSONDecodeError, ValueError):
+        raise typer.Exit(0) from None
+    if not isinstance(payload, dict):
+        raise typer.Exit(0)
+
+    try:
+        activity_db = os.environ.get("MEMORYHUB_ACTIVITY_DB")
+        context = process_activity_hook(
+            event,
+            payload,
+            database_path=Path(activity_db) if activity_db else None,
+        )
+    except Exception as exc:
+        _log.debug("activity hook skipped: %s", exc)
+        raise typer.Exit(0) from None
+    if context:
+        event_name = str(payload.get("hook_event_name") or "")
+        if not event_name:
+            event_name = {
+                "post-tool-use": "PostToolUse",
+                "user-prompt-submit": "UserPromptSubmit",
+                "session-start": "SessionStart",
+            }.get(event, "UserPromptSubmit")
+        print(format_hook_output(event_name, context))  # noqa: T201
+
+
 # ── Turn-level hooks (#313) ──────────────────────────────────────────────────
 
 
@@ -3264,6 +3321,7 @@ def rebias(
 
     Exits 0 on all failures for graceful degradation.
     """
+    hook_session_id: str | None = None
     if message is None:
         if sys.stdin.isatty():
             raise typer.Exit(0)
@@ -3273,7 +3331,12 @@ def rebias(
         # Try parsing as JSON (Claude Code hook payload has a 'prompt' field)
         try:
             payload = json.loads(raw)
-            message = payload.get("prompt", "") if isinstance(payload, dict) else raw
+            if isinstance(payload, dict):
+                message = payload.get("prompt", "")
+                candidate_id = payload.get("session_id")
+                hook_session_id = candidate_id if isinstance(candidate_id, str) else None
+            else:
+                message = raw
         except (json.JSONDecodeError, ValueError):
             message = raw
 
@@ -3296,6 +3359,12 @@ def rebias(
     except (SystemExit, Exception) as exc:
         print(f"memoryhub rebias: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise typer.Exit(0)
+
+    if hook_session_id:
+        process_activity_hook(
+            "cli-search",
+            {"session_id": hook_session_id, "cwd": os.getcwd()},
+        )
 
     if not result or not result.results:
         raise typer.Exit(0)
@@ -3396,6 +3465,16 @@ def extract(
     except (SystemExit, Exception) as exc:
         print(f"memoryhub extract: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise typer.Exit(0)
+
+    if session_id and result.written:
+        process_activity_hook(
+            "cli-write",
+            {
+                "session_id": session_id,
+                "cwd": os.getcwd(),
+                "count": len(result.written),
+            },
+        )
 
     if output == OutputFormat.json:
         json_success({

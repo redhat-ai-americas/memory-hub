@@ -292,11 +292,11 @@ class TestExtract:
         assert "quiet" in result.output
 
 
-# ── merge_settings_hooks turn-level entries ──────────────────────────────────
+# ── activity hook settings and legacy hook migration ─────────────────────────
 
 
-class TestMergeSettingsHooksTurnLevel:
-    def test_creates_user_prompt_submit_entry(self, tmp_path):
+class TestMergeSettingsHooksActivity:
+    def test_user_prompt_submit_has_activity_hook_only(self, tmp_path):
         from memoryhub_cli.project_config import merge_settings_hooks
 
         settings_path = merge_settings_hooks(tmp_path)
@@ -305,22 +305,13 @@ class TestMergeSettingsHooksTurnLevel:
         assert "UserPromptSubmit" in data["hooks"]
         entries = data["hooks"]["UserPromptSubmit"]
         assert len(entries) == 1
-        assert "rebias-memories.sh" in entries[0]["hooks"][0]["command"]
-        assert entries[0]["hooks"][0]["timeout"] == 3
+        hook = entries[0]["hooks"][0]
+        assert "activity-hook.sh" in hook["command"]
+        assert hook["command"].rstrip().endswith("user-prompt-submit")
+        assert hook["timeout"] == 2
+        assert "Stop" not in data["hooks"]
 
-    def test_creates_stop_entry(self, tmp_path):
-        from memoryhub_cli.project_config import merge_settings_hooks
-
-        settings_path = merge_settings_hooks(tmp_path)
-        data = json.loads(settings_path.read_text())
-
-        assert "Stop" in data["hooks"]
-        entries = data["hooks"]["Stop"]
-        assert len(entries) == 1
-        assert "extract-memories.sh" in entries[0]["hooks"][0]["command"]
-        assert entries[0]["hooks"][0]["timeout"] == 5
-
-    def test_turn_level_hooks_idempotent(self, tmp_path):
+    def test_activity_hooks_are_idempotent(self, tmp_path):
         from memoryhub_cli.project_config import merge_settings_hooks
 
         merge_settings_hooks(tmp_path)
@@ -330,6 +321,54 @@ class TestMergeSettingsHooksTurnLevel:
         second = (tmp_path / ".claude" / "settings.json").read_text()
 
         assert first == second
+
+    def test_removes_legacy_auto_hooks_and_preserves_other_hooks(self, tmp_path):
+        from memoryhub_cli.project_config import merge_settings_hooks
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir(parents=True)
+        settings_path = settings_dir / "settings.json"
+        settings_path.write_text(json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "matcher": "",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/rebias-memories.sh",
+                    }, {
+                        "type": "command",
+                        "command": "user-custom-hook.sh",
+                    }],
+                }],
+                "Stop": [{
+                    "matcher": "lint",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "lint.sh",
+                    }, {
+                        "type": "command",
+                        "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/extract-memories.sh",
+                    }],
+                }],
+            },
+        }))
+
+        merge_settings_hooks(tmp_path)
+        data = json.loads(settings_path.read_text())
+        prompt_commands = [
+            hook["command"]
+            for entry in data["hooks"]["UserPromptSubmit"]
+            for hook in entry["hooks"]
+        ]
+        assert "user-custom-hook.sh" in prompt_commands
+        assert not any("rebias-memories.sh" in command for command in prompt_commands)
+
+        stop_commands = [
+            hook["command"]
+            for entry in data["hooks"].get("Stop", [])
+            for hook in entry["hooks"]
+        ]
+        assert stop_commands == ["lint.sh"]
 
     def test_preserves_existing_stop_hooks(self, tmp_path):
         from memoryhub_cli.project_config import merge_settings_hooks
@@ -346,7 +385,6 @@ class TestMergeSettingsHooksTurnLevel:
         data = json.loads(settings_path.read_text())
 
         stop_entries = data["hooks"]["Stop"]
-        assert len(stop_entries) == 2
+        assert len(stop_entries) == 1
         commands = [e["hooks"][0]["command"] for e in stop_entries]
         assert "lint.sh" in commands
-        assert any("extract-memories.sh" in c for c in commands)

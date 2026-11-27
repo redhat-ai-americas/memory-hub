@@ -668,14 +668,20 @@ def test_merge_settings_hooks_creates_settings_json(tmp_path: Path):
 
     data = json.loads(settings_path.read_text())
     entries = data["hooks"]["SessionStart"]
-    matchers = [e["matcher"] for e in entries]
+    matchers = [e["matcher"] for e in entries if "matcher" in e]
     assert "startup" in matchers
     assert "compact" in matchers
     assert "clear" in matchers
 
-    for entry in entries:
+    load_entries = [entry for entry in entries if "matcher" in entry]
+    assert len(load_entries) == 3
+    for entry in load_entries:
         assert HOOK_SCRIPT_NAME in entry["hooks"][0]["command"]
         assert entry["hooks"][0]["timeout"] == 5
+    activity_entry = next(entry for entry in entries if "matcher" not in entry)
+    activity_command = activity_entry["hooks"][0]["command"]
+    assert "activity-hook.sh" in activity_command
+    assert activity_command.rstrip().endswith("session-start")
 
 
 def test_merge_settings_hooks_is_idempotent(tmp_path: Path):
@@ -704,7 +710,7 @@ def test_merge_settings_hooks_preserves_existing_keys(tmp_path: Path):
 
     assert data["permissions"] == {"allow": ["Read"]}
     assert len(data["hooks"]["PreToolUse"]) == 1
-    assert len(data["hooks"]["SessionStart"]) == 3
+    assert len([entry for entry in data["hooks"]["SessionStart"] if "matcher" in entry]) == 3
 
 
 def test_write_init_files_generates_hooks_by_default(tmp_path: Path):
@@ -715,6 +721,12 @@ def test_write_init_files_generates_hooks_by_default(tmp_path: Path):
     assert result.hook_path.is_file()
     assert result.settings_path is not None
     assert result.settings_path.is_file()
+    assert not (tmp_path / ".claude" / "hooks" / "rebias-memories.sh").exists()
+    assert not (tmp_path / ".claude" / "hooks" / "extract-memories.sh").exists()
+    assert result.activity_hook_path is not None
+    assert result.activity_hook_path.is_file()
+    assert result.codex_hooks_path is not None
+    assert result.codex_hooks_path.is_file()
 
 
 def test_write_init_files_skips_hooks_when_disabled(tmp_path: Path):
@@ -724,6 +736,7 @@ def test_write_init_files_skips_hooks_when_disabled(tmp_path: Path):
     assert result.hook_path is None
     assert result.settings_path is None
     assert not (tmp_path / ".claude" / "hooks" / HOOK_SCRIPT_NAME).exists()
+    assert not (tmp_path / ".codex" / "hooks.json").exists()
 
 
 def test_config_init_generates_hooks_end_to_end(tmp_path: Path):
@@ -743,8 +756,14 @@ def test_config_init_generates_hooks_end_to_end(tmp_path: Path):
 
     hook_path = tmp_path / ".claude" / "hooks" / HOOK_SCRIPT_NAME
     settings_path = tmp_path / ".claude" / "settings.json"
+    activity_hook_path = tmp_path / ".memoryhub" / "hooks" / "activity-hook.sh"
+    codex_hooks_path = tmp_path / ".codex" / "hooks.json"
     assert hook_path.is_file()
+    assert not (tmp_path / ".claude" / "hooks" / "rebias-memories.sh").exists()
+    assert not (tmp_path / ".claude" / "hooks" / "extract-memories.sh").exists()
     assert settings_path.is_file()
+    assert activity_hook_path.is_file()
+    assert codex_hooks_path.is_file()
     assert "Wrote" in result.output
 
 
@@ -757,6 +776,7 @@ def test_render_instructions_claude_code_matches_render_rule_file():
 
     cfg = build_project_config(_choices(pattern="lazy_with_rebias"))
     assert render_instructions(cfg, "claude-code") == render_rule_file(cfg)
+    assert '"I saved 2 memories."' in render_rule_file(cfg)
 
 
 def test_render_instructions_raw_no_claude_references():
@@ -792,6 +812,7 @@ def test_render_instructions_agents_md_has_section_header():
     assert "## MemoryHub" in out
     assert "Subsystem change" in out
     assert "memoryhub-context" not in out
+    assert '"I saved 2 memories."' in out
 
 
 def test_render_instructions_ogx_includes_run_yaml_snippet():
@@ -823,6 +844,74 @@ def test_write_init_files_non_claude_format_skips_rule_and_hooks(tmp_path: Path)
     assert result.hook_path is None
     assert result.settings_path is None
     assert not (tmp_path / ".claude" / "rules").exists()
+
+
+def test_agents_md_format_installs_codex_activity_hooks(tmp_path: Path):
+    cfg = build_project_config(_choices())
+    result = write_init_files(cfg, tmp_path, instruction_format="agents-md")
+
+    assert result.rule_path is None
+    assert result.activity_hook_path == tmp_path / ".memoryhub" / "hooks" / "activity-hook.sh"
+    assert result.codex_hooks_path == tmp_path / ".codex" / "hooks.json"
+    assert result.codex_hooks_path.is_file()
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+def test_merge_codex_hooks_preserves_existing_hooks_and_is_idempotent(tmp_path: Path):
+    import json
+
+    from memoryhub_cli.project_config import merge_codex_hooks
+
+    hooks_path = tmp_path / ".codex" / "hooks.json"
+    hooks_path.parent.mkdir(parents=True)
+    hooks_path.write_text(json.dumps({
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "existing-hook"}],
+            }],
+        },
+    }))
+
+    merge_codex_hooks(tmp_path)
+    first = hooks_path.read_text()
+    merge_codex_hooks(tmp_path)
+    assert hooks_path.read_text() == first
+    data = json.loads(first)
+    assert data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "existing-hook"
+    assert "PostToolUse" in data["hooks"]
+    assert "UserPromptSubmit" in data["hooks"]
+    assert "SessionStart" in data["hooks"]
+    assert "SessionEnd" in data["hooks"]
+    codex_command = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert "git rev-parse --show-toplevel 2>/dev/null || pwd" in codex_command
+
+
+def test_codex_hook_command_resolves_non_git_project_root(tmp_path: Path):
+    import json
+    import subprocess
+
+    from memoryhub_cli.project_config import merge_codex_hooks
+
+    hooks_path = merge_codex_hooks(tmp_path)
+    hook_script = tmp_path / ".memoryhub" / "hooks" / "activity-hook.sh"
+    hook_script.parent.mkdir(parents=True)
+    hook_script.write_text('#!/bin/sh\nprintf "%s" "$1"\n')
+    hook_script.chmod(0o755)
+    data = json.loads(hooks_path.read_text())
+    command = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+
+    result = subprocess.run(
+        command,
+        shell=True,
+        cwd=tmp_path,
+        input="{}",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "session-start"
 
 
 def test_config_init_format_flag_recognized():

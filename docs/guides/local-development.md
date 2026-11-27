@@ -178,17 +178,20 @@ provided by the local Compose stack.
 ## Integration tests
 
 The integration test Compose file remains intentionally ephemeral: it uses
-tmpfs for PostgreSQL and Valkey so test runs do not retain state.
+tmpfs for PostgreSQL, Valkey, and MinIO so test runs do not retain state.
 
 ```bash
-podman compose -f tests/integration/compose.yaml up -d
 make test-integration
-podman compose -f tests/integration/compose.yaml down
 ```
 
-Use `docker compose` instead when Docker is the local container runtime.
-Development uses the persistent root `compose.yaml`; integration tests use a
-separate disposable database.
+`make test-integration` manages the stack and stops it on success or failure.
+Use `podman compose -f tests/integration/compose.yaml up -d --wait` and
+`podman compose -f tests/integration/compose.yaml down` only when managing the
+stack manually for a focused pytest command. Use `docker compose` instead when
+Docker is the local container runtime. Development uses the persistent root
+`compose.yaml`; integration tests use separate disposable services. See the
+[integration test inventory](../../tests/integration/README.md) for coverage
+and system boundaries.
 
 ## Cluster edition
 

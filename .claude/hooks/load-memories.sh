@@ -14,6 +14,10 @@ emit_unavailable_warning() {
   exit 0
 }
 
+# Retain the small host event payload so the activity recorder can associate
+# the automatic startup search with this session. The payload is not stored.
+HOOK_INPUT=$(cat)
+
 # --- Credential resolution ---
 # 1. MEMORYHUB_API_KEY env var (already set)
 # 2. ~/.config/memoryhub/credentials (INI, MEMORYHUB_CONTEXT or [default])
@@ -110,6 +114,7 @@ if MEMORY_OUTPUT=$("$MEMORYHUB_BIN" search \
   if [ -n "$MEMORY_OUTPUT" ]; then
     printf '%s\n' "$MEMORY_OUTPUT"
   fi
+  printf '%s' "$HOOK_INPUT" | "$MEMORYHUB_BIN" activity-hook --event cli-search >/dev/null 2>&1 || true
 else
   SEARCH_STATUS=$?
   if [ "$SEARCH_STATUS" -eq 3 ]; then

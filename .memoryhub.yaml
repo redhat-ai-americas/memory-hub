@@ -8,7 +8,7 @@
 memory_loading:
   mode: focused
   pattern: jit
-  focus_source: auto
+  focus_source: directory
   session_focus_weight: 0.4
   on_topic_shift: rebias
   cross_domain_contradiction_detection: true

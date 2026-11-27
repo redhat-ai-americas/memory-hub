@@ -45,6 +45,49 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PROJECT_DIR}/.memoryhub/hooks/activity-hook.sh\" session-start",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PROJECT_DIR}/.memoryhub/hooks/activity-hook.sh\" post-tool-use",
+            "timeout": 2
+          }
+        ],
+        "matcher": ".*memory.*"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PROJECT_DIR}/.memoryhub/hooks/activity-hook.sh\" user-prompt-submit",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PROJECT_DIR}/.memoryhub/hooks/activity-hook.sh\" session-end",
+            "timeout": 2
+          }
+        ]
       }
     ]
   }

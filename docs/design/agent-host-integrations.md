@@ -137,6 +137,29 @@ context (this is also what happens when the 15s timeout fires).
   fresh transport the first caller's retry is using. Non-auth errors
   propagate without retry.
 
+## Client-side activity visibility (Claude Code and Codex)
+
+Generated MemoryHub instructions tell every host to report confirmed memory
+saves when relevant. They distinguish new saves from updates and exclude
+failed or curation-gated writes. Claude Code and Codex add project-local hooks
+that observe MemoryHub tool calls and the Claude Code startup search. The
+hooks count successful saves, updates, and searches; they do not persist
+prompt text, memory content, or tool arguments.
+
+The hook runner writes counts and timestamps to
+`~/.config/memoryhub/activity/activity.sqlite3`, keyed by hashes of the project path
+and host session ID. `PostToolUse` makes the current count available after a
+MemoryHub call. `UserPromptSubmit` adds the current summary before a response
+and reminds the agent every ten user turns without a successful save or
+update. A successful save or update resets that turn counter.
+
+Neither host can use `SessionEnd` to change an already-completed response.
+That event stores a session snapshot; the next `SessionStart` injects the
+previous snapshot. The most recent write timestamp is the latest successful
+save or update observed on this machine for the project since activity
+tracking was enabled. It is not a server-wide audit query and may not include
+activity from another machine.
+
 ### What opencode expects of a plugin (loading and packaging)
 
 For reviewers unfamiliar with opencode's plugin model:

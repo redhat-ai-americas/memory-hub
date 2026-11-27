@@ -186,9 +186,11 @@ The `--output` / `-o` flag controls output format on most commands:
 
 ## Project configuration
 
-`memoryhub config` generates a project-local `.memoryhub.yaml` and a companion `.claude/rules/memoryhub-loading.md` rule file. Both files are meant to be committed so every contributor's agent inherits the same loading policy.
+`memoryhub config` generates a project-local `.memoryhub.yaml` and agent instructions. The default Claude Code format writes `.claude/rules/memoryhub-loading.md`; `--format agents-md` prints framework-neutral instructions for an `AGENTS.md` file.
 
-`memoryhub config init` is an interactive wizard that asks about session shape, loading pattern, focus source, and retrieval defaults, then writes both files at the project root. If a legacy `.claude/rules/memoryhub-integration.md` already exists, it is backed up to `.bak` before the new rule file is written.
+`memoryhub config init` is an interactive wizard that asks about session shape, loading pattern, focus source, and retrieval defaults. With the default format it also generates the Claude Code startup hook and activity hooks for Claude Code and Codex. The activity hooks count successful saves, updates, and searches, and nudge the agent every 10 user turns without a successful write. If a legacy `.claude/rules/memoryhub-integration.md` already exists, it is backed up to `.bak` before the new rule file is written. The CLI credentials do not configure the host's MCP server connection; connect that separately for agent tool calls.
+
+Activity summaries are added to the agent context before a response through turn-time hooks. `SessionEnd` stores a local summary for the next session's startup hook because both hosts have already finished the response by then. Counts and timestamps are stored in `~/.config/memoryhub/activity/activity.sqlite3`; prompts and memory contents are not stored. The last-write time is the latest successful save or update observed on this machine for the project.
 
 `memoryhub config regenerate` re-renders the rule file from `.memoryhub.yaml` after you hand-edit the YAML. It reads the YAML and rewrites the Markdown rule file only; it does not modify `.memoryhub.yaml`.
 
