@@ -116,6 +116,9 @@ OpenShift; not published as a package.
 
 - **Actionable tool errors (#655)**: MCP tool failures include structured
   `error` and `next_action` fields, plus readable error text for agents.
+- Contradiction resolution now stages its required audit event in the same
+  transaction as the mutation, preserves soft-deleted-memory compatibility,
+  and emits the compatibility log only after commit (#738).
 - **Project membership authorization (#514)**: `list_memory` and `search_memory` verify membership in the resolved tenant before serving an explicit `project_id`, regardless of the project-isolation setting. For requests without an explicit project, when isolation is enabled and membership claims are empty, both tools use tenant-scoped database memberships for retrieval and authorization filters.
 
 - **Procedural graph content type, Phase 1 (#552)**: `write`/`list`/`search` accept `content_type="procedural"`; `relate` accepts `precedes`/`requires`/`alternative_to` edge types (`mentions` remains system-managed). `reconstruct` is unchanged and still scoped to `behavioral` only — procedural graphs are not returned by it. Retrieval/traversal support is #553, not this change.
@@ -170,6 +173,9 @@ Dashboard UI (React frontend + FastAPI backend). Lives in
   preserving personal-data and individual-activity privacy (#710, #738).
 - Fixed stale entity merge previews, complete filter reset and whole-chain
   delete capabilities. Added User/Admin browser regression coverage (#738).
+- HTTP contradiction review now uses the shared Core locked query, keeps the
+  live-memory restriction, and reports typed self-review/state conflicts
+  consistently (#738).
 - Browse errors replace stale results, writer filters use the actual author,
   graph actions follow per-memory capabilities, and graph reset restores
   current versions (#738).

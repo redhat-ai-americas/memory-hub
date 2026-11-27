@@ -19,7 +19,11 @@ from src.core.authz import (
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._audit_helpers import record_audit_event, stage_required_audit_event
+from src.tools._audit_helpers import (
+    emit_required_audit_log,
+    record_audit_event,
+    stage_required_audit_event,
+)
 from src.tools._deps import get_db_session, release_db_session, resolve_driver_id
 
 from memoryhub_core.models.curation import CuratorRule
@@ -467,22 +471,23 @@ async def _handle_resolve_contradiction(
 
     session, gen = await get_db_session()
     try:
-        report = await _review_contradiction(
+        report, target = await _review_contradiction(
             parsed_id,
             session,
             resolved=True,
             resolution_action=resolution_action,
             actor_id=user_id,
             tenant_id=get_tenant_filter(claims),
+            live=False,
             commit=False,
         )
 
-        target = report.memory
+        driver_id = resolve_driver_id(None, claims)
         stage_required_audit_event(
             session,
             event_type="memory.contradiction_resolved",
             actor_id=user_id,
-            driver_id=user_id,
+            driver_id=driver_id,
             scope=target.scope,
             owner_id=target.owner_id,
             memory_id=report.memory_id,
@@ -494,6 +499,22 @@ async def _handle_resolve_contradiction(
             },
         )
         await session.commit()
+        try:
+            emit_required_audit_log(
+                event_type="memory.contradiction_resolved",
+                actor_id=user_id,
+                driver_id=driver_id,
+                scope=target.scope,
+                owner_id=target.owner_id,
+                memory_id=report.memory_id,
+                metadata={
+                    "report_id": str(report.id),
+                    "resolution_action": resolution_action,
+                    "resolution_note": resolution_note,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Committed contradiction audit log could not be emitted", exc_info=True)
 
         return {
             "contradiction_id": str(report.id),

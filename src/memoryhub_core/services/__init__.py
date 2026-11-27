@@ -3,7 +3,9 @@
 from memoryhub_core.services.database import close_db, get_session, init_db
 from memoryhub_core.services.embeddings import EMBEDDING_DIM, EmbeddingService, MockEmbeddingService
 from memoryhub_core.services.exceptions import (
+    ContradictionAlreadyInStateError,
     ContradictionNotFoundError,
+    ContradictionSelfReviewError,
     MemoryAccessDeniedError,
     MemoryNotCurrentError,
     MemoryNotFoundError,
@@ -34,6 +36,8 @@ __all__ = [
     "init_db",
     "read_memory",
     "ContradictionNotFoundError",
+    "ContradictionAlreadyInStateError",
+    "ContradictionSelfReviewError",
     "VALID_RESOLUTION_ACTIONS",
     "report_contradiction",
     "review_contradiction",

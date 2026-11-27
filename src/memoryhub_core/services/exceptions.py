@@ -1,7 +1,9 @@
 """Compatibility exports for the shared Core domain exceptions."""
 
 from memoryhub_core.exceptions import (
+    ContradictionAlreadyInStateError,
     ContradictionNotFoundError,
+    ContradictionSelfReviewError,
     CrossTenantRelationshipError,
     CurationBlockedError,
     EmbeddingContentTooLargeError,
@@ -27,7 +29,9 @@ from memoryhub_core.exceptions import (
 )
 
 __all__ = [
+    "ContradictionAlreadyInStateError",
     "ContradictionNotFoundError",
+    "ContradictionSelfReviewError",
     "CrossTenantRelationshipError",
     "CurationBlockedError",
     "EmbeddingContentTooLargeError",

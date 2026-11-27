@@ -20,7 +20,19 @@ _QUERY_BUILDERS = {
     "update",
 }
 _SESSION_FACTORIES = {"async_sessionmaker", "sessionmaker"}
-_EXECUTION_METHODS = {"execute", "scalars"}
+_BFF_ALLOWED_SESSION_METHODS = {"commit", "rollback", "refresh"}
+_EXECUTION_METHODS = {
+    "add",
+    "add_all",
+    "delete",
+    "execute",
+    "flush",
+    "scalar",
+    "scalars",
+    "stream",
+    "stream_scalars",
+}
+_SESSION_OPERATION_METHODS = _EXECUTION_METHODS | _BFF_ALLOWED_SESSION_METHODS
 _ORM_ROOT_NAMES = {
     "contradiction",
     "entity",
@@ -31,7 +43,20 @@ _ORM_ROOT_NAMES = {
     "report",
     "rule",
 }
-_ORM_RESULT_METHODS = {"first", "get", "one", "one_or_none", "scalar_one", "scalar_one_or_none"}
+_ORM_RESULT_METHODS = {
+    "first",
+    "get",
+    "one",
+    "one_or_none",
+    "scalar",
+    "scalar_one",
+    "scalar_one_or_none",
+    "stream",
+    "stream_scalars",
+}
+_ORM_RESULT_FUNCTION_HINTS = {"entity", "get", "memory", "node", "read", "record", "report", "rule"}
+_ORM_COLLECTION_NAMES = {"entities", "items", "memories", "nodes", "records", "reports", "rows"}
+_NON_SESSION_ROOT_NAMES = {"router", "seen_owners"}
 
 
 def _qualified_name(expression: ast.expr, bindings: dict[str, str]) -> str | None:
@@ -90,6 +115,22 @@ def _collect_bindings(tree: ast.AST) -> dict[str, str]:
     return bindings
 
 
+def _unwrap_await(expression: ast.expr) -> ast.expr:
+    return expression.value if isinstance(expression, ast.Await) else expression
+
+
+def _looks_like_orm_result(expression: ast.expr, orm_names: set[str]) -> bool:
+    expression = _unwrap_await(expression)
+    if not isinstance(expression, ast.Call):
+        return False
+    if isinstance(expression.func, ast.Attribute):
+        return expression.func.attr in _ORM_RESULT_METHODS
+    if isinstance(expression.func, ast.Name):
+        name = expression.func.id.lower()
+        return any(hint in name for hint in _ORM_RESULT_FUNCTION_HINTS)
+    return False
+
+
 def _bff_boundary_violations(tree: ast.AST) -> list[str]:
     """Find persistence construction, execution, or ORM mutation in adapters."""
     bindings = _collect_bindings(tree)
@@ -107,9 +148,14 @@ def _bff_boundary_violations(tree: ast.AST) -> list[str]:
             values = []
             targets = []
 
-        if values and isinstance(values[0], ast.Call):
-            method = values[0].func
+        if values and _looks_like_orm_result(values[0], orm_names):
+            result = _unwrap_await(values[0])
+            method = result.func
             if isinstance(method, ast.Attribute) and method.attr in _ORM_RESULT_METHODS:
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        orm_names.add(target.id)
+            elif isinstance(method, ast.Name):
                 for target in targets:
                     if isinstance(target, ast.Name):
                         orm_names.add(target.id)
@@ -128,11 +174,29 @@ def _bff_boundary_violations(tree: ast.AST) -> list[str]:
             )
             if (short_name in _SESSION_FACTORIES) or sqlalchemy_builder or unqualified_builder:
                 violations.append(f"database construction/query builder: {short_name}")
-            if isinstance(node.func, ast.Attribute) and node.func.attr in _EXECUTION_METHODS:
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in _SESSION_OPERATION_METHODS
+                and node.func.attr not in _BFF_ALLOWED_SESSION_METHODS
+                and _root_name(node.func.value) not in _NON_SESSION_ROOT_NAMES
+            ):
                 violations.append(f"direct query execution: {node.func.attr}")
             if isinstance(node.func, ast.Name) and node.func.id in {"setattr", "delattr"}:
                 if node.args and _root_name(node.args[0]) in orm_names:
                     violations.append(f"dynamic ORM mutation: {node.func.id}")
+
+        if isinstance(node, ast.For):
+            iterable = _unwrap_await(node.iter)
+            iterable_root = _root_name(iterable)
+            if iterable_root in orm_names or iterable_root in _ORM_COLLECTION_NAMES:
+                loop_targets = [node.target] if isinstance(node.target, ast.Name) else []
+                orm_names.update(target.id for target in loop_targets)
+        if isinstance(node, ast.AsyncFor):
+            iterable = _unwrap_await(node.iter)
+            iterable_root = _root_name(iterable)
+            if iterable_root in orm_names or iterable_root in _ORM_COLLECTION_NAMES:
+                loop_targets = [node.target] if isinstance(node.target, ast.Name) else []
+                orm_names.update(target.id for target in loop_targets)
 
         mutation_targets: list[ast.expr] = []
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
@@ -165,6 +229,11 @@ def _forbidden_core_imports(tree: ast.AST) -> set[str]:
     return {name for name in imports if name.split(".")[0] in forbidden}
 
 
+def _core_dependency_violations(tree: ast.AST) -> set[str]:
+    """Check Core's transport dependency boundary, independent of SQL usage."""
+    return _forbidden_core_imports(tree)
+
+
 def test_http_adapters_do_not_construct_or_execute_database_queries():
     violations = []
     for path in BFF.rglob("*.py"):
@@ -191,12 +260,20 @@ def test_query_modules_do_not_depend_on_service_modules():
     "source",
     [
         "arbitrary_session.execute(stmt)",
+        "db.add(entity)",
+        "db.delete(entity)",
+        "db.flush()",
+        "db.scalar(stmt)",
+        "db.stream(stmt)",
         "report.resolved = True",
         "setattr(report, 'resolved', True)",
         "report.metadata['status'] = 'resolved'",
         "session_factory = async_sessionmaker(engine)",
         "db = create_async_engine(url)",
         "from sqlalchemy.ext.asyncio import async_sessionmaker as factory\nsession_factory = factory(engine)",
+        "async def update(db):\n    target = await db.get(MemoryNode, memory_id)\n    target.weight = 1.0",
+        "async def update():\n    item = await read_memory(memory_id)\n    item.weight = 1.0",
+        "for n in rows:\n    n.status = 'resolved'",
     ],
 )
 def test_bff_boundary_guard_rejects_prohibited_examples(source):
@@ -215,7 +292,11 @@ async def commit_transaction(db, entity):
 
 def test_core_service_sql_is_not_rejected_by_transport_guard():
     source = """
+from sqlalchemy import select
+
 async def read_with_core_service(session, stmt):
     return await session.execute(stmt)
 """
-    assert not _forbidden_core_imports(ast.parse(source))
+    tree = ast.parse(source)
+    assert _bff_boundary_violations(tree)
+    assert not _core_dependency_violations(tree)

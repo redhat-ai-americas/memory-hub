@@ -7,7 +7,7 @@ that returns empty/predictable results.
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -1569,7 +1569,7 @@ class TestContradictionsEndpoints:
             async def apply_review(*_args, **kwargs):
                 report.resolved = kwargs["resolved"]
                 report.resolved_at = datetime.now(UTC) if report.resolved else None
-                return report
+                return report, memory
 
             with patch("src.routes.review_contradiction", new_callable=AsyncMock,
                        side_effect=apply_review) as review:
@@ -1589,6 +1589,8 @@ class TestContradictionsEndpoints:
                 resolved=True,
                 actor_id="test-user",
                 tenant_id="default",
+                live=True,
+                authorize=ANY,
                 commit=False,
             )
         finally:
@@ -1613,7 +1615,7 @@ class TestContradictionsEndpoints:
             async def apply_review(*_args, **kwargs):
                 report.resolved = kwargs["resolved"]
                 report.resolved_at = datetime.now(UTC) if report.resolved else None
-                return report
+                return report, memory
 
             with patch("src.routes.review_contradiction", new_callable=AsyncMock,
                        side_effect=apply_review) as review:
@@ -1631,6 +1633,8 @@ class TestContradictionsEndpoints:
                 resolved=False,
                 actor_id="test-user",
                 tenant_id="default",
+                live=True,
+                authorize=ANY,
                 commit=False,
             )
         finally:
@@ -1652,7 +1656,7 @@ class TestContradictionsEndpoints:
         try:
             with (
                 patch("src.routes.review_contradiction", new_callable=AsyncMock,
-                      return_value=report),
+                      return_value=(report, memory)),
                 patch("src.routes._record_human_audit", side_effect=RuntimeError("audit failed")),
                 pytest.raises(RuntimeError, match="audit failed"),
             ):

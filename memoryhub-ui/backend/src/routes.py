@@ -16,7 +16,12 @@ from memoryhub_core.queries import identities as identity_queries
 from memoryhub_core.queries import memories as memory_queries
 from memoryhub_core.queries import summaries as summary_queries
 from memoryhub_core.services.curation.rules import delete_current_rule, insert_rule, revise_rule
-from memoryhub_core.services.exceptions import ContradictionNotFoundError, MemoryNotFoundError
+from memoryhub_core.services.exceptions import (
+    ContradictionAlreadyInStateError,
+    ContradictionNotFoundError,
+    ContradictionSelfReviewError,
+    MemoryNotFoundError,
+)
 from memoryhub_core.services.memory import (
     get_memory_history as get_memory_history_service,
 )
@@ -1072,21 +1077,21 @@ async def update_contradiction(
         parsed_id = uuid.UUID(report_id)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID: {report_id!r}") from None
-    row = await contradiction_queries.review_row(db, parsed_id, tenant_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
-    report, memory = row
-    if not access.can_review(memory):
-        raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
-    if not access.can_resolve_report(memory, report.reporter):
-        raise HTTPException(status_code=403, detail="Self review forbidden")
+    def authorize_review(report, memory):
+        if not access.can_review(memory):
+            raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found")
+        if not access.can_resolve_report(memory, report.reporter):
+            raise HTTPException(status_code=403, detail="Self review forbidden")
+
     try:
-        report = await review_contradiction(
+        report, memory = await review_contradiction(
             parsed_id,
             db,
             resolved=body.resolved,
             actor_id=access.principal.username,
             tenant_id=tenant_id,
+            live=True,
+            authorize=authorize_review,
             commit=False,
         )
         _record_human_audit(
@@ -1099,7 +1104,10 @@ async def update_contradiction(
     except ContradictionNotFoundError:
         await db.rollback()
         raise HTTPException(status_code=404, detail=f"Contradiction report {report_id!r} not found") from None
-    except ValueError as exc:
+    except ContradictionSelfReviewError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ContradictionAlreadyInStateError, ValueError) as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception:

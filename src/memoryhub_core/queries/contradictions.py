@@ -46,23 +46,27 @@ async def for_memory(db: AsyncSession, memory_id, tenant):
     )
 
 
-async def review_row(db: AsyncSession, report_id, tenant):
-    return (
-        await db.execute(
-            select(ContradictionReport, MemoryNode)
-            .join(
-                MemoryNode,
-                ContradictionReport.memory_id == MemoryNode.id,
-            )
-            .where(
-                ContradictionReport.id == report_id,
-                ContradictionReport.tenant_id == tenant,
-                MemoryNode.tenant_id == tenant,
-                MemoryNode.deleted_at.is_(None),
-            )
-            .with_for_update()
+async def review_row(db: AsyncSession, report_id, tenant=None, *, live: bool = True):
+    """Return the locked report and target memory for a review mutation.
+
+    ``live`` is an adapter policy: the dashboard only reviews live memories,
+    while MCP preserves its historical ability to resolve reports for
+    soft-deleted memories. Tenant predicates and row locking remain shared.
+    """
+    stmt = (
+        select(ContradictionReport, MemoryNode)
+        .join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id)
+        .where(ContradictionReport.id == report_id)
+        .with_for_update()
+    )
+    if tenant is not None:
+        stmt = stmt.where(
+            ContradictionReport.tenant_id == tenant,
+            MemoryNode.tenant_id == tenant,
         )
-    ).one_or_none()
+    if live:
+        stmt = stmt.where(MemoryNode.deleted_at.is_(None))
+    return (await db.execute(stmt)).one_or_none()
 
 
 async def list_reports(db: AsyncSession, access: Access, *, resolved=None, min_confidence=None, max_confidence=None):

@@ -16,7 +16,6 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import Integer, and_, func, or_, select, update
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from memoryhub_core.config import AppSettings
 from memoryhub_core.models.contradiction import ContradictionReport
@@ -29,13 +28,16 @@ from memoryhub_core.models.schemas import (
     MemoryVersionInfo,
 )
 from memoryhub_core.models.utils import generate_stub
+from memoryhub_core.queries import contradictions as contradiction_queries
 from memoryhub_core.queries.deletion import delete_closure
 from memoryhub_core.queries.memories import current_children, mark_deleted, memory_by_id
 from memoryhub_core.queries.mutations import RelationshipBoundaryError, mutation_edges
 from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 from memoryhub_core.services.embeddings import EmbeddingService
 from memoryhub_core.services.exceptions import (
+    ContradictionAlreadyInStateError,
     ContradictionNotFoundError,
+    ContradictionSelfReviewError,
     CurationBlockedError,
     MemoryAccessDeniedError,
     MemoryAlreadyDeletedError,
@@ -2185,15 +2187,22 @@ async def review_contradiction(
     resolution_action: str | None = None,
     actor_id: str | None = None,
     tenant_id: str | None = None,
+    live: bool = False,
+    authorize: Callable[[ContradictionReport, MemoryNode], None] | None = None,
     commit: bool = True,
-) -> ContradictionReport:
+) -> tuple[ContradictionReport, MemoryNode]:
     """Apply a contradiction review transition in the caller's transaction.
 
     ``commit=False`` is used by transports that need to stage an audit event
-    alongside the mutation.  The service always flushes the transition, so
-    domain validation and database constraints run before the caller commits.
-    The target memory is eagerly loaded for callers that need audit context;
-    transport-specific authorization remains outside this service.
+    alongside the mutation. The compatibility flag remains until service
+    transaction ownership is migrated fully to an explicit Unit of Work.
+    The service always flushes the transition, so domain validation and
+    database constraints run before the caller commits. ``live`` is an
+    adapter policy passed to the shared query; MCP intentionally sets it to
+    false to preserve soft-deleted-memory behavior. ``authorize`` is an
+    optional transport callback executed after the locked row is loaded.
+    The self-review invariant is deliberately resolve-only; HTTP may apply
+    its own review policy to reopen operations through this callback.
     """
     if resolved and resolution_action is not None and resolution_action not in VALID_RESOLUTION_ACTIONS:
         raise ValueError(
@@ -2203,26 +2212,18 @@ async def review_contradiction(
     if not resolved and resolution_action is not None:
         raise ValueError("resolution_action is only valid when resolving a contradiction")
 
-    stmt = (
-        select(ContradictionReport)
-        .options(selectinload(ContradictionReport.memory))
-        .where(ContradictionReport.id == contradiction_id)
-        .with_for_update()
-    )
-    if tenant_id is not None:
-        stmt = stmt.join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id).where(
-            ContradictionReport.tenant_id == tenant_id,
-            MemoryNode.tenant_id == tenant_id,
-        )
-    report = (await session.execute(stmt)).scalar_one_or_none()
-    if report is None:
+    row = await contradiction_queries.review_row(session, contradiction_id, tenant_id, live=live)
+    if row is None:
         raise ContradictionNotFoundError(contradiction_id)
+    report, memory = row
+    if authorize is not None:
+        authorize(report, memory)
 
     if report.resolved == resolved:
         state = "resolved" if resolved else "unresolved"
-        raise ValueError(f"Contradiction {contradiction_id} is already {state}")
+        raise ContradictionAlreadyInStateError(contradiction_id, state)
     if resolved and actor_id is not None and report.reporter == actor_id:
-        raise ValueError("Cannot resolve one's own contradiction report")
+        raise ContradictionSelfReviewError(contradiction_id)
 
     report.resolved = resolved
     report.resolved_at = datetime.now(UTC) if resolved else None
@@ -2231,7 +2232,7 @@ async def review_contradiction(
     await session.flush()
     if commit:
         await session.commit()
-    return report
+    return report, memory
 
 
 async def resolve_contradiction(
@@ -2241,6 +2242,8 @@ async def resolve_contradiction(
     resolution_action: str | None = None,
     actor_id: str | None = None,
     tenant_id: str | None = None,
+    live: bool = False,
+    authorize: Callable[[ContradictionReport, MemoryNode], None] | None = None,
     commit: bool = True,
 ) -> ContradictionReport:
     """Mark a contradiction report as resolved with an optional disposition.
@@ -2256,15 +2259,18 @@ async def resolve_contradiction(
     if the ID doesn't exist, or ValueError if already resolved or if
     resolution_action is invalid.
     """
-    return await review_contradiction(
+    report, _memory = await review_contradiction(
         contradiction_id,
         session,
         resolved=True,
         resolution_action=resolution_action,
         actor_id=actor_id,
         tenant_id=tenant_id,
+        live=live,
+        authorize=authorize,
         commit=commit,
     )
+    return report
 
 
 # -- Internal helpers --

@@ -15,9 +15,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastmcp.exceptions import ToolError
-
 import src.tools.auth as auth_mod
+from fastmcp.exceptions import ToolError
 from src.tools.manage_curation import manage_curation
 
 # ---------------------------------------------------------------------------
@@ -259,7 +258,7 @@ async def test_resolve_contradiction_valid_actions(resolution_action):
         patch(
             f"{_MOD}._review_contradiction",
             new_callable=AsyncMock,
-            return_value=mock_report,
+            return_value=(mock_report, mock_report.memory),
         ) as mock_svc,
     ):
         result = await manage_curation(
@@ -275,6 +274,7 @@ async def test_resolve_contradiction_valid_actions(resolution_action):
         resolution_action=resolution_action,
         actor_id="test-user",
         tenant_id="default",
+        live=False,
         commit=False,
     )
     assert result["resolved"] is True
@@ -306,7 +306,7 @@ async def test_resolve_contradiction_includes_note_in_message():
         patch(
             f"{_MOD}._review_contradiction",
             new_callable=AsyncMock,
-            return_value=mock_report,
+            return_value=(mock_report, mock_report.memory),
         ),
     ):
         result = await manage_curation(
@@ -346,7 +346,7 @@ async def test_resolve_contradiction_preserves_soft_deleted_memory_contract():
         }),
         patch(f"{_MOD}.get_db_session", return_value=(mock_session, mock_gen)),
         patch(f"{_MOD}.release_db_session", new_callable=AsyncMock),
-        patch(f"{_MOD}._review_contradiction", new_callable=AsyncMock, return_value=mock_report),
+        patch(f"{_MOD}._review_contradiction", new_callable=AsyncMock, return_value=(mock_report, memory)),
     ):
         result = await manage_curation(
             action="resolve_contradiction",
@@ -357,6 +357,50 @@ async def test_resolve_contradiction_preserves_soft_deleted_memory_contract():
     assert result["resolved"] is True
     assert result["resolution_action"] == "keep_old"
     mock_session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_contradiction_emits_compatibility_log_after_commit():
+    """The JSON compatibility log must not report success before commit."""
+    memory = SimpleNamespace(scope="user", owner_id="test-user", deleted_at=None)
+    mock_report = SimpleNamespace(
+        id=uuid.UUID(CONTRADICTION_UUID),
+        memory_id=uuid.UUID(MEMORY_UUID),
+        memory=memory,
+        resolved_at=datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC),
+        resolution_action="keep_old",
+        resolved_by="test-user",
+    )
+    committed = False
+
+    async def commit():
+        nonlocal committed
+        committed = True
+
+    mock_session = AsyncMock()
+    mock_session.add = MagicMock()
+    mock_session.commit.side_effect = commit
+    mock_gen = AsyncMock()
+
+    def emit_log(**_kwargs):
+        assert committed
+
+    with (
+        patch(f"{_MOD}.get_claims_from_context", return_value={
+            "sub": "test-user", "tenant_id": "default", "scopes": ["memory:admin"],
+        }),
+        patch(f"{_MOD}.get_db_session", return_value=(mock_session, mock_gen)),
+        patch(f"{_MOD}.release_db_session", new_callable=AsyncMock),
+        patch(f"{_MOD}._review_contradiction", new_callable=AsyncMock, return_value=(mock_report, memory)),
+        patch(f"{_MOD}.emit_required_audit_log", side_effect=emit_log),
+    ):
+        await manage_curation(
+            action="resolve_contradiction",
+            contradiction_id=CONTRADICTION_UUID,
+            resolution_action="keep_old",
+        )
+
+    assert committed
 
 
 @pytest.mark.asyncio

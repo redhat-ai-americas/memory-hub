@@ -93,6 +93,23 @@ class ContradictionNotFoundError(Exception):
         super().__init__(f"Contradiction report {contradiction_id} not found")
 
 
+class ContradictionAlreadyInStateError(ValueError):
+    """Raised when a contradiction already has the requested state."""
+
+    def __init__(self, contradiction_id: uuid.UUID, state: str) -> None:
+        self.contradiction_id = contradiction_id
+        self.state = state
+        super().__init__(f"Contradiction {contradiction_id} is already {state}")
+
+
+class ContradictionSelfReviewError(ValueError):
+    """Raised when a reporter attempts to resolve their own report."""
+
+    def __init__(self, contradiction_id: uuid.UUID) -> None:
+        self.contradiction_id = contradiction_id
+        super().__init__("Cannot resolve one's own contradiction report")
+
+
 class MemoryAlreadyDeletedError(Exception):
     """Raised when attempting to delete an already-deleted memory."""
 

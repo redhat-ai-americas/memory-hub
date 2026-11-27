@@ -100,6 +100,19 @@ def stage_required_audit_event(
         memory_id=memory_id,
         metadata=metadata,
     )
+
+
+def emit_required_audit_log(
+    *,
+    event_type: str,
+    actor_id: str,
+    driver_id: str,
+    scope: str,
+    owner_id: str,
+    memory_id: uuid.UUID | str | None,
+    metadata: dict | None = None,
+) -> None:
+    """Emit the compatibility audit log after the transaction commits."""
     record_event_stub(
         event_type=event_type,
         actor_id=actor_id,

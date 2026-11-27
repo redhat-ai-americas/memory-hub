@@ -6,14 +6,13 @@ without the pgvector extension.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
 
 from memoryhub_core.models.contradiction import ContradictionReport
 from memoryhub_core.models.memory import MemoryRelationship
-
 from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryNodeRead,
@@ -21,7 +20,12 @@ from memoryhub_core.models.schemas import (
     MemoryNodeUpdate,
     MemoryScope,
 )
-from memoryhub_core.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
+from memoryhub_core.services.exceptions import (
+    ContradictionNotFoundError,
+    ContradictionSelfReviewError,
+    MemoryNotCurrentError,
+    MemoryNotFoundError,
+)
 from memoryhub_core.services.memory import (
     DEFAULT_PIVOT_THRESHOLD,
     node_to_read,
@@ -398,7 +402,9 @@ async def test_update_memory_repoints_outgoing_edges(async_session, embedding_se
         select(MemoryRelationship).where(MemoryRelationship.id == edge.id)
     )
     repointed = result.scalar_one()
-    assert repointed.source_id == updated_a.id, f"outgoing edge should point from new version, got {repointed.source_id}"
+    assert repointed.source_id == updated_a.id, (
+        f"outgoing edge should point from new version, got {repointed.source_id}"
+    )
     assert repointed.target_id == b.id
 
 
@@ -437,7 +443,7 @@ async def test_update_memory_preserves_invalidated_edges(async_session, embeddin
         source_id=a.id, target_id=b.id,
         relationship_type="related_to",
         created_by="test", tenant_id="default",
-        valid_until=datetime.now(timezone.utc),
+        valid_until=datetime.now(UTC),
     )
     async_session.add(edge)
     await async_session.commit()
@@ -874,6 +880,40 @@ async def test_resolve_contradiction_already_resolved(async_session, embedding_s
         await resolve_contradiction(report.id, async_session)
 
 
+async def test_self_review_is_a_resolve_invariant_only(async_session, embedding_service):
+    node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
+    await report_contradiction(
+        node.id, "user ran docker build", 0.8, "test-agent", async_session,
+    )
+    report = (await async_session.execute(
+        select(ContradictionReport).where(ContradictionReport.memory_id == node.id)
+    )).scalar_one()
+    report_id = report.id
+
+    with pytest.raises(ContradictionSelfReviewError):
+        await review_contradiction(
+            report_id,
+            async_session,
+            resolved=True,
+            actor_id="test-agent",
+            tenant_id="default",
+            commit=False,
+        )
+    await async_session.rollback()
+
+    await resolve_contradiction(report_id, async_session, actor_id="reviewer")
+    reopened, _memory = await review_contradiction(
+        report_id,
+        async_session,
+        resolved=False,
+        actor_id="test-agent",
+        tenant_id="default",
+        commit=False,
+    )
+    assert reopened.resolved is False
+    await async_session.rollback()
+
+
 async def test_review_contradiction_reopens_without_committing(async_session, embedding_service):
     node, _ = await create_memory(_make_create_data(), async_session, embedding_service)
     await report_contradiction(
@@ -886,7 +926,7 @@ async def test_review_contradiction_reopens_without_committing(async_session, em
     report_id = report.id
     await resolve_contradiction(report_id, async_session)
 
-    reopened = await review_contradiction(
+    reopened, reopened_memory = await review_contradiction(
         report_id,
         async_session,
         resolved=False,
@@ -897,6 +937,7 @@ async def test_review_contradiction_reopens_without_committing(async_session, em
     assert reopened.resolved is False
     assert reopened.resolved_at is None
     assert reopened.resolution_action is None
+    assert reopened_memory.id == node.id
     await async_session.rollback()
 
     persisted = (await async_session.execute(
@@ -2194,8 +2235,8 @@ def _make_mock_node(**overrides):
     Uses a SimpleNamespace instead of a real ORM instance to avoid needing
     a database session. node_to_read only reads attributes, never queries.
     """
-    from types import SimpleNamespace
     from datetime import UTC, datetime
+    from types import SimpleNamespace
 
     defaults = {
         "id": uuid.uuid4(),
