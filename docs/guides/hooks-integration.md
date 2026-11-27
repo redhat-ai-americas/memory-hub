@@ -61,7 +61,29 @@ This creates two files:
 - `.memoryhub.yaml` -- project-level configuration (loading pattern, campaigns, retrieval defaults)
 - `.claude/rules/memoryhub-loading.md` -- agent instructions telling the model how to use MemoryHub during the session
 
-Both files should be committed to your repository so that all collaborators get the same behavior.
+Commit the project config, generated instructions, and hook configuration so collaborators get the same behavior.
+
+For activity visibility, `config init` also writes
+`.memoryhub/hooks/activity-hook.sh`, merges activity hooks into
+`.claude/settings.json`, and adds them to `.codex/hooks.json`. The activity
+hooks count successful MemoryHub saves, updates, and searches. They keep
+counts and timestamps in `~/.config/memoryhub/activity/activity.sqlite3`; they do not
+store prompts or memory contents. If you use another host with the
+framework-neutral instructions, run `memoryhub config init --format agents-md`
+to install the Codex hook configuration and print the instructions for
+`AGENTS.md`.
+
+The CLI credentials used by shell hooks do not configure the MemoryHub MCP
+server in Claude Code; connect that server separately to make memory tools
+available to the agent.
+
+The activity summary is supplied to the agent before its next response by
+turn-time hooks. A host's `SessionEnd` hook cannot add context to a response
+that has already finished, so it stores a local session summary; the next
+session's startup hook supplies that summary to the agent.
+The reported last-write time is the latest successful save or update
+observed on this machine for the project; it does not include activity from
+other machines.
 
 The wizard asks about session shape (focused/broad/adaptive), loading pattern, and optional campaign enrollment. For most projects, the defaults (focused mode, lazy loading) work well.
 
@@ -215,7 +237,9 @@ Commit these files to your repository:
 - `.memoryhub.yaml` -- project configuration
 - `.claude/rules/memoryhub-loading.md` -- agent instructions
 - `.claude/hooks/load-memories.sh` -- hook script
+- `.memoryhub/hooks/activity-hook.sh` -- shared activity hook runner
 - `.claude/settings.json` -- hook configuration (merge with existing settings)
+- `.codex/hooks.json` -- Codex hook configuration (merge with existing hooks)
 
 Do NOT commit:
 

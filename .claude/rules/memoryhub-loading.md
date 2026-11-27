@@ -50,6 +50,19 @@ implicit context. Use it for narrow one-shot tooling sessions.
 - For interactive agent sessions, prefer the default (truncated) mode
   and hydrate individual memories only when needed.
 
+## Reporting MemoryHub activity
+
+- When you create memories successfully, briefly tell the user when it is
+  relevant, for example: "I saved 2 memories." Count only successful new
+  writes; a failed, rejected, duplicate, or gated write is not a save.
+- Describe successful edits as updates rather than new saves.
+- Use the activity summary supplied by the host hooks for this session's
+  write, update, and search counts. The last-write timestamp is the latest
+  successful save observed locally for this project; it may not include
+  activity from another machine.
+- Do not create a memory just to satisfy an activity reminder. Store only
+  information that meets the memory hygiene guidance below.
+
 ## Memory hygiene
 
 - Keep memories concise and self-contained. Another agent should

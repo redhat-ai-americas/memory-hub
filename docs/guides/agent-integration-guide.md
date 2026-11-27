@@ -156,9 +156,17 @@ memoryhub login
 memoryhub config init
 ```
 
-`memoryhub login` stores your API key and server URL in `~/.config/memoryhub/`. `memoryhub config init` runs an interactive wizard that asks about your project's session shape and generates three files: `.memoryhub.yaml`, `.claude/rules/memoryhub-loading.md`, and `.claude/hooks/load-memories.sh`. It also merges the hook configuration into `.claude/settings.json`.
+`memoryhub login` stores your API key and server URL in `~/.config/memoryhub/`. `memoryhub config init` runs an interactive wizard that asks about your project's session shape and generates `.memoryhub.yaml`, `.claude/rules/memoryhub-loading.md`, and the Claude Code startup hook. It also installs MemoryHub activity hooks in `.claude/settings.json` and `.codex/hooks.json`, using `.memoryhub/hooks/activity-hook.sh` as the shared runner.
 
-Commit `.memoryhub.yaml`, the rule file, and the hook script to your repository. Do not commit credentials -- those stay in `~/.config/memoryhub/`.
+The activity hooks give the agent a short summary of successful saves,
+updates, and searches before a response, and remind it after 10 user turns
+without a successful write. The summary uses local observations from the
+current machine; it does not read prompts or memory contents. `SessionEnd`
+records a local snapshot, which the next session's startup hook supplies to
+the agent. See the [Hooks Integration Guide](hooks-integration.md) for the
+host-specific setup and timestamp limits.
+
+Commit `.memoryhub.yaml`, generated instructions, `.memoryhub/hooks/activity-hook.sh`, and the host hook configuration to your repository. Do not commit credentials or the local activity database; those stay in `~/.config/memoryhub/`.
 
 After setup, the next Claude Code session in that project will automatically load relevant memories at startup and have the MCP tools available for mid-session operations.
 

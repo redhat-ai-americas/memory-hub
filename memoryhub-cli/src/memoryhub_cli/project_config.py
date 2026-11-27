@@ -436,6 +436,21 @@ When you DO notice a contradiction with a loaded memory, call
 `memory(action="report", memory_id="...", options={"observed_behavior": "..."})`.
 """
 
+_ACTIVITY_REPORTING_BLOCK = """\
+## Reporting MemoryHub activity
+
+- When you create memories successfully, briefly tell the user when it is
+  relevant, for example: "I saved 2 memories." Count only successful new
+  writes; a failed, rejected, duplicate, or gated write is not a save.
+- Describe successful edits as updates rather than new saves.
+- Use the activity summary supplied by the host hooks for this session's
+  write, update, and search counts. The last-write timestamp is the latest
+  successful save observed locally for this project; it may not include
+  activity from another machine.
+- Do not create a memory just to satisfy an activity reminder. Store only
+  information that meets the memory hygiene guidance below.
+"""
+
 
 _CAMPAIGN_BLOCK = """\
 ## Campaign enrollment
@@ -473,6 +488,7 @@ def render_rule_file(config: ProjectConfig) -> str:
         _RULE_HEADER.format(pattern_title=_PATTERN_TITLES[pattern]),
         pattern_block,
         _CONTENT_DELIVERY_BLOCK,
+        _ACTIVITY_REPORTING_BLOCK,
         _HYGIENE_BLOCK,
         contradiction_block,
     ]
@@ -544,7 +560,7 @@ def _render_universal_body(config: ProjectConfig) -> str:
         if config.memory_loading.cross_domain_contradiction_detection
         else _CONTRADICTION_DISABLED
     )
-    blocks = [pattern_block, _HYGIENE_BLOCK, contradiction_block]
+    blocks = [pattern_block, _ACTIVITY_REPORTING_BLOCK, _HYGIENE_BLOCK, contradiction_block]
 
     campaigns = config.memory_loading.campaigns
     if campaigns:
@@ -602,6 +618,8 @@ class WriteResult:
     legacy_backup: Path | None  # set when an old memoryhub-integration.md was moved
     hook_path: Path | None = None
     settings_path: Path | None = None
+    activity_hook_path: Path | None = None
+    codex_hooks_path: Path | None = None
 
 
 LEGACY_RULE_NAME = "memoryhub-integration.md"
@@ -642,15 +660,16 @@ def write_init_files(
     user-edited YAML.
 
     When ``instruction_format`` is ``"claude-code"`` (the default), this
-    writes the rule file to ``.claude/rules/`` and generates hooks.
-    For other formats, only ``.memoryhub.yaml`` is written; the rendered
-    instructions are returned via :func:`render_instructions` for the
-    caller to print.
+    writes the rule file to ``.claude/rules/`` and generates Claude Code
+    and Codex hooks. For other formats, the rendered instructions are
+    returned via :func:`render_instructions` for the caller to print.
+    ``agents-md`` also installs the Codex activity hooks.
 
     When ``generate_hooks`` is True (default) and format is
     ``"claude-code"``, also writes the SessionStart hook script to
-    ``.claude/hooks/`` and merges hook entries into
-    ``.claude/settings.json``.
+    ``.claude/hooks/``, the shared activity hook script, and merges hook
+    entries into both hosts' project-local configuration. For
+    ``"agents-md"``, only the shared script and Codex hooks are generated.
 
     Raises:
         FileExistsError: If either generated file already exists and
@@ -667,10 +686,17 @@ def write_init_files(
                 f"{yaml_path} already exists. Re-run with --force to overwrite."
             )
         yaml_path.write_text(render_yaml(config))
+        activity_hook_path = None
+        codex_hooks_path = None
+        if generate_hooks and instruction_format == "agents-md":
+            activity_hook_path = write_activity_hook_script(project_dir)
+            codex_hooks_path = merge_codex_hooks(project_dir)
         return WriteResult(
             yaml_path=yaml_path,
             rule_path=None,
             legacy_backup=None,
+            activity_hook_path=activity_hook_path,
+            codex_hooks_path=codex_hooks_path,
         )
 
     rules_dir = project_dir / ".claude" / "rules"
@@ -691,9 +717,16 @@ def write_init_files(
 
     hook_path = None
     settings_path = None
+    activity_hook_path = None
+    codex_hooks_path = None
     if generate_hooks:
         hook_path = write_hook_script(project_dir)
+        activity_hook_path = write_activity_hook_script(project_dir)
         settings_path = merge_settings_hooks(project_dir)
+        # The default Claude Code config is also commonly initialized from
+        # Codex. Installing both project-local hook manifests keeps activity
+        # visibility available in either host; unused manifests are inert.
+        codex_hooks_path = merge_codex_hooks(project_dir)
 
     return WriteResult(
         yaml_path=yaml_path,
@@ -701,6 +734,8 @@ def write_init_files(
         legacy_backup=legacy_backup,
         hook_path=hook_path,
         settings_path=settings_path,
+        activity_hook_path=activity_hook_path,
+        codex_hooks_path=codex_hooks_path,
     )
 
 
@@ -745,6 +780,7 @@ HOOK_SCRIPT_TEMPLATE = """\
 
 set -euo pipefail
 
+<<<<<<< Updated upstream
 emit_unavailable_warning() {
   local reason="$1"
   local action="${2:-Run 'memoryhub doctor' to diagnose.}"
@@ -752,6 +788,11 @@ emit_unavailable_warning() {
     "$reason" "$action"
   exit 0
 }
+=======
+# Retain the small host event payload so the activity recorder can associate
+# the automatic startup search with this session. The payload is not stored.
+HOOK_INPUT=$(cat)
+>>>>>>> Stashed changes
 
 # --- Credential resolution ---
 # 1. MEMORYHUB_API_KEY env var (already set)
@@ -841,6 +882,7 @@ fi
 
 PROJECT_ID=$(basename "$PROJECT_ROOT")
 
+<<<<<<< Updated upstream
 if MEMORY_OUTPUT=$("$MEMORYHUB_BIN" search \\
   "project context architecture preferences decisions workflow" \\
   --project-id "$PROJECT_ID" \\
@@ -855,6 +897,14 @@ else
     emit_unavailable_warning "Authentication failed."
   fi
   emit_unavailable_warning "Could not connect to MemoryHub or load memories."
+=======
+if "$MEMORYHUB_BIN" search \\
+  "project context architecture preferences decisions workflow" \\
+  --project-id "$PROJECT_ID" \\
+  --output compact \\
+  --max 20 2>/dev/null; then
+  printf '%s' "$HOOK_INPUT" | "$MEMORYHUB_BIN" activity-hook --event cli-search >/dev/null 2>&1 || true
+>>>>>>> Stashed changes
 fi
 """
 
@@ -863,17 +913,19 @@ REBIAS_HOOK_SCRIPT_NAME = "rebias-memories.sh"
 EXTRACT_HOOK_SCRIPT_NAME = "extract-memories.sh"
 
 _SETTINGS_HOOK_MATCHERS = ("startup", "compact", "clear")
+_LEGACY_AUTO_HOOKS = {
+    "UserPromptSubmit": REBIAS_HOOK_SCRIPT_NAME,
+    "Stop": EXTRACT_HOOK_SCRIPT_NAME,
+}
 
-# Turn-level hook definitions (#313)
-_TURN_LEVEL_HOOKS: dict[str, dict[str, Any]] = {
-    "UserPromptSubmit": {
-        "script": REBIAS_HOOK_SCRIPT_NAME,
-        "timeout": 3,
-    },
-    "Stop": {
-        "script": EXTRACT_HOOK_SCRIPT_NAME,
-        "timeout": 5,
-    },
+_ACTIVITY_HOOK_EVENTS = {
+    "SessionStart": ("session-start", "", 2),
+    # ".*memory.*" captures mcp__memoryhub__memory and standalone write_memory /
+    # search_memory tool names. Keep this broad enough for all MemoryHub MCP
+    # tool variants but no broader — do not widen to match unrelated tools.
+    "PostToolUse": ("post-tool-use", ".*memory.*", 2),
+    "UserPromptSubmit": ("user-prompt-submit", "", 2),
+    "SessionEnd": ("session-end", "", 2),
 }
 
 
@@ -900,11 +952,52 @@ def _has_memoryhub_hook(entries: list[dict[str, Any]]) -> bool:
     return False
 
 
-def _has_hook_script(entries: list[dict[str, Any]], script_name: str) -> bool:
-    """Check whether any entry references the given script."""
+def _remove_legacy_auto_hooks(hooks: dict[str, Any]) -> bool:
+    """Remove generated rebias/extract hooks that run outside Phase 1 scope."""
+    changed = False
+    for event_name, script_name in _LEGACY_AUTO_HOOKS.items():
+        event_entries = hooks.get(event_name)
+        if not isinstance(event_entries, list):
+            continue
+
+        kept_entries: list[dict[str, Any]] = []
+        for entry in event_entries:
+            if not isinstance(entry, dict):
+                kept_entries.append(entry)
+                continue
+            entry_hooks = entry.get("hooks", [])
+            if not isinstance(entry_hooks, list):
+                kept_entries.append(entry)
+                continue
+            kept_hooks = [
+                hook for hook in entry_hooks
+                if not (
+                    isinstance(hook, dict)
+                    and isinstance(hook.get("command"), str)
+                    and Path(hook["command"]).name == script_name
+                )
+            ]
+            if len(kept_hooks) != len(entry_hooks):
+                changed = True
+                if kept_hooks:
+                    entry["hooks"] = kept_hooks
+                    kept_entries.append(entry)
+            else:
+                kept_entries.append(entry)
+
+        if kept_entries:
+            hooks[event_name] = kept_entries
+        else:
+            hooks.pop(event_name, None)
+    return changed
+
+
+def _has_activity_hook(entries: list[dict[str, Any]], event_name: str) -> bool:
+    """Check for an activity-hook command already registered for an event."""
     for entry in entries:
         for hook in entry.get("hooks", []):
-            if Path(hook.get("command", "")).name == script_name:
+            command = hook.get("command", "")
+            if "activity-hook.sh" in command and command.rstrip().endswith(event_name):
                 return True
     return False
 
@@ -912,9 +1005,8 @@ def _has_hook_script(entries: list[dict[str, Any]], script_name: str) -> bool:
 def merge_settings_hooks(project_dir: Path) -> Path:
     """Merge MemoryHub hook entries into .claude/settings.json.
 
-    Read-modify-write with idempotent detection: if load-memories hooks
-    are already present, the file is left unchanged. Also adds turn-level
-    hooks (UserPromptSubmit, Stop) for rebias and extract (#313).
+    Read-modify-write: preserve unrelated hooks, remove legacy automatic
+    rebias/extract hooks, and merge the activity recorder.
 
     Returns the path to settings.json (whether modified or not).
     """
@@ -927,6 +1019,8 @@ def merge_settings_hooks(project_dir: Path) -> Path:
 
     hooks = settings.setdefault("hooks", {})
     changed = False
+    if _remove_legacy_auto_hooks(hooks):
+        changed = True
 
     # SessionStart hooks
     session_start = hooks.setdefault("SessionStart", [])
@@ -935,18 +1029,22 @@ def merge_settings_hooks(project_dir: Path) -> Path:
             session_start.append(_build_hook_entry(matcher))
         changed = True
 
-    # Turn-level hooks (#313)
-    for event_name, hook_def in _TURN_LEVEL_HOOKS.items():
+    for event_name, (activity_event, matcher, timeout) in _ACTIVITY_HOOK_EVENTS.items():
         event_entries = hooks.setdefault(event_name, [])
-        if not _has_hook_script(event_entries, hook_def["script"]):
-            event_entries.append({
-                "matcher": "",
+        if not _has_activity_hook(event_entries, activity_event):
+            hook_entry: dict[str, Any] = {
                 "hooks": [{
                     "type": "command",
-                    "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/" + hook_def["script"],
-                    "timeout": hook_def["timeout"],
+                    "command": (
+                        'sh "${CLAUDE_PROJECT_DIR}/.memoryhub/hooks/activity-hook.sh" '
+                        + activity_event
+                    ),
+                    "timeout": timeout,
                 }],
-            })
+            }
+            if matcher:
+                hook_entry["matcher"] = matcher
+            event_entries.append(hook_entry)
             changed = True
 
     if changed:
@@ -956,6 +1054,39 @@ def merge_settings_hooks(project_dir: Path) -> Path:
     return settings_path
 
 
+def merge_codex_hooks(project_dir: Path) -> Path:
+    """Merge activity hooks into the project's Codex hooks.json."""
+    codex_dir = Path(project_dir) / ".codex"
+    hooks_path = codex_dir / "hooks.json"
+    settings: dict[str, Any] = {}
+    if hooks_path.exists():
+        settings = json.loads(hooks_path.read_text())
+
+    hooks = settings.setdefault("hooks", {})
+    changed = False
+    for event_name, (activity_event, matcher, timeout) in _ACTIVITY_HOOK_EVENTS.items():
+        event_entries = hooks.setdefault(event_name, [])
+        if _has_activity_hook(event_entries, activity_event):
+            continue
+        command = (
+            'PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); '
+            'sh "$PROJECT_ROOT/.memoryhub/hooks/activity-hook.sh" '
+            + activity_event
+        )
+        entry: dict[str, Any] = {
+            "hooks": [{"type": "command", "command": command, "timeout": timeout}],
+        }
+        if matcher:
+            entry["matcher"] = matcher
+        event_entries.append(entry)
+        changed = True
+
+    if changed:
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        hooks_path.write_text(json.dumps(settings, indent=2) + "\n")
+    return hooks_path
+
+
 def write_hook_script(project_dir: Path) -> Path:
     """Write the hook script to .claude/hooks/ with execute permission."""
     hooks_dir = project_dir / ".claude" / "hooks"
@@ -963,6 +1094,44 @@ def write_hook_script(project_dir: Path) -> Path:
     hook_path = hooks_dir / HOOK_SCRIPT_NAME
 
     hook_path.write_text(HOOK_SCRIPT_TEMPLATE)
+    hook_path.chmod(hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return hook_path
+
+
+ACTIVITY_HOOK_SCRIPT_TEMPLATE = """\
+#!/bin/sh
+# Record MemoryHub activity without storing prompt or memory content.
+# Missing CLI setup is a no-op so hook failures never block the host.
+
+set -eu
+EVENT=${1:-}
+PROJECT_ROOT=${CLAUDE_PROJECT_DIR:-}
+if [ -z "$PROJECT_ROOT" ]; then
+  PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+fi
+
+MEMORYHUB_BIN=$(command -v memoryhub 2>/dev/null || true)
+if [ -z "$MEMORYHUB_BIN" ]; then
+  for candidate in \
+    "$PROJECT_ROOT/.venv/bin/memoryhub" \
+    "$PROJECT_ROOT/memoryhub-cli/.venv/bin/memoryhub"; do
+    if [ -x "$candidate" ]; then
+      MEMORYHUB_BIN=$candidate
+      break
+    fi
+  done
+fi
+[ -n "$MEMORYHUB_BIN" ] || exit 0
+"$MEMORYHUB_BIN" activity-hook --event "$EVENT" || exit 0
+"""
+
+
+def write_activity_hook_script(project_dir: Path) -> Path:
+    """Write the shared activity hook command used by Claude Code and Codex."""
+    hooks_dir = Path(project_dir) / ".memoryhub" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / "activity-hook.sh"
+    hook_path.write_text(ACTIVITY_HOOK_SCRIPT_TEMPLATE)
     hook_path.chmod(hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return hook_path
 
@@ -977,14 +1146,17 @@ __all__ = [
     "GENERATED_RULE_NAME",
     "HOOK_SCRIPT_NAME",
     "HOOK_SCRIPT_TEMPLATE",
+    "ACTIVITY_HOOK_SCRIPT_TEMPLATE",
     "LEGACY_RULE_NAME",
     "build_project_config",
     "merge_settings_hooks",
+    "merge_codex_hooks",
     "render_instructions",
     "render_yaml",
     "render_rule_file",
     "rewrite_rule_file",
     "suggest_pattern",
     "write_hook_script",
+    "write_activity_hook_script",
     "write_init_files",
 ]
