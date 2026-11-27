@@ -1,0 +1,17 @@
+{{- if .Values.models.enabled }}
+{{- $name := ternary "ms-marco-minilm-l12-v2" "granite-reranker" (eq .Values.models.variant "cpu") -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespaces.rerankerModel }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" $name) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  ports:
+    - { name: http, port: 80, targetPort: http, protocol: TCP }
+{{- end }}

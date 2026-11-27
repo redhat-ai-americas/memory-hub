@@ -1,0 +1,12 @@
+{{- if and .Values.auth.enabled .Values.openshift.enabled .Values.auth.rbac.enabled .Values.auth.rbac.namespaceReader (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: memoryhub-auth-ns-reader
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "auth-server") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get]
+{{- end }}

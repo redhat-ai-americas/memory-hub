@@ -1,0 +1,11 @@
+{{- if and .Values.auth.enabled .Values.openshift.enabled (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-ca-bundle
+  namespace: {{ .Values.namespaces.auth }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "auth-server") | nindent 4 }}
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+{{- end }}

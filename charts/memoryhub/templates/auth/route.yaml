@@ -1,0 +1,18 @@
+{{- if and .Values.auth.enabled .Values.auth.route.enabled .Values.openshift.routes (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: auth-server
+  namespace: {{ .Values.namespaces.auth }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "auth-server") | nindent 4 }}
+spec:
+  {{- with .Values.auth.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  to: { kind: Service, name: auth-server }
+  port: { targetPort: http }
+  tls:
+    termination: {{ .Values.auth.route.tlsTermination }}
+    insecureEdgeTerminationPolicy: {{ .Values.auth.route.insecurePolicy }}
+{{- end }}

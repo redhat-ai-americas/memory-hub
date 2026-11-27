@@ -1,0 +1,58 @@
+{{- if .Values.minio.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memoryhub-minio
+  namespace: {{ .Values.namespaces.storage }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-minio") | nindent 4 }}
+spec:
+  replicas: {{ .Values.minio.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoryhub-minio
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-minio") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.minio.serviceAccountName }}
+      {{- include "memoryhub.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: minio
+          image: {{ include "memoryhub.imageRef" .Values.minio.image | quote }}
+          imagePullPolicy: {{ .Values.minio.image.pullPolicy }}
+          args: [server, /data, --console-address, ":9001"]
+          ports:
+            - { name: api, containerPort: 9000, protocol: TCP }
+            - { name: console, containerPort: 9001, protocol: TCP }
+          envFrom:
+            - secretRef:
+                name: {{ .Values.minio.secretName }}
+          {{- with .Values.minio.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          volumeMounts:
+            - { name: minio-data, mountPath: /data }
+          {{- with .Values.minio.probes.liveness }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.minio.probes.readiness }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: {{ default "memoryhub-minio-data" .Values.minio.existingClaim }}
+{{- end }}

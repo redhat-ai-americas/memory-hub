@@ -13,6 +13,7 @@ spec:
       labels:
         app: granite-reranker
     spec:
+      automountServiceAccountToken: false
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists
@@ -36,9 +37,11 @@ spec:
             requests:
               cpu: "1"
               memory: 4Gi
+              nvidia.com/gpu: "1"
             limits:
               cpu: "4"
               memory: 8Gi
+              nvidia.com/gpu: "1"
           volumeMounts:
             - name: cache
               mountPath: /data

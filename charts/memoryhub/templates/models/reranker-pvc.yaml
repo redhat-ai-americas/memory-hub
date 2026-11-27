@@ -1,0 +1,16 @@
+{{- if .Values.models.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reranker-model-cache
+  namespace: {{ .Values.namespaces.rerankerModel }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "reranker-model") | nindent 4 }}
+spec:
+  accessModes: [{{ .Values.models.reranker.storageAccessMode }}]
+  {{- with .Values.models.reranker.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests: { storage: {{ .Values.models.reranker.storage | quote }} }
+{{- end }}

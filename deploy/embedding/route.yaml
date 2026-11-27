@@ -8,6 +8,6 @@ spec:
     kind: Service
     name: all-minilm-l6-v2
   port:
-    targetPort: 8080
+    targetPort: http
   tls:
     termination: edge

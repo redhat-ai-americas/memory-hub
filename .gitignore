@@ -71,3 +71,9 @@ benchmarks/amb-harness/.blob_manifest.json
 benchmarks/amb-harness/blob-manifest.json
 benchmarks/amb-harness/catalog.json
 benchmarks/amb-harness/results-manifest.json
+
+# Local runtime data (models, caches, local DB)
+.memoryhub-data/
+
+# User-customized Helm values (committed example lives at values-openshift.example.yaml)
+values-openshift.yaml

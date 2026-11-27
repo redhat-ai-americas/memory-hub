@@ -1,0 +1,19 @@
+{{- if .Values.valkey.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: memoryhub-valkey
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memoryhub.componentLabels" (dict "root" . "component" "memoryhub-valkey") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: memoryhub-valkey
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+{{- end }}

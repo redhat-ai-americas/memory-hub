@@ -19,6 +19,7 @@ spec:
       annotations:
         alpha.image.policy.openshift.io/resolve-names: '*'
     spec:
+      automountServiceAccountToken: false
       containers:
       - name: mcp-server
         image: memory-hub-mcp:latest
