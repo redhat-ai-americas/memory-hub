@@ -27,6 +27,7 @@ from src.tools._deps import get_db_session, get_s3_adapter, release_db_session, 
 from src.tools._object_access import memory_object_access
 from src.tools._push_helpers import broadcast_after_write
 
+from memoryhub_core.queries.mutations import RelationshipBoundaryError
 from memoryhub_core.services.campaign import get_campaigns_for_project
 from memoryhub_core.services.exceptions import (
     MemoryAccessDeniedError,
@@ -189,6 +190,8 @@ async def delete_memory(
         # descendant before Core can mutate any row, including the seed.
         affected = await collect_delete_nodes(existing, session, tenant)
         for member in affected.values():
+            if getattr(member, "deleted_at", None) is not None:
+                continue
             if member.tenant_id != tenant:
                 raise ToolError("Not authorized to delete a cross-tenant memory.")
             if is_admin:
@@ -242,6 +245,8 @@ async def delete_memory(
 
         return result
 
+    except RelationshipBoundaryError:
+        raise ToolError("Invalid memory relationship boundary. Repair the graph before retrying deletion.") from None
     except MemoryNotFoundError:
         raise ToolError(
             f"Memory {memory_id} not found. It may have already been "

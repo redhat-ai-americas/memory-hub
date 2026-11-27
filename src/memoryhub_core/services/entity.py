@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.schemas import MemoryNodeRead, RelationshipCreate, RelationshipRead
 from memoryhub_core.models.utils import generate_stub
+from memoryhub_core.queries.entities import mention_statement
 from memoryhub_core.services.embeddings import EmbeddingService
 from memoryhub_core.services.graph import create_relationship
 from memoryhub_core.services.memory import node_to_read
@@ -492,11 +493,7 @@ async def merge_entities(
             raise ValueError(f"{label} entity belongs to a different owner")
 
     # Find active MENTIONS edges pointing to the source entity
-    source_edges_stmt = select(MemoryRelationship).where(
-        MemoryRelationship.target_id == source_id,
-        MemoryRelationship.relationship_type == "mentions",
-        MemoryRelationship.valid_until.is_(None),
-    )
+    source_edges_stmt = mention_statement(source_id)
     source_edges = (await session.execute(source_edges_stmt)).scalars().all()
 
     # Find which source memories already have an active MENTIONS edge to target

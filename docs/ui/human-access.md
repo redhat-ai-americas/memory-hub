@@ -138,9 +138,15 @@ configured `project` content grant. A tenant-wide Admin can still inspect
 the project roster without gaining access to its focus history. Authorized
 members retain access to shared memories and focus history.
 
+Delete capabilities cover the complete version chain and descendant branches.
+Writing a revision of someone else's shared memory does not grant permission
+to delete their earlier versions. Already deleted descendants do not block
+deleting the remaining authorized rows. The API rechecks permissions under
+lock when the deletion is submitted.
+
 ## Admin privacy
 
-Admin queries are filtered at a single point in `authorization.py`
+Admin queries are filtered by `memoryhub_core.authorization.human.Access`
 (`clause()` / `can_read()`): only project, campaign, role and organizational
 scopes are visible. User, entity and enterprise scopes are excluded,
 including entity metadata derived from personal memories. This covers every Admin path:
@@ -169,6 +175,11 @@ memory counts or last-active times. `tests/test_admin_privacy_pg.py`
 checks all of this end to end on Postgres. CI runs it with
 `MEMORYHUB_REQUIRE_PG=1`, so a missing database fails the job instead of
 skipping the test.
+
+Reusable SQL and mutation preflight are in `memoryhub_core.queries`, shared
+with Core services. The BFF keeps HTTP/session handling and response shaping.
+See [query boundary](query-boundary.md) for selection, transaction and
+deployment-trust details.
 
 ## Cross-site requests
 

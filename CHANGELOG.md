@@ -116,6 +116,9 @@ OpenShift; not published as a package.
 
 - **Actionable tool errors (#655)**: MCP tool failures include structured
   `error` and `next_action` fields, plus readable error text for agents.
+- Contradiction resolution now stages its required audit event in the same
+  transaction as the mutation, preserves soft-deleted-memory compatibility,
+  and emits the compatibility log only after commit (#738).
 - **Project membership authorization (#514)**: `list_memory` and `search_memory` verify membership in the resolved tenant before serving an explicit `project_id`, regardless of the project-isolation setting. For requests without an explicit project, when isolation is enabled and membership claims are empty, both tools use tenant-scoped database memberships for retrieval and authorization filters.
 
 - **Procedural graph content type, Phase 1 (#552)**: `write`/`list`/`search` accept `content_type="procedural"`; `relate` accepts `precedes`/`requires`/`alternative_to` edge types (`mentions` remains system-managed). `reconstruct` is unchanged and still scoped to `behavioral` only — procedural graphs are not returned by it. Retrieval/traversal support is #553, not this change.
@@ -130,6 +133,15 @@ Lives at the repo root in [`src/memoryhub_core/`](src/memoryhub_core/). Consumed
 memory-hub-mcp and memoryhub-auth; not published as a standalone package.
 
 ### [Unreleased]
+
+- Centralized human memory, graph, entity, rule and identity queries and policies
+  in Core for dashboard adapters and shared services (#738). Read-only deletion
+  capabilities and mutation preflight use the same recursive closure.
+- Subscriber shutdown honors pending cancellation even when a dependency
+  swallows `CancelledError` during a Python 3.11 `wait_for` race (#738).
+- Revision curation, deletion preflight/staging and batched project queries
+  are shared by HTTP and MCP. Deleted descendants retain their original
+  timestamps and are excluded from deletion counts (#738).
 
 - **Fixed (#553)**: `find_related` wrote each neighbor's stub to the opposite end of the edge, so `RelationshipRead.source_stub` and `target_stub` were inverted in the returned paths. Pre-existing; only observable once #553 began returning these edges through the API.
 - **Procedural retrieval (#553)**: `find_related` requires `tenant_id` and applies it in SQL on the start node, every edge, and every neighbor. Each result hop carries direction and role. `resolve_procedure_entry` uses `metadata_.procedure.entry_step_id` when it names a live in-tenant step, and otherwise the single step with no incoming `precedes` edge.
@@ -156,5 +168,19 @@ Dashboard UI (React frontend + FastAPI backend). Lives in
 [`memoryhub-ui/`](memoryhub-ui/). Not yet published.
 
 ### [Unreleased]
+
+- Connected the redesigned dashboard to verified User/Admin capabilities,
+  preserving personal-data and individual-activity privacy (#710, #738).
+- Fixed stale entity merge previews, complete filter reset and whole-chain
+  delete capabilities. Added User/Admin browser regression coverage (#738).
+- HTTP contradiction review now uses the shared Core locked query, keeps the
+  live-memory restriction, and reports typed self-review/state conflicts
+  consistently (#738).
+- Browse errors replace stale results, writer filters use the actual author,
+  graph actions follow per-memory capabilities, and graph reset restores
+  current versions (#738).
+- Deployment helpers use an explicit OpenShift context (default `mcp-rhoai`)
+  and verify Route TLS with the ingress CA or `MEMORYHUB_ROUTE_CA_FILE` (#738).
+
 
 - BFF walker, dashboard views, memory inspector.

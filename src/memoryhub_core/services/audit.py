@@ -11,7 +11,6 @@ infrastructure issues never block memory operations.
 
 import logging
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -107,3 +106,17 @@ async def record_event(
             exc_info=True,
         )
         # Swallow the exception — audit failures never block operations
+
+
+def stage_event(session, *, actor_id: str, tenant_id: str, event_type: str,
+                scope: str, owner_id: str, memory_id=None, metadata=None):
+    """Stage an allowed human event atomically with a pending mutation.
+
+    Unlike the best-effort async recorder, this does not catch persistence
+    errors: failure of a required human audit also rolls back the mutation.
+    """
+    session.add(AuditLog(
+        event_type=event_type, actor_id=actor_id, driver_id=actor_id,
+        scope=scope, owner_id=owner_id, memory_id=memory_id, decision="allowed",
+        event_metadata=metadata, tenant_id=tenant_id,
+    ))

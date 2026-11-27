@@ -14,20 +14,26 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from memoryhub_core.config import ValkeySettings
-from memoryhub_core.models.audit import AuditLog
-from memoryhub_core.models.campaign import Campaign, CampaignMembership
-from memoryhub_core.models.contradiction import ContradictionReport
-from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
-from memoryhub_core.models.project import Project, ProjectMembership
+from memoryhub_core.models.memory import MemoryNode
+from memoryhub_core.models.project import Project
 from memoryhub_core.models.schemas import MemoryNodeCreate, MemoryNodeUpdate, RelationshipCreate, RelationshipType
+from memoryhub_core.queries import browse as browse_queries
+from memoryhub_core.queries import entities as entity_queries
+from memoryhub_core.queries import identities as identity_queries
+from memoryhub_core.queries import memories as memory_queries
+from memoryhub_core.queries import mutations as mutation_queries
+from memoryhub_core.queries import projects as project_queries
+from memoryhub_core.queries.filters import MemoryFilters
 from memoryhub_core.services.admin import quarantine_memory, record_moderation_audit, restore_memory
-from memoryhub_core.services.curation.pipeline import run_curation_pipeline
+from memoryhub_core.services.audit import stage_event
 from memoryhub_core.services.embeddings import HttpEmbeddingService
 from memoryhub_core.services.entity import merge_entities, rename_entity
 from memoryhub_core.services.exceptions import (
     CrossTenantRelationshipError,
+    CurationBlockedError,
     LastAdminError,
     MembershipNotFoundError,
+    MemoryAccessDeniedError,
     MemoryNotCurrentError,
     MemoryNotFoundError,
     ProjectAlreadyExistsError,
@@ -35,14 +41,12 @@ from memoryhub_core.services.exceptions import (
 )
 from memoryhub_core.services.graph import create_relationship
 from memoryhub_core.services.memory import (
-    collect_delete_nodes,
-)
-from memoryhub_core.services.memory import (
     create_memory as core_create_memory,
 )
 from memoryhub_core.services.memory import (
     report_contradiction as core_report_contradiction,
 )
+from memoryhub_core.services.memory import stage_memory_delete
 from memoryhub_core.services.memory import (
     update_memory as core_update_memory,
 )
@@ -56,14 +60,12 @@ from memoryhub_core.services.project import (
 )
 from memoryhub_core.services.valkey_client import ValkeyClient, ValkeyUnavailableError
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import String, and_, cast, func, or_, select
-from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
-from src.authorization import AccessDep, AgentOwner
+from src.authorization import AccessDep
 from src.config import Settings, get_settings
 from src.database import get_db
+from src.deletion import delete_capabilities, prepare_human_delete
 
 router = APIRouter()
 DbDep = Annotated[AsyncSession, Depends(get_db)]
@@ -163,19 +165,14 @@ def _record_human_audit(
     """Stage an append-only audit row in the mutation's existing transaction."""
     if not isinstance(db, AsyncSession):
         return  # Test doubles have no SQLAlchemy unit of work.
-    db.add(AuditLog(
-        event_type=event_type, actor_id=access.principal.username,
-        driver_id=access.principal.username, scope=scope,
-        owner_id=owner_id, memory_id=memory_id, decision="allowed",
-        event_metadata=metadata, tenant_id=access.principal.tenant_id,
-    ))
+    stage_event(
+        db, actor_id=access.principal.username, tenant_id=access.principal.tenant_id,
+        event_type=event_type, scope=scope, owner_id=owner_id, memory_id=memory_id, metadata=metadata,
+    )
 
 
 async def _project(db: AsyncSession, access: AccessDep, name: str, *, lock: bool = False) -> Project:
-    stmt = select(Project).where(Project.name == name, Project.tenant_id == access.principal.tenant_id)
-    if lock:
-        stmt = stmt.with_for_update()
-    project = (await db.execute(stmt)).scalar_one_or_none()
+    project = await project_queries.project_by_name(db, name, access.principal.tenant_id, lock=lock)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
@@ -183,13 +180,7 @@ async def _project(db: AsyncSession, access: AccessDep, name: str, *, lock: bool
 
 async def _membership(db: AsyncSession, access: AccessDep, name: str, *, admin: bool = False) -> bool:
     """Recheck a live human membership inside the mutation transaction."""
-    stmt = select(ProjectMembership).join(Project, ProjectMembership.project_id == Project.name).where(
-        Project.tenant_id == access.principal.tenant_id,
-        ProjectMembership.project_id == name,
-        ProjectMembership.user_id == access.principal.username,
-    ).with_for_update(of=ProjectMembership)
-    rows = (await db.execute(stmt)).scalars().all()
-    return any(m.role == "admin" for m in rows) if admin else bool(rows)
+    return await project_queries.human_membership(db, access, name, admin=admin)
 
 
 async def _known_member(db: AsyncSession, settings: Settings, tenant: str, user_id: str) -> bool:
@@ -197,29 +188,13 @@ async def _known_member(db: AsyncSession, settings: Settings, tenant: str, user_
               for name in raw.split(",") if name.strip()}
     if user_id in humans:
         return True
-    stmt = select(AgentOwner.client_id).where(AgentOwner.tenant_id == tenant, AgentOwner.client_id == user_id)
-    return (await db.execute(stmt)).scalar_one_or_none() is not None
+    return await identity_queries.owner_binding_exists(db, user_id, tenant)
 
 
-async def _project_row(db: AsyncSession, access: AccessDep, project: Project) -> dict:
-    tenant = access.principal.tenant_id
-    member_count = (await db.execute(select(func.count()).select_from(ProjectMembership).where(
-        ProjectMembership.project_id == project.name,
-    ))).scalar_one()
-    memory_info = (await db.execute(select(func.count(MemoryNode.id), func.max(MemoryNode.updated_at)).where(
-        MemoryNode.tenant_id == tenant,
-        MemoryNode.scope == "project",
-        MemoryNode.scope_id == project.name,
-        MemoryNode.deleted_at.is_(None),
-        MemoryNode.is_current.is_(True),
-    ))).one()
-    campaigns = (await db.execute(select(Campaign).join(
-        CampaignMembership, CampaignMembership.campaign_id == Campaign.id,
-    ).where(Campaign.tenant_id == tenant, CampaignMembership.project_id == project.name))).scalars().all()
-    my_role = (await db.execute(select(ProjectMembership.role).where(
-        ProjectMembership.project_id == project.name,
-        ProjectMembership.user_id == access.principal.username,
-    ))).scalar_one_or_none()
+async def _project_row(db: AsyncSession, access: AccessDep, project: Project, *, summary=None) -> dict:
+    if summary is None:
+        summary = await project_queries.project_summary(db, access, project)
+    member_count, memory_info, campaigns, my_role = summary
     return {
         "name": project.name,
         "description": project.description,
@@ -237,17 +212,9 @@ async def _project_row(db: AsyncSession, access: AccessDep, project: Project) ->
 
 @router.get("/api/projects")
 async def list_projects(db: DbDep, access: AccessDep, mine: bool = Query(False)):
-    tenant = access.principal.tenant_id
-    my_projects = select(ProjectMembership.project_id).where(
-        ProjectMembership.user_id == access.principal.username,
-    )
-    stmt = select(Project).where(Project.tenant_id == tenant)
-    if mine:
-        stmt = stmt.where(Project.name.in_(my_projects))
-    elif access.principal.role == "user":
-        stmt = stmt.where(or_(Project.name.in_(my_projects), Project.invite_only.is_(False)))
-    projects = (await db.execute(stmt.order_by(Project.name))).scalars().all()
-    items = [await _project_row(db, access, p) for p in projects]
+    projects = await project_queries.visible_projects(db, access, mine=mine)
+    summaries = await project_queries.project_summaries(db, access, projects)
+    items = [await _project_row(db, access, p, summary=summaries[p.name]) for p in projects]
     return {
         "items": items,
         "total": len(items),
@@ -372,70 +339,25 @@ async def remove_member(name: str, user_id: str, db: DbDep, access: AccessDep):
 
 
 async def _node(db: AsyncSession, access: AccessDep, memory_id: uuid.UUID, *, lock: bool = False) -> MemoryNode:
-    stmt = select(MemoryNode).where(MemoryNode.id == memory_id,
-                                    MemoryNode.tenant_id == access.principal.tenant_id)
-    if lock:
-        stmt = stmt.with_for_update()
-    node = (await db.execute(stmt)).scalar_one_or_none()
+    node = await memory_queries.get_memory_row(db, memory_id, access.principal.tenant_id, lock=lock)
     if node is None:
         raise HTTPException(status_code=404, detail="Memory not found")
     return node
 
 
 async def _require_write(db: AsyncSession, access: AccessDep, node: MemoryNode) -> None:
-    if not access.can_write(node):
-        raise HTTPException(status_code=404, detail="Memory not found")
-    if node.scope == "project" and not await _membership(
-        db, access, node.scope_id, admin=access.principal.role == "admin",
-    ):
+    if not await project_queries.writable_by_human(db, access, node):
         raise HTTPException(status_code=404, detail="Memory not found")
 
 
 async def _mutation_neighbors(db: AsyncSession, access: AccessDep, node: MemoryNode) -> None:
     """Preflight the branch/relationship set that Core versioning mutates."""
-    children = (await db.execute(select(MemoryNode).where(
-        MemoryNode.parent_id == node.id,
-        MemoryNode.is_current.is_(True),
-        MemoryNode.deleted_at.is_(None),
-    ).with_for_update())).scalars().all()
-    rels = (await db.execute(select(MemoryRelationship).where(
-        MemoryRelationship.valid_until.is_(None),
-        or_(MemoryRelationship.source_id == node.id, MemoryRelationship.target_id == node.id),
-    ).with_for_update())).scalars().all()
-    if any(rel.tenant_id != access.principal.tenant_id for rel in rels):
-        raise HTTPException(status_code=409, detail="Memory relationship boundary invalid")
-    neighbor_ids = {rel.target_id if rel.source_id == node.id else rel.source_id for rel in rels}
-    if node.parent_id:
-        neighbor_ids.add(node.parent_id)
-    if neighbor_ids:
-        neighbors = (await db.execute(select(MemoryNode).where(
-            MemoryNode.id.in_(neighbor_ids),
-        ).with_for_update())).scalars().all()
-    else:
-        neighbors = []
-    if len(neighbors) != len(neighbor_ids):
-        raise HTTPException(status_code=409, detail="Memory relationship boundary invalid")
-    for child in children:
-        await _require_write(db, access, child)
-    for related in neighbors:
-        # Core only re-points an existing MENTIONS edge to an entity when a
-        # memory gets a new version. It does not edit the entity itself.
-        # Requiring entity write here would block ordinary versioning because
-        # entity nodes have their own managed scope.
-        related_edges = [rel for rel in rels if related.id in (rel.source_id, rel.target_id)]
-        entity_reference = (
-            related.id != node.parent_id
-            and related.scope == "entity"
-            and related.tenant_id == access.principal.tenant_id
-            and related.deleted_at is None
-            and related.is_current
-            and related.status == "active"
-            and related_edges
-            and all(rel.relationship_type == "mentions" and rel.source_id == node.id
-                    and rel.target_id == related.id for rel in related_edges)
-        )
-        if not entity_reference:
-            await _require_write(db, access, related)
+    try:
+        await mutation_queries.authorize_version_neighbors(db, access, node)
+    except mutation_queries.RelationshipBoundaryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except MemoryAccessDeniedError:
+        raise HTTPException(status_code=404, detail="Memory not found") from None
 
 
 @router.post("/api/memories", status_code=201)
@@ -478,22 +400,14 @@ async def new_version(memory_id: uuid.UUID, body: VersionBody, db: DbDep, access
     node = await _node(db, access, memory_id, lock=True)
     await _require_write(db, access, node)
     await _mutation_neighbors(db, access, node)
-    if body.content is not None:
-        # Core update does not run curation. Enforce content rules for the
-        # memory's owner before any version or audit row is written. Duplicate
-        # gates apply to new memories, not revisions of an existing memory.
-        curation = await run_curation_pipeline(
-            content=body.content, embedding=None, owner_id=node.owner_id,
-            scope=node.scope, session=db, tenant_id=node.tenant_id, commit_seed=False,
-        )
-        if curation["blocked"]:
-            raise HTTPException(status_code=409, detail="Curation blocked write")
     _record_human_audit(db, access, "memory.update", node.scope, node.owner_id, node.id)
     try:
         version = await core_update_memory(
             memory_id, MemoryNodeUpdate(**body.model_dump(exclude_unset=True)), db, embedding,
             actor_id=access.principal.username, driver_id=access.principal.username,
         )
+    except CurationBlockedError:
+        raise HTTPException(status_code=409, detail="Curation blocked write") from None
     except MemoryNotFoundError:
         raise HTTPException(status_code=404, detail="Memory not found") from None
     except MemoryNotCurrentError:
@@ -608,48 +522,18 @@ async def moderate_bulk(body: BulkBody, db: DbDep, access: AccessDep):
 
 
 async def _bulk_delete(ids: list[uuid.UUID], db: AsyncSession, access: AccessDep) -> dict:
-    """Use the Core delete closure; update all rows in one transaction."""
-    tenant = access.principal.tenant_id
-    roots = []
-    closure: dict[uuid.UUID, MemoryNode] = {}
-    for memory_id in sorted(ids):
-        node = await _node(db, access, memory_id, lock=True)
-        access.require_delete(node)
-        if node.deleted_at is not None:
-            raise HTTPException(status_code=409, detail="Memory is already deleted")
-        roots.append(node)
-        try:
-            related = await collect_delete_nodes(node, db, tenant, seed_locked=True)
-        except MemoryNotFoundError:
-            raise HTTPException(status_code=404, detail="Memory not found") from None
-        for member in related.values():
-            if member.deleted_at is not None:
-                continue
-            access.require_delete(member)
-            closure[member.id] = member
-    # Soft-delete does not mutate unrelated edge endpoints. A corrupt
-    # cross-tenant edge is nevertheless a boundary failure, not a reason to
-    # proceed with a partially visible graph.
-    edges = (await db.execute(select(MemoryRelationship).where(
-        MemoryRelationship.valid_until.is_(None),
-        or_(MemoryRelationship.source_id.in_(closure),
-            MemoryRelationship.target_id.in_(closure)),
-    ).with_for_update())).scalars().all()
-    if any(edge.tenant_id != tenant for edge in edges):
-        raise HTTPException(status_code=409, detail="Memory relationship boundary invalid")
-    now = datetime.now(UTC)
-    for node in roots:
+    """Authorize through Core preflight, then commit one audited transaction."""
+    plan = await prepare_human_delete(db, access, ids)
+    for node in plan.roots:
         _record_human_audit(db, access, "memory.delete", node.scope, node.owner_id, node.id,
-                            {"deleted_rows": len(closure), "bulk": True})
+                            {"deleted_rows": len(plan.nodes), "bulk": True})
     try:
-        await db.execute(sa_update(MemoryNode).where(
-            MemoryNode.tenant_id == tenant, MemoryNode.id.in_(closure),
-        ).values(deleted_at=now, is_current=False))
+        await stage_memory_delete(plan, db)
         await db.commit()
     except Exception:
         await db.rollback()
         raise
-    return {"done": [str(node.id) for node in roots], "errors": []}
+    return {"done": [str(node.id) for node in plan.roots], "errors": []}
 
 
 async def _bulk_relate(ids: list[uuid.UUID], target_id: uuid.UUID,
@@ -667,13 +551,9 @@ async def _bulk_relate(ids: list[uuid.UUID], target_id: uuid.UUID,
                 or (source.scope == "user" and source.owner_id != target.owner_id)):
             raise HTTPException(status_code=403, detail="Relationship scope forbidden")
         sources.append(source)
-    existing = (await db.execute(select(MemoryRelationship.source_id).where(
-        MemoryRelationship.tenant_id == access.principal.tenant_id,
-        MemoryRelationship.source_id.in_(ids),
-        MemoryRelationship.target_id == target_id,
-        MemoryRelationship.relationship_type == relationship_type,
-        MemoryRelationship.valid_until.is_(None),
-    ).with_for_update())).scalars().all()
+    existing = await mutation_queries.existing_relationship_sources(
+        db, ids, target_id, relationship_type, access.principal.tenant_id,
+    )
     if existing:
         raise HTTPException(status_code=409, detail="Relationship already exists")
     try:
@@ -698,49 +578,12 @@ async def _bulk_relate(ids: list[uuid.UUID], target_id: uuid.UUID,
 
 
 def _human_content_clause(access: AccessDep, model=MemoryNode):
-    """Content access from direct human grants, never an agent membership."""
-    tenant = and_(model.tenant_id == access.principal.tenant_id,
-                  model.deleted_at.is_(None))
-    if access.principal.role == "user":
-        return and_(tenant, model.status == "active", or_(
-            and_(model.scope == "user", model.owner_id.in_(access.identities)),
-            and_(model.scope == "project", model.scope_id.in_(access.human_projects)),
-            and_(model.scope == "role", model.scope_id.in_(access.human_roles)),
-            and_(model.scope == "campaign", model.owner_id.in_(access.human_campaigns)),
-            model.scope.in_(("organizational", "enterprise")),
-        ))
-    allowed = []
-    if "organizational" in access.moderation_scopes:
-        allowed.append(model.scope == "organizational")
-    if "project" in access.moderation_scopes:
-        allowed.append(and_(model.scope == "project", model.scope_id.in_(access.human_projects)))
-    if "role" in access.moderation_scopes:
-        allowed.append(and_(model.scope == "role", model.scope_id.in_(access.human_roles)))
-    if "campaign" in access.moderation_scopes:
-        allowed.append(and_(model.scope == "campaign", model.owner_id.in_(access.human_campaigns)))
-    return and_(tenant, or_(*allowed)) if allowed else and_(tenant, model.id.is_(None))
+    """Compatibility helper for the single shared Core content policy."""
+    return access.live_content_clause(model)
 
 
 def _human_can_see_content(access: AccessDep, memory: MemoryNode) -> bool:
-    if memory.tenant_id != access.principal.tenant_id or memory.deleted_at is not None:
-        return False
-    if access.principal.role == "user":
-        return memory.status == "active" and memory.deleted_at is None and (
-            (memory.scope == "user" and memory.owner_id in access.identities)
-            or (memory.scope == "project" and memory.scope_id in access.human_projects)
-            or (memory.scope == "role" and memory.scope_id in access.human_roles)
-            or (memory.scope == "campaign" and memory.owner_id in access.human_campaigns)
-            or memory.scope in ("organizational", "enterprise")
-        )
-    return (
-        (memory.scope == "organizational" and "organizational" in access.moderation_scopes)
-        or (memory.scope == "project" and memory.scope_id in access.human_projects
-            and "project" in access.moderation_scopes)
-        or (memory.scope == "role" and memory.scope_id in access.human_roles
-            and "role" in access.moderation_scopes)
-        or (memory.scope == "campaign" and memory.owner_id in access.human_campaigns
-            and "campaign" in access.moderation_scopes)
-    )
+    return access.can_see_content(memory)
 
 
 @router.get("/api/memories/browse")
@@ -767,149 +610,13 @@ async def browse_memories(
     per_page: int = Query(20, ge=1, le=100),
 ):
     """Read existing memories with the same human scope as other BFF reads."""
-    if min_weight is not None and max_weight is not None and min_weight > max_weight:
-        raise HTTPException(status_code=422, detail="Invalid weight range")
-    if flag and any(value not in ("contradicted", "has_branches") for value in flag):
-        raise HTTPException(status_code=422, detail="Unsupported flag filter")
-    if access.principal.role == "user" and tab in ("quarantined", "deleted"):
-        raise HTTPException(status_code=403, detail="Memory state forbidden")
-    access.forbid_person_filter(actor)
-    tenant = access.principal.tenant_id
-    base = [MemoryNode.tenant_id == tenant]
-    if access.principal.role == "user":
-        base.append(_human_content_clause(access))
-    else:
-        # Admin rows are metadata of shared scopes only; personal memories are excluded (#667).
-        base.append(access.clause())
-    filters = list(base)
-    if tab == "current":
-        filters.extend((MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
-                        MemoryNode.status == "active"))
-    elif tab == "all":
-        filters.append(MemoryNode.deleted_at.is_(None))
-    elif tab == "quarantined":
-        filters.extend((MemoryNode.deleted_at.is_(None), MemoryNode.status == "quarantined"))
-    else:
-        filters.append(MemoryNode.deleted_at.is_not(None))
-    if scope:
-        filters.append(MemoryNode.scope.in_(scope))
-    if actor:
-        filters.append(MemoryNode.actor_id.in_(actor))
-    if project:
-        filters.extend((MemoryNode.scope == "project", MemoryNode.scope_id == project))
-    if domain:
-        filters.extend((_human_content_clause(access), MemoryNode.domains.overlap(domain)))
-    if min_weight is not None:
-        filters.append(MemoryNode.weight >= min_weight)
-    if max_weight is not None:
-        filters.append(MemoryNode.weight <= max_weight)
-    if created_from:
-        filters.append(MemoryNode.created_at >= created_from)
-    if created_to:
-        filters.append(MemoryNode.created_at < created_to + timedelta(days=1))
-    if branch_type:
-        child = aliased(MemoryNode)
-        filters.append(select(child.id).where(
-            child.parent_id == MemoryNode.id, child.tenant_id == tenant,
-            child.branch_type == branch_type, child.deleted_at.is_(None),
-            child.is_current.is_(True),
-            access.clause(child),
-        ).exists())
-    if flag:
-        if "contradicted" in flag:
-            filters.append(select(ContradictionReport.id).where(
-                ContradictionReport.memory_id == MemoryNode.id,
-                ContradictionReport.tenant_id == tenant,
-                ContradictionReport.resolved.is_(False),
-            ).exists())
-        if "has_branches" in flag:
-            child = aliased(MemoryNode)
-            filters.append(select(child.id).where(
-                child.parent_id == MemoryNode.id, child.tenant_id == tenant,
-                child.deleted_at.is_(None),
-                child.is_current.is_(True),
-                access.clause(child),
-            ).exists())
-    if entity:
-        filters.extend((_human_content_clause(access), select(MemoryRelationship.id).where(
-            MemoryRelationship.source_id == MemoryNode.id,
-            MemoryRelationship.target_id == entity,
-            MemoryRelationship.tenant_id == tenant,
-            MemoryRelationship.relationship_type == "mentions",
-            MemoryRelationship.valid_until.is_(None),
-        ).exists()))
-    search_mode = "none"
-    if q:
-        pattern = f"%{q.strip()}%"
-        # Searching by owner would count one person's memories; admins match IDs only.
-        metadata_match = or_(
-            cast(MemoryNode.id, String).ilike(pattern), MemoryNode.owner_id.ilike(pattern),
-        ) if access.sees_individual_activity else cast(MemoryNode.id, String).ilike(pattern)
-        if mode == "metadata":
-            filters.append(metadata_match)
-            search_mode = "metadata"
-        elif access.principal.role == "admin":
-            filters.append(or_(metadata_match, _human_content_clause(access) &
-                               or_(MemoryNode.content.ilike(pattern), MemoryNode.stub.ilike(pattern))))
-            search_mode = "text"
-        else:
-            filters.append(or_(metadata_match, MemoryNode.content.ilike(pattern), MemoryNode.stub.ilike(pattern)))
-            search_mode = "text"
-    total = (await db.execute(select(func.count()).select_from(MemoryNode).where(*filters))).scalar_one()
-    sort_col = {"updated": MemoryNode.updated_at, "created": MemoryNode.created_at,
-                "weight": MemoryNode.weight, "relevance": MemoryNode.updated_at}[sort]
-    ordered = sort_col.asc() if order == "asc" else sort_col.desc()
-    memories = (await db.execute(select(MemoryNode).where(*filters).order_by(ordered, MemoryNode.id)
-                                 .offset((page - 1) * per_page).limit(per_page))).scalars().all()
-    memories = [
-        memory for memory in memories
-        if memory.tenant_id == tenant and (
-            access.can_read(memory) if access.principal.role == "admin"
-            else _human_can_see_content(access, memory)
-        )
-    ]
-    ids = [memory.id for memory in memories]
-    branch_counts: dict[uuid.UUID, Counter] = {}
-    report_counts: dict[uuid.UUID, int] = {}
-    entities_by_memory: dict[uuid.UUID, list[dict]] = {}
-    if ids:
-        children = (await db.execute(select(MemoryNode.parent_id, MemoryNode.branch_type).where(
-            MemoryNode.parent_id.in_(ids), MemoryNode.tenant_id == tenant,
-            MemoryNode.deleted_at.is_(None),
-            MemoryNode.is_current.is_(True),
-            access.clause(),
-        ))).all()
-        for parent_id, branch in children:
-            branch_counts.setdefault(parent_id, Counter())[branch or "other"] += 1
-        reports = (await db.execute(select(ContradictionReport.memory_id, func.count()).where(
-            ContradictionReport.memory_id.in_(ids), ContradictionReport.tenant_id == tenant,
-            ContradictionReport.resolved.is_(False),
-        ).group_by(ContradictionReport.memory_id))).all()
-        report_counts = dict(reports)
-        # Entity names are content. The selected source memory is already
-        # authorized, and a redacted Admin row gets no linked entity names.
-        content_ids = [memory.id for memory in memories if _human_can_see_content(access, memory)]
-        if content_ids:
-            entity_node = aliased(MemoryNode)
-            entity_rows = (await db.execute(select(
-                MemoryRelationship.source_id, entity_node.id,
-                entity_node.content, entity_node.branch_type,
-            ).join(entity_node, entity_node.id == MemoryRelationship.target_id).where(
-                MemoryRelationship.source_id.in_(content_ids),
-                MemoryRelationship.tenant_id == tenant,
-                MemoryRelationship.relationship_type == "mentions",
-                MemoryRelationship.valid_until.is_(None),
-                entity_node.tenant_id == tenant,
-                entity_node.scope == "entity",
-                entity_node.status == "active",
-                entity_node.is_current.is_(True),
-                entity_node.deleted_at.is_(None),
-            ))).all()
-            for source_id, entity_id, name, kind in entity_rows:
-                entities_by_memory.setdefault(source_id, []).append({
-                    "id": str(entity_id), "name": name,
-                    "type": (kind or "").removeprefix("entity:"),
-                })
+    query = MemoryFilters(tab=tab, q=q, mode=mode, scope=scope, actor=actor,
+        project=project, domain=domain, min_weight=min_weight, max_weight=max_weight,
+        created_from=created_from, created_to=created_to, branch_type=branch_type, flag=flag, entity=entity)
+    total, memories, branch_counts, report_counts, entities_by_memory, search_mode = await browse_queries.browse_page(
+        db, access, query, sort=sort, order=order, page=page, per_page=per_page,
+    )
+    deletable = await delete_capabilities(db, access, memories)
     items = []
     for memory in memories:
         hidden = not _human_can_see_content(access, memory)
@@ -943,61 +650,9 @@ async def browse_memories(
             "entity_count": 0 if hidden else len(entities_by_memory.get(memory.id, [])),
             "redacted": hidden,
             "capabilities": {"write": writable, "moderate": moderatable},
-            "can_delete": access.can_delete(memory) and (
-                memory.scope != "project" or memory.scope_id in access.human_projects
-            ),
+            "can_delete": deletable[memory.id],
         })
-    tabs = {}
-    for name, condition in (
-        ("current", (MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
-                     MemoryNode.status == "active")),
-        ("all", (MemoryNode.deleted_at.is_(None),)),
-        ("quarantined", (MemoryNode.deleted_at.is_(None), MemoryNode.status == "quarantined")),
-        ("deleted", (MemoryNode.deleted_at.is_not(None),)),
-    ):
-        if access.principal.role == "user" and name in ("quarantined", "deleted"):
-            tabs[name] = 0
-        else:
-            stmt = select(func.count()).select_from(MemoryNode).where(*base, *condition)
-            tabs[name] = (await db.execute(stmt)).scalar_one()
-    facets = {"writers": []}
-    for name, column, extra in (
-        ("scopes", MemoryNode.scope, ()),
-        # Memories per person is individual activity: not an admin facet (#667).
-        *((("writers", MemoryNode.owner_id, ()),) if access.sees_individual_activity else ()),
-        ("projects", MemoryNode.scope_id, (MemoryNode.scope == "project",)),
-    ):
-        rows = (await db.execute(select(column, func.count()).select_from(MemoryNode).where(
-            *base, MemoryNode.deleted_at.is_(None), *extra,
-        ).group_by(column))).all()
-        facets[name] = [{"value": value, "count": count} for value, count in rows if value is not None]
-    facets["domains"] = []
-    # These counts describe only authorized memories. Domain values are
-    # content metadata and must exclude Admin's redacted personal rows.
-    domain_rows = select(func.unnest(MemoryNode.domains).label("value")).where(
-        *base, MemoryNode.deleted_at.is_(None), _human_content_clause(access),
-    ).subquery()
-    domains = (await db.execute(select(domain_rows.c.value, func.count()).select_from(
-        domain_rows).group_by(domain_rows.c.value))).all()
-    facets["domains"] = [{"value": value, "count": count} for value, count in domains if value]
-    contradicted = (await db.execute(select(func.count()).select_from(MemoryNode).where(
-        *base, MemoryNode.deleted_at.is_(None),
-        select(ContradictionReport.id).where(
-            ContradictionReport.memory_id == MemoryNode.id,
-            ContradictionReport.tenant_id == tenant,
-            ContradictionReport.resolved.is_(False),
-        ).exists(),
-    ))).scalar_one()
-    branch = aliased(MemoryNode)
-    has_branches = (await db.execute(select(func.count()).select_from(MemoryNode).where(
-        *base, MemoryNode.deleted_at.is_(None),
-        select(branch.id).where(
-            branch.parent_id == MemoryNode.id, branch.tenant_id == tenant,
-            branch.deleted_at.is_(None), branch.is_current.is_(True), access.clause(branch),
-        ).exists(),
-    ))).scalar_one()
-    facets["flags"] = {"contradicted": contradicted, "has_branches": has_branches,
-                       "near_duplicate": None}
+    tabs, facets = await browse_queries.browse_facets(db, access)
     return {"items": items, "total": total, "page": page, "per_page": per_page,
             "search_mode": search_mode, "metadata_only": access.principal.role == "admin",
             "hidden_scopes": ["user", "enterprise"] if access.principal.role == "admin" else [],
@@ -1014,69 +669,33 @@ def _aliases(node: MemoryNode) -> list[str]:
 
 
 async def _entity_sources(db: AsyncSession, access: AccessDep, entity_id: uuid.UUID) -> list[MemoryNode]:
-    rels = (await db.execute(select(MemoryRelationship).where(
-        MemoryRelationship.target_id == entity_id,
-        MemoryRelationship.tenant_id == access.principal.tenant_id,
-        MemoryRelationship.relationship_type == "mentions",
-        MemoryRelationship.valid_until.is_(None),
-    ))).scalars().all()
-    source_ids = {rel.source_id for rel in rels}
-    if not source_ids:
-        return []
-    sources = (await db.execute(select(MemoryNode).where(
-        MemoryNode.id.in_(source_ids), _human_content_clause(access),
-    ))).scalars().all()
-    visible = [
-        source for source in sources
-        if source.tenant_id == access.principal.tenant_id
-        and source.deleted_at is None and source.is_current and _human_can_see_content(access, source)
-        and all(rel.tenant_id == access.principal.tenant_id for rel in rels if rel.source_id == source.id)
-    ]
-    return visible
+    return await entity_queries.readable_sources(db, access, entity_id)
 
 
 async def _entity(db: AsyncSession, access: AccessDep, entity_id: uuid.UUID, *, lock: bool = False) -> MemoryNode:
     if access.principal.role != "user":
         raise HTTPException(status_code=403, detail="Entity access forbidden")
-    stmt = select(MemoryNode).where(
-        MemoryNode.id == entity_id,
-        MemoryNode.scope == "entity",
-        MemoryNode.tenant_id == access.principal.tenant_id,
-        MemoryNode.deleted_at.is_(None),
-        MemoryNode.is_current.is_(True),
-        MemoryNode.status == "active",
-    )
-    if lock:
-        stmt = stmt.with_for_update()
-    entity = (await db.execute(stmt)).scalar_one_or_none()
+    entity = await entity_queries.entity_row(db, entity_id, access.principal.tenant_id, lock=lock)
     if entity is None:
         raise HTTPException(status_code=404, detail="Entity not found")
     return entity
 
 
 async def _entity_mutation_sources(db: AsyncSession, access: AccessDep, entity: MemoryNode) -> list[MemoryNode]:
-    """Core merge rewires every active mention; reject if any is not writable."""
-    if entity.owner_id != access.principal.username:
-        raise HTTPException(status_code=404, detail="Entity not found")
-    rels = (await db.execute(select(MemoryRelationship).where(
-        MemoryRelationship.target_id == entity.id,
-        MemoryRelationship.relationship_type == "mentions",
-        MemoryRelationship.valid_until.is_(None),
-    ).with_for_update())).scalars().all()
-    source_ids = {rel.source_id for rel in rels}
-    if any(rel.tenant_id != access.principal.tenant_id for rel in rels):
-        raise HTTPException(status_code=409, detail="Entity relationship boundary invalid")
-    if source_ids:
-        sources = (await db.execute(select(MemoryNode).where(MemoryNode.id.in_(source_ids)))).scalars().all()
-    else:
-        sources = []
-    if len({source.id for source in sources}) != len(source_ids):
-        raise HTTPException(status_code=409, detail="Entity relationship boundary invalid")
-    for source in sources:
-        if not _human_can_see_content(access, source):
-            raise HTTPException(status_code=404, detail="Entity not found")
-        await _require_write(db, access, source)
-    return sources
+    try:
+        return await entity_queries.mutation_sources(db, access, entity, lock=True)
+    except entity_queries.EntityBoundaryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except MemoryAccessDeniedError:
+        raise HTTPException(status_code=404, detail="Entity not found") from None
+
+
+async def _entity_editable(db: AsyncSession, access: AccessDep, entity: MemoryNode) -> bool:
+    try:
+        await entity_queries.mutation_sources(db, access, entity)
+        return True
+    except (entity_queries.EntityBoundaryError, MemoryAccessDeniedError):
+        return False
 
 
 @router.get("/api/entities")
@@ -1093,73 +712,9 @@ async def list_entities(
         raise HTTPException(status_code=403, detail="Entity access forbidden")
     if project and not await _membership(db, access, project):
         raise HTTPException(status_code=404, detail="Project not found")
-    source = aliased(MemoryNode)
-    mention = MemoryRelationship
-    visibility = select(
-        mention.target_id.label("entity_id"),
-        func.count(func.distinct(source.id)).label("memory_count"),
-        func.max(source.updated_at).label("last_seen"),
-    ).join(source, source.id == mention.source_id).where(
-        mention.tenant_id == access.principal.tenant_id,
-        mention.relationship_type == "mentions",
-        mention.valid_until.is_(None),
-        source.deleted_at.is_(None),
-        source.is_current.is_(True),
-        _human_content_clause(access, source),
+    rows, total, counts, projects_by_entity = await entity_queries.entity_page(
+        db, access, q=q, entity_type=type, project=project, page=page, per_page=per_page,
     )
-    if project:
-        visibility = visibility.where(source.scope == "project", source.scope_id == project)
-    visible = visibility.group_by(mention.target_id).subquery()
-    conditions = [
-        MemoryNode.scope == "entity",
-        MemoryNode.tenant_id == access.principal.tenant_id,
-        MemoryNode.deleted_at.is_(None),
-        MemoryNode.is_current.is_(True),
-        MemoryNode.status == "active",
-    ]
-    if q:
-        pattern = f"%{q.strip()}%"
-        conditions.append(or_(MemoryNode.content.ilike(pattern), cast(MemoryNode.metadata_, String).ilike(pattern)))
-    visible_or_owned = (
-        visible.c.entity_id.is_not(None) if project else
-        or_(visible.c.entity_id.is_not(None), MemoryNode.owner_id == access.principal.username)
-    )
-    base = select(MemoryNode.id).outerjoin(visible, visible.c.entity_id == MemoryNode.id).where(
-        *conditions, visible_or_owned,
-    )
-    counts_rows = (await db.execute(select(MemoryNode.branch_type, func.count()).outerjoin(
-        visible, visible.c.entity_id == MemoryNode.id,
-    ).where(*conditions, visible_or_owned).group_by(MemoryNode.branch_type))).all()
-    counts = {kind: 0 for kind in ("person", "organization", "location", "object", "event")}
-    for branch_type, count in counts_rows:
-        kind = (branch_type or "").removeprefix("entity:")
-        if kind in counts:
-            counts[kind] = count
-    counts["all"] = sum(counts.values())
-    if type != "all":
-        base = base.where(MemoryNode.branch_type == f"entity:{type}")
-    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
-    rows = (await db.execute(select(MemoryNode, visible.c.memory_count, visible.c.last_seen).outerjoin(
-        visible, visible.c.entity_id == MemoryNode.id,
-    ).where(*conditions, visible_or_owned,
-            *([MemoryNode.branch_type == f"entity:{type}"] if type != "all" else []))
-        .order_by(func.coalesce(visible.c.memory_count, 0).desc(), MemoryNode.content)
-        .offset((page - 1) * per_page).limit(per_page))).all()
-    entity_ids = [entity.id for entity, _count, _last in rows]
-    projects_by_entity: dict[uuid.UUID, set[str]] = {entity_id: set() for entity_id in entity_ids}
-    if entity_ids:
-        linked_source = aliased(MemoryNode)
-        project_rows = (await db.execute(select(mention.target_id, linked_source.scope_id).join(
-            linked_source, linked_source.id == mention.source_id,
-        ).where(
-            mention.target_id.in_(entity_ids), mention.relationship_type == "mentions",
-            mention.valid_until.is_(None), mention.tenant_id == access.principal.tenant_id,
-            linked_source.scope == "project", linked_source.deleted_at.is_(None),
-            linked_source.is_current.is_(True), _human_content_clause(access, linked_source),
-        ))).all()
-        for entity_id, project_name in project_rows:
-            if project_name:
-                projects_by_entity[entity_id].add(project_name)
     items = [{
         "id": str(entity.id), "name": entity.content, "entity_type": _entity_type(entity),
         "aliases": _aliases(entity), "memory_count": count or 0,
@@ -1182,20 +737,7 @@ async def entity_detail(entity_id: uuid.UUID, db: DbDep, access: AccessDep):
     month_counts = Counter(source.created_at.strftime("%Y-%m") for source in sources if source.created_at)
     co_mentions = []
     if sources:
-        other = aliased(MemoryNode)
-        edge = aliased(MemoryRelationship)
-        count = func.count(func.distinct(edge.source_id)).label("mentions_count")
-        rows = (await db.execute(select(other, count).join(edge, edge.target_id == other.id).where(
-            edge.source_id.in_([source.id for source in sources]),
-            edge.target_id != entity.id,
-            edge.relationship_type == "mentions",
-            edge.tenant_id == access.principal.tenant_id,
-            edge.valid_until.is_(None),
-            other.tenant_id == access.principal.tenant_id,
-            other.scope == "entity",
-            other.deleted_at.is_(None),
-            other.status == "active",
-        ).group_by(other.id).order_by(count.desc()).limit(20))).all()
+        rows = await entity_queries.co_mentions(db, access, entity, sources)
         co_mentions = [{"id": str(other_entity.id), "name": other_entity.content,
                         "type": _entity_type(other_entity), "count": mentions}
                        for other_entity, mentions in rows]
@@ -1216,6 +758,7 @@ async def entity_detail(entity_id: uuid.UUID, db: DbDep, access: AccessDep):
         "projects": [{"value": key, "count": value} for key, value in project_counts.items()],
         "months": [{"month": key, "count": value} for key, value in sorted(month_counts.items())],
         "co_mentions": co_mentions, "memories": memories,
+        "can_edit": await _entity_editable(db, access, entity),
     }
 
 

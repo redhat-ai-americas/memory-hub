@@ -21,7 +21,7 @@ def node(*, scope="user", owner="alice", tenant="tenant-a", scope_id=None, paren
         weight=0.8, branch_type=None, version=1, is_current=True,
         parent_id=parent_id, previous_version_id=None, metadata_={"secret": "value"},
         created_at=datetime(2026, 1, 1, tzinfo=UTC), updated_at=datetime(2026, 1, 2, tzinfo=UTC),
-        expires_at=None, deleted_at=None,
+        expires_at=None, deleted_at=None, storage_type="inline", content_ref=None,
     )
 
 
@@ -393,7 +393,7 @@ async def test_delete_checks_entire_closure_before_bulk_update():
     root = node()
     child = node(owner="bob", parent_id=root.id)
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[result(scalar=root), result(items=[child]), result(items=[])])
+    db.execute = AsyncMock(side_effect=[result(scalar=root), result(items=[child]), result(items=[child])])
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_access] = lambda: access()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -410,8 +410,8 @@ async def test_delete_walks_nested_branches_before_single_update():
     grandchild = node(parent_id=child.id)
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[
-        result(scalar=root), result(items=[child]), result(items=[grandchild]),
-        result(items=[]), result(),
+        result(scalar=root), result(items=[child, grandchild]),
+        result(items=[child, grandchild]), result(), result(),
     ])
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_access] = lambda: access()

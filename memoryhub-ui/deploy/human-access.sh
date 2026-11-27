@@ -25,7 +25,7 @@
 #     becomes the first Admin, so a clean install can be signed in to.
 set -euo pipefail
 
-CONTEXT="${MEMORYHUB_CONTEXT:-$(oc config current-context 2>/dev/null || echo "")}"
+CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 NAMESPACE="${MEMORYHUB_UI_NAMESPACE:-memoryhub-ui}"
 SECRET="memoryhub-ui-human-access"
 
@@ -38,8 +38,11 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-OC=(oc)
-[ -n "$CONTEXT" ] && OC+=(--context "$CONTEXT")
+if [ -z "$CONTEXT" ]; then
+    echo "ERROR: --context must not be empty." >&2
+    exit 1
+fi
+OC=(oc --context "$CONTEXT")
 
 normalize() {
     # Trim surrounding spaces, drop empties and duplicates, keep order.

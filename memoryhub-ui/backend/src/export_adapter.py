@@ -11,8 +11,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from memoryhub_core.models.memory import MemoryNode
-from sqlalchemy import select
+from memoryhub_core.queries.memories import memory_rows
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import AccessDep
@@ -98,10 +97,7 @@ async def export_memories(
     async def jsonl_rows():
         async for items in selected_pages():
             ids = [uuid.UUID(item["id"]) for item in items]
-            rows = (await db.execute(select(MemoryNode).where(
-                MemoryNode.id.in_(ids), MemoryNode.tenant_id == tenant,
-                MemoryNode.deleted_at.is_(None), access.content_clause(),
-            ))).scalars().all() if ids else []
+            rows = await memory_rows(db, ids, tenant, access=access, content=True) if ids else []
             by_id = {node.id: node for node in rows if _human_can_see_content(access, node)}
             for item in items:
                 node = by_id.get(uuid.UUID(item["id"]))

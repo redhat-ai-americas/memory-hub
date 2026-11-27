@@ -6,8 +6,9 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from memoryhub_core.queries.filters import QueryAccessError, QueryValidationError
 
 from src.config import get_settings
 from src.csrf import CrossSiteRequestGuard
@@ -53,6 +54,14 @@ def create_app() -> FastAPI:
         description="BFF API for the MemoryHub dashboard",
         version="0.1.0",
     )
+
+    @app.exception_handler(QueryValidationError)
+    async def invalid_query(_request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+
+    @app.exception_handler(QueryAccessError)
+    async def forbidden_query(_request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=403)
 
     app.add_middleware(
         CORSMiddleware,

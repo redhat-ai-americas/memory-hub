@@ -263,18 +263,7 @@ ROUTE_EOF
         oc annotate serviceaccount memoryhub-ui --context "$CONTEXT" -n "$NAMESPACE" \
             --overwrite \
             "serviceaccounts.openshift.io/oauth-redirecturi.rhoai=https://$RHOAI_HOST/oauth/callback"
-        HEALTH_CODE=000
-        for _ in $(seq 1 12); do
-            HEALTH_CODE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \
-                "https://$RHOAI_HOST/healthz" || echo 000)
-            [ "$HEALTH_CODE" = "200" ] && break
-            sleep 5
-        done
-        if [ "$HEALTH_CODE" != "200" ]; then
-            echo "ERROR: https://$RHOAI_HOST/healthz returned $HEALTH_CODE through the RHOAI proxy route."
-            exit 1
-        fi
-        echo "  OK: https://$RHOAI_HOST/healthz returned 200 through the proxy route"
+        bash "$SCRIPT_DIR/verify-route.sh" --context "$CONTEXT" --host "$RHOAI_HOST"
         echo "  Proxy route synced."
     fi
 

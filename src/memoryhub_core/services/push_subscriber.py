@@ -131,6 +131,12 @@ async def memoryhub_subscriber_loop(
     while True:
         try:
             message = await valkey_client.pop_broadcast_message(session_id)
+            # A dependency's wait_for can swallow cancellation when its result
+            # becomes ready at the same time on Python 3.11. Honor the pending
+            # stop request before delivering or starting another blocking pop.
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise asyncio.CancelledError
             if message is None:
                 continue  # BRPOP timeout — refresh heartbeat and retry.
 

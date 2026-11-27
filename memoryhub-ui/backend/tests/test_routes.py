@@ -7,7 +7,7 @@ that returns empty/predictable results.
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -67,6 +67,7 @@ def _scalar_result(value):
 def _review_result(report, memory=None):
     r = MagicMock()
     r.one_or_none.return_value = (report, memory) if report is not None else None
+    r.scalar_one_or_none.return_value = report
     return r
 
 
@@ -1558,21 +1559,40 @@ class TestContradictionsEndpoints:
         db_session = AsyncMock()
         db_session.execute = AsyncMock(return_value=_review_result(report, memory))
         db_session.commit = AsyncMock()
+        db_session.rollback = AsyncMock()
         db_session.refresh = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: test_settings
 
         try:
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/contradictions/{report.id}", json={"resolved": True}
-                )
+            async def apply_review(*_args, **kwargs):
+                report.resolved = kwargs["resolved"]
+                report.resolved_at = datetime.now(UTC) if report.resolved else None
+                return report, memory
+
+            with patch("src.routes.review_contradiction", new_callable=AsyncMock,
+                       side_effect=apply_review) as review:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                    response = await ac.patch(
+                        f"/api/contradictions/{report.id}", json={"resolved": True}
+                    )
 
             assert response.status_code == 200
             assert report.resolved is True
             assert report.resolved_at is not None
             db_session.commit.assert_awaited()
+            db_session.rollback.assert_not_awaited()
+            review.assert_awaited_once_with(
+                report.id,
+                db_session,
+                resolved=True,
+                actor_id="test-user",
+                tenant_id="default",
+                live=True,
+                authorize=ANY,
+                commit=False,
+            )
         finally:
             app.dependency_overrides.clear()
 
@@ -1585,20 +1605,67 @@ class TestContradictionsEndpoints:
         db_session = AsyncMock()
         db_session.execute = AsyncMock(return_value=_review_result(report, memory))
         db_session.commit = AsyncMock()
+        db_session.rollback = AsyncMock()
         db_session.refresh = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_settings] = lambda: test_settings
 
         try:
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                response = await ac.patch(
-                    f"/api/contradictions/{report.id}", json={"resolved": False}
-                )
+            async def apply_review(*_args, **kwargs):
+                report.resolved = kwargs["resolved"]
+                report.resolved_at = datetime.now(UTC) if report.resolved else None
+                return report, memory
+
+            with patch("src.routes.review_contradiction", new_callable=AsyncMock,
+                       side_effect=apply_review) as review:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                    response = await ac.patch(
+                        f"/api/contradictions/{report.id}", json={"resolved": False}
+                    )
 
             assert response.status_code == 200
             assert report.resolved is False
             assert report.resolved_at is None
+            review.assert_awaited_once_with(
+                report.id,
+                db_session,
+                resolved=False,
+                actor_id="test-user",
+                tenant_id="default",
+                live=True,
+                authorize=ANY,
+                commit=False,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_contradiction_audit_failure_rolls_back_mutation(self, test_settings):
+        report = _make_contradiction(resolved=False, resolved_at=None)
+        memory = _make_node(owner_id="other", actor_id="other", driver_id="other")
+
+        db_session = AsyncMock()
+        db_session.execute = AsyncMock(return_value=_review_result(report, memory))
+        db_session.commit = AsyncMock()
+        db_session.rollback = AsyncMock()
+        db_session.refresh = AsyncMock()
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_settings] = lambda: test_settings
+
+        try:
+            with (
+                patch("src.routes.review_contradiction", new_callable=AsyncMock,
+                      return_value=(report, memory)),
+                patch("src.routes._record_human_audit", side_effect=RuntimeError("audit failed")),
+                pytest.raises(RuntimeError, match="audit failed"),
+            ):
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                    await ac.patch(f"/api/contradictions/{report.id}", json={"resolved": True})
+
+            db_session.commit.assert_not_awaited()
+            db_session.rollback.assert_awaited_once()
+            db_session.refresh.assert_not_awaited()
         finally:
             app.dependency_overrides.clear()
 

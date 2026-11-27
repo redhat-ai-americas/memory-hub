@@ -63,13 +63,15 @@ def oc(tmp_path):
     stub.chmod(0o755)
     state = tmp_path / "secret.json"
 
-    def run(env=None, existing=None, who="katya"):
+    def run(env=None, existing=None, who="katya", context="ctx"):
         if existing is not None:
             state.write_text(json.dumps(existing))
         full_env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "OC_STATE": str(state),
                     "OC_WHO": who, **(env or {})}
-        done = subprocess.run([BASH, str(SCRIPT), "--context", "ctx", "--namespace", "ns"],
-                              env=full_env, capture_output=True, text=True, timeout=60)
+        args = [BASH, str(SCRIPT), "--namespace", "ns"]
+        if context is not None:
+            args += ["--context", context]
+        done = subprocess.run(args, env=full_env, capture_output=True, text=True, timeout=60)
         secret = json.loads(state.read_text()) if state.exists() else None
         log = state.with_name(state.name + ".log")
         calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -145,3 +147,24 @@ def test_a_service_account_cannot_become_the_first_admin(oc):
     assert done.returncode != 0
     assert "no human deployer" in done.stdout
     assert secret is None
+
+
+@pytest.mark.parametrize("env, context, expected", [
+    ({}, None, "mcp-rhoai"),
+    ({"MEMORYHUB_CONTEXT": ""}, None, "mcp-rhoai"),
+    ({"MEMORYHUB_CONTEXT": "env-cluster"}, None, "env-cluster"),
+    ({"MEMORYHUB_CONTEXT": "env-cluster"}, "cli-cluster", "cli-cluster"),
+])
+def test_context_never_depends_on_the_operators_current_cluster(oc, env, context, expected):
+    done, _, calls = oc(env, context=context)
+    assert done.returncode == 0, done.stderr
+    assert calls
+    assert all(call[:2] == ["--context", expected] for call in calls)
+    assert not any("config" in call or "current-context" in call for call in calls)
+
+
+def test_empty_explicit_context_cannot_read_or_write_any_cluster(oc):
+    done, secret, calls = oc(context="")
+    assert done.returncode != 0
+    assert "context must not be empty" in done.stderr
+    assert secret is None and calls == []

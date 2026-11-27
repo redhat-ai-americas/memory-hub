@@ -158,6 +158,33 @@ class TestSubscriberLifecycle:
         await stop_memoryhub_subscriber("never-started")
         assert get_active_subscriber_count() == 0
 
+    async def test_stop_honors_cancellation_swallowed_by_pop(self, valkey_client, monkeypatch):
+        entered_pop = asyncio.Event()
+
+        async def pop_with_cancellation_race(session_id):
+            entered_pop.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                # Model Python 3.11 wait_for returning a ready result instead
+                # of propagating concurrent cancellation in a dependency.
+                return None
+
+        monkeypatch.setattr(valkey_client, "pop_broadcast_message", pop_with_cancellation_race)
+        session = FakeServerSession()
+        await ensure_memoryhub_subscriber_running("sess-race", session, valkey_client)
+        await entered_pop.wait()
+        stop = asyncio.create_task(stop_memoryhub_subscriber("sess-race"))
+        try:
+            done, _ = await asyncio.wait({stop}, timeout=1)
+            assert stop in done, "shutdown started another pop after cancellation"
+            await stop
+            assert get_active_subscriber_count() == 0
+            assert session.sent == []
+        finally:
+            stop.cancel()
+            await asyncio.gather(stop, return_exceptions=True)
+
     async def test_multiple_sessions_tracked_independently(self, valkey_client):
         sessions = [FakeServerSession() for _ in range(3)]
         for i, session in enumerate(sessions):

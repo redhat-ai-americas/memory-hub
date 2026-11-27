@@ -6,18 +6,19 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from memoryhub_core.models.audit import AuditLog
-from memoryhub_core.models.contradiction import ContradictionReport
-from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
+from memoryhub_core.models.memory import MemoryNode
+from memoryhub_core.queries import contradictions as contradiction_queries
+from memoryhub_core.queries import memories as memory_queries
+from memoryhub_core.queries.audit import read_count
 from memoryhub_core.services.curation.similarity import get_similar_memories
 from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.memory import get_memory_history
-from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import Access, AccessDep
 from src.database import get_db
+from src.deletion import delete_capabilities
 from src.human_adapters import _human_can_see_content
 
 router = APIRouter()
@@ -45,16 +46,14 @@ def _brief(node: MemoryNode, access: Access) -> dict:
         "is_current": node.is_current, "status": node.status,
         "created_at": node.created_at, "updated_at": node.updated_at,
         "redacted": hidden,
+        "capabilities": {"write": access.can_write(node), "moderate": access.can_moderate(node)},
     }
 
 
 @router.get("/api/memory/{memory_id}/context")
 async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
     tenant = access.principal.tenant_id
-    seed = (await db.execute(select(MemoryNode).where(
-        MemoryNode.id == memory_id, MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None),
-    ))).scalar_one_or_none()
+    seed = await memory_queries.get_memory_row(db, memory_id, tenant, live=True)
     if seed is None or not _readable(access, seed):
         raise HTTPException(status_code=404, detail="Memory not found")
 
@@ -64,10 +63,7 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
     except MemoryNotFoundError:
         raise HTTPException(status_code=404, detail="Memory not found") from None
     version_ids = [version.id for version in history["versions"]]
-    version_rows = (await db.execute(select(MemoryNode).where(
-        MemoryNode.id.in_(version_ids), MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None),
-    ))).scalars().all() if version_ids else []
+    version_rows = await memory_queries.memory_rows(db, version_ids, tenant) if version_ids else []
     version_map = {row.id: row for row in version_rows if _readable(access, row)}
     versions = [{
         "id": str(row.id), "version": row.version, "is_current": row.is_current,
@@ -77,26 +73,16 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
         "created_at": row.created_at, "deleted_at": row.deleted_at,
     } for version in history["versions"] if (row := version_map.get(version.id)) is not None]
 
-    children = (await db.execute(select(MemoryNode).where(
-        MemoryNode.parent_id == seed.id, MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None), MemoryNode.is_current.is_(True),
-    ))).scalars().all()
+    children = await memory_queries.current_children(db, [seed.id], tenant)
     branches = [{
         "id": str(child.id), "branch_type": child.branch_type,
         "content": child.content if _human_can_see_content(access, child) else "",
         "actor_id": access.visible_identity(child.actor_id), "created_at": child.created_at,
     } for child in children if child.is_current and _readable(access, child)]
 
-    rels = (await db.execute(select(MemoryRelationship).where(
-        MemoryRelationship.tenant_id == tenant,
-        MemoryRelationship.valid_until.is_(None),
-        or_(MemoryRelationship.source_id == seed.id, MemoryRelationship.target_id == seed.id),
-    ))).scalars().all()
+    rels = await memory_queries.relationships_touching(db, [seed.id], tenant)
     neighbor_ids = {rel.target_id if rel.source_id == seed.id else rel.source_id for rel in rels}
-    neighbor_rows = (await db.execute(select(MemoryNode).where(
-        MemoryNode.id.in_(neighbor_ids), MemoryNode.tenant_id == tenant,
-        MemoryNode.deleted_at.is_(None),
-    ))).scalars().all() if neighbor_ids else []
+    neighbor_rows = await memory_queries.memory_rows(db, neighbor_ids, tenant) if neighbor_ids else []
     neighbors = {node.id: node for node in neighbor_rows if _readable(access, node)}
     relationships = []
     for rel in rels:
@@ -114,9 +100,7 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
     if hidden:
         contradictions = []
     else:
-        report_rows = (await db.execute(select(ContradictionReport).where(
-            ContradictionReport.memory_id == seed.id, ContradictionReport.tenant_id == tenant,
-        ).order_by(ContradictionReport.created_at.desc()))).scalars().all()
+        report_rows = await contradiction_queries.for_memory(db, seed.id, tenant)
         contradictions = [{
             "id": str(report.id), "observed_behavior": report.observed_behavior,
             "confidence": report.confidence, "reporter": access.visible_identity(report.reporter),
@@ -130,33 +114,25 @@ async def memory_context(memory_id: uuid.UUID, db: DbDep, access: AccessDep):
         except (MemoryNotFoundError, SQLAlchemyError):
             matches = {"results": []}
         match_ids = [uuid.UUID(str(item["id"])) for item in matches["results"]]
-        match_rows = (await db.execute(select(MemoryNode).where(
-            MemoryNode.id.in_(match_ids), MemoryNode.tenant_id == tenant,
-            MemoryNode.deleted_at.is_(None),
-        ))).scalars().all() if match_ids else []
+        match_rows = await memory_queries.memory_rows(db, match_ids, tenant) if match_ids else []
         match_map = {row.id: row for row in match_rows if _readable(access, row)}
         similar = [{**_brief(match_map[uid], access), "score": item["score"]}
                    for item in matches["results"] if (uid := uuid.UUID(str(item["id"]))) in match_map]
 
-    access_count = (await db.execute(select(func.count()).select_from(AuditLog).where(
-        AuditLog.tenant_id == tenant, AuditLog.memory_id == seed.id,
-        AuditLog.event_type == "memory.read", AuditLog.decision == "allowed",
-    ))).scalar_one()
+    access_count = await read_count(db, seed.id, tenant)
     visible_parent = None
     if seed.parent_id:
-        parent = (await db.execute(select(MemoryNode).where(
-            MemoryNode.id == seed.parent_id, MemoryNode.tenant_id == tenant,
-            MemoryNode.deleted_at.is_(None),
-        ))).scalar_one_or_none()
+        parent = await memory_queries.get_memory_row(db, seed.parent_id, tenant, live=True)
         if parent is not None and _readable(access, parent):
             visible_parent = str(parent.id)
 
+    deletable = await delete_capabilities(db, access, [seed])
     memory = {
         **_brief(seed, access),
         "capabilities": {
             "write": access.can_write(seed), "moderate": access.can_moderate(seed),
         },
-        "can_delete": access.can_delete(seed),
+        "can_delete": deletable[seed.id],
         "content": "" if hidden else seed.content,
         "logical_id": str(seed.logical_id) if seed.logical_id else None,
         "parent_id": visible_parent, "branch_type": seed.branch_type,

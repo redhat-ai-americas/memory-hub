@@ -414,3 +414,27 @@ async def test_review_without_project_admin_grant_is_hidden():
         response = await client.patch(f"/api/contradictions/{report.id}", json={"resolved": True})
     assert response.status_code == 404
     db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_client_list_marks_only_bound_clients_as_owned():
+    """Admins see every tenant client; only bound ones may have credentials rotated."""
+    clients = [
+        {"client_id": cid, "client_name": cid, "identity_type": kind, "tenant_id": "tenant-a",
+         "default_scopes": ["memory:read:project"], "active": True,
+         "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+         "owner": "someone-else"}
+        for cid, kind in (("svc-mine", "service"), ("svc-other", "service"), ("bob-agent", "user"))
+    ]
+    response_obj = MagicMock()
+    response_obj.json.return_value = clients
+    app.dependency_overrides[get_access] = lambda: _access("admin", agents={"svc-mine"})
+    with patch("src.routes._admin_request", new=AsyncMock(return_value=response_obj)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/api/clients")
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    owned = {row["client_id"]: row["owned"] for row in response.json()}
+    assert owned == {"svc-mine": True, "svc-other": False, "bob-agent": False}
+    # The owner's name itself stays private to the auth service.
+    assert all("owner" not in row for row in response.json())

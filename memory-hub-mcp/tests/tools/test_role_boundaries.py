@@ -87,8 +87,9 @@ async def test_resolution_restricts_tenant_and_forbids_self_review():
         id=uuid.uuid4(), reporter="agent", resolved=False,
         resolved_at=None, resolution_action=None, resolved_by=None,
     )
+    memory = SimpleNamespace(id=uuid.uuid4(), deleted_at=None)
     row = MagicMock()
-    row.scalar_one_or_none.return_value = report
+    row.one_or_none.return_value = (report, memory)
     db = AsyncMock()
     db.execute.return_value = row
     with pytest.raises(ValueError, match="own contradiction"):

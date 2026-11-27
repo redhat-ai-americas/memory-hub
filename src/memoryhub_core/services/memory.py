@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import math
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -27,10 +28,17 @@ from memoryhub_core.models.schemas import (
     MemoryVersionInfo,
 )
 from memoryhub_core.models.utils import generate_stub
+from memoryhub_core.queries import contradictions as contradiction_queries
+from memoryhub_core.queries.deletion import delete_closure
+from memoryhub_core.queries.memories import current_children, mark_deleted, memory_by_id
+from memoryhub_core.queries.mutations import RelationshipBoundaryError, mutation_edges
 from memoryhub_core.services.curation.pipeline import run_curation_pipeline
 from memoryhub_core.services.embeddings import EmbeddingService
 from memoryhub_core.services.exceptions import (
+    ContradictionAlreadyInStateError,
     ContradictionNotFoundError,
+    ContradictionSelfReviewError,
+    CurationBlockedError,
     MemoryAccessDeniedError,
     MemoryAlreadyDeletedError,
     MemoryNotCurrentError,
@@ -428,13 +436,8 @@ async def read_memory(
     callers can never distinguish "does not exist" from "exists in
     another tenant." This mirrors the authz layer's per-row behavior.
     """
-    stmt = select(MemoryNode).where(
-        MemoryNode.id == memory_id,
-        MemoryNode.deleted_at.is_(None),
-        MemoryNode.tenant_id == tenant_id,
-        # Non-admin read: only active memories are visible.
-        # Quarantined and soft_deleted require admin_memory tool.
-        MemoryNode.status == "active",
+    stmt = memory_by_id(memory_id, tenant_id).where(
+        MemoryNode.deleted_at.is_(None), MemoryNode.status == "active",
     )
     result = await session.execute(stmt)
     node = result.scalar_one_or_none()
@@ -526,6 +529,16 @@ async def update_memory(
 
     # Apply updates
     content_changed = data.content is not None
+    if content_changed:
+        # Revision policy is shared by HTTP, MCP and direct Core callers.
+        # Duplicate gates concern new memories; content rules still apply.
+        curation = await run_curation_pipeline(
+            content=data.content, embedding=None, owner_id=old_node.owner_id,
+            scope=old_node.scope, session=session, tenant_id=old_node.tenant_id,
+            commit_seed=False,
+        )
+        if curation["blocked"]:
+            raise CurationBlockedError(curation.get("reason"))
     new_content = data.content if content_changed else old_node.content
     new_weight = data.weight if data.weight is not None else old_node.weight
     new_metadata = data.metadata if data.metadata is not None else old_node.metadata_
@@ -645,13 +658,7 @@ async def update_memory(
     # Deep-copy one level of child branches from old node to new node.
     # Chunk branches are skipped when content changed (they reflect old
     # content and will be replaced by fresh chunks below).
-    children_stmt = select(MemoryNode).where(
-        MemoryNode.parent_id == old_node.id,
-        MemoryNode.is_current.is_(True),
-        MemoryNode.deleted_at.is_(None),
-    )
-    children_result = await session.execute(children_stmt)
-    old_children = children_result.scalars().all()
+    old_children = await current_children(session, [old_node.id], None)
 
     copied_count = 0
     for child in old_children:
@@ -757,61 +764,86 @@ async def delete_memory(
     Raises MemoryNotFoundError if the node doesn't exist, or
     MemoryAlreadyDeletedError if already soft-deleted.
     """
-    stmt = select(MemoryNode).where(MemoryNode.id == memory_id).with_for_update()
-    result = await session.execute(stmt)
-    node = result.scalar_one_or_none()
-
-    if node is None:
-        raise MemoryNotFoundError(memory_id)
-
-    if node.deleted_at is not None:
-        raise MemoryAlreadyDeletedError(memory_id)
-
-    effective_tenant = tenant_id or node.tenant_id
-    if node.tenant_id != effective_tenant:
-        raise MemoryNotFoundError(memory_id)
-    found = await collect_delete_nodes(node, session, effective_tenant, seed_locked=True)
-    all_ids = set(found)
-    if expected_ids is not None and all_ids != expected_ids:
-        raise MemoryAccessDeniedError("Delete closure changed after authorization")
-    version_ids = {n.id for n in await _walk_version_chain(node, session)} & all_ids
-    child_ids = all_ids - version_ids
-    now = datetime.now(UTC)
-
-    # Collect S3 content_refs before soft-delete so we can clean up objects
-    s3_refs: list[str] = []
-    if s3_adapter is not None:
-        s3_refs_stmt = (
-            select(MemoryNode.content_ref)
-            .where(
-                MemoryNode.id.in_(list(all_ids)),
-                MemoryNode.tenant_id == effective_tenant,
-                MemoryNode.storage_type == "s3",
-                MemoryNode.content_ref.isnot(None),
-            )
-        )
-        s3_result = await session.execute(s3_refs_stmt)
-        s3_refs = [row[0] for row in s3_result.all()]
-
-    # Bulk soft-delete
-    await session.execute(
-        update(MemoryNode)
-        .where(MemoryNode.id.in_(list(all_ids)), MemoryNode.tenant_id == effective_tenant)
-        .values(deleted_at=now, is_current=False)
-    )
-
+    plan = await prepare_memory_delete([memory_id], session, tenant_id, expected_ids=expected_ids)
+    version_ids = {n.id for n in await _walk_version_chain(plan.roots[0], session)} & plan.nodes.keys()
+    child_ids = plan.nodes.keys() - version_ids
+    s3_refs = await stage_memory_delete(plan, session)
     await session.commit()
 
     # Clean up S3 objects after successful DB commit
-    if s3_refs:
+    if s3_adapter is not None and s3_refs:
         await s3_adapter.delete_contents(s3_refs)
 
     return {
         "deleted_id": str(memory_id),
         "versions_deleted": len(version_ids),
         "branches_deleted": len(child_ids),
-        "total_deleted": len(all_ids),
+        "total_deleted": len(plan.nodes),
     }
+
+
+@dataclass
+class MemoryDeletePlan:
+    """Locked deletion preflight; only ``nodes`` may be changed or counted."""
+
+    tenant_id: str
+    roots: list[MemoryNode]
+    all_nodes: dict[uuid.UUID, MemoryNode]
+    nodes: dict[uuid.UUID, MemoryNode]
+
+
+async def prepare_memory_delete(
+    memory_ids: list[uuid.UUID],
+    session: AsyncSession,
+    tenant_id: str | None,
+    *,
+    can_delete: Callable[[MemoryNode], bool] | None = None,
+    expected_ids: set[uuid.UUID] | None = None,
+) -> MemoryDeletePlan:
+    """Lock, validate and authorize a complete single or bulk deletion set.
+
+    A missing tenant is supported only for the legacy single-root Core API.
+    Each transport supplies its own authorization; the affected set and
+    integrity rules are common. No changes or commits occur here.
+    """
+    if not memory_ids or (tenant_id is None and len(set(memory_ids)) != 1):
+        raise ValueError("A tenant is required for bulk deletion")
+    roots = []
+    found = {}
+    for memory_id in sorted(set(memory_ids)):
+        node = (await session.execute(memory_by_id(
+            memory_id, tenant_id, lock=True, unscoped=tenant_id is None,
+        ))).scalar_one_or_none()
+        if node is None:
+            raise MemoryNotFoundError(memory_id)
+        if can_delete is not None and not can_delete(node):
+            raise MemoryAccessDeniedError("Memory delete forbidden")
+        if node.deleted_at is not None:
+            raise MemoryAlreadyDeletedError(memory_id)
+        tenant_id = tenant_id or node.tenant_id
+        roots.append(node)
+        found.update(await collect_delete_nodes(node, session, tenant_id, seed_locked=True))
+    if expected_ids is not None and set(found) != expected_ids:
+        raise MemoryAccessDeniedError("Delete closure changed after authorization")
+    live = {uid: node for uid, node in found.items() if node.deleted_at is None}
+    if can_delete is not None and any(not can_delete(node) for node in live.values()):
+        raise MemoryAccessDeniedError("Memory delete forbidden")
+    edges = await mutation_edges(session, live)
+    if any(edge.tenant_id != tenant_id for edge in edges):
+        raise RelationshipBoundaryError("Memory relationship boundary invalid")
+    return MemoryDeletePlan(tenant_id, roots, found, live)
+
+
+async def stage_memory_delete(plan: MemoryDeletePlan, session: AsyncSession) -> list[str]:
+    """Stage the prepared live set without committing the caller's transaction.
+
+    External objects may be removed by the caller only after a successful
+    commit. Historical deletion timestamps are never overwritten.
+    """
+    refs = {node.content_ref for node in plan.nodes.values()
+            if node.storage_type == "s3" and node.content_ref is not None}
+    await mark_deleted(session, list(plan.nodes), plan.tenant_id, datetime.now(UTC))
+    return sorted(refs)
 
 
 async def collect_delete_nodes(
@@ -824,36 +856,22 @@ async def collect_delete_nodes(
     """Collect versions and descendants to any depth for BFF and Core deletes."""
     node_id = node.id
     if not seed_locked:
-        node = (await session.execute(
-            select(MemoryNode).where(
-                MemoryNode.id == node_id, MemoryNode.tenant_id == tenant_id,
-            ).with_for_update()
-        )).scalar_one_or_none()
+        node = (await session.execute(memory_by_id(node_id, tenant_id, lock=True))).scalar_one_or_none()
     if node is None or node.tenant_id != tenant_id:
         raise MemoryNotFoundError(node_id)
     found = {node.id: node}
-    frontier = {node.id}
-    while frontier:
-        previous_ids = {
-            found[i].previous_version_id
-            for i in frontier if found[i].previous_version_id
-        }
-        related = (await session.execute(
-            select(MemoryNode).where(
-                MemoryNode.tenant_id == tenant_id,
-                or_(
-                    MemoryNode.id.in_(previous_ids),
-                    MemoryNode.previous_version_id.in_(frontier),
-                    MemoryNode.parent_id.in_(frontier),
-                ),
-            ).with_for_update()
-        )).scalars().all()
-        frontier = set()
-        for member in related:
-            if member.id not in found:
-                found[member.id] = member
-                frontier.add(member.id)
-    return found
+    while True:
+        closure = delete_closure({node.id}, tenant_id)
+        rows = (await session.execute(select(MemoryNode).join(
+            closure, closure.c.node_id == MemoryNode.id,
+        ).where(MemoryNode.tenant_id == tenant_id).with_for_update(of=MemoryNode))).scalars().all()
+        current = {member.id: member for member in [node, *rows]}
+        if current.keys() == found.keys():
+            return current
+        found = current
+        # A CTE has one statement snapshot. A child can commit while this
+        # statement waits for a descendant lock. Re-read after taking all
+        # discovered locks so such children cannot escape the mutation.
 
 
 def _build_search_filters(
@@ -2161,6 +2179,62 @@ VALID_RESOLUTION_ACTIONS = frozenset({
 })
 
 
+async def review_contradiction(
+    contradiction_id: uuid.UUID,
+    session: AsyncSession,
+    *,
+    resolved: bool,
+    resolution_action: str | None = None,
+    actor_id: str | None = None,
+    tenant_id: str | None = None,
+    live: bool = False,
+    authorize: Callable[[ContradictionReport, MemoryNode], None] | None = None,
+    commit: bool = True,
+) -> tuple[ContradictionReport, MemoryNode]:
+    """Apply a contradiction review transition in the caller's transaction.
+
+    ``commit=False`` is used by transports that need to stage an audit event
+    alongside the mutation. The compatibility flag remains until service
+    transaction ownership is migrated fully to an explicit Unit of Work.
+    The service always flushes the transition, so domain validation and
+    database constraints run before the caller commits. ``live`` is an
+    adapter policy passed to the shared query; MCP intentionally sets it to
+    false to preserve soft-deleted-memory behavior. ``authorize`` is an
+    optional transport callback executed after the locked row is loaded.
+    The self-review invariant is deliberately resolve-only; HTTP may apply
+    its own review policy to reopen operations through this callback.
+    """
+    if resolved and resolution_action is not None and resolution_action not in VALID_RESOLUTION_ACTIONS:
+        raise ValueError(
+            f"Invalid resolution_action '{resolution_action}'. "
+            f"Must be one of: {', '.join(sorted(VALID_RESOLUTION_ACTIONS))}"
+        )
+    if not resolved and resolution_action is not None:
+        raise ValueError("resolution_action is only valid when resolving a contradiction")
+
+    row = await contradiction_queries.review_row(session, contradiction_id, tenant_id, live=live)
+    if row is None:
+        raise ContradictionNotFoundError(contradiction_id)
+    report, memory = row
+    if authorize is not None:
+        authorize(report, memory)
+
+    if report.resolved == resolved:
+        state = "resolved" if resolved else "unresolved"
+        raise ContradictionAlreadyInStateError(contradiction_id, state)
+    if resolved and actor_id is not None and report.reporter == actor_id:
+        raise ContradictionSelfReviewError(contradiction_id)
+
+    report.resolved = resolved
+    report.resolved_at = datetime.now(UTC) if resolved else None
+    report.resolution_action = resolution_action if resolved else None
+    report.resolved_by = actor_id if resolved else None
+    await session.flush()
+    if commit:
+        await session.commit()
+    return report, memory
+
+
 async def resolve_contradiction(
     contradiction_id: uuid.UUID,
     session: AsyncSession,
@@ -2168,6 +2242,9 @@ async def resolve_contradiction(
     resolution_action: str | None = None,
     actor_id: str | None = None,
     tenant_id: str | None = None,
+    live: bool = False,
+    authorize: Callable[[ContradictionReport, MemoryNode], None] | None = None,
+    commit: bool = True,
 ) -> ContradictionReport:
     """Mark a contradiction report as resolved with an optional disposition.
 
@@ -2182,35 +2259,17 @@ async def resolve_contradiction(
     if the ID doesn't exist, or ValueError if already resolved or if
     resolution_action is invalid.
     """
-    if resolution_action is not None and resolution_action not in VALID_RESOLUTION_ACTIONS:
-        raise ValueError(
-            f"Invalid resolution_action '{resolution_action}'. "
-            f"Must be one of: {', '.join(sorted(VALID_RESOLUTION_ACTIONS))}"
-        )
-
-    stmt = select(ContradictionReport).where(ContradictionReport.id == contradiction_id)
-    if tenant_id is not None:
-        stmt = stmt.join(MemoryNode, ContradictionReport.memory_id == MemoryNode.id).where(
-            ContradictionReport.tenant_id == tenant_id,
-            MemoryNode.tenant_id == tenant_id,
-        )
-    result = await session.execute(stmt)
-    report = result.scalar_one_or_none()
-
-    if report is None:
-        raise ContradictionNotFoundError(contradiction_id)
-
-    if report.resolved:
-        raise ValueError(f"Contradiction {contradiction_id} is already resolved")
-    if actor_id is not None and report.reporter == actor_id:
-        raise ValueError("Cannot resolve one's own contradiction report")
-
-    report.resolved = True
-    report.resolved_at = datetime.now(UTC)
-    report.resolution_action = resolution_action
-    report.resolved_by = actor_id
-
-    await session.commit()
+    report, _memory = await review_contradiction(
+        contradiction_id,
+        session,
+        resolved=True,
+        resolution_action=resolution_action,
+        actor_id=actor_id,
+        tenant_id=tenant_id,
+        live=live,
+        authorize=authorize,
+        commit=commit,
+    )
     return report
 
 

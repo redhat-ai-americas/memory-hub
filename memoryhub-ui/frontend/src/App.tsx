@@ -1,138 +1,185 @@
-import React, { useState } from 'react';
-import {
-  Button,
-  Label,
-  Masthead,
-  MastheadMain,
-  MastheadBrand,
-  MastheadContent,
-  MastheadToggle,
-  Nav,
-  NavItem,
-  NavList,
-  Page,
-  PageSidebar,
-  PageSidebarBody,
-  Title,
-} from '@patternfly/react-core';
-import { BarsIcon } from '@patternfly/react-icons';
+import React, { useEffect, useState } from 'react';
+import { api, AUTH_REQUIRED_EVENT } from '@/api/client';
+import { AppProvider, canSee, movedFor, NAV, navFor, Shell, useApp } from '@/components/Shell';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Empty } from '@/components/ui';
+import { ToastProvider } from '@/components/ui';
+import { navigate, useHashRoute, type HashRoute } from '@/hooks/useHashRoute';
+import Clients from '@/pages/Clients';
+import Curation from '@/pages/Curation';
+import Entities from '@/pages/Entities';
+import EntityDetail from '@/pages/EntityDetail';
+import Identities from '@/pages/Identities';
+import Memories from '@/pages/Memories';
+import MemoryDetail from '@/pages/MemoryDetail';
+import Overview from '@/pages/Overview';
+import Review from '@/pages/Review';
+import Search from '@/pages/Search';
+import MyAgents from '@/pages/MyAgents';
+import MyProjects from '@/pages/MyProjects';
+import AdminProjects, { ProjectSettings } from '@/pages/Projects';
 
-import ClientManagement from './components/ClientManagement';
-import ContradictionLog from './components/ContradictionLog';
-import CurationRules from './components/CurationRules';
-import MemoryGraph from './components/MemoryGraph';
-import StatusOverview from './components/StatusOverview';
-import UsersAgents from './components/UsersAgents';
-import { SessionProvider, useSession } from './context/SessionContext';
+/** Users get their own version of a few screens; everyone else the shared one. */
+const ByRole: React.FC<{ user: React.ReactNode; other: React.ReactNode }> = ({ user, other }) => {
+  const { role } = useApp();
+  return <>{role === 'user' ? user : other}</>;
+};
 
-type ActivePanel = 'graph' | 'status' | 'users' | 'rules' | 'contradictions' | 'clients';
+/** Settings pages are for admins; users land on the read-only view of the same record. */
+const Redirect: React.FC<{ to: string; params?: Record<string, string> }> = ({ to, params }) => {
+  useEffect(() => navigate(to, params, { replace: true }), [to, params]);
+  return null;
+};
 
-interface NavEntry {
-  id: string;
-  label: string;
-  panel?: ActivePanel;
-  disabled?: boolean;
+interface Screen {
+  nav: string;
+  title: string;
+  render: (route: HashRoute) => React.ReactNode;
 }
 
-const NAV_ITEMS: NavEntry[] = [
-  { id: 'graph', label: 'Memory Graph', panel: 'graph' },
-  { id: 'status', label: 'Status Overview', panel: 'status' },
-  { id: 'users', label: 'Users & Agents', panel: 'users' },
-  { id: 'curation', label: 'Curation Rules', panel: 'rules' },
-  { id: 'contradictions', label: 'Contradictions', panel: 'contradictions' },
-  { id: 'observability', label: 'Observability', disabled: true },
-  { id: 'clients', label: 'Client Management', panel: 'clients' },
-];
+// Only screens backed by the dashboard BFF (memoryhub-ui/backend). Users and
+// admins see different versions of a few of them; the BFF enforces the same split.
+const SCREENS: Record<string, Screen> = {
+  '/overview': { nav: '/overview', title: 'Overview', render: () => <Overview /> },
+  '/memories': { nav: '/memories', title: 'Memory browser', render: (r) => <Memories route={r} /> },
+  '/memory': { nav: '/memories', title: 'Memory detail', render: (r) => <MemoryDetail route={r} /> },
+  '/entities': { nav: '/entities', title: 'Entities', render: (r) => <Entities route={r} /> },
+  '/entity': { nav: '/entities', title: 'Entity', render: (r) => <EntityDetail route={r} /> },
+  '/search': { nav: '/search', title: 'Search playground', render: (r) => <Search route={r} /> },
+  '/projects': { nav: '/projects', title: 'Projects', render: (r) => <ByRole user={<MyProjects route={r} />} other={<AdminProjects route={r} />} /> },
+  '/project': { nav: '/projects', title: 'Project', render: (r) => <ByRole user={<Redirect to="/projects" params={{ project: decodeURIComponent(r.path.slice(9)) }} />} other={<ProjectSettings route={r} />} /> },
+  '/review': { nav: '/review', title: 'Contradictions', render: (r) => <Review route={r} /> },
+  '/curation': { nav: '/curation', title: 'Curation rules', render: (r) => <Curation route={r} /> },
+  '/identities': { nav: '/identities', title: 'Agents & identities', render: (r) => <ByRole user={<MyAgents route={r} />} other={<Identities route={r} />} /> },
+  '/clients': { nav: '/clients', title: 'OAuth clients & keys', render: (r) => <Clients route={r} /> },
+};
 
-const Dashboard: React.FC = () => {
-  const session = useSession();
-  const [activePanel, setActivePanel] = useState<ActivePanel>('graph');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [graphOwnerFilter, setGraphOwnerFilter] = useState<string | undefined>();
+// Old bookmarks from the previous dashboard keep working.
+const LEGACY: Record<string, { path: string; params?: Record<string, string> }> = {
+  '/status': { path: '/overview' },
+  '/contradictions': { path: '/review' },
+  '/curation-rules': { path: '/curation' },
+  '/rules': { path: '/curation' },
+  '/users': { path: '/identities' },
+  '/graph': { path: '/memories', params: { view: 'graph' } },
+};
 
-  const handleNavigateToGraph = (ownerId: string) => {
-    setGraphOwnerFilter(ownerId);
-    setActivePanel('graph');
-  };
 
-  const handleNavigateToMemory = (_memoryId: string) => {
-    // Navigate to graph panel — future: highlight the specific node
-    setGraphOwnerFilter(undefined);
-    setActivePanel('graph');
-  };
-
-  const masthead = (
-    <Masthead style={{ backgroundColor: '#1b1d21' }}>
-      <MastheadToggle>
-        <Button variant="plain" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
-          <BarsIcon />
-        </Button>
-      </MastheadToggle>
-      <MastheadMain>
-        <MastheadBrand style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <svg
-            width="28"
-            height="28"
-            viewBox="0 0 28 28"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-hidden="true"
-          >
-            <circle cx="14" cy="14" r="13" stroke="white" strokeWidth="2" />
-            <circle cx="14" cy="14" r="5" fill="white" />
-            <line x1="14" y1="1" x2="14" y2="7" stroke="white" strokeWidth="2" />
-            <line x1="14" y1="21" x2="14" y2="27" stroke="white" strokeWidth="2" />
-            <line x1="1" y1="14" x2="7" y2="14" stroke="white" strokeWidth="2" />
-            <line x1="21" y1="14" x2="27" y2="14" stroke="white" strokeWidth="2" />
-          </svg>
-          <Title headingLevel="h1" size="lg" style={{ color: 'white', margin: 0 }}>
-            MemoryHub
-          </Title>
-        </MastheadBrand>
-      </MastheadMain>
-      <MastheadContent><Label>{session.role === 'admin' ? 'Admin' : 'User'}</Label></MastheadContent>
-    </Masthead>
-  );
-
-  const sidebar = (
-    <PageSidebar isSidebarOpen={sidebarOpen}>
-      <PageSidebarBody>
-        <Nav aria-label="Primary navigation">
-          <NavList>
-            {NAV_ITEMS.map((item) => (
-              <NavItem
-                key={item.id}
-                itemId={item.id}
-                isActive={!item.disabled && item.panel === activePanel}
-                onClick={() => {
-                  if (!item.disabled && item.panel) {
-                    setActivePanel(item.panel);
-                  }
-                }}
-                style={item.disabled ? { opacity: 0.45, cursor: 'not-allowed', pointerEvents: 'none' } : {}}
-                aria-disabled={item.disabled}
-              >
-                {item.label}
-              </NavItem>
-            ))}
-          </NavList>
-        </Nav>
-      </PageSidebarBody>
-    </PageSidebar>
-  );
-
+/** Screens a role may not open show a short explanation instead. */
+const Guarded: React.FC<{ nav: string; children: React.ReactNode }> = ({ nav, children }) => {
+  const { me, role } = useApp();
+  const route = useHashRoute();
+  const moved = movedFor(role, nav);
+  useEffect(() => {
+    if (!moved) return;
+    // A user screen that now lives inside a hub: keep its parameters, add the view.
+    const next = new URLSearchParams(route.params);
+    next.set('view', moved.view);
+    navigate(moved.path, next, { replace: true });
+  }, [moved, route.params]);
+  if (moved) return null;
+  if (!me || canSee(nav, role)) return <>{children}</>;
   return (
-    <Page masthead={masthead} sidebar={sidebar} style={{ height: '100vh' }}>
-      {activePanel === 'graph' && <MemoryGraph initialOwnerFilter={graphOwnerFilter} />}
-      {activePanel === 'status' && <StatusOverview />}
-      {activePanel === 'users' && <UsersAgents onNavigateToGraph={handleNavigateToGraph} />}
-      {activePanel === 'rules' && <CurationRules />}
-      {activePanel === 'contradictions' && <ContradictionLog onNavigateToMemory={handleNavigateToMemory} />}
-      {activePanel === 'clients' && <ClientManagement />}
-    </Page>
+    <div className="body">
+      <div className="card">
+        <Empty title={role === 'admin' ? 'Not available to platform admins' : 'Only platform admins can open this'}>
+          {role === 'admin'
+            ? 'This screen works with personal memories, which stay private to their owner.'
+            : 'Identities, OAuth clients and contradiction review are managed by platform admins.'}
+        </Empty>
+      </div>
+    </div>
   );
 };
 
-const App: React.FC = () => <SessionProvider><Dashboard /></SessionProvider>;
+const screenKey = (path: string) => {
+  if (path.startsWith('/memory/')) return '/memory';
+  if (path.startsWith('/project/')) return '/project';
+  if (path.startsWith('/entity/')) return '/entity';
+  return path;
+};
+
+/** Browser tab title: the menu label this role sees for a top-level screen, the screen title for detail pages. */
+const DocTitle: React.FC<{ path: string; screen: Screen }> = ({ path, screen }) => {
+  const { role } = useApp();
+  const label =
+    path === screen.nav
+      ? navFor(role)
+          .flatMap((s) => s.items)
+          .find((i) => i.path === screen.nav)?.label
+      : undefined;
+  const title = label ?? screen.title;
+  useEffect(() => {
+    document.title = `MemoryHub · ${title}`;
+  }, [title]);
+  return null;
+};
+
+const Routed: React.FC = () => {
+  const route = useHashRoute();
+  const [authRequired, setAuthRequired] = useState(false);
+
+  useEffect(() => {
+    api
+      .authStatus()
+      .then((s) => setAuthRequired(!s.authenticated))
+      .catch(() => undefined);
+    const onAuth = () => setAuthRequired(true);
+    window.addEventListener(AUTH_REQUIRED_EVENT, onAuth);
+    return () => window.removeEventListener(AUTH_REQUIRED_EVENT, onAuth);
+  }, []);
+
+  useEffect(() => {
+    const legacy = LEGACY[route.path];
+    if (legacy) navigate(legacy.path, legacy.params, { replace: true });
+    else if (route.path === '/' || (!SCREENS[screenKey(route.path)])) {
+      navigate('/overview', undefined, { replace: true });
+    }
+  }, [route.path]);
+
+  const key = screenKey(route.path);
+  const screen = SCREENS[key];
+
+  if (authRequired) {
+    // The dashboard sits behind the OpenShift oauth-proxy: signing in again is a fresh page load.
+    return (
+      <div className="body">
+        <div className="card">
+          <Empty
+            title="Your session has ended"
+            action={
+              <button type="button" className="btn bp" onClick={() => window.location.replace('/')}>
+                Sign in again
+              </button>
+            }
+          >
+            Sign in through OpenShift to keep working with MemoryHub.
+          </Empty>
+        </div>
+      </div>
+    );
+  }
+  if (!screen) return null;
+  const known = NAV.some((s) => s.items.some((i) => i.path === screen.nav));
+  return (
+    <AppProvider>
+      <Shell activePath={known ? screen.nav : ''}>
+        {/* key resets page state when moving between screens */}
+        <React.Fragment key={key}>
+          <DocTitle path={key} screen={screen} />
+          <ErrorBoundary key={route.path}>
+            <Guarded nav={screen.nav}>{screen.render(route)}</Guarded>
+          </ErrorBoundary>
+        </React.Fragment>
+      </Shell>
+    </AppProvider>
+  );
+};
+
+const App: React.FC = () => (
+  <ToastProvider>
+    <Routed />
+  </ToastProvider>
+);
 
 export default App;

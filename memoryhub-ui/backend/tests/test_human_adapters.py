@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from memoryhub_core.models.audit import AuditLog
-from memoryhub_core.models.curation import CuratorRule
+from memoryhub_core.services.exceptions import CurationBlockedError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.authorization import Access, Principal, get_access
@@ -41,7 +41,7 @@ def node(**changes):
         "content": "Entity", "stub": "Memory stub", "branch_type": None,
         "metadata_": None, "version": 1,
         "driver_id": None, "domains": [], "content_type": "experiential",
-        "relevant_until": None,
+        "relevant_until": None, "storage_type": "inline", "content_ref": None,
         "created_at": datetime(2026, 1, 1, tzinfo=UTC),
         "updated_at": datetime(2026, 1, 2, tzinfo=UTC),
     }
@@ -147,7 +147,10 @@ def test_project_list_filters_user_visibility_and_admin_tenant(client):
     project = SimpleNamespace(name="p", tenant_id="tenant-a")
     db.execute.side_effect = [result(items=[project])]
     with patch("src.human_adapters._project_row", new_callable=AsyncMock,
-               return_value={"name": "p", "campaigns": [], "members": 1}):
+               return_value={"name": "p", "campaigns": [], "members": 1}), patch(
+        "src.human_adapters.project_queries.project_summaries", new_callable=AsyncMock,
+        return_value={"p": (1, (0, None), [], None)},
+    ):
         response = http.get("/api/projects?mine=false")
         assert response.status_code == 200 and response.json()["total"] == 1
         assert response.json()["can_create"] is False
@@ -333,9 +336,7 @@ def test_version_preflights_all_affected_nodes(client):
         update.assert_not_awaited()
     db.execute.side_effect = [result(own), result(items=[]), result(items=[])]
     with patch("src.human_adapters.core_update_memory", new_callable=AsyncMock,
-               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update, patch(
-        "src.human_adapters.run_curation_pipeline", new_callable=AsyncMock, return_value={"blocked": False},
-    ):
+               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update:
         response = http.post(f"/api/memory/{own.id}/versions", json={"content": "new"})
         assert response.status_code == 201
         assert response.json()["version"] == 2
@@ -354,32 +355,22 @@ def test_version_preserves_authorized_entity_mention(client):
         result(own), result(items=[]), result(items=[mention]), result(items=[entity]),
     ]
     with patch("src.human_adapters.core_update_memory", new_callable=AsyncMock,
-               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update, patch(
-        "src.human_adapters.run_curation_pipeline", new_callable=AsyncMock, return_value={"blocked": False},
-    ):
+               return_value=SimpleNamespace(id=uuid.uuid4(), version=2)) as update:
         response = http.post(f"/api/memory/{own.id}/versions", json={"content": "new"})
         assert response.status_code == 201
         update.assert_awaited_once()
 
 
-@pytest.mark.parametrize("action", ["block", "quarantine", "reject_with_pointer"])
-def test_version_applies_content_rules_for_the_memory_owner(client, action):
-    http, db, set_access = client
-    own = node(owner_id="alice-agent")
-    set_access(access(agents={"alice-agent"}))
-    policy = CuratorRule(
-        name="personal-policy", tier="regex", config={"pattern": "FORBIDDEN_CONTENT"}, action=action,
-    )
+def test_version_maps_shared_core_curation_veto(client):
+    http, db, _ = client
+    own = node()
     db.execute.side_effect = [result(own), result(items=[]), result(items=[])]
-    with patch("memoryhub_core.services.curation.pipeline.seed_default_rules", new_callable=AsyncMock), patch(
-        "memoryhub_core.services.curation.pipeline.load_rules", new_callable=AsyncMock, return_value=[policy],
-    ) as load, patch("src.human_adapters.core_update_memory", new_callable=AsyncMock) as update:
+    with patch("src.human_adapters.core_update_memory", new_callable=AsyncMock,
+               side_effect=CurationBlockedError("protected-content")) as update:
         response = http.post(f"/api/memory/{own.id}/versions", json={"content": "FORBIDDEN_CONTENT"})
     assert response.status_code == 409, response.text
-    update.assert_not_awaited()
+    update.assert_awaited_once()
     db.commit.assert_not_awaited()
-    assert load.await_args.kwargs["owner_id"] == "alice-agent"
-    assert load.await_args.kwargs["tenant_id"] == "tenant-a"
 
 
 def test_version_allows_clean_content_without_a_duplicate_gate(client):
@@ -532,10 +523,13 @@ def test_entity_detail_hides_foreign_mentions(client):
         SimpleNamespace(source_id=own.id, tenant_id="tenant-a"),
         SimpleNamespace(source_id=foreign.id, tenant_id="tenant-a"),
     ]
-    db.execute.side_effect = [result(entity), result(items=rels), result(items=[own, foreign]), result(rows=[])]
+    db.execute.side_effect = [result(entity), result(items=rels), result(items=[own, foreign]), result(rows=[]),
+                              result(items=rels), result(items=[own, foreign])]
     response = http.get(f"/api/entities/{entity.id}")
     assert response.status_code == 200
     assert response.json()["memory_count"] == 1
+    # Rename/merge would be refused: a mention sits in a memory Alice cannot write.
+    assert response.json()["can_edit"] is False
     assert response.json()["hidden_mentions"] == 0
     assert [item["id"] for item in response.json()["memories"]] == [str(own.id)]
     sql = str(db.execute.await_args_list[2].args[0].compile(compile_kwargs={"literal_binds": True}))
@@ -553,19 +547,26 @@ def test_entity_detail_aggregate_unchanged_by_inaccessible_source(client, inacce
     own = node()
     foreign = node(**inaccessible)
 
-    db.execute.side_effect = [result(entity), result(items=[
-        SimpleNamespace(source_id=own.id, tenant_id="tenant-a"),
-    ]), result(items=[own]), result(rows=[])]
+    own_rels = [SimpleNamespace(source_id=own.id, tenant_id="tenant-a")]
+    db.execute.side_effect = [result(entity), result(items=own_rels), result(items=[own]), result(rows=[]),
+                              result(items=own_rels), result(items=[own])]
     baseline = http.get(f"/api/entities/{entity.id}")
     assert baseline.status_code == 200
+    assert baseline.json()["can_edit"] is True
 
-    db.execute.side_effect = [result(entity), result(items=[
+    all_rels = [
         SimpleNamespace(source_id=own.id, tenant_id="tenant-a"),
         SimpleNamespace(source_id=foreign.id, tenant_id=foreign.tenant_id),
-    ]), result(items=[own, foreign]), result(rows=[])]
+    ]
+    db.execute.side_effect = [result(entity), result(items=all_rels), result(items=[own, foreign]), result(rows=[]),
+                              result(items=all_rels), result(items=[own, foreign])]
     with_hidden = http.get(f"/api/entities/{entity.id}")
     assert with_hidden.status_code == 200
-    assert with_hidden.json() == baseline.json()
+    # The aggregate never changes. can_edit mirrors what a rename would answer
+    # (the mutation is refused either way), so it is the one field that differs.
+    assert {k: v for k, v in with_hidden.json().items() if k != "can_edit"} == {
+        k: v for k, v in baseline.json().items() if k != "can_edit"}
+    assert with_hidden.json()["can_edit"] is False
     assert with_hidden.json()["hidden_mentions"] == 0
 
 
@@ -574,13 +575,16 @@ def test_entity_detail_only_accessible_sources(client):
     entity = node(scope="entity", branch_type="entity:person")
     own = node()
     project = node(scope="project", scope_id="p", owner_id="bob")
-    db.execute.side_effect = [result(entity), result(items=[
+    rels = [
         SimpleNamespace(source_id=own.id, tenant_id="tenant-a"),
         SimpleNamespace(source_id=project.id, tenant_id="tenant-a"),
-    ]), result(items=[own, project]), result(rows=[])]
+    ]
+    db.execute.side_effect = [result(entity), result(items=rels), result(items=[own, project]), result(rows=[]),
+                              result(items=rels), result(items=[own, project])]
     response = http.get(f"/api/entities/{entity.id}")
     assert response.status_code == 200
     assert response.json()["memory_count"] == 2
+    assert response.json()["can_edit"] is True
     assert response.json()["hidden_mentions"] == 0
     assert {item["id"] for item in response.json()["memories"]} == {str(own.id), str(project.id)}
 
@@ -590,9 +594,11 @@ def test_entity_detail_never_reports_hidden_only_sources(client):
     entity = node(scope="entity", branch_type="entity:person")
     foreign = node(owner_id="bob")
     rel = SimpleNamespace(source_id=foreign.id, tenant_id="tenant-a")
-    db.execute.side_effect = [result(entity), result(items=[rel]), result(items=[foreign])]
+    db.execute.side_effect = [result(entity), result(items=[rel]), result(items=[foreign]),
+                              result(items=[rel]), result(items=[foreign])]
     owned_detail = http.get(f"/api/entities/{entity.id}")
     assert owned_detail.status_code == 200
+    assert owned_detail.json()["can_edit"] is False
     assert owned_detail.json()["memory_count"] == owned_detail.json()["hidden_mentions"] == 0
     assert owned_detail.json()["memories"] == []
 
@@ -726,3 +732,19 @@ def test_browse_rejects_unsupported_flag_and_role_spoof_is_inert(client):
     assert response.json()["metadata_only"] is False
     sql = str(db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True}))
     assert "tenant-a" in sql and "tenant-b" not in sql
+
+
+def test_entity_created_by_own_agent_is_not_editable_by_its_person(client):
+    """Documents the current rule: only entity.owner_id == the person may rename.
+    An entity extracted from a memory written by the person's agent is owned by
+    that agent, so the dashboard must not offer rename/merge for it."""
+    http, db, set_access = client
+    set_access(access(agents={"alice-agent"}))
+    entity = node(scope="entity", branch_type="entity:person", owner_id="alice-agent")
+    source = node(owner_id="alice-agent", actor_id="alice-agent")
+    rel = SimpleNamespace(source_id=source.id, tenant_id="tenant-a")
+    db.execute.side_effect = [result(entity), result(items=[rel]), result(items=[source]), result(rows=[])]
+    response = http.get(f"/api/entities/{entity.id}")
+    assert response.status_code == 200
+    assert response.json()["memory_count"] == 1
+    assert response.json()["can_edit"] is False

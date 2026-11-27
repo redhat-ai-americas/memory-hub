@@ -14,9 +14,12 @@ localhost:15433) and skips when it is not reachable:
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import json
 import os
+import shutil
 import subprocess
-import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,10 +33,13 @@ from memoryhub_core.models.curation import CuratorRule
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.project import Project, ProjectMembership
 from memoryhub_core.models.schemas import MemoryNodeCreate, MemoryNodeUpdate
+from memoryhub_core.queries.mutations import RelationshipBoundaryError
 from memoryhub_core.services.embeddings import MockEmbeddingService
 from memoryhub_core.services.entity import find_or_create_entity
-from memoryhub_core.services.memory import create_memory, update_memory
-from sqlalchemy import select, text
+from memoryhub_core.services.exceptions import CurationBlockedError
+from memoryhub_core.services.memory import create_memory, delete_memory, update_memory
+from memoryhub_core.services.project import create_project, list_projects_for_tenant
+from sqlalchemy import delete, event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -73,7 +79,9 @@ def database():
         pytest.skip("Integration PostgreSQL (localhost:15433) is not running")
     env = {**os.environ, "MEMORYHUB_DB_PORT": os.environ.get("MEMORYHUB_DB_PORT", "15433"),
            "MEMORYHUB_DB_PASSWORD": os.environ.get("MEMORYHUB_DB_PASSWORD", "memoryhub-test")}
-    migrated = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=REPO, env=env,
+    alembic = shutil.which("alembic")
+    assert alembic, "alembic executable is required for PostgreSQL integration tests"
+    migrated = subprocess.run([alembic, "upgrade", "head"], cwd=REPO, env=env,
                               capture_output=True, text=True)
     assert migrated.returncode == 0, migrated.stderr
     yield engine
@@ -153,6 +161,111 @@ class _Clients:
         return []
 
 
+@pytest.mark.parametrize("actor", ["alice-agent", None])
+async def test_writer_facet_and_filter_share_actual_author_with_legacy_fallback(env, actor):
+    note = await env["seed"]("Written through a client", owner="alice", actor=actor)
+    http = env["http"]
+    writer = actor or "alice"
+    browsed = await http.get("/api/memories/browse")
+    assert browsed.status_code == 200, browsed.text
+    assert browsed.json()["facets"]["writers"] == [{"value": writer, "count": 1}]
+    for path, field in (("/api/memories/browse", "items"), ("/api/graph/all", "nodes")):
+        filtered = await http.get(path, params={"actor": writer})
+        assert filtered.status_code == 200, filtered.text
+        assert {row["id"] for row in filtered.json()[field]} == {str(note.id)}
+    exported = await http.get("/api/memories/export", params={"actor": writer})
+    assert exported.status_code == 200, exported.text
+    assert {json.loads(line)["id"] for line in exported.text.splitlines()} == {str(note.id)}
+    if actor:
+        by_owner = await http.get("/api/memories/browse", params={"actor": "alice"})
+        assert by_owner.json()["total"] == 0
+
+
+async def test_graph_write_capabilities_match_node_policy_for_users_and_project_admins(env):
+    org = await env["seed"]("Read-only organization policy", scope="organizational")
+    original = await env["seed"]("Original project guidance")
+    revised = await env["new_version"](original.id, "Revised project guidance")
+    target = await env["seed"]("Relationship target")
+    http = env["http"]
+    expected = {str(org.id): False, str(original.id): False, str(revised.id): True, str(target.id): True}
+    for name, role in (("alice", "user"), ("bob", "admin")):
+        env["act_as"](name, role)
+        graph = await http.get("/api/graph/all", params={"tab": "all"})
+        assert graph.status_code == 200, graph.text
+        assert {node["id"]: node["capabilities"]["write"] for node in graph.json()["nodes"]} == expected
+        for node_id, writable in expected.items():
+            hood = await http.get("/api/graph/neighbourhood", params={"focus": node_id, "tab": "all"})
+            assert hood.status_code == 200, hood.text
+            assert hood.json()["focus"]["capabilities"]["write"] is writable
+    # The administrator advertised as writable above really can create a link.
+    linked = await http.post("/api/relationships", json={
+        "source_id": str(revised.id), "target_id": str(target.id), "relationship_type": "related_to",
+    })
+    assert linked.status_code == 201, linked.text
+    env["act_as"]("alice")
+    refused = await http.post("/api/relationships", json={
+        "source_id": str(org.id), "target_id": str(target.id), "relationship_type": "related_to",
+    })
+    assert refused.status_code == 404, refused.text
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+async def test_delete_capability_checks_other_authors_in_the_version_chain(env, bulk):
+    http = env["http"]
+    original = await env["seed"]("Carol's shared note", owner="carol", actor="carol")
+    edited = await http.post(f"/api/memory/{original.id}/versions", json={"content": "Alice's shared revision"})
+    assert edited.status_code == 201, edited.text
+    current = edited.json()["id"]
+    context = await http.get(f"/api/memory/{current}/context")
+    assert context.status_code == 200, context.text
+    assert context.json()["memory"]["can_delete"] is False
+    browse = await http.get("/api/memories/browse")
+    row = next(item for item in browse.json()["items"] if item["id"] == current)
+    assert row["can_delete"] is False
+
+    async def remove():
+        return (await http.post("/api/memories/bulk", json={"action": "delete", "ids": [current]})
+                if bulk else await http.delete(f"/api/memory/{current}"))
+
+    refused = await remove()
+    assert refused.status_code == 403, refused.text
+    assert (await env["fetch"](original.id)).deleted_at is None
+    assert (await env["fetch"](uuid.UUID(current))).deleted_at is None
+    env["act_as"]("carol")
+    context = await http.get(f"/api/memory/{current}/context")
+    assert context.json()["memory"]["can_delete"] is True
+    removed = await remove()
+    assert removed.status_code == (200 if bulk else 204), removed.text
+    assert (await env["fetch"](original.id)).deleted_at is not None
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+@pytest.mark.parametrize("depth", [1, 2])
+async def test_delete_capability_checks_live_descendants_and_ignores_deleted_ones(env, bulk, depth):
+    http = env["http"]
+    parent = await env["seed"]("Shared parent", owner="alice", actor="alice")
+    branch_parent = parent
+    if depth == 2:
+        branch_parent = await env["seed"]("Nested evidence", owner="alice", actor="alice",
+                                          parent=parent.id, branch="evidence")
+    child = await env["seed"]("Carol's branch", owner="carol", actor="carol",
+                              parent=branch_parent.id, branch="evidence")
+    context = await http.get(f"/api/memory/{parent.id}/context")
+    assert context.json()["memory"]["can_delete"] is False
+    env["act_as"]("carol")
+    removed = await http.delete(f"/api/memory/{child.id}")
+    assert removed.status_code == 204, removed.text
+    original_deleted_at = (await env["fetch"](child.id)).deleted_at
+    env["act_as"]("alice")
+    context = await http.get(f"/api/memory/{parent.id}/context")
+    assert context.json()["memory"]["can_delete"] is True
+    removed = (await http.post("/api/memories/bulk", json={"action": "delete", "ids": [str(parent.id)]})
+               if bulk else await http.delete(f"/api/memory/{parent.id}"))
+    assert removed.status_code == (200 if bulk else 204), removed.text
+    assert (await env["fetch"](parent.id)).deleted_at is not None
+    assert (await env["fetch"](child.id)).deleted_at == original_deleted_at
+
+
 async def test_project_focus_requires_live_membership_without_hiding_shared_content(env):
     http = env["http"]
     shared = await env["seed"]("Shared deployment guide", owner="carol", actor="carol")
@@ -194,6 +307,8 @@ async def test_blocked_version_leaves_memory_and_audit_unchanged(env, action):
 
     response = await http.post(f"/api/memory/{memory.id}/versions", json={"content": "FORBIDDEN_CONTENT"})
     assert response.status_code == 409, response.text
+    with pytest.raises(CurationBlockedError):
+        await env["new_version"](memory.id, "FORBIDDEN_CONTENT")
     async with env["sessions"]() as db:
         versions = (await db.execute(select(MemoryNode).where(
             MemoryNode.tenant_id == TENANT, MemoryNode.logical_id == memory.logical_id,
@@ -204,6 +319,93 @@ async def test_blocked_version_leaves_memory_and_audit_unchanged(env, action):
             AuditLog.tenant_id == TENANT, AuditLog.event_type == "memory.update",
         ))).scalars().all()
         assert audit == []
+
+
+@pytest.mark.parametrize("mode", ["single", "bulk", "core"])
+async def test_all_delete_paths_preserve_deleted_bridges_and_reach_live_descendants(env, mode):
+    root = await env["seed"]("Shared root", scope="user", actor="alice")
+    bridge = await env["seed"]("Deleted bridge", scope="user", owner="carol", parent=root.id, branch="evidence")
+    leaf = await env["seed"]("Live leaf", scope="user", parent=bridge.id, branch="evidence")
+    original = datetime(2020, 1, 1, tzinfo=UTC)
+    async with env["sessions"]() as db:
+        retired = await db.get(MemoryNode, bridge.id)
+        retired.deleted_at, retired.is_current = original, False
+        await db.commit()
+    if mode == "core":
+        async with env["sessions"]() as db:
+            result = await delete_memory(root.id, db, tenant_id=TENANT)
+            assert result["total_deleted"] == 2
+    elif mode == "single":
+        response = await env["http"].delete(f"/api/memory/{root.id}")
+        assert response.status_code == 204, response.text
+    else:
+        response = await env["http"].post("/api/memories/bulk", json={"action": "delete", "ids": [str(root.id)]})
+        assert response.status_code == 200, response.text
+    assert (await env["fetch"](bridge.id)).deleted_at == original
+    assert (await env["fetch"](root.id)).deleted_at is not None
+    assert (await env["fetch"](leaf.id)).deleted_at is not None
+
+
+@pytest.mark.parametrize("mode", ["single", "bulk", "core"])
+async def test_all_delete_paths_reject_invalid_relationships_without_changes(env, mode):
+    root = await env["seed"]("Shared root", scope="user", actor="alice")
+    target = await env["seed"]("Shared target", scope="user", actor="alice")
+    async with env["sessions"]() as db:
+        db.add(MemoryRelationship(
+            source_id=root.id, target_id=target.id, relationship_type="related_to",
+            tenant_id="corrupt-other-tenant", created_by="alice",
+        ))
+        await db.commit()
+    if mode == "core":
+        async with env["sessions"]() as db:
+            with pytest.raises(RelationshipBoundaryError):
+                await delete_memory(root.id, db, tenant_id=TENANT)
+    elif mode == "single":
+        response = await env["http"].delete(f"/api/memory/{root.id}")
+        assert response.status_code == 409, response.text
+    else:
+        response = await env["http"].post("/api/memories/bulk", json={"action": "delete", "ids": [str(root.id)]})
+        assert response.status_code == 409, response.text
+    assert (await env["fetch"](root.id)).deleted_at is None
+
+
+@pytest.mark.parametrize("size", [1, 10])
+async def test_project_lists_share_counts_and_query_count_does_not_grow_with_projects(env, size):
+    names = [f"batch-{uuid.uuid4().hex[:12]}" for _ in range(size)]
+    await env["seed"]("Current shared note")
+    hidden = await env["seed"]("Already deleted shared note")
+    async with env["sessions"]() as db:
+        retired = await db.get(MemoryNode, hidden.id)
+        retired.deleted_at = datetime.now(UTC)
+        # Even legacy rows retaining is_current must be excluded consistently.
+        for name in names:
+            await create_project(db, name, TENANT, "alice")
+        await db.commit()
+    statements = []
+
+    def count(_conn, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    engine = env["sessions"].kw["bind"]
+    event.listen(engine.sync_engine, "before_cursor_execute", count)
+    try:
+        http = await env["http"].get("/api/projects")
+        assert http.status_code == 200, http.text
+        assert len(statements) == 4
+        statements.clear()
+        async with env["sessions"]() as db:
+            core = await list_projects_for_tenant(db, TENANT, "alice", include_all_open=True)
+        assert len(statements) == 3
+        human_counts = {row["name"]: row["memories"] for row in http.json()["items"]}
+        assert human_counts == {row["name"]: row["memory_count"] for row in core}
+        assert human_counts["atlas-p"] == 1
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count)
+        async with env["sessions"]() as db:
+            await db.execute(delete(ProjectMembership).where(ProjectMembership.project_id.in_(names)))
+            await db.execute(delete(Project).where(Project.name.in_(names)))
+            await db.commit()
 
 
 async def test_bulk_delete_parent_after_a_branch_was_deleted(env):
@@ -376,6 +578,105 @@ async def test_admin_memory_attribution_is_redacted_across_projections(env):
     assert response.status_code == 200 and response.json()["memory"]["owner_id"] == "alice"
 
 
+async def test_report_capabilities_match_mutations_with_redacted_authors(env):
+    own = await env["seed"]("Admin-authored procedure", owner="admin", actor="admin")
+    other = await env["seed"]("Member-authored procedure")
+    async with env["sessions"]() as db:
+        reports = [ContradictionReport(memory_id=memory.id, observed_behavior=label,
+                                       confidence=0.9, reporter=reporter, tenant_id=TENANT)
+                   for memory, reporter, label in (
+                       (own, "carol", "Own memory"), (other, "admin", "Own report"),
+                       (other, "carol", "Independent report"),
+                   )]
+        db.add_all(reports)
+        await db.commit()
+    env["act_as"]("admin", "admin")
+    http = env["http"]
+    response = await http.get("/api/contradictions")
+    assert response.status_code == 200, response.text
+    rows = {row["id"]: row for row in response.json()}
+    for report, allowed in zip(reports, (False, False, True), strict=True):
+        row = rows[str(report.id)]
+        assert row["reporter"] is None and row["can_resolve"] is allowed
+        mutation = await http.patch(f"/api/contradictions/{report.id}", json={"resolved": True})
+        assert mutation.status_code == (200 if allowed else 403), mutation.text
+        if allowed:
+            assert mutation.json()["can_resolve"] is True
+
+
+async def test_contradiction_mutation_and_audit_are_atomic(env):
+    memory = await env["seed"]("Contradiction audit atomicity")
+    async with env["sessions"]() as db:
+        resolved_report = ContradictionReport(
+            memory_id=memory.id,
+            observed_behavior="The operator used Docker",
+            confidence=0.9,
+            reporter="carol",
+            tenant_id=TENANT,
+        )
+        failed_report = ContradictionReport(
+            memory_id=memory.id,
+            observed_behavior="The operator used another image",
+            confidence=0.8,
+            reporter="carol",
+            tenant_id=TENANT,
+        )
+        db.add_all([resolved_report, failed_report])
+        await db.commit()
+
+    env["act_as"]("admin", "admin")
+    http = env["http"]
+    response = await http.patch(f"/api/contradictions/{resolved_report.id}", json={"resolved": True})
+    assert response.status_code == 200, response.text
+
+    async with env["sessions"]() as db:
+        persisted = await db.get(ContradictionReport, resolved_report.id)
+        audit = (await db.execute(select(AuditLog).where(
+            AuditLog.memory_id == memory.id,
+            AuditLog.event_type == "memory.contradiction_resolved",
+        ))).scalars().all()
+        assert persisted.resolved is True
+        assert len(audit) == 1
+
+    with patch("src.human_adapters.stage_event", side_effect=RuntimeError("audit insert failed")):
+        with pytest.raises(RuntimeError, match="audit insert failed"):
+            await http.patch(f"/api/contradictions/{failed_report.id}", json={"resolved": True})
+
+    async with env["sessions"]() as db:
+        persisted = await db.get(ContradictionReport, failed_report.id)
+        audit = (await db.execute(select(AuditLog).where(
+            AuditLog.memory_id == memory.id,
+            AuditLog.event_type == "memory.contradiction_resolved",
+        ))).scalars().all()
+        assert persisted.resolved is False
+        assert all(row.event_metadata.get("report_id") != str(failed_report.id) for row in audit)
+
+
+async def test_http_contradiction_review_rejects_soft_deleted_memory(env):
+    memory = await env["seed"]("Deleted contradiction target")
+    async with env["sessions"]() as db:
+        report = ContradictionReport(
+            memory_id=memory.id,
+            observed_behavior="The operator used another image",
+            confidence=0.8,
+            reporter="carol",
+            tenant_id=TENANT,
+        )
+        db.add(report)
+        target = await db.get(MemoryNode, memory.id)
+        target.deleted_at = datetime.now(UTC)
+        await db.commit()
+        report_id = report.id
+
+    env["act_as"]("admin", "admin")
+    response = await env["http"].patch(f"/api/contradictions/{report_id}", json={"resolved": True})
+    assert response.status_code == 404, response.text
+
+    async with env["sessions"]() as db:
+        persisted = await db.get(ContradictionReport, report_id)
+        assert persisted.resolved is False
+
+
 async def test_parent_versioning_skips_retired_and_deleted_branches(env):
     http = env["http"]
     parent = await env["seed"]("Original specification")
@@ -414,3 +715,40 @@ async def test_parent_versioning_skips_retired_and_deleted_branches(env):
     browse = await http.get("/api/memories/browse", params={"tab": "all"})
     old = next(item for item in browse.json()["items"] if item["id"] == str(parent.id))
     assert old["branch_count"] == 0
+
+
+@pytest.mark.parametrize("role", ["user", "admin"])
+@pytest.mark.parametrize("filters, selected", [
+    ({"domain": "robotics"}, {"project", "personal", "org"}),
+    ({"min_weight": "0.8"}, {"project", "personal"}),
+    ({"q": "gripper", "mode": "text"}, {"project", "personal"}),
+])
+async def test_browse_graph_and_export_share_authorized_selection(env, role, filters, selected):
+    rows = {
+        "project": await env["seed"]("Gripper calibration", actor="alice", weight=0.9),
+        "personal": await env["seed"]("Private gripper preference", scope="user", owner="alice", weight=0.8),
+        "org": await env["seed"]("Deployment policy", scope="organizational", owner="admin", weight=0.7),
+        "hidden": await env["seed"]("Dana private gripper preference", scope="user", owner="dana", weight=0.95),
+    }
+    async with env["sessions"]() as db:
+        for row in rows.values():
+            node = await db.get(MemoryNode, row.id)
+            node.domains = ["robotics"]
+        await db.commit()
+    env["act_as"]("alice" if role == "user" else "admin", role)
+    expected = {str(rows[key].id) for key in selected if key != "personal" or role == "user"}
+    http = env["http"]
+    params = {"tab": "current", **filters}
+    browse = await http.get("/api/memories/browse", params=params)
+    graph = await http.get("/api/graph/all", params=params)
+    exported = await http.get("/api/memories/export", params=params)
+    for response in (browse, graph, exported):
+        assert response.status_code == 200, response.text
+        assert str(rows["hidden"].id) not in response.text
+    assert {item["id"] for item in browse.json()["items"]} == expected
+    assert browse.json()["total"] == len(expected)
+    assert {item["id"] for item in graph.json()["nodes"]} == expected
+    assert graph.json()["total"] == len(expected)
+    export_rows = (list(csv.DictReader(io.StringIO(exported.text))) if role == "admin"
+                   else [json.loads(line) for line in exported.text.splitlines()])
+    assert {item["id"] for item in export_rows} == expected

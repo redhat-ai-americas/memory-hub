@@ -1,0 +1,401 @@
+import React, { useEffect, useState } from 'react';
+import { api } from '@/api/client';
+import { PageHeader } from '@/components/Shell';
+import { Empty, ErrorState, Modal, ScopeLabel, SkLines, useToast } from '@/components/ui';
+import { useApi } from '@/hooks/useApi';
+import { buildHash, navigate, type HashRoute } from '@/hooks/useHashRoute';
+import type { EntitiesResponse, EntityDetail as EntityDetailT, EntityMergePreview } from '@/types';
+import { errorMessage, fmtInt, fmtRelative, fmtWeight, scopeMeta } from '@/utils/format';
+import { memoryHref } from './common';
+
+const TYPES = [
+  { value: 'person', label: 'Person', cls: 'blue' },
+  { value: 'organization', label: 'Organization', cls: 'pur' },
+  { value: 'location', label: 'Location', cls: 's-project' },
+  { value: 'object', label: 'Object', cls: 'org' },
+  { value: 'event', label: 'Event', cls: 'ylw' },
+];
+const typeOf = (t: string) => TYPES.find((x) => x.value === t) ?? { value: t, label: t, cls: 'g' };
+
+/** One entity: the memories that mention it, when, with whom, and its aliases. */
+const EntityDetail: React.FC<{ route: HashRoute }> = ({ route }) => {
+  const id = route.path.split('/')[2] ?? '';
+  const toast = useToast();
+  const { data, error, loading, reload } = useApi<EntityDetailT>(() => api.entity(id), [id]);
+  const [modal, setModal] = useState<null | 'edit' | 'merge'>(null);
+
+  if (error && !data) {
+    return (
+      <>
+        <PageHeader title="Entity" crumbs={[{ label: 'Entities', href: buildHash('/entities') }, { label: 'Not found' }]} />
+        <div className="body">
+          <div className="card">
+            {(error as { status?: number }).status === 404 ? (
+              <Empty title="Entity not found" action={<a className="btn bs" href={buildHash('/entities')}>Back to entities</a>}>
+                It may have been merged into another entity, or none of the memories that mention it are yours to read.
+              </Empty>
+            ) : (
+              <ErrorState error={error} onRetry={reload} />
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  const e = data;
+  const maxMonth = Math.max(1, ...(e?.months ?? []).map((m) => m.count));
+  const filter = e ? { entity: e.id, entityName: e.name } : {};
+
+  return (
+    <>
+      <PageHeader
+        crumbs={[{ label: 'Entities', href: buildHash('/entities') }, { label: e?.name ?? '…' }]}
+        title={
+          e ? (
+            <span style={{ display: 'inline-flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              {e.name}
+              <span className={`lbl ${typeOf(e.entity_type).cls}`} style={{ fontFamily: 'var(--mh-font-text)' }}>
+                {typeOf(e.entity_type).label}
+              </span>
+            </span>
+          ) : (
+            'Entity'
+          )
+        }
+        description={
+          e
+            ? e.aliases.length
+              ? `Also known as ${e.aliases.join(', ')}.`
+              : 'No aliases yet. Add the other names agents use for it so they resolve to this entity.'
+            : undefined
+        }
+        actions={
+          e && (
+            <>
+              {e.can_edit ? (
+                <>
+                  <button type="button" className="btn bg" onClick={() => setModal('edit')}>
+                    Rename
+                  </button>
+                  <button type="button" className="btn bs" onClick={() => setModal('merge')}>
+                    Merge into…
+                  </button>
+                </>
+              ) : (
+                <span
+                  className="sm muted"
+                  title="Rename and merge work on entities you created yourself, when you can edit every memory that mentions them. Entities your agents extracted belong to the agent."
+                >
+                  Read only
+                </span>
+              )}
+              <a className="btn bp" href={buildHash('/memories', filter)}>
+                Open in Memory browser
+              </a>
+            </>
+          )
+        }
+      />
+      <div className="body">
+        {loading && !e ? (
+          <div className="card">
+            <SkLines lines={8} />
+          </div>
+        ) : (
+          e && (
+            <div className="row-wrap">
+              <div className="col-main">
+                <section className="card">
+                  <div className="stats4">
+                    <div>
+                      <div className="statv">{fmtInt(e.memory_count)}</div>
+                      <div className="hint">memories mention it</div>
+                    </div>
+                    <div>
+                      <div className="statv">{e.first_seen ? fmtRelative(e.first_seen) : '—'}</div>
+                      <div className="hint">first seen</div>
+                    </div>
+                    <div>
+                      <div className="statv">{e.last_seen ? fmtRelative(e.last_seen) : '—'}</div>
+                      <div className="hint">last change</div>
+                    </div>
+                    <div>
+                      <div className="statv">{fmtInt(e.co_mentions.length)}</div>
+                      <div className="hint">related entities</div>
+                    </div>
+                  </div>
+                  {e.hidden_mentions > 0 && (
+                    <p className="hint" style={{ margin: '12px 0 0' }}>
+                      {fmtInt(e.hidden_mentions)} more {e.hidden_mentions === 1 ? 'memory mentions' : 'memories mention'} it that you cannot read. They are counted, never shown.
+                    </p>
+                  )}
+                </section>
+
+                <section className="card" style={{ padding: 0 }}>
+                  <div className="ch" style={{ padding: '18px 20px 0' }}>
+                    <h2 data-h="3">Memories</h2>
+                    <a className="sm" href={buildHash('/memories', { ...filter, view: 'graph' })}>
+                      Graph
+                    </a>
+                  </div>
+                  <div className="scroll">
+                    <table className="tbl mid">
+                      <thead>
+                        <tr>
+                          <th>Memory</th>
+                          <th>Scope</th>
+                          <th>Weight</th>
+                          <th>Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {e.memories.map((m) => (
+                          <tr key={m.id}>
+                            <td style={{ maxWidth: 460 }}>
+                              <a href={memoryHref(m.id)} style={{ fontWeight: 500, textDecoration: 'none' }}>
+                                {m.stub}
+                              </a>
+                            </td>
+                            <td>
+                              <ScopeLabel scope={m.scope} />
+                            </td>
+                            <td className="sm">{fmtWeight(m.weight)}</td>
+                            <td className="sm muted">{fmtRelative(m.updated_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+
+              <aside className="col-side">
+                <section className="card">
+                  <h2 data-h="3">When it comes up</h2>
+                  {e.months.length === 0 ? (
+                    <p className="sm muted">No dates yet.</p>
+                  ) : (
+                    <div className="months" role="img" aria-label="Memories that mention it, per month">
+                      {e.months.slice(-12).map((m) => (
+                        <div key={m.month} title={`${m.month}: ${m.count}`}>
+                          <span style={{ height: `${Math.max(6, (m.count / maxMonth) * 64)}px` }} />
+                          <small>{new Date(`${m.month}-01T00:00:00`).toLocaleDateString(undefined, { month: 'short' })}</small>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+                <section className="card">
+                  <h2 data-h="3">Mentioned together with</h2>
+                  {e.co_mentions.length === 0 ? (
+                    <p className="sm muted">No other entity appears in the same memories.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
+                      {e.co_mentions.map((c) => (
+                        <a key={c.id} className="conn link-plain" href={buildHash(`/entity/${c.id}`)}>
+                          <span className={`lbl ${typeOf(c.type).cls}`}>{typeOf(c.type).label}</span>
+                          <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>
+                            {c.name}
+                          </span>
+                          <b className="sm">{c.count}</b>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </section>
+                <section className="card">
+                  <h2 data-h="3">Where</h2>
+                  <dl className="dl" style={{ marginTop: 12 }}>
+                    <dt>Scopes</dt>
+                    <dd>
+                      {Object.entries(e.scopes)
+                        .map(([s, n]) => `${scopeMeta(s).label} ${n}`)
+                        .join(' · ') || '—'}
+                    </dd>
+                    <dt>Projects</dt>
+                    <dd>
+                      {e.projects.length
+                        ? e.projects.map((p) => (
+                            <a key={p.value} className="tag link-plain" href={buildHash('/memories', { ...filter, project: p.value })} style={{ marginRight: 4 }}>
+                              {p.value}
+                            </a>
+                          ))
+                        : '—'}
+                    </dd>
+                    <dt>Written by</dt>
+                    <dd>{e.writers.map((w) => `${w.value} (${w.count})`).join(', ') || '—'}</dd>
+                  </dl>
+                </section>
+              </aside>
+            </div>
+          )
+        )}
+      </div>
+      {modal === 'edit' && e && e.can_edit && (
+        <EditEntityModal
+          entity={e}
+          onClose={() => setModal(null)}
+          onSaved={() => {
+            setModal(null);
+            toast('Entity updated.');
+            reload();
+          }}
+        />
+      )}
+      {modal === 'merge' && e && e.can_edit && (
+        <MergeModal
+          entity={e}
+          onClose={() => setModal(null)}
+          onMerged={(res) => {
+            setModal(null);
+            toast(
+              res.source_removed
+                ? `Merged into ${res.target.name}.`
+                : `Moved ${res.moving} mentions to ${res.target.name}. ${res.staying} in memories you cannot read stay here.`,
+            );
+            if (res.source_removed) navigate(`/entity/${res.target.id}`);
+            else reload();
+          }}
+        />
+      )}
+    </>
+  );
+};
+
+const EditEntityModal: React.FC<{ entity: EntityDetailT; onClose: () => void; onSaved: () => void }> = ({ entity, onClose, onSaved }) => {
+  const toast = useToast();
+  const [name, setName] = useState(entity.name);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.renameEntity(entity.id, name.trim());
+      onSaved();
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title="Rename entity"
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="btn bp" disabled={busy || !name.trim() || name.trim() === entity.name} onClick={save}>
+            Save
+          </button>
+          <button type="button" className="btn bg" onClick={onClose}>
+            Cancel
+          </button>
+        </>
+      }
+    >
+      <div className="f">
+        <label htmlFor="en">Name</label>
+        <input id="en" className="in" value={name} onChange={(ev) => setName(ev.target.value)} />
+        <span className="hint">The old name is kept as an alias.</span>
+      </div>
+      <p className="hint" style={{ margin: 0 }}>
+        Type and aliases come from extraction and stay as they are. Recorded in the audit log.
+      </p>
+    </Modal>
+  );
+};
+
+const MergeModal: React.FC<{ entity: EntityDetailT; onClose: () => void; onMerged: (r: EntityMergePreview) => void }> = ({ entity, onClose, onMerged }) => {
+  const toast = useToast();
+  const [q, setQ] = useState('');
+  const [into, setInto] = useState<{ id: string; name: string } | null>(null);
+  const [loadedPreview, setPreview] = useState<EntityMergePreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { data } = useApi<EntitiesResponse>(() => api.entities({ q: q || entity.name.slice(0, 3), per_page: 8 }), [q]);
+  const options = (data?.items ?? []).filter((x) => x.id !== entity.id);
+  const preview = loadedPreview?.source.id === entity.id && loadedPreview.target.id === into?.id ? loadedPreview : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreview(null);
+    if (!into) return;
+    api
+      .mergeEntity(entity.id, into.id, true)
+      .then((result) => {
+        if (!cancelled) setPreview(result);
+      })
+      .catch((e) => {
+        if (!cancelled) toast(errorMessage(e), 'err');
+      });
+    return () => { cancelled = true; };
+  }, [entity.id, into?.id, toast]);
+
+  return (
+    <Modal
+      title={`Merge “${entity.name}” into…`}
+      onClose={onClose}
+      actions={
+        <>
+          <button
+            type="button"
+            className="btn bp"
+            disabled={!preview || busy}
+            onClick={async () => {
+              if (!preview || busy) return;
+              setBusy(true);
+              try {
+                onMerged(await api.mergeEntity(entity.id, preview.target.id, false));
+              } catch (e) {
+                toast(errorMessage(e), 'err');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Merge
+          </button>
+          <button type="button" className="btn bg" onClick={onClose}>
+            Cancel
+          </button>
+        </>
+      }
+    >
+      <div className="f">
+        <label htmlFor="mq">Entity to keep</label>
+        <input id="mq" className="in" autoFocus value={q} placeholder="Search by name or alias" onChange={(ev) => setQ(ev.target.value)} />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflow: 'auto' }}>
+        {options.length === 0 && <span className="sm muted">No other entity matches.</span>}
+        {options.map((o) => (
+          <label key={o.id} className={`radio ${into?.id === o.id ? 'on' : ''}`}>
+            <input type="radio" name="into" disabled={busy} checked={into?.id === o.id} onChange={() => setInto({ id: o.id, name: o.name })} />
+            <span>
+              <span className="sm b6">{o.name}</span>{' '}
+              <span className="hint">
+                {typeOf(o.entity_type).label} · {o.memory_count} memories
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {preview && (
+        <div className="alert" role="status">
+          <div>
+            <b>
+              {preview.moving} {preview.moving === 1 ? 'mention moves' : 'mentions move'} to {preview.target.name}
+            </b>
+            {preview.both > 0 ? ` (${preview.both} already ${preview.both === 1 ? 'mentions' : 'mention'} both and ${preview.both === 1 ? 'is' : 'are'} folded).` : '.'}{' '}
+            {preview.source_removed
+              ? `“${entity.name}” is removed and kept as an alias.`
+              : `${preview.staying} in memories you cannot read stay on “${entity.name}”.`}
+            <div className="hint" style={{ marginTop: 6 }}>
+              Aliases after: {preview.aliases_after.join(', ') || '—'}
+            </div>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+export default EntityDetail;

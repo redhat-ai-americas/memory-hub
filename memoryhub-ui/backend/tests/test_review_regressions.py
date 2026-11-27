@@ -12,9 +12,28 @@ from src.authorization import Access, Principal, get_access
 from src.config import Settings, get_settings
 from src.database import get_db
 from src.main import app
-from src.routes import _client_scopes_allowed
+from src.routes import _client_scopes_allowed, _contradiction_to_response
 
 TENANT = "review-tenant"
+
+
+@pytest.mark.parametrize("self_field", [None, "reporter", "owner_id", "actor_id", "driver_id"])
+def test_report_capability_checks_private_authorship_without_exposing_it(self_field):
+    access = Access(Principal("alice", "admin", TENANT), agents={"alice-agent"},
+                    human_project_admins={"p1"}, moderation_scopes={"project"})
+    memory = SimpleNamespace(id=uuid.uuid4(), tenant_id=TENANT, scope="project", scope_id="p1",
+                             owner_id="bob", actor_id="bob", driver_id="bob")
+    report = SimpleNamespace(id=uuid.uuid4(), memory_id=memory.id, reporter="bob", memory=memory,
+                             observed_behavior="Observed mismatch", confidence=0.9,
+                             created_at=datetime.now(UTC), resolved=False, resolved_at=None)
+    if self_field == "reporter":
+        report.reporter = "alice-agent"
+    elif self_field:
+        setattr(memory, self_field, "alice-agent")
+    response = _contradiction_to_response(report, access)
+    assert response.can_resolve is (self_field is None)
+    assert response.reporter is None
+    assert "alice-agent" not in response.model_dump_json()
 
 
 def query_result(*, value=None, rows=()):
